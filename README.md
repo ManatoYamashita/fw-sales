@@ -1,155 +1,79 @@
-# Firstweb Lead OS
+# Firstweb Lead OS — Next.js 16
 
-**飲食店WEB集客支援営業管理アプリ（社内オペレーション）**
+飲食店向け WEB 集客の営業管理システム(社内ツール)を **Next.js 16 (App Router) + React 19 + TypeScript strict + Tailwind CSS v4** で再構築したものです。
 
----
+## 主な特徴
 
-## 🎯 アプリ概要
+- **App Router + Cache Components** (`'use cache'` / `cacheTag` / `cacheLife`)
+- **Server Actions** によるミューテーション。`revalidateTag(tag, "max")` で stale-while-revalidate
+- **mock データ層** (server-only インメモリ Map + globalThis 永続化)
+- 後で DB へ差し替えるための **Repository インターフェース**(`lib/repositories/*-repository.ts`)
+- **Composition Pattern**: Card / Modal / Tabs は Compound Components、RSC ↔ Client は children で橋渡し
+- 過剰依存ゼロ: 追加した npm パッケージは `lucide-react` と `clsx` のみ
 
-飲食店へのWEB集客支援（MEO・HP制作・Instagram運用など）を販売する営業チームが使う、
-社内向けリード管理・営業進捗管理・引き継ぎ管理の一体型 SPA（シングルページアプリ）です。
+## 開発
 
----
-
-## ✅ 実装済み機能
-
-| 画面 | 機能 |
-|---|---|
-| ダッシュボード | KPI（店舗数・商談数・受注額）、アクションキュー、パイプラインサマリー |
-| 店舗一覧 | 検索・フィルタ（ステージ・チャネル・優先度）、全店舗一覧テーブル |
-| 店舗登録 | 食べログ/GoogleマップURL貼り付けで基本情報を自動入力 |
-| 店舗詳細 | WEB資産・チャネル判定・調査サマリー・商談履歴 |
-| **店舗編集** | 登録済み情報の修正・更新・削除（v1.1 新機能） |
-| 調査キュー | 調査待ち/完了の一覧管理 |
-| 調査結果 | 強み弱み・口コミ分析・施策別改善余地・提案仮説 |
-| 営業アクション | DM文面自動生成・テレアポ台本・実行記録 |
-| パイプライン | 12ステージ Kanban ボードで案件進捗管理 |
-| 商談管理 | 商談一覧・詳細・ステータス更新（受注/失注） |
-| 引き継ぎ管理 | 引き継ぎシート作成・チェックリスト |
-| KPI分析 | ファネル・変換率・チャネル内訳 |
-| **設定・データ管理** | データ概要・JSONエクスポート・インポート・リセット（v1.1 新機能） |
-
----
-
-## 📁 ファイル構成
-
-```
-index.html                  ← SPA エントリーポイント（ナビ・モーダル・トーストを含む）
-css/
-  style.css                 ← デザインシステム（CSS変数でカラー管理）
-js/
-  data.js                   ← AppDB（データストア）＋サンプルデータ＋localStorage 永続化
-  app.js                    ← ルーター・モーダル・トースト・タブ共通関数
-  url-parser.js             ← 食べログ/GoogleマップURL解析・OGP取得ロジック
-  pages/
-    dashboard.js            ← ダッシュボード
-    stores.js               ← 店舗一覧・登録・詳細・編集
-    research.js             ← 調査キュー・調査結果
-    pipeline.js             ← パイプライン Kanban
-    actions.js              ← 営業アクション（DM/テレアポ）
-    deals.js                ← 商談管理・商談詳細・引き継ぎ作成
-    handoffs.js             ← 引き継ぎ管理・引き継ぎ詳細
-    kpi.js                  ← KPI分析・ファネル
-    settings.js             ← 設定・データ管理（エクスポート/インポート）
+```bash
+pnpm install
+pnpm dev          # http://localhost:3000 (Turbopack)
+pnpm typecheck    # tsc --noEmit (strict + noUncheckedIndexedAccess)
+pnpm lint         # ESLint (next/core-web-vitals + typescript-eslint)
+pnpm build
 ```
 
----
-
-## 🔧 手直しガイド
-
-### 担当者を増やしたい
-→ `js/pages/settings.js` の `STAFF_LIST_DEFAULT` 配列に名前を追加  
-→ `js/pages/deals.js` / `handoffs.js` の `<select>` 内の `<option>` も追記
-
-### 商材（サービス）を追加したい
-→ `js/app.js` の `initServiceCheckboxes()` 内の `services` 配列を編集
-
-### ステージ名・色を変えたい
-→ `js/data.js` の `STAGES` 配列の `id` / `label` / `color` / `bg` を変更  
-※ `id` を変えると既存データのステージが unmatch になるので注意
-
-### 新しい画面を追加したい
-1. `js/pages/xxx.js` を新規作成して `renderXxx()` 関数を定義
-2. `index.html` の `<script>` タグに読み込みを追加
-3. `js/app.js` の `navigate()` の `switch` 文に `case 'xxx':` を追加
-4. `index.html` のサイドバーに `<a class="nav-item" ...>` を追加
-5. `breadcrumbs` オブジェクトにページタイトルを追加
-
-### デザイン（カラー）を変えたい
-→ `css/style.css` の `:root {}` 内の CSS 変数を変更
-
----
-
-## 💾 データ永続化
-
-- **ストレージ**: ブラウザの `localStorage`（キー: `fw_lead_os_v1`）
-- **初回起動**: シードデータ（5店舗・2調査・2商談・1引き継ぎ）で初期化
-- **バックアップ**: 設定画面 → 「JSONファイルをダウンロード」
-- **復元**: 設定画面 → 「データを復元する」でJSONファイルを選択
-- **デバッグ**: ブラウザコンソールから `AppDB.exportJSON()` / `AppDB.resetToSeed()` 等が使用可能
-
----
-
-## 📊 データモデル
-
-### stores（店舗）
-| フィールド | 内容 |
-|---|---|
-| name | 店名 |
-| prefecture / city / address | 住所 |
-| genre | 業態 |
-| priority | 優先度（高/中/低） |
-| stage | パイプラインステージ（12段階） |
-| channel | 推奨チャネル（DM推奨/テレアポ推奨/未判定） |
-| has_contact_form | 問い合わせフォーム有無 |
-| target_service | 狙い商材（カンマ区切り） |
-| assigned_planner / assigned_sales | 担当者 |
-| review_count / review_avg | 口コミ情報 |
-
-### research（調査結果）
-強み3・弱み3・口コミ傾向・施策別改善余地・提案仮説（入口商品・本命商品・営業フック）を保管
-
-### deals（商談）
-商談日・形式・ヒアリング内容・提案内容・見積/受注金額・失注理由・ステータス
-
-### handoffs（引き継ぎ）
-契約サービス・初期費用・月額・契約期間・期待成果・注意事項・NG事項・素材状況・運用担当
-
----
-
-## 🚀 URL入力自動補完の仕組み
-
-食べログURL（例: `https://tabelog.com/kanagawa/A1405/A140504/14096697/`）を貼り付けると：
-
-1. **Layer 1（即時）**: URLパターンから都道府県コード・エリアコードを解析 → 都道府県・市区町村・駅名を自動入力
-2. **Layer 2（〜6秒）**: allorigins.win 経由で OGP を取得試行 → 店名・業態・電話・口コミ情報
-3. **Layer 3（手動）**: 取得できなかった項目を黄色ハイライトで表示、手動補完 + 「食べログで確認」リンク
-
-※ 食べログの CORS 制限により Layer 2 が失敗することがあります。その場合でも Layer 1 の情報は取得できます。
-
----
-
-## 🎯 パイプラインステージ（12段階）
+## ディレクトリ構造(抜粋)
 
 ```
-調査待ち → 調査完了 → 一次接触準備 → DM送信済み → テレアポ済み →
-反応あり → 商談化 → 見積提出 → 失注
-                                    ↓
-                                   受注 → 引き継ぎ待ち → 引き継ぎ完了
+app/
+├── layout.tsx                 # html/body, fonts (Inter + Noto Sans JP), <Toaster />
+├── globals.css                # Tailwind v4 + @theme トークン
+├── page.tsx                   # / → /dashboard へ redirect
+├── (main)/                    # 共通シェル(サイドバー + トップバー)
+│   ├── layout.tsx
+│   ├── dashboard/             # KPI / アクションキュー / パイプラインサマリー
+│   ├── stores/                # 一覧・登録・詳細・編集
+│   ├── research/              # 調査キュー・記録
+│   ├── pipeline/              # Kanban
+│   ├── actions/               # DM/Tel スクリプト + 実行記録
+│   ├── deals/                 # 商談一覧・新規・詳細
+│   ├── handoffs/              # 引き継ぎ管理
+│   ├── kpi/                   # ファネル / 変換率 / チャネル内訳
+│   └── settings/              # データ概要 / Export / Import / Reset
+└── api/
+    └── export/route.ts        # JSON ダウンロード
+
+components/
+├── ui/                        # Button / Badge / Card / Modal / Tabs / Toast …
+├── feature/                   # ドメインバッジ(Stage / Channel / Priority …)
+└── layout/                    # Sidebar (Client) / Topbar (Client) / NavBadges (RSC)
+
+lib/
+├── domain/                    # STAGES, SERVICES, STAFF, channel 判定
+├── repositories/              # 抽象 interface (差し替え対象の入口)
+├── mock/                      # インメモリ実装 + シードデータ
+├── queries/                   # 集計 / 取得関数 ('use cache' で包む)
+├── actions/                   # Server Actions ('use server')
+├── url-parser/                # 食べログ / Googleマップ URL 解析 + OGP fetch
+├── templates/                 # DM / テレアポ文面生成(純関数)
+├── utils/                     # date / format / id / cn(clsx)
+└── cache.ts                   # CACHE_TAGS 定数
+
+types/                         # Store / Research / Deal / Handoff / Stage
 ```
 
----
+## キャッシュ設計
 
-## 📌 次のステップ（未実装・拡張候補）
+- マスタ/集計データは **`'use cache'` 関数**でラップし、`cacheTag` を付与
+- 各 Server Action は変更後に `revalidateTag(tag, "max")` を呼ぶ(stale-while-revalidate)
+- 主要タグは `lib/cache.ts` に集約(`stores`, `store:{id}`, `deals`, `handoffs`, `stats`, `kpi`, `pipeline`, `actionQueue` など)
 
-- [ ] 担当者マスタの画面内編集（現在はコード編集が必要）
-- [ ] 複数ユーザー対応（現在は「佐藤（代表）」固定）
-- [ ] 活動ログ・タイムライン機能
-- [ ] CSVエクスポート機能
-- [ ] 月次レポート自動生成
-- [ ] LINE/Slack通知連携
-- [ ] サーバーAPIへのデータ移行（現在はlocalStorageのみ）
+## DB に置き換える際の手順
 
----
+1. `lib/db/store-repository.ts` 等を新設(Drizzle / Prisma など)
+2. `lib/repositories/index.ts` の `repos.store = mockStoreRepo` を新実装に差し替える
+3. Server Action とクエリは無修正で動作
 
-*Firstweb Lead OS v1.1 — 2026-04-07*
+## 既存資産の扱い
+
+- 旧来のバニラJS実装は `legacy/vanilla-js` ブランチと `v0-legacy` タグで保全
+- 復元したい場合: `git checkout v0-legacy`

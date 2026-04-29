@@ -1,0 +1,157 @@
+import Link from "next/link";
+import { cacheTag } from "next/cache";
+import { Search, Send, ArrowLeftRight } from "lucide-react";
+import { Card } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
+import { getActionQueue } from "@/lib/queries/action-queue";
+import { CACHE_TAGS } from "@/lib/cache";
+import type { ReactNode } from "react";
+import type { Store } from "@/types/store";
+import type { Handoff } from "@/types/handoff";
+
+async function loadQueue() {
+  "use cache";
+  cacheTag(CACHE_TAGS.stores, CACHE_TAGS.handoffs, CACHE_TAGS.actionQueue);
+  return getActionQueue();
+}
+
+interface SectionProps {
+  icon: ReactNode;
+  title: string;
+  count: number;
+  emptyText: string;
+  children: ReactNode;
+}
+
+function Section({ icon, title, count, emptyText, children }: SectionProps) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <span className="text-slate-500 [&>svg]:h-4 [&>svg]:w-4">{icon}</span>
+        <h3 className="text-sm font-semibold text-slate-800">{title}</h3>
+        <span className="ml-auto text-xs font-medium text-slate-500">
+          {count} 件
+        </span>
+      </div>
+      {count === 0 ? (
+        <p className="text-xs text-slate-400 px-1 py-2">{emptyText}</p>
+      ) : (
+        <ul className="space-y-1">{children}</ul>
+      )}
+    </div>
+  );
+}
+
+function StoreItem({ store, href }: { store: Store; href: string }) {
+  return (
+    <li>
+      <Link
+        href={href}
+        className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-md hover:bg-slate-50 transition-colors"
+      >
+        <span className="text-sm text-slate-800 font-medium truncate">
+          {store.name}
+        </span>
+        <span className="text-xs text-slate-400 whitespace-nowrap">
+          {store.prefecture} {store.city}
+        </span>
+      </Link>
+    </li>
+  );
+}
+
+function HandoffItem({ handoff }: { handoff: Handoff }) {
+  return (
+    <li>
+      <Link
+        href={`/handoffs/${handoff.id}`}
+        className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-md hover:bg-slate-50 transition-colors"
+      >
+        <span className="text-sm text-slate-800 font-medium truncate">
+          {handoff.store_name}
+        </span>
+        <span className="text-xs text-slate-400 whitespace-nowrap">
+          {handoff.ops_assignee || "—"}
+        </span>
+      </Link>
+    </li>
+  );
+}
+
+export async function ActionQueue() {
+  const queue = await loadQueue();
+  const isEmpty =
+    queue.needsResearch.length === 0 &&
+    queue.needsAction.length === 0 &&
+    queue.pendingHandoffs.length === 0;
+
+  return (
+    <Card>
+      <Card.Header>
+        <Card.Title>アクションキュー</Card.Title>
+      </Card.Header>
+      <Card.Body>
+        {isEmpty ? (
+          <EmptyState
+            title="未着手アクションはありません"
+            description="優秀ですねぇ。"
+          />
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            <Section
+              icon={<Search />}
+              title="調査未着手"
+              count={queue.needsResearch.length}
+              emptyText="未調査の店舗はありません。"
+            >
+              {queue.needsResearch.map((s) => (
+                <StoreItem
+                  key={s.id}
+                  store={s}
+                  href={`/research/${s.id}`}
+                />
+              ))}
+            </Section>
+            <Section
+              icon={<Send />}
+              title="アクション準備"
+              count={queue.needsAction.length}
+              emptyText="一次接触準備中の店舗はありません。"
+            >
+              {queue.needsAction.map((s) => (
+                <StoreItem
+                  key={s.id}
+                  store={s}
+                  href={`/actions/${s.id}`}
+                />
+              ))}
+            </Section>
+            <Section
+              icon={<ArrowLeftRight />}
+              title="引き継ぎ確認待ち"
+              count={queue.pendingHandoffs.length}
+              emptyText="運用確認待ちはありません。"
+            >
+              {queue.pendingHandoffs.map((h) => (
+                <HandoffItem key={h.id} handoff={h} />
+              ))}
+            </Section>
+          </div>
+        )}
+      </Card.Body>
+    </Card>
+  );
+}
+
+export function ActionQueueSkeleton() {
+  return (
+    <Card>
+      <Card.Header>
+        <Card.Title>アクションキュー</Card.Title>
+      </Card.Header>
+      <Card.Body>
+        <div className="h-32 bg-slate-100 rounded animate-pulse" />
+      </Card.Body>
+    </Card>
+  );
+}

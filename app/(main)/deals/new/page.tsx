@@ -1,0 +1,37 @@
+import { notFound } from "next/navigation";
+import type { Metadata } from "next";
+import Link from "next/link";
+import { DealNewForm } from "./_components/deal-new-form";
+import { getStoreCached } from "@/lib/queries/stores";
+
+export const metadata: Metadata = { title: "商談を作成" };
+
+interface PageProps {
+  searchParams: Promise<{ store?: string }>;
+}
+
+export default async function NewDealPage({ searchParams }: PageProps) {
+  const sp = await searchParams;
+  if (!sp.store) {
+    notFound();
+  }
+  const store = await getStoreCached(sp.store);
+  if (!store) notFound();
+
+  return (
+    <div className="space-y-4 max-w-3xl mx-auto">
+      <div>
+        <Link
+          href={`/stores/${store.id}`}
+          className="text-xs text-slate-500 hover:text-slate-700"
+        >
+          ← {store.name}
+        </Link>
+        <h2 className="text-xl md:text-2xl font-bold text-slate-900 mt-1">
+          新規商談
+        </h2>
+      </div>
+      <DealNewForm store={store} />
+    </div>
+  );
+}

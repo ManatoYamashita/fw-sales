@@ -1,0 +1,17 @@
+import { Skeleton, TableSkeleton } from "@/components/ui/skeleton";
+
+export default function ResearchLoading() {
+  return (
+    <div className="space-y-4">
+      <div>
+        <Skeleton className="h-7 w-48" />
+        <Skeleton className="h-4 w-72 mt-2" />
+      </div>
+      <div className="flex gap-2 border-b border-slate-200">
+        <Skeleton className="h-9 w-32" />
+        <Skeleton className="h-9 w-32" />
+      </div>
+      <TableSkeleton rows={4} />
+    </div>
+  );
+}
