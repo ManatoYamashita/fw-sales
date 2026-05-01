@@ -24,7 +24,7 @@ const columns: ColumnDef<Handoff>[] = [
     cell: (h) => (
       <Link
         href={`/handoffs/${h.id}`}
-        className="font-semibold text-slate-900 hover:text-blue-700"
+        className="font-semibold text-foreground hover:text-blue-700"
       >
         {h.store_name}
       </Link>
@@ -37,7 +37,7 @@ const columns: ColumnDef<Handoff>[] = [
     cell: (h) => (
       <span className="tabular-nums">
         {formatYen(h.initial_fee)}
-        <span className="text-slate-400"> / </span>
+        <span className="text-muted-foreground/70"> / </span>
         {formatYen(h.monthly_fee)}
       </span>
     ),
@@ -64,17 +64,17 @@ export default async function HandoffsPage() {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-xl md:text-2xl font-bold text-slate-900">
+        <h2 className="text-xl md:text-2xl font-bold text-foreground">
           引き継ぎ
         </h2>
-        <p className="text-sm text-slate-500 mt-1">
+        <p className="text-sm text-muted-foreground mt-1">
           受注後の運用チームへの引き継ぎを管理します。
         </p>
       </div>
       <Card>
         <Card.Header>
           <Card.Title>引き継ぎ一覧</Card.Title>
-          <span className="text-sm text-slate-500">{handoffs.length} 件</span>
+          <span className="text-sm text-muted-foreground">{handoffs.length} 件</span>
         </Card.Header>
         <DataTable
           columns={columns}

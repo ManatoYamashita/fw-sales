@@ -21,7 +21,10 @@ export function StarRating({
 
   return (
     <span
-      className={cn("inline-flex items-center gap-0.5 text-amber-500", className)}
+      className={cn(
+        "inline-flex items-center gap-0.5 text-warning",
+        className,
+      )}
       aria-label={`評価 ${safe.toFixed(1)} / ${max}`}
     >
       {Array.from({ length: full }).map((_, i) => (
@@ -29,10 +32,10 @@ export function StarRating({
       ))}
       {half ? <StarHalf className="h-3.5 w-3.5 fill-current" /> : null}
       {Array.from({ length: empty }).map((_, i) => (
-        <Star key={`e${i}`} className="h-3.5 w-3.5 text-slate-300" />
+        <Star key={`e${i}`} className="h-3.5 w-3.5 text-muted-foreground/40" />
       ))}
       {showValue ? (
-        <span className="ml-1 text-xs font-semibold text-slate-700">
+        <span className="ml-1 text-xs font-semibold text-foreground tabular-nums">
           {safe.toFixed(1)}
         </span>
       ) : null}

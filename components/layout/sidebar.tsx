@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Zap } from "lucide-react";
+import { Menu, Zap } from "lucide-react";
 import { useState } from "react";
 import { NAV_ITEMS } from "@/lib/domain/nav";
 import { CURRENT_USER } from "@/lib/domain/staff";
@@ -22,7 +22,7 @@ export function Sidebar({ counts }: SidebarProps) {
     <>
       {open ? (
         <div
-          className="fixed inset-0 z-30 bg-slate-900/50 md:hidden"
+          className="fixed inset-0 z-30 bg-foreground/40 backdrop-blur-sm md:hidden animate-fade-in"
           aria-hidden
           onClick={() => setOpen(false)}
         />
@@ -32,25 +32,39 @@ export function Sidebar({ counts }: SidebarProps) {
         id="sidebar-nav"
         aria-label="メインナビゲーション"
         className={cn(
-          "fixed md:static z-40 h-dvh md:h-auto md:min-h-dvh w-60 shrink-0 bg-slate-900 text-slate-200 flex flex-col",
+          "fixed md:static z-40 h-dvh md:h-auto md:min-h-dvh w-60 shrink-0",
+          "bg-sidebar text-sidebar-foreground border-r border-sidebar-border",
+          "flex flex-col",
           "transition-transform duration-200 ease-out",
           open ? "translate-x-0" : "-translate-x-full md:translate-x-0",
         )}
       >
-        <div className="flex items-center gap-2.5 px-4 h-15 border-b border-slate-800">
-          <span className="h-9 w-9 rounded-lg bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white">
-            <Zap className="h-5 w-5" />
+        {/* Brand */}
+        <div className="flex items-center gap-2.5 px-4 h-15 border-b border-sidebar-border">
+          <span
+            className="h-9 w-9 rounded-lg bg-gradient-to-br from-info to-primary flex items-center justify-center text-primary-foreground shadow-xs"
+            aria-hidden
+          >
+            <Zap className="h-4.5 w-4.5" />
           </span>
-          <div className="leading-tight">
-            <p className="text-sm font-bold text-white">Firstweb</p>
-            <p className="text-xs text-slate-400">Lead OS</p>
+          <div className="leading-tight min-w-0">
+            <p className="text-sm font-semibold tracking-tight text-sidebar-foreground truncate">
+              Firstweb
+            </p>
+            <p className="text-[11px] text-muted-foreground -mt-0.5">
+              Lead OS
+            </p>
           </div>
         </div>
 
+        {/* Nav */}
         <nav
           aria-label="メイン"
           className="flex-1 overflow-y-auto px-2 py-3 space-y-0.5"
         >
+          <p className="px-3 pt-1 pb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            メニュー
+          </p>
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon;
             const active =
@@ -62,20 +76,37 @@ export function Sidebar({ counts }: SidebarProps) {
                 href={item.href}
                 onClick={close}
                 aria-current={active ? "page" : undefined}
+                data-active={active ? "true" : undefined}
                 className={cn(
-                  "flex items-center gap-2.5 h-9 px-3 rounded-md text-sm font-medium transition-colors",
+                  "group relative flex items-center gap-2.5 h-9 px-3 rounded-md text-sm transition-colors",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
                   active
-                    ? "bg-slate-800 text-white"
-                    : "text-slate-300 hover:bg-slate-800/60 hover:text-white",
+                    ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
+                    : "text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
                 )}
               >
-                <Icon className="h-4 w-4 shrink-0" />
+                {active ? (
+                  <span
+                    aria-hidden
+                    className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-0.5 rounded-r-sm bg-sidebar-primary"
+                  />
+                ) : null}
+                <Icon
+                  className={cn(
+                    "h-4 w-4 shrink-0 transition-colors",
+                    active
+                      ? "text-sidebar-primary"
+                      : "text-muted-foreground group-hover:text-sidebar-accent-foreground",
+                  )}
+                />
                 <span className="flex-1 truncate">{item.label}</span>
                 {typeof count === "number" && count > 0 ? (
                   <span
                     className={cn(
-                      "inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full text-xs font-semibold",
-                      active ? "bg-blue-500 text-white" : "bg-slate-700 text-slate-100",
+                      "inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full text-[11px] font-semibold tabular-nums",
+                      active
+                        ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                        : "bg-secondary text-secondary-foreground",
                     )}
                   >
                     {count}
@@ -86,24 +117,42 @@ export function Sidebar({ counts }: SidebarProps) {
           })}
         </nav>
 
-        <div className="px-4 py-3 border-t border-slate-800">
-          <p className="text-xs text-slate-400">ログイン中</p>
-          <p className="text-sm font-semibold text-white mt-0.5">
-            {CURRENT_USER.name}
-          </p>
-          <p className="text-xs text-slate-400">{CURRENT_USER.role}</p>
+        {/* User block */}
+        <div className="px-3 py-3 border-t border-sidebar-border">
+          <div className="flex items-center gap-3 px-1">
+            <span
+              className="h-9 w-9 rounded-full bg-secondary text-secondary-foreground flex items-center justify-center text-sm font-semibold shrink-0 ring-1 ring-border"
+              aria-hidden
+            >
+              {CURRENT_USER.name.slice(0, 1)}
+            </span>
+            <div className="min-w-0 flex-1 leading-tight">
+              <p className="text-sm font-semibold text-sidebar-foreground truncate">
+                {CURRENT_USER.name}
+              </p>
+              <p className="text-[11px] text-muted-foreground truncate">
+                {CURRENT_USER.role}
+              </p>
+            </div>
+          </div>
         </div>
       </aside>
 
+      {/* Mobile menu trigger */}
       <button
         type="button"
         aria-label={open ? "メニューを閉じる" : "メニューを開く"}
         aria-expanded={open}
         aria-controls="sidebar-nav"
         onClick={() => setOpen((v) => !v)}
-        className="md:hidden fixed top-3 left-3 z-50 inline-flex h-9 w-9 items-center justify-center rounded-md bg-white border border-slate-200 shadow-card text-slate-700"
+        className={cn(
+          "md:hidden fixed top-3 left-3 z-50 inline-flex h-9 w-9 items-center justify-center rounded-md",
+          "bg-card text-foreground border border-border shadow-card",
+          "hover:bg-accent transition-colors",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        )}
       >
-        <span className="block h-0.5 w-4 bg-current relative before:content-[''] before:absolute before:-top-1.5 before:left-0 before:h-0.5 before:w-4 before:bg-current after:content-[''] after:absolute after:top-1.5 after:left-0 after:h-0.5 after:w-4 after:bg-current" />
+        <Menu className="h-4 w-4" />
       </button>
     </>
   );

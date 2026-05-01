@@ -28,7 +28,7 @@ const columns: ColumnDef<Deal>[] = [
     cell: (d) => (
       <Link
         href={`/deals/${d.id}`}
-        className="font-semibold text-slate-900 hover:text-blue-700"
+        className="font-semibold text-foreground hover:text-blue-700"
       >
         {d.store_name}
       </Link>
@@ -68,12 +68,12 @@ export default async function DealsPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-xl md:text-2xl font-bold text-slate-900">商談管理</h2>
+        <h2 className="text-xl md:text-2xl font-bold text-foreground">商談管理</h2>
       </div>
       <Card>
         <Card.Header>
           <Card.Title>商談一覧</Card.Title>
-          <span className="text-sm text-slate-500">{deals.length} 件</span>
+          <span className="text-sm text-muted-foreground">{deals.length} 件</span>
         </Card.Header>
         <DataTable
           columns={columns}

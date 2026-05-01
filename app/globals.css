@@ -1,80 +1,328 @@
 @import "tailwindcss";
 
-@theme {
+@custom-variant dark (&:is(.dark *));
+
+/* ------------------------------------------------------------------ */
+/*  デザイントークン (cossUI 流: neutral-first OKLCH + semantic)        */
+/* ------------------------------------------------------------------ */
+@theme inline {
+  /* Surface */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+
+  /* Brand */
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+
+  /* Semantic */
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-info-soft: var(--info-soft);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning-soft: var(--warning-soft);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-destructive-soft: var(--destructive-soft);
+
+  /* Borders & Rings */
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* Sidebar */
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* Charts (multi-hue) */
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  /* Stage soft / fg pair (data-stage 属性で都度上書き) */
+  --color-stage: var(--stage);
+  --color-stage-foreground: var(--stage-foreground);
+
+  /* Radius */
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  /* Font */
   --font-sans: var(--font-inter), var(--font-noto-jp), "Hiragino Sans",
     "Yu Gothic", system-ui, sans-serif;
 
-  /* レイアウト定数 */
+  /* Layout const */
   --spacing-sidebar: 240px;
   --spacing-sidebar-collapsed: 64px;
   --spacing-topbar: 60px;
 
-  /* シャドウ */
+  /* Shadows */
   --shadow-card: 0 1px 2px rgb(0 0 0 / 0.04), 0 2px 8px rgb(0 0 0 / 0.06);
   --shadow-modal: 0 20px 25px -5px rgb(0 0 0 / 0.1),
     0 8px 10px -6px rgb(0 0 0 / 0.1);
 
-  /* アニメーション */
+  /* Animation tokens */
   --animate-fade-in: fade-in 0.2s ease-out;
   --animate-slide-up: slide-up 0.2s ease-out;
+  --animate-shimmer: shimmer 1.6s linear infinite;
+
+  /* Breakpoints (cossUI 流: ダッシュボードの密度向上用) */
+  --breakpoint-3xl: 1600px;
+  --breakpoint-4xl: 2000px;
 }
 
+/* ------------------------------------------------------------------ */
+/*  Light theme                                                        */
+/* ------------------------------------------------------------------ */
+:root {
+  --radius: 0.625rem;
+
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+
+  /* Semantic (light) */
+  --info: oklch(0.55 0.18 250);
+  --info-foreground: oklch(0.985 0 0);
+  --info-soft: oklch(0.96 0.04 250);
+  --success: oklch(0.58 0.16 145);
+  --success-foreground: oklch(0.985 0 0);
+  --success-soft: oklch(0.95 0.06 145);
+  --warning: oklch(0.7 0.16 80);
+  --warning-foreground: oklch(0.205 0 0);
+  --warning-soft: oklch(0.96 0.08 80);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.985 0 0);
+  --destructive-soft: oklch(0.96 0.04 27.325);
+
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+
+  /* Sidebar (light) */
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.95 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
+
+  /* Charts (multi-hue, ダッシュボード用) */
+  --chart-1: oklch(0.646 0.222 41.116);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
+
+  /* Stage デフォルト */
+  --stage: var(--muted);
+  --stage-foreground: var(--muted-foreground);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Dark theme                                                         */
+/* ------------------------------------------------------------------ */
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.371 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+
+  --info: oklch(0.7 0.18 250);
+  --info-foreground: oklch(0.205 0 0);
+  --info-soft: oklch(0.32 0.06 250);
+  --success: oklch(0.74 0.16 145);
+  --success-foreground: oklch(0.205 0 0);
+  --success-soft: oklch(0.3 0.06 145);
+  --warning: oklch(0.83 0.16 80);
+  --warning-foreground: oklch(0.205 0 0);
+  --warning-soft: oklch(0.32 0.08 80);
+  --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.985 0 0);
+  --destructive-soft: oklch(0.32 0.08 27.325);
+
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.922 0 0);
+  --sidebar-primary-foreground: oklch(0.205 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.439 0 0);
+
+  --chart-1: oklch(0.488 0.243 264.376);
+  --chart-2: oklch(0.696 0.17 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
+
+  --stage: var(--muted);
+  --stage-foreground: var(--muted-foreground);
+}
+
+/* ------------------------------------------------------------------ */
+/*  ステージ別配色 (12 stages)                                          */
+/*  Badge / StageBadge 側で  data-stage="<id>" を付与すれば自動適用     */
+/* ------------------------------------------------------------------ */
+[data-stage="調査待ち"]      { --stage: var(--muted);          --stage-foreground: var(--muted-foreground); }
+[data-stage="調査完了"]      { --stage: var(--info-soft);      --stage-foreground: var(--info); }
+[data-stage="一次接触準備"]  { --stage: var(--warning-soft);   --stage-foreground: var(--warning); }
+[data-stage="DM送信済み"]    { --stage: var(--info-soft);      --stage-foreground: var(--info); }
+[data-stage="テレアポ済み"]  { --stage: oklch(0.95 0.04 200);  --stage-foreground: oklch(0.5 0.13 200); }
+[data-stage="反応あり"]      { --stage: var(--success-soft);   --stage-foreground: var(--success); }
+[data-stage="商談化"]        { --stage: var(--success-soft);   --stage-foreground: oklch(0.45 0.16 145); }
+[data-stage="見積提出"]      { --stage: var(--warning-soft);   --stage-foreground: var(--warning); }
+[data-stage="失注"]          { --stage: var(--destructive-soft); --stage-foreground: var(--destructive); }
+[data-stage="受注"]          { --stage: var(--success-soft);   --stage-foreground: oklch(0.4 0.16 145); }
+[data-stage="引き継ぎ待ち"]  { --stage: oklch(0.95 0.06 50);   --stage-foreground: oklch(0.5 0.16 50); }
+[data-stage="引き継ぎ完了"]  { --stage: var(--muted);          --stage-foreground: var(--muted-foreground); }
+
+.dark [data-stage="テレアポ済み"]  { --stage: oklch(0.32 0.06 200); --stage-foreground: oklch(0.78 0.13 200); }
+.dark [data-stage="商談化"]        { --stage: oklch(0.3 0.06 145);  --stage-foreground: oklch(0.78 0.16 145); }
+.dark [data-stage="受注"]          { --stage: oklch(0.3 0.06 145);  --stage-foreground: oklch(0.82 0.16 145); }
+.dark [data-stage="引き継ぎ待ち"]  { --stage: oklch(0.32 0.08 50);  --stage-foreground: oklch(0.82 0.16 50); }
+
+/* ------------------------------------------------------------------ */
+/*  Keyframes                                                          */
+/* ------------------------------------------------------------------ */
 @keyframes fade-in {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
-
 @keyframes slide-up {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Base                                                                */
+/* ------------------------------------------------------------------ */
+@layer base {
+  * {
+    border-color: var(--color-border);
   }
-  to {
-    opacity: 1;
-    transform: translateY(0);
+
+  html, body {
+    height: 100%;
+  }
+
+  body {
+    background: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    font-synthesis-weight: none;
+  }
+
+  ::selection {
+    background-color: var(--color-foreground);
+    color: var(--color-background);
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: color-mix(in oklab, var(--color-muted-foreground) 30%, transparent);
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in oklab, var(--color-muted-foreground) 50%, transparent);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+    border-radius: 4px;
   }
 }
 
-/* グローバルベース */
-html,
-body {
-  height: 100%;
-}
+/* ------------------------------------------------------------------ */
+/*  Utilities                                                          */
+/* ------------------------------------------------------------------ */
+@layer utilities {
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
 
-body {
-  background: var(--color-slate-50);
-  color: var(--color-slate-900);
-  font-family: var(--font-sans);
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
+  .shimmer {
+    background-image: linear-gradient(
+      90deg,
+      transparent 0%,
+      color-mix(in oklab, var(--color-muted-foreground) 18%, transparent) 50%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    animation: var(--animate-shimmer);
+  }
 
-/* スクロールバー */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background: var(--color-slate-300);
-  border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: var(--color-slate-400);
-}
-
-/* フォーカスリング(キーボードのみ) */
-:focus-visible {
-  outline: 2px solid var(--color-blue-500);
-  outline-offset: 2px;
-  border-radius: 4px;
+  .scrollbar-none {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
 }

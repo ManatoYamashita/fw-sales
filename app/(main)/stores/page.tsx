@@ -50,10 +50,10 @@ export default async function StoresPage({ searchParams }: PageProps) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <h2 className="text-xl md:text-2xl font-bold text-slate-900">店舗一覧</h2>
+        <h2 className="text-xl md:text-2xl font-bold text-foreground">店舗一覧</h2>
         <Link
           href="/stores/new"
-          className="inline-flex items-center gap-1.5 h-10 px-4 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-800 transition-colors"
+          className="inline-flex items-center gap-1.5 h-10 px-4 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-secondary transition-colors"
         >
           <Plus className="h-4 w-4" />
           店舗を登録
@@ -65,7 +65,7 @@ export default async function StoresPage({ searchParams }: PageProps) {
       <Suspense
         key={JSON.stringify(filter)}
         fallback={
-          <div className="flex items-center gap-2 text-sm text-slate-500 py-12 justify-center">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground py-12 justify-center">
             <Spinner /> 読み込み中…
           </div>
         }

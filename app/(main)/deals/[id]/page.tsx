@@ -46,14 +46,14 @@ export default async function DealDetailPage({
         <div>
           <Link
             href="/deals"
-            className="text-xs text-slate-500 hover:text-slate-700"
+            className="text-xs text-muted-foreground hover:text-foreground"
           >
             ← 商談一覧
           </Link>
-          <h2 className="text-xl md:text-2xl font-bold text-slate-900 mt-1">
+          <h2 className="text-xl md:text-2xl font-bold text-foreground mt-1">
             {deal.store_name}
           </h2>
-          <p className="text-sm text-slate-500 mt-0.5">
+          <p className="text-sm text-muted-foreground mt-0.5">
             {formatDate(deal.date)} / {deal.meeting_type} / 担当{" "}
             {deal.assigned_sales || "—"}
           </p>
@@ -68,13 +68,13 @@ export default async function DealDetailPage({
               <p className="text-sm font-semibold text-green-700">
                 受注金額 {formatYen(deal.order_amount)}
               </p>
-              <p className="text-xs text-slate-500 mt-0.5">
+              <p className="text-xs text-muted-foreground mt-0.5">
                 運用への引き継ぎを作成しましょう。
               </p>
             </div>
             <Link
               href={`/handoffs/new?deal=${deal.id}`}
-              className="inline-flex items-center gap-1 h-9 px-3 rounded-md text-sm bg-slate-900 text-white"
+              className="inline-flex items-center gap-1 h-9 px-3 rounded-md text-sm bg-primary text-primary-foreground"
             >
               <ArrowLeftRight className="h-4 w-4" />
               引き継ぎを作成
@@ -96,7 +96,7 @@ export default async function DealDetailPage({
               {store.name} ({store.prefecture} {store.city})
             </Link>
           ) : (
-            <span className="text-slate-400">削除済み</span>
+            <span className="text-muted-foreground/70">削除済み</span>
           )}
         </Card.Body>
       </Card>

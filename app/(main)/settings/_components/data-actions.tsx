@@ -57,14 +57,14 @@ export function DataActions() {
       <Card.Body className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <a
           href="/api/export"
-          className="inline-flex items-center justify-center gap-2 h-11 rounded-lg border border-slate-200 bg-white text-sm font-medium hover:bg-slate-50"
+          className="inline-flex items-center justify-center gap-2 h-11 rounded-lg border border-border bg-card text-sm font-medium hover:bg-muted/40"
           download
         >
           <Download className="h-4 w-4" />
           JSON エクスポート
         </a>
 
-        <label className="inline-flex items-center justify-center gap-2 h-11 rounded-lg border border-slate-200 bg-white text-sm font-medium hover:bg-slate-50 cursor-pointer">
+        <label className="inline-flex items-center justify-center gap-2 h-11 rounded-lg border border-border bg-card text-sm font-medium hover:bg-muted/40 cursor-pointer">
           <Upload className="h-4 w-4" />
           JSON インポート
           <input
@@ -86,7 +86,7 @@ export function DataActions() {
             シードデータに戻す
           </Button>
           <ModalContent title="シードデータにリセット" size="sm">
-            <p className="text-sm text-slate-700">
+            <p className="text-sm text-foreground">
               現在のデータをすべて破棄し、初期サンプルデータに戻します。
               この操作は元に戻せません。
             </p>
@@ -115,7 +115,7 @@ export function DataActions() {
             全データを削除
           </Button>
           <ModalContent title="全データを削除" size="sm">
-            <p className="text-sm text-slate-700">
+            <p className="text-sm text-foreground">
               すべての店舗・調査・商談・引き継ぎを削除します。
               復元はインポートからのみ可能です。
             </p>

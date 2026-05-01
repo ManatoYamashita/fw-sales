@@ -29,10 +29,10 @@ export default async function PipelinePage({ searchParams }: PageProps) {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-xl md:text-2xl font-bold text-slate-900">
+        <h2 className="text-xl md:text-2xl font-bold text-foreground">
           パイプライン
         </h2>
-        <p className="text-sm text-slate-500 mt-1">
+        <p className="text-sm text-muted-foreground mt-1">
           ステージ別に店舗を一望し、ボトルネックを早期に発見します。
         </p>
       </div>
@@ -40,7 +40,7 @@ export default async function PipelinePage({ searchParams }: PageProps) {
       <Suspense
         key={JSON.stringify(filter)}
         fallback={
-          <div className="flex items-center justify-center py-16 text-slate-500 gap-2">
+          <div className="flex items-center justify-center py-16 text-muted-foreground gap-2">
             <Spinner /> 読み込み中…
           </div>
         }

@@ -26,7 +26,7 @@ const columns: ColumnDef<Store>[] = [
     cell: (s) => (
       <Link
         href={`/stores/${s.id}`}
-        className="font-semibold text-slate-900 hover:text-blue-700"
+        className="font-semibold text-foreground hover:text-blue-700"
       >
         {s.name}
       </Link>
@@ -36,7 +36,7 @@ const columns: ColumnDef<Store>[] = [
     key: "location",
     header: "エリア",
     cell: (s) => (
-      <span className="text-slate-600">
+      <span className="text-foreground/80">
         {[s.prefecture, s.city].filter(Boolean).join(" / ") || "—"}
       </span>
     ),
@@ -61,7 +61,7 @@ const columns: ColumnDef<Store>[] = [
     key: "updated",
     header: "更新",
     cell: (s) => (
-      <span className="text-xs text-slate-500">{formatDate(s.updated_at)}</span>
+      <span className="text-xs text-muted-foreground">{formatDate(s.updated_at)}</span>
     ),
   },
 ];
@@ -102,7 +102,7 @@ export function RecentStoresTableSkeleton() {
         <Card.Title>最近登録した店舗</Card.Title>
       </Card.Header>
       <Card.Body>
-        <div className="h-40 bg-slate-100 rounded animate-pulse" />
+        <div className="h-40 bg-muted rounded animate-pulse" />
       </Card.Body>
     </Card>
   );

@@ -21,7 +21,7 @@ export function ScriptCard({
         <CopyButton text={text} />
       </Card.Header>
       <Card.Body>
-        <pre className="whitespace-pre-wrap font-sans text-sm text-slate-800 leading-7 bg-slate-900/5 rounded-md p-3">
+        <pre className="whitespace-pre-wrap font-sans text-sm text-foreground leading-7 bg-muted/60 rounded-md p-3">
           {text}
         </pre>
       </Card.Body>

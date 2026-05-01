@@ -27,7 +27,7 @@ export async function ResearchSummaryCard({ storeId }: { storeId: string }) {
             action={
               <Link
                 href={`/research/${storeId}`}
-                className="inline-flex h-9 px-4 rounded-md bg-slate-900 text-white text-sm items-center"
+                className="inline-flex h-9 px-4 rounded-md bg-primary text-primary-foreground text-sm items-center"
               >
                 調査を開始
               </Link>
@@ -50,25 +50,25 @@ export async function ResearchSummaryCard({ storeId }: { storeId: string }) {
       </Card.Header>
       <Card.Body className="space-y-3">
         <div>
-          <p className="text-xs font-semibold text-slate-500">営業フック</p>
-          <p className="text-sm text-slate-800 mt-1 leading-6">
+          <p className="text-xs font-semibold text-muted-foreground">営業フック</p>
+          <p className="text-sm text-foreground mt-1 leading-6">
             {research.sales_hook || "—"}
           </p>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div>
-            <p className="text-xs font-semibold text-slate-500">
+            <p className="text-xs font-semibold text-muted-foreground">
               入口商品
             </p>
-            <p className="text-sm text-slate-800 mt-1">
+            <p className="text-sm text-foreground mt-1">
               {research.entry_product || "—"}
             </p>
           </div>
           <div>
-            <p className="text-xs font-semibold text-slate-500">
+            <p className="text-xs font-semibold text-muted-foreground">
               本命商品
             </p>
-            <p className="text-sm text-slate-800 mt-1">
+            <p className="text-sm text-foreground mt-1">
               {research.main_product || "—"}
             </p>
           </div>

@@ -20,7 +20,7 @@ export function CopyButton({ text, label = "コピー" }: { text: string; label?
     <button
       type="button"
       onClick={copy}
-      className="inline-flex items-center gap-1 h-8 px-2.5 rounded-md text-xs font-medium border border-slate-200 bg-white hover:bg-slate-50 text-slate-700"
+      className="inline-flex items-center gap-1 h-8 px-2.5 rounded-md text-xs font-medium border border-border bg-card hover:bg-muted/40 text-foreground"
     >
       {copied ? (
         <>

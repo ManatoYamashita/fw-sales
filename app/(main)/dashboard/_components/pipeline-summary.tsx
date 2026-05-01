@@ -38,7 +38,7 @@ export async function PipelineSummary() {
               >
                 {row.label}
               </span>
-              <div className="flex-1 h-2 rounded-full bg-slate-100 overflow-hidden">
+              <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
                 <div
                   className="h-full rounded-full"
                   style={{
@@ -48,7 +48,7 @@ export async function PipelineSummary() {
                   }}
                 />
               </div>
-              <span className="w-10 text-right tabular-nums text-slate-700 font-semibold">
+              <span className="w-10 text-right tabular-nums text-foreground font-semibold">
                 {row.count}
               </span>
             </li>
@@ -66,7 +66,7 @@ export function PipelineSummarySkeleton() {
         <Card.Title>パイプライン</Card.Title>
       </Card.Header>
       <Card.Body>
-        <div className="h-44 bg-slate-100 rounded animate-pulse" />
+        <div className="h-44 bg-muted rounded animate-pulse" />
       </Card.Body>
     </Card>
   );

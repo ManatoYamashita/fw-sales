@@ -83,7 +83,7 @@ export function StatGridSkeleton() {
       {Array.from({ length: 8 }).map((_, i) => (
         <div
           key={i}
-          className="h-[88px] rounded-lg bg-white border border-slate-200 animate-pulse"
+          className="h-[112px] rounded-lg bg-card border border-border animate-pulse"
         />
       ))}
     </div>

@@ -1,38 +1,54 @@
 import { type HTMLAttributes } from "react";
+import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils/cn";
 
-type Tone =
-  | "neutral"
-  | "blue"
-  | "green"
-  | "amber"
-  | "red"
-  | "purple"
-  | "cyan"
-  | "orange"
-  | "slate";
+const badgeVariants = cva(
+  "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium leading-5 whitespace-nowrap",
+  {
+    variants: {
+      tone: {
+        // 新 semantic 系
+        default: "bg-secondary text-secondary-foreground",
+        secondary: "bg-secondary text-secondary-foreground",
+        info: "bg-info-soft text-info",
+        success: "bg-success-soft text-success",
+        warning: "bg-warning-soft text-warning",
+        destructive: "bg-destructive-soft text-destructive",
+        outline: "border border-border text-foreground",
+        // 旧色名 (互換): dark mode の見え方も最低限担保
+        neutral: "bg-secondary text-secondary-foreground",
+        slate: "bg-secondary text-secondary-foreground",
+        blue: "bg-info-soft text-info",
+        cyan: "bg-cyan-100 text-cyan-700 dark:bg-cyan-950/40 dark:text-cyan-300",
+        green: "bg-success-soft text-success",
+        amber: "bg-warning-soft text-warning",
+        orange:
+          "bg-orange-100 text-orange-700 dark:bg-orange-950/40 dark:text-orange-300",
+        red: "bg-destructive-soft text-destructive",
+        purple:
+          "bg-purple-100 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300",
+        // 動的トーン: data-stage 属性で配色決定
+        stage: "bg-stage text-stage-foreground",
+      },
+    },
+    defaultVariants: {
+      tone: "default",
+    },
+  },
+);
 
-const toneClass: Record<Tone, string> = {
-  neutral: "bg-slate-100 text-slate-700",
-  blue: "bg-blue-100 text-blue-700",
-  green: "bg-green-100 text-green-700",
-  amber: "bg-amber-100 text-amber-800",
-  red: "bg-red-100 text-red-700",
-  purple: "bg-purple-100 text-purple-700",
-  cyan: "bg-cyan-100 text-cyan-700",
-  orange: "bg-orange-100 text-orange-700",
-  slate: "bg-slate-200 text-slate-800",
-};
-
-export interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
-  tone?: Tone;
-  /** 背景色を直接指定する場合はインラインスタイルで(STAGES の配色を使うため) */
+export interface BadgeProps
+  extends HTMLAttributes<HTMLSpanElement>,
+    VariantProps<typeof badgeVariants> {
+  /** stage トーン用: globals.css の `[data-stage="..."]` ルールが配色を切替 */
+  "data-stage"?: string;
+  /** 互換用: 直接配色を inline で指定する場合 (StageBadge 旧API) */
   swatch?: { bg: string; color: string };
 }
 
 export function Badge({
   className,
-  tone = "neutral",
+  tone,
   swatch,
   style,
   ...props
@@ -43,8 +59,9 @@ export function Badge({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium leading-5 whitespace-nowrap",
-        !swatch && toneClass[tone],
+        !swatch && badgeVariants({ tone }),
+        swatch &&
+          "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium leading-5 whitespace-nowrap",
         className,
       )}
       style={swatchStyle}
@@ -52,3 +69,5 @@ export function Badge({
     />
   );
 }
+
+export { badgeVariants };

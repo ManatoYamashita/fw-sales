@@ -11,15 +11,15 @@ function LinkRow({
 }) {
   if (!url) {
     return (
-      <li className="flex items-center justify-between gap-2 py-2 border-b border-slate-100 last:border-b-0">
-        <span className="text-sm text-slate-500">{label}</span>
-        <span className="text-xs text-slate-400">未設定</span>
+      <li className="flex items-center justify-between gap-2 py-2 border-b border-border/60 last:border-b-0">
+        <span className="text-sm text-muted-foreground">{label}</span>
+        <span className="text-xs text-muted-foreground/70">未設定</span>
       </li>
     );
   }
   return (
-    <li className="flex items-center justify-between gap-2 py-2 border-b border-slate-100 last:border-b-0">
-      <span className="text-sm text-slate-500">{label}</span>
+    <li className="flex items-center justify-between gap-2 py-2 border-b border-border/60 last:border-b-0">
+      <span className="text-sm text-muted-foreground">{label}</span>
       <a
         href={url}
         target="_blank"
@@ -43,8 +43,8 @@ export function WebAssetCard({ store }: { store: Store }) {
           <LinkRow label="Googleマップ" url={store.map_url} />
           <LinkRow label="公式サイト" url={store.site_url} />
           <LinkRow label="Instagram" url={store.instagram_url} />
-          <li className="flex items-center justify-between gap-2 py-2 border-b border-slate-100 last:border-b-0">
-            <span className="text-sm text-slate-500">電話番号</span>
+          <li className="flex items-center justify-between gap-2 py-2 border-b border-border/60 last:border-b-0">
+            <span className="text-sm text-muted-foreground">電話番号</span>
             {store.phone ? (
               <a
                 href={`tel:${store.phone}`}
@@ -54,7 +54,7 @@ export function WebAssetCard({ store }: { store: Store }) {
                 {store.phone}
               </a>
             ) : (
-              <span className="text-xs text-slate-400">未設定</span>
+              <span className="text-xs text-muted-foreground/70">未設定</span>
             )}
           </li>
         </ul>

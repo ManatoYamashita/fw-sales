@@ -36,7 +36,7 @@ export function ServiceCheckboxGroup({
               className={
                 checked
                   ? "px-3 py-1.5 rounded-full border text-xs font-medium border-blue-600 bg-blue-600 text-white"
-                  : "px-3 py-1.5 rounded-full border text-xs font-medium border-slate-300 bg-white text-slate-700 hover:border-slate-400"
+                  : "px-3 py-1.5 rounded-full border text-xs font-medium border-input bg-card text-foreground hover:border-ring/50"
               }
             >
               {opt}

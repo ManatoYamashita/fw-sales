@@ -10,13 +10,28 @@ export interface ColumnDef<T> {
   className?: string;
 }
 
+export type DataTableDensity = "compact" | "normal";
+
 export interface DataTableProps<T> {
   columns: ColumnDef<T>[];
   rows: T[];
   rowKey: (row: T) => string;
   emptyState?: ReactNode;
   className?: string;
+  density?: DataTableDensity;
+  /** 行クリック時のラッパー (Link 用途) */
+  rowHref?: (row: T) => string | undefined;
 }
+
+const ROW_PADDING: Record<DataTableDensity, string> = {
+  compact: "px-3 py-2",
+  normal: "px-4 py-3",
+};
+
+const HEADER_PADDING: Record<DataTableDensity, string> = {
+  compact: "px-3 py-2",
+  normal: "px-4 py-2.5",
+};
 
 export function DataTable<T>({
   columns,
@@ -24,20 +39,22 @@ export function DataTable<T>({
   rowKey,
   emptyState,
   className,
+  density = "normal",
 }: DataTableProps<T>) {
   if (rows.length === 0) {
     return <div className={className}>{emptyState ?? null}</div>;
   }
   return (
     <div className={cn("overflow-x-auto", className)}>
-      <table className="w-full text-sm">
+      <table className="w-full text-sm border-collapse">
         <thead>
-          <tr className="text-left text-xs font-semibold uppercase tracking-wide text-slate-500 bg-slate-50 border-y border-slate-200">
+          <tr className="text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground bg-muted/50 border-y border-border">
             {columns.map((col) => (
               <th
                 key={col.key}
                 className={cn(
-                  "px-4 py-2.5 font-semibold",
+                  HEADER_PADDING[density],
+                  "font-semibold",
                   col.align === "right" && "text-right",
                   col.align === "center" && "text-center",
                   col.className,
@@ -53,13 +70,14 @@ export function DataTable<T>({
           {rows.map((row) => (
             <tr
               key={rowKey(row)}
-              className="border-b border-slate-100 last:border-b-0 hover:bg-slate-50 transition-colors"
+              className="border-b border-border/60 last:border-b-0 hover:bg-muted/40 transition-colors"
             >
               {columns.map((col) => (
                 <td
                   key={col.key}
                   className={cn(
-                    "px-4 py-3 align-middle text-slate-700",
+                    ROW_PADDING[density],
+                    "align-middle text-foreground/90",
                     col.align === "right" && "text-right tabular-nums",
                     col.align === "center" && "text-center",
                     col.className,

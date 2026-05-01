@@ -24,9 +24,9 @@ export function PipelineFilters() {
   };
 
   return (
-    <div className="bg-white border border-slate-200 rounded-lg shadow-card p-3 flex flex-wrap items-center gap-2">
+    <div className="bg-card border border-border rounded-lg shadow-card p-3 flex flex-wrap items-center gap-2">
       <div className="relative flex-1 min-w-[200px]">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/70" />
         <Input
           defaultValue={params.get("q") ?? ""}
           onChange={(e: ChangeEvent<HTMLInputElement>) =>
@@ -77,7 +77,7 @@ export function PipelineFilters() {
         </Button>
       ) : null}
       {pending ? (
-        <span className="text-xs text-slate-500 ml-auto">適用中…</span>
+        <span className="text-xs text-muted-foreground ml-auto">適用中…</span>
       ) : null}
     </div>
   );

@@ -29,7 +29,7 @@ export async function DealsHistoryCard({ storeId }: { storeId: string }) {
     <Card>
       <Card.Header>
         <Card.Title>商談履歴</Card.Title>
-        <span className="text-xs text-slate-500">{deals.length} 件</span>
+        <span className="text-xs text-muted-foreground">{deals.length} 件</span>
       </Card.Header>
       {deals.length === 0 ? (
         <Card.Body>
@@ -40,23 +40,23 @@ export async function DealsHistoryCard({ storeId }: { storeId: string }) {
           />
         </Card.Body>
       ) : (
-        <ul className="divide-y divide-slate-100">
+        <ul className="divide-y divide-border/60">
           {deals.map((deal) => (
             <li key={deal.id}>
               <Link
                 href={`/deals/${deal.id}`}
-                className="block px-5 py-3 hover:bg-slate-50 transition-colors"
+                className="block px-5 py-3 hover:bg-muted/40 transition-colors"
               >
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-sm font-semibold text-slate-900">
+                  <span className="text-sm font-semibold text-foreground">
                     {formatDate(deal.date)} / {deal.meeting_type}
                   </span>
                   <Badge tone={statusTone[deal.status]}>{deal.status}</Badge>
                 </div>
-                <p className="text-xs text-slate-500 mt-1 line-clamp-1">
+                <p className="text-xs text-muted-foreground mt-1 line-clamp-1">
                   {deal.proposal || deal.discussion || "—"}
                 </p>
-                <div className="flex items-center gap-4 mt-1 text-xs text-slate-500">
+                <div className="flex items-center gap-4 mt-1 text-xs text-muted-foreground">
                   <span>見積 {formatYen(deal.estimate_amount)}</span>
                   {deal.order_amount ? (
                     <span className="text-green-700 font-semibold">

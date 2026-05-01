@@ -42,14 +42,14 @@ export default async function StoreDetailPage({
         <div>
           <Link
             href="/stores"
-            className="text-xs text-slate-500 hover:text-slate-700"
+            className="text-xs text-muted-foreground hover:text-foreground"
           >
             ← 店舗一覧
           </Link>
-          <h2 className="text-xl md:text-2xl font-bold text-slate-900 mt-1">
+          <h2 className="text-xl md:text-2xl font-bold text-foreground mt-1">
             {store.name}
           </h2>
-          <p className="text-sm text-slate-500 mt-0.5">
+          <p className="text-sm text-muted-foreground mt-0.5">
             {[store.prefecture, store.city, store.genre]
               .filter(Boolean)
               .join(" / ") || "—"}
@@ -59,25 +59,25 @@ export default async function StoreDetailPage({
           <StageChangeButton storeId={store.id} current={store.stage} />
           <Link
             href={`/research/${store.id}`}
-            className="inline-flex items-center gap-1 h-9 px-3 rounded-md text-sm border border-slate-200 bg-white hover:bg-slate-50 text-slate-700"
+            className="inline-flex items-center gap-1 h-9 px-3 rounded-md text-sm border border-border bg-card hover:bg-muted/40 text-foreground"
           >
             <Search className="h-4 w-4" /> 調査
           </Link>
           <Link
             href={`/actions/${store.id}`}
-            className="inline-flex items-center gap-1 h-9 px-3 rounded-md text-sm border border-slate-200 bg-white hover:bg-slate-50 text-slate-700"
+            className="inline-flex items-center gap-1 h-9 px-3 rounded-md text-sm border border-border bg-card hover:bg-muted/40 text-foreground"
           >
             <Send className="h-4 w-4" /> アクション
           </Link>
           <Link
             href={`/deals/new?store=${store.id}`}
-            className="inline-flex items-center gap-1 h-9 px-3 rounded-md text-sm border border-slate-200 bg-white hover:bg-slate-50 text-slate-700"
+            className="inline-flex items-center gap-1 h-9 px-3 rounded-md text-sm border border-border bg-card hover:bg-muted/40 text-foreground"
           >
             <Handshake className="h-4 w-4" /> 商談を作成
           </Link>
           <Link
             href={`/stores/${store.id}/edit`}
-            className="inline-flex items-center gap-1 h-9 px-3 rounded-md text-sm bg-slate-900 text-white hover:bg-slate-800"
+            className="inline-flex items-center gap-1 h-9 px-3 rounded-md text-sm bg-primary text-primary-foreground hover:bg-primary/90"
           >
             <Edit2 className="h-4 w-4" /> 編集
           </Link>
@@ -104,7 +104,7 @@ export default async function StoreDetailPage({
                 <Card.Title>メモ</Card.Title>
               </Card.Header>
               <Card.Body>
-                <p className="text-sm text-slate-700 whitespace-pre-wrap leading-6">
+                <p className="text-sm text-foreground whitespace-pre-wrap leading-6">
                   {store.memo}
                 </p>
               </Card.Body>
@@ -122,7 +122,7 @@ function SectionFallback({ label }: { label: string }) {
       <Card.Header>
         <Card.Title>{label}</Card.Title>
       </Card.Header>
-      <Card.Body className="flex items-center gap-2 text-sm text-slate-500">
+      <Card.Body className="flex items-center gap-2 text-sm text-muted-foreground">
         <Spinner /> 読み込み中…
       </Card.Body>
     </Card>

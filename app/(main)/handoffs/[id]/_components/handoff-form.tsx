@@ -77,7 +77,7 @@ export function HandoffForm({ handoff }: { handoff: Handoff }) {
               <p className="text-sm font-semibold text-green-700">
                 運用への引き継ぎが完了しました
               </p>
-              <p className="text-xs text-slate-500 mt-0.5">
+              <p className="text-xs text-muted-foreground mt-0.5">
                 店舗ステージは「引き継ぎ完了」になっています。
               </p>
             </div>
@@ -88,7 +88,7 @@ export function HandoffForm({ handoff }: { handoff: Handoff }) {
           <Card.Body className="flex items-center justify-between gap-3">
             <div>
               <Badge tone="amber">運用確認待ち</Badge>
-              <p className="text-sm text-slate-700 mt-2">
+              <p className="text-sm text-foreground mt-2">
                 チェックを終えたら「引き継ぎ完了」を押してください。
               </p>
             </div>

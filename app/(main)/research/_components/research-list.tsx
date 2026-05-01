@@ -22,21 +22,21 @@ export function WaitingList({ stores }: { stores: Store[] }) {
   }
   return (
     <Card>
-      <ul className="divide-y divide-slate-100">
+      <ul className="divide-y divide-border/60">
         {stores.map((s) => (
           <li key={s.id}>
             <Link
               href={`/research/${s.id}`}
-              className="flex items-center justify-between gap-3 px-5 py-3 hover:bg-slate-50 transition-colors"
+              className="flex items-center justify-between gap-3 px-5 py-3 hover:bg-muted/40 transition-colors"
             >
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold text-slate-900">{s.name}</p>
-                <p className="text-xs text-slate-500 truncate">
+                <p className="text-sm font-semibold text-foreground">{s.name}</p>
+                <p className="text-xs text-muted-foreground truncate">
                   {[s.prefecture, s.city, s.genre].filter(Boolean).join(" / ")}
                 </p>
               </div>
               <PriorityBadge priority={s.priority} />
-              <span className="inline-flex h-9 items-center gap-1 px-3 rounded-md text-xs font-medium bg-slate-900 text-white">
+              <span className="inline-flex h-9 items-center gap-1 px-3 rounded-md text-xs font-medium bg-primary text-primary-foreground">
                 <Search className="h-3.5 w-3.5" />
                 調査開始
               </span>
@@ -65,21 +65,21 @@ export function DoneList({
   }
   return (
     <Card>
-      <ul className="divide-y divide-slate-100">
+      <ul className="divide-y divide-border/60">
         {rows.map(({ store, research }) => (
           <li key={research.id}>
             <Link
               href={`/research/${store.id}`}
-              className="flex items-start justify-between gap-3 px-5 py-3 hover:bg-slate-50 transition-colors"
+              className="flex items-start justify-between gap-3 px-5 py-3 hover:bg-muted/40 transition-colors"
             >
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold text-slate-900">
+                <p className="text-sm font-semibold text-foreground">
                   {store.name}
                 </p>
-                <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">
+                <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">
                   {research.sales_hook || research.total_review}
                 </p>
-                <p className="text-xs text-slate-400 mt-1">
+                <p className="text-xs text-muted-foreground/70 mt-1">
                   調査者 {research.researcher} ・{" "}
                   {formatDate(research.updated_at)}
                 </p>

@@ -7,7 +7,7 @@ export default function ResearchLoading() {
         <Skeleton className="h-7 w-48" />
         <Skeleton className="h-4 w-72 mt-2" />
       </div>
-      <div className="flex gap-2 border-b border-slate-200">
+      <div className="flex gap-2 border-b border-border">
         <Skeleton className="h-9 w-32" />
         <Skeleton className="h-9 w-32" />
       </div>

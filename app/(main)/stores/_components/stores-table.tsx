@@ -18,7 +18,7 @@ const columns: ColumnDef<Store>[] = [
     cell: (s) => (
       <Link
         href={`/stores/${s.id}`}
-        className="font-semibold text-slate-900 hover:text-blue-700"
+        className="font-semibold text-foreground hover:text-blue-700"
       >
         {s.name}
       </Link>
@@ -28,7 +28,7 @@ const columns: ColumnDef<Store>[] = [
     key: "location",
     header: "エリア",
     cell: (s) => (
-      <span className="text-slate-600">
+      <span className="text-foreground/80">
         {[s.prefecture, s.city].filter(Boolean).join(" / ") || "—"}
       </span>
     ),
@@ -41,10 +41,10 @@ const columns: ColumnDef<Store>[] = [
       s.review_count > 0 ? (
         <span className="inline-flex items-center gap-1.5">
           <StarRating value={s.review_avg} showValue />
-          <span className="text-xs text-slate-500">{s.review_count}件</span>
+          <span className="text-xs text-muted-foreground">{s.review_count}件</span>
         </span>
       ) : (
-        <span className="text-xs text-slate-400">—</span>
+        <span className="text-xs text-muted-foreground/70">—</span>
       ),
   },
   {
@@ -71,7 +71,7 @@ const columns: ColumnDef<Store>[] = [
     key: "updated",
     header: "更新",
     cell: (s) => (
-      <span className="text-xs text-slate-500 whitespace-nowrap">
+      <span className="text-xs text-muted-foreground whitespace-nowrap">
         {formatDate(s.updated_at)}
       </span>
     ),
@@ -84,7 +84,7 @@ export async function StoresTable({ filter }: { filter: StoreFilter }) {
     <Card>
       <Card.Header>
         <Card.Title>店舗一覧</Card.Title>
-        <span className="text-sm text-slate-500">{stores.length} 件</span>
+        <span className="text-sm text-muted-foreground">{stores.length} 件</span>
       </Card.Header>
       <DataTable
         columns={columns}

@@ -27,14 +27,14 @@ function Section({ icon, title, count, emptyText, children }: SectionProps) {
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2">
-        <span className="text-slate-500 [&>svg]:h-4 [&>svg]:w-4">{icon}</span>
-        <h3 className="text-sm font-semibold text-slate-800">{title}</h3>
-        <span className="ml-auto text-xs font-medium text-slate-500">
+        <span className="text-muted-foreground [&>svg]:h-4 [&>svg]:w-4">{icon}</span>
+        <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+        <span className="ml-auto text-xs font-medium text-muted-foreground">
           {count} 件
         </span>
       </div>
       {count === 0 ? (
-        <p className="text-xs text-slate-400 px-1 py-2">{emptyText}</p>
+        <p className="text-xs text-muted-foreground/70 px-1 py-2">{emptyText}</p>
       ) : (
         <ul className="space-y-1">{children}</ul>
       )}
@@ -47,12 +47,12 @@ function StoreItem({ store, href }: { store: Store; href: string }) {
     <li>
       <Link
         href={href}
-        className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-md hover:bg-slate-50 transition-colors"
+        className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-md hover:bg-muted/40 transition-colors"
       >
-        <span className="text-sm text-slate-800 font-medium truncate">
+        <span className="text-sm text-foreground font-medium truncate">
           {store.name}
         </span>
-        <span className="text-xs text-slate-400 whitespace-nowrap">
+        <span className="text-xs text-muted-foreground/70 whitespace-nowrap">
           {store.prefecture} {store.city}
         </span>
       </Link>
@@ -65,12 +65,12 @@ function HandoffItem({ handoff }: { handoff: Handoff }) {
     <li>
       <Link
         href={`/handoffs/${handoff.id}`}
-        className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-md hover:bg-slate-50 transition-colors"
+        className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-md hover:bg-muted/40 transition-colors"
       >
-        <span className="text-sm text-slate-800 font-medium truncate">
+        <span className="text-sm text-foreground font-medium truncate">
           {handoff.store_name}
         </span>
-        <span className="text-xs text-slate-400 whitespace-nowrap">
+        <span className="text-xs text-muted-foreground/70 whitespace-nowrap">
           {handoff.ops_assignee || "—"}
         </span>
       </Link>
@@ -150,7 +150,7 @@ export function ActionQueueSkeleton() {
         <Card.Title>アクションキュー</Card.Title>
       </Card.Header>
       <Card.Body>
-        <div className="h-32 bg-slate-100 rounded animate-pulse" />
+        <div className="h-32 bg-muted rounded animate-pulse" />
       </Card.Body>
     </Card>
   );

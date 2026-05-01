@@ -23,11 +23,11 @@ export default async function NewDealPage({ searchParams }: PageProps) {
       <div>
         <Link
           href={`/stores/${store.id}`}
-          className="text-xs text-slate-500 hover:text-slate-700"
+          className="text-xs text-muted-foreground hover:text-foreground"
         >
           ← {store.name}
         </Link>
-        <h2 className="text-xl md:text-2xl font-bold text-slate-900 mt-1">
+        <h2 className="text-xl md:text-2xl font-bold text-foreground mt-1">
           新規商談
         </h2>
       </div>

@@ -1,54 +1,97 @@
 import { type ReactNode } from "react";
 import { cn } from "@/lib/utils/cn";
 
+type StatTone = "default" | "primary" | "success" | "warning" | "danger";
+
+const toneIconClass: Record<StatTone, string> = {
+  default: "text-muted-foreground bg-muted",
+  primary: "text-info bg-info-soft",
+  success: "text-success bg-success-soft",
+  warning: "text-warning bg-warning-soft",
+  danger: "text-destructive bg-destructive-soft",
+};
+
+export interface StatDelta {
+  value: string;
+  /** 上向き=正のシグナル(success), 下向き=負のシグナル(destructive) を表示 */
+  trend?: "up" | "down" | "flat";
+}
+
 export interface StatProps {
   label: string;
   value: ReactNode;
   sub?: ReactNode;
+  delta?: StatDelta;
   icon?: ReactNode;
-  tone?: "default" | "primary" | "success" | "warning" | "danger";
+  tone?: StatTone;
   className?: string;
 }
 
-const toneClass: Record<NonNullable<StatProps["tone"]>, string> = {
-  default: "text-slate-700 bg-slate-100",
-  primary: "text-blue-700 bg-blue-100",
-  success: "text-green-700 bg-green-100",
-  warning: "text-amber-700 bg-amber-100",
-  danger: "text-red-700 bg-red-100",
+const TREND_GLYPH: Record<NonNullable<StatDelta["trend"]>, string> = {
+  up: "↗",
+  down: "↘",
+  flat: "→",
+};
+
+const TREND_CLASS: Record<NonNullable<StatDelta["trend"]>, string> = {
+  up: "bg-success-soft text-success",
+  down: "bg-destructive-soft text-destructive",
+  flat: "bg-muted text-muted-foreground",
 };
 
 export function Stat({
   label,
   value,
   sub,
+  delta,
   icon,
   tone = "default",
   className,
 }: StatProps) {
+  const trend = delta?.trend ?? "flat";
   return (
     <div
       className={cn(
-        "flex items-start gap-3 p-4 bg-white border border-slate-200 rounded-lg shadow-card",
+        "relative flex flex-col gap-2 p-5 bg-card text-card-foreground",
+        "border border-border rounded-lg shadow-card transition-colors hover:bg-accent/30",
         className,
       )}
     >
-      {icon ? (
-        <div
-          className={cn(
-            "h-10 w-10 rounded-lg flex items-center justify-center shrink-0 [&>svg]:h-5 [&>svg]:w-5",
-            toneClass[tone],
-          )}
-        >
-          {icon}
-        </div>
-      ) : null}
-      <div className="flex-1 min-w-0">
-        <p className="text-xs font-medium text-slate-500">{label}</p>
-        <p className="mt-1 text-2xl font-bold tabular-nums text-slate-900">
-          {value}
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          {label}
         </p>
-        {sub ? <p className="text-xs text-slate-500 mt-1">{sub}</p> : null}
+        {icon ? (
+          <span
+            className={cn(
+              "h-9 w-9 rounded-lg flex items-center justify-center shrink-0",
+              "[&>svg]:h-4 [&>svg]:w-4",
+              toneIconClass[tone],
+            )}
+            aria-hidden
+          >
+            {icon}
+          </span>
+        ) : null}
+      </div>
+      <p className="text-3xl font-semibold tabular-nums leading-none text-foreground">
+        {value}
+      </p>
+      <div className="flex items-center gap-2 min-h-5">
+        {delta ? (
+          <span
+            className={cn(
+              "inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-medium tabular-nums",
+              TREND_CLASS[trend],
+            )}
+          >
+            <span aria-hidden>{TREND_GLYPH[trend]}</span>
+            <span>{delta.value}</span>
+          </span>
+        ) : null}
+        {sub ? (
+          <span className="text-xs text-muted-foreground truncate">{sub}</span>
+        ) : null}
       </div>
     </div>
   );

@@ -25,7 +25,7 @@ export default function DashboardPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-xl md:text-2xl font-bold text-slate-900">
+        <h2 className="text-xl md:text-2xl font-bold text-foreground">
           ダッシュボード
         </h2>
       </div>

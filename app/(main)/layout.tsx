@@ -10,19 +10,27 @@ async function SidebarShell() {
 
 function SidebarFallback() {
   return (
-    <aside className="hidden md:block w-60 shrink-0 bg-slate-900" aria-hidden />
+    <aside
+      className="hidden md:flex w-60 shrink-0 bg-sidebar border-r border-sidebar-border min-h-dvh flex-col"
+      aria-hidden
+    >
+      <div className="h-15 border-b border-sidebar-border" />
+    </aside>
   );
 }
 
 function TopbarFallback() {
   return (
-    <header className="sticky top-0 z-20 h-15 bg-white border-b border-slate-200" />
+    <header
+      className="sticky top-0 z-20 h-15 bg-background/80 backdrop-blur-md border-b border-border"
+      aria-hidden
+    />
   );
 }
 
 export default function MainLayout({ children }: { children: ReactNode }) {
   return (
-    <div className="flex min-h-dvh">
+    <div className="flex min-h-dvh bg-background text-foreground">
       <Suspense fallback={<SidebarFallback />}>
         <SidebarShell />
       </Suspense>
@@ -30,7 +38,9 @@ export default function MainLayout({ children }: { children: ReactNode }) {
         <Suspense fallback={<TopbarFallback />}>
           <Topbar />
         </Suspense>
-        <main className="flex-1 px-4 md:px-6 py-4 md:py-6">{children}</main>
+        <main className="flex-1 px-4 md:px-6 py-4 md:py-6 max-w-screen-2xl 4xl:max-w-screen-4xl mx-auto w-full">
+          {children}
+        </main>
       </div>
     </div>
   );

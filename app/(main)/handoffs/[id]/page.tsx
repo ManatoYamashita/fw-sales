@@ -30,14 +30,14 @@ export default async function HandoffDetailPage({
       <div>
         <Link
           href="/handoffs"
-          className="text-xs text-slate-500 hover:text-slate-700"
+          className="text-xs text-muted-foreground hover:text-foreground"
         >
           ← 引き継ぎ一覧
         </Link>
-        <h2 className="text-xl md:text-2xl font-bold text-slate-900 mt-1">
+        <h2 className="text-xl md:text-2xl font-bold text-foreground mt-1">
           {handoff.store_name}
         </h2>
-        <p className="text-sm text-slate-500 mt-0.5">
+        <p className="text-sm text-muted-foreground mt-0.5">
           商談 ID: {handoff.deal_id}
         </p>
       </div>

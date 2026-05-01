@@ -12,10 +12,10 @@ export default async function ResearchPage() {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-xl md:text-2xl font-bold text-slate-900">
+        <h2 className="text-xl md:text-2xl font-bold text-foreground">
           調査キュー
         </h2>
-        <p className="text-sm text-slate-500 mt-1">
+        <p className="text-sm text-muted-foreground mt-1">
           調査待ちの店舗からプランナーが S/W 分析・チャネル判定を行います。
         </p>
       </div>

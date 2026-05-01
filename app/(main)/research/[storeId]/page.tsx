@@ -36,14 +36,14 @@ export default async function ResearchDetailPage({
       <div>
         <Link
           href={`/stores/${store.id}`}
-          className="text-xs text-slate-500 hover:text-slate-700"
+          className="text-xs text-muted-foreground hover:text-foreground"
         >
           ← {store.name}
         </Link>
-        <h2 className="text-xl md:text-2xl font-bold text-slate-900 mt-1">
+        <h2 className="text-xl md:text-2xl font-bold text-foreground mt-1">
           調査記録
         </h2>
-        <p className="text-sm text-slate-500 mt-1">
+        <p className="text-sm text-muted-foreground mt-1">
           口コミと WEB 資産を分析し、最適な営業チャネルとフックを記録します。
         </p>
       </div>

@@ -64,7 +64,10 @@ export function TabsList({
   return (
     <div
       role="tablist"
-      className={cn("inline-flex border-b border-slate-200 gap-1", className)}
+      className={cn(
+        "inline-flex items-center bg-muted/50 border border-border rounded-md p-1 gap-1",
+        className,
+      )}
     >
       {children}
     </div>
@@ -91,11 +94,13 @@ export function TabsTrigger({
       aria-selected={active}
       aria-controls={`${ctx.tabsId}-panel-${value}`}
       tabIndex={active ? 0 : -1}
+      data-state={active ? "active" : "inactive"}
       className={cn(
-        "px-3 py-2 text-sm font-medium transition-colors -mb-px border-b-2",
+        "inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium",
+        "transition-[color,background-color,box-shadow] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         active
-          ? "border-blue-600 text-blue-700"
-          : "border-transparent text-slate-500 hover:text-slate-800",
+          ? "bg-background text-foreground shadow-xs"
+          : "text-muted-foreground hover:text-foreground",
         className,
       )}
       onClick={() => ctx.setValue(value)}
@@ -123,7 +128,7 @@ export function TabsPanel({
       id={`${ctx.tabsId}-panel-${value}`}
       aria-labelledby={`${ctx.tabsId}-tab-${value}`}
       tabIndex={0}
-      className={cn("pt-4 focus:outline-none", className)}
+      className={cn("pt-4 focus-visible:outline-none", className)}
     >
       {children}
     </div>

@@ -34,17 +34,17 @@ export default async function ActionsPage() {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-xl md:text-2xl font-bold text-slate-900">
+        <h2 className="text-xl md:text-2xl font-bold text-foreground">
           営業アクション
         </h2>
-        <p className="text-sm text-slate-500 mt-1">
+        <p className="text-sm text-muted-foreground mt-1">
           DM・テレアポ・反応待ちの店舗から次のアクションを選びます。
         </p>
       </div>
       <Card>
         <Card.Header>
           <Card.Title>アクション対象店舗</Card.Title>
-          <span className="text-sm text-slate-500">{stores.length} 件</span>
+          <span className="text-sm text-muted-foreground">{stores.length} 件</span>
         </Card.Header>
         {stores.length === 0 ? (
           <Card.Body>
@@ -55,18 +55,18 @@ export default async function ActionsPage() {
             />
           </Card.Body>
         ) : (
-          <ul className="divide-y divide-slate-100">
+          <ul className="divide-y divide-border/60">
             {stores.map((s) => (
               <li key={s.id}>
                 <Link
                   href={`/actions/${s.id}`}
-                  className="flex flex-wrap items-center gap-3 px-5 py-3 hover:bg-slate-50 transition-colors"
+                  className="flex flex-wrap items-center gap-3 px-5 py-3 hover:bg-muted/40 transition-colors"
                 >
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold text-slate-900">
+                    <p className="text-sm font-semibold text-foreground">
                       {s.name}
                     </p>
-                    <p className="text-xs text-slate-500 truncate">
+                    <p className="text-xs text-muted-foreground truncate">
                       {[s.prefecture, s.city, s.genre]
                         .filter(Boolean)
                         .join(" / ")}
@@ -75,7 +75,7 @@ export default async function ActionsPage() {
                   <PriorityBadge priority={s.priority} />
                   <StageBadge stage={s.stage} />
                   <ChannelBadge channel={s.channel} />
-                  <span className="inline-flex h-9 items-center px-3 rounded-md text-xs font-medium bg-slate-900 text-white">
+                  <span className="inline-flex h-9 items-center px-3 rounded-md text-xs font-medium bg-primary text-primary-foreground">
                     アクションへ
                   </span>
                 </Link>

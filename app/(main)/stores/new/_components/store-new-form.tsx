@@ -264,7 +264,7 @@ export function StoreNewForm() {
               value={form.channel}
               onChange={onText("channel")}
               readOnly
-              className="bg-slate-50"
+              className="bg-muted/40"
             />
           </FormField>
         </Card.Body>

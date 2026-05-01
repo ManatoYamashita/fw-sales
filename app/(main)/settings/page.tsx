@@ -2,10 +2,17 @@ import type { Metadata } from "next";
 import { cacheTag } from "next/cache";
 import { Card } from "@/components/ui/card";
 import { Stat } from "@/components/ui/stat";
+import { Heading, Text } from "@/components/ui/typography";
 import { DataActions } from "./_components/data-actions";
+import { ThemeToggleCard } from "./_components/theme-toggle-card";
 import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
-import { Store as StoreIcon, Search, Handshake, ArrowLeftRight } from "lucide-react";
+import {
+  Store as StoreIcon,
+  Search,
+  Handshake,
+  ArrowLeftRight,
+} from "lucide-react";
 
 export const metadata: Metadata = { title: "設定" };
 
@@ -34,12 +41,12 @@ async function loadCounts() {
 export default async function SettingsPage() {
   const counts = await loadCounts();
   return (
-    <div className="space-y-4 max-w-4xl">
+    <div className="space-y-6 max-w-4xl">
       <div>
-        <h2 className="text-xl md:text-2xl font-bold text-slate-900">設定</h2>
-        <p className="text-sm text-slate-500 mt-1">
-          データの保持状況とエクスポート/インポートを管理します。
-        </p>
+        <Heading level={1}>設定</Heading>
+        <Text variant="muted" className="mt-1">
+          データの保持状況・テーマ・エクスポート/インポートを管理します。
+        </Text>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -53,20 +60,22 @@ export default async function SettingsPage() {
         />
       </div>
 
+      <ThemeToggleCard />
+
       <DataActions />
 
       <Card>
         <Card.Header>
           <Card.Title>備考</Card.Title>
         </Card.Header>
-        <Card.Body className="space-y-2 text-sm text-slate-600 leading-6">
+        <Card.Body className="space-y-2 text-sm text-muted-foreground leading-relaxed">
           <p>
             現状はサーバ側インメモリストア(プロセス共有)で動作しています。
             プロセスを再起動するとシードデータに戻ります。
           </p>
           <p>
             将来 PostgreSQL/Drizzle 等の永続層に差し替える場合は、
-            <code className="px-1 py-0.5 mx-1 rounded bg-slate-100 text-xs">
+            <code className="px-1 py-0.5 mx-1 rounded bg-muted text-xs font-mono text-foreground">
               lib/repositories/index.ts
             </code>
             の export を切り替えるだけで対応できます。

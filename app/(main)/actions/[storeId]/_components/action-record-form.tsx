@@ -96,13 +96,13 @@ export function ActionRecordForm({ storeId }: { storeId: string }) {
         <Card.Footer>
           <Link
             href={`/stores/${storeId}`}
-            className="inline-flex h-10 px-4 items-center rounded-lg text-sm text-slate-700 hover:bg-slate-100"
+            className="inline-flex h-10 px-4 items-center rounded-lg text-sm text-foreground hover:bg-muted"
           >
             キャンセル
           </Link>
           <Link
             href={`/deals/new?store=${storeId}`}
-            className="inline-flex h-10 px-4 items-center rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-800"
+            className="inline-flex h-10 px-4 items-center rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90"
           >
             商談化する
           </Link>

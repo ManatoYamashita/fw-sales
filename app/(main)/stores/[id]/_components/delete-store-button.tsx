@@ -38,7 +38,7 @@ export function DeleteStoreButton({
         <Trash2 className="h-4 w-4" /> 削除
       </Button>
       <ModalContent title="店舗を削除しますか?" size="sm">
-        <p className="text-sm text-slate-700">
+        <p className="text-sm text-foreground">
           「<strong>{storeName}</strong>」を削除します。
           関連する調査・商談・引き継ぎは残りますが、店舗側の参照は失われます。
           この操作は元に戻せません。

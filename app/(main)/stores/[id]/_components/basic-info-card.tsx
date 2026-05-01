@@ -9,8 +9,8 @@ import type { Store } from "@/types/store";
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-0.5">
-      <dt className="text-xs font-medium text-slate-500">{label}</dt>
-      <dd className="text-sm text-slate-800">{children}</dd>
+      <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
+      <dd className="text-sm text-foreground">{children}</dd>
     </div>
   );
 }
@@ -39,7 +39,7 @@ export function BasicInfoCard({ store }: { store: Store }) {
             {store.review_count > 0 ? (
               <span className="inline-flex items-center gap-2">
                 <StarRating value={store.review_avg} showValue />
-                <span className="text-xs text-slate-500">
+                <span className="text-xs text-muted-foreground">
                   {store.review_count} 件
                 </span>
               </span>

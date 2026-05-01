@@ -43,7 +43,7 @@ export function StageChangeButton({ storeId, current }: StageChangeButtonProps) 
         className="gap-1.5"
       >
         <StageBadge stage={current} />
-        <ChevronDown className="h-3.5 w-3.5 text-slate-400" />
+        <ChevronDown className="h-3.5 w-3.5 text-muted-foreground/70" />
       </Button>
       <ModalContent title="ステージを変更" size="sm">
         <div className="grid grid-cols-2 gap-2">
@@ -58,7 +58,7 @@ export function StageChangeButton({ storeId, current }: StageChangeButtonProps) 
                 className={
                   active
                     ? "px-3 py-2 rounded-md text-xs font-medium border-2 border-blue-600 text-blue-700 bg-blue-50"
-                    : "px-3 py-2 rounded-md text-xs font-medium border border-slate-200 text-slate-700 hover:border-slate-300 hover:bg-slate-50 disabled:opacity-50"
+                    : "px-3 py-2 rounded-md text-xs font-medium border border-border text-foreground hover:border-input hover:bg-muted/40 disabled:opacity-50"
                 }
                 style={
                   active ? undefined : { background: stage.bg, color: stage.color }

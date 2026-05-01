@@ -9,7 +9,9 @@
 - **mock データ層** (server-only インメモリ Map + globalThis 永続化)
 - 後で DB へ差し替えるための **Repository インターフェース**(`lib/repositories/*-repository.ts`)
 - **Composition Pattern**: Card / Modal / Tabs は Compound Components、RSC ↔ Client は children で橋渡し
-- 過剰依存ゼロ: 追加した npm パッケージは `lucide-react` と `clsx` のみ
+- **cossUI 由来のデザインシステム**(MIT 範囲のトークンのみ採用、AGPL の `@coss/ui` ソースは未取り込み)
+- **ダークモード対応**(`next-themes`、Settings 画面でライト / ダーク / システム切替)
+- 主要追加依存: `lucide-react`, `clsx`, `class-variance-authority`, `next-themes`, `@base-ui/react`
 
 ## 開発
 
@@ -60,6 +62,14 @@ lib/
 
 types/                         # Store / Research / Deal / Handoff / Stage
 ```
+
+## デザインシステム
+
+- **トークン体系**(`app/globals.css`): cossUI 流の neutral-first OKLCH カラーパレット ─ `--background` / `--foreground` / `--card` / `--muted` / `--primary` / `--info` / `--success` / `--warning` / `--destructive` / `--sidebar-*` / `--chart-1〜5`
+- **タイポグラフィ**: `<Heading level={1|2|3|4} />` / `<Display />` / `<Text variant="..." />`(`components/ui/typography.tsx`)
+- **Stage 配色**: `[data-stage="<id>"]` セレクタで `--stage` / `--stage-foreground` を切替(12 ステージ × Light / Dark)
+- **Button**: cva ベース(variant: default / secondary / ghost / outline / link / destructive ほか × size: sm / md / lg / xl / icon-*)
+- **Theme Toggle**: `components/ui/theme-toggle.tsx`(Topbar)+ Settings 画面の `ThemeToggleCard`(ラジオ風)
 
 ## キャッシュ設計
 

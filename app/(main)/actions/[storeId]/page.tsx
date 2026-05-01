@@ -54,14 +54,14 @@ export default async function ActionDetailPage({
         <div>
           <Link
             href="/actions"
-            className="text-xs text-slate-500 hover:text-slate-700"
+            className="text-xs text-muted-foreground hover:text-foreground"
           >
             ← アクション一覧
           </Link>
-          <h2 className="text-xl md:text-2xl font-bold text-slate-900 mt-1">
+          <h2 className="text-xl md:text-2xl font-bold text-foreground mt-1">
             {store.name}
           </h2>
-          <p className="text-sm text-slate-500 mt-0.5">
+          <p className="text-sm text-muted-foreground mt-0.5">
             {[store.prefecture, store.city, store.genre]
               .filter(Boolean)
               .join(" / ")}
@@ -80,13 +80,13 @@ export default async function ActionDetailPage({
               <p className="text-sm font-semibold text-amber-700">
                 先に調査を完了してください
               </p>
-              <p className="text-xs text-slate-500 mt-0.5">
+              <p className="text-xs text-muted-foreground mt-0.5">
                 S/W分析・営業フックがあると DM/Tel スクリプトの精度が上がります。
               </p>
             </div>
             <Link
               href={`/research/${store.id}`}
-              className="inline-flex h-9 px-3 rounded-md bg-slate-900 text-white text-sm items-center"
+              className="inline-flex h-9 px-3 rounded-md bg-primary text-primary-foreground text-sm items-center"
             >
               調査を開始
             </Link>
@@ -114,7 +114,7 @@ export default async function ActionDetailPage({
                 </p>
                 <ul className="mt-2 space-y-1 text-sm text-green-900">
                   {strengths.length === 0 ? (
-                    <li className="text-slate-400">—</li>
+                    <li className="text-muted-foreground/70">—</li>
                   ) : (
                     strengths.map((s, i) => <li key={i}>・{s}</li>)
                   )}
@@ -126,7 +126,7 @@ export default async function ActionDetailPage({
                 </p>
                 <ul className="mt-2 space-y-1 text-sm text-blue-900">
                   {weaknesses.length === 0 ? (
-                    <li className="text-slate-400">—</li>
+                    <li className="text-muted-foreground/70">—</li>
                   ) : (
                     weaknesses.map((w, i) => <li key={i}>・{w}</li>)
                   )}

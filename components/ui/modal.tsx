@@ -140,7 +140,7 @@ export function ModalContent({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 animate-fade-in"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-foreground/40 backdrop-blur-sm animate-fade-in"
       onClick={() => setOpen(false)}
       role="presentation"
     >
@@ -150,28 +150,33 @@ export function ModalContent({
         aria-modal="true"
         aria-labelledby={titleId}
         className={cn(
-          "w-full bg-white rounded-xl shadow-modal animate-slide-up",
+          "w-full bg-popover text-popover-foreground border border-border rounded-xl shadow-modal animate-slide-up",
           sizeClass[size],
           className,
         )}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-start justify-between gap-4 px-5 py-4 border-b border-slate-200">
+        <div className="flex items-start justify-between gap-4 px-5 py-4 border-b border-border">
           <div>
-            <h2 id={titleId} className="text-base font-semibold text-slate-900">
+            <h2
+              id={titleId}
+              className="text-base font-semibold tracking-tight text-foreground"
+            >
               {title}
             </h2>
             {description ? (
-              <p className="mt-1 text-sm text-slate-500">{description}</p>
+              <p className="mt-1 text-sm text-muted-foreground leading-relaxed">
+                {description}
+              </p>
             ) : null}
           </div>
           <button
             type="button"
             aria-label="閉じる"
             onClick={() => setOpen(false)}
-            className="text-slate-400 hover:text-slate-700 transition-colors -mr-1.5"
+            className="text-muted-foreground hover:text-foreground hover:bg-accent rounded-md h-8 w-8 inline-flex items-center justify-center transition-colors -mr-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <X className="h-5 w-5" />
+            <X className="h-4 w-4" />
           </button>
         </div>
         <div className="px-5 py-4">{children}</div>
@@ -191,7 +196,7 @@ export function ModalFooter({
   return (
     <div
       className={cn(
-        "flex items-center justify-end gap-2 px-5 py-3 border-t border-slate-200 bg-slate-50 -mx-5 -mb-4 mt-4",
+        "flex items-center justify-end gap-2 px-5 py-3 border-t border-border bg-muted/30 -mx-5 -mb-4 mt-4",
         className,
       )}
     >
