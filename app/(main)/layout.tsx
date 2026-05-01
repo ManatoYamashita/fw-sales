@@ -38,7 +38,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
         <Suspense fallback={<TopbarFallback />}>
           <Topbar />
         </Suspense>
-        <main className="flex-1 px-4 md:px-6 py-4 md:py-6 max-w-screen-2xl 4xl:max-w-screen-4xl mx-auto w-full">
+        <main className="flex-1 px-4 md:px-6 py-6 md:py-8 max-w-screen-2xl 4xl:max-w-screen-4xl mx-auto w-full">
           {children}
         </main>
       </div>

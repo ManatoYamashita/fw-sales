@@ -53,7 +53,9 @@ export function Stat({
     <div
       className={cn(
         "relative flex flex-col gap-2 p-5 bg-card text-card-foreground",
-        "border border-border rounded-lg shadow-card transition-colors hover:bg-accent/30",
+        "border border-border rounded-lg shadow-card",
+        "transition-[box-shadow,transform] duration-200",
+        "hover:shadow-card-hover hover:-translate-y-0.5",
         className,
       )}
     >

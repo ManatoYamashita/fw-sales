@@ -23,7 +23,7 @@ async function loadStats() {
 export async function StatGrid() {
   const stats = await loadStats();
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
       <Stat
         label="登録店舗"
         value={stats.total}
@@ -79,7 +79,7 @@ export async function StatGrid() {
 
 export function StatGridSkeleton() {
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
       {Array.from({ length: 8 }).map((_, i) => (
         <div
           key={i}

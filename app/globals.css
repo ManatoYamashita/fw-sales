@@ -3,7 +3,10 @@
 @custom-variant dark (&:is(.dark *));
 
 /* ------------------------------------------------------------------ */
-/*  デザイントークン (cossUI 流: neutral-first OKLCH + semantic)        */
+/*  デザイントークン                                                    */
+/*  - サーフェス: Tailwind slate ベースで 3-tier 階層化                  */
+/*    (Tier 0 body / Tier 1 sidebar / Tier 2 card)                     */
+/*  - セマンティック(info/success/warning/destructive)は OKLCH 維持     */
 /* ------------------------------------------------------------------ */
 @theme inline {
   /* Surface */
@@ -53,7 +56,7 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
 
-  /* Charts (multi-hue) */
+  /* Charts */
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
@@ -79,44 +82,55 @@
   --spacing-sidebar-collapsed: 64px;
   --spacing-topbar: 60px;
 
-  /* Shadows */
-  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.04), 0 2px 8px rgb(0 0 0 / 0.06);
-  --shadow-modal: 0 20px 25px -5px rgb(0 0 0 / 0.1),
-    0 8px 10px -6px rgb(0 0 0 / 0.1);
+  /* Shadows ─ 3-tier の層感を演出 */
+  --shadow-card: var(--shadow-card-value);
+  --shadow-card-hover: var(--shadow-card-hover-value);
+  --shadow-popover: var(--shadow-popover-value);
+  --shadow-modal: var(--shadow-modal-value);
 
   /* Animation tokens */
   --animate-fade-in: fade-in 0.2s ease-out;
   --animate-slide-up: slide-up 0.2s ease-out;
   --animate-shimmer: shimmer 1.6s linear infinite;
 
-  /* Breakpoints (cossUI 流: ダッシュボードの密度向上用) */
+  /* Breakpoints */
   --breakpoint-3xl: 1600px;
   --breakpoint-4xl: 2000px;
 }
 
 /* ------------------------------------------------------------------ */
-/*  Light theme                                                        */
+/*  Light theme — Tailwind slate ベース                                 */
 /* ------------------------------------------------------------------ */
 :root {
   --radius: 0.625rem;
 
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
+  /* Tier 0 — body (slate-100) */
+  --background: #f1f5f9;
+  --foreground: #0f172a;       /* slate-900 */
 
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
+  /* Tier 2 — card (white)  ← body の上に確実に「浮く」 */
+  --card: #ffffff;
+  --card-foreground: #0f172a;
 
-  /* Semantic (light) */
+  /* Tier ⤴ — popover (white + 強シャドウ) */
+  --popover: #ffffff;
+  --popover-foreground: #0f172a;
+
+  /* Tier ⊥ — muted (slate-100 = body と同色: card 内側の inset 用) */
+  --muted: #f1f5f9;
+  --muted-foreground: #64748b; /* slate-500 */
+
+  /* accent (hover/focus) */
+  --accent: #e2e8f0;           /* slate-200 */
+  --accent-foreground: #0f172a;
+
+  /* brand */
+  --primary: #0f172a;          /* slate-900 */
+  --primary-foreground: #f8fafc;
+  --secondary: #e2e8f0;        /* slate-200 */
+  --secondary-foreground: #0f172a;
+
+  /* semantic (差別化のため OKLCH 維持) */
   --info: oklch(0.55 0.18 250);
   --info-foreground: oklch(0.985 0 0);
   --info-soft: oklch(0.96 0.04 250);
@@ -130,21 +144,22 @@
   --destructive-foreground: oklch(0.985 0 0);
   --destructive-soft: oklch(0.96 0.04 27.325);
 
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  /* borders & rings (slate-200/300/400) */
+  --border: #e2e8f0;           /* slate-200 */
+  --input: #cbd5e1;            /* slate-300 */
+  --ring: #94a3b8;             /* slate-400 */
 
-  /* Sidebar (light) */
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.95 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  /* Tier 1 — sidebar (slate-50: body と card の中間) */
+  --sidebar: #f8fafc;
+  --sidebar-foreground: #0f172a;
+  --sidebar-primary: #0f172a;
+  --sidebar-primary-foreground: #f8fafc;
+  --sidebar-accent: #e2e8f0;   /* slate-200 ─ active 状態くっきり */
+  --sidebar-accent-foreground: #0f172a;
+  --sidebar-border: #e2e8f0;
+  --sidebar-ring: #94a3b8;
 
-  /* Charts (multi-hue, ダッシュボード用) */
+  /* Charts (multi-hue) */
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
   --chart-3: oklch(0.398 0.07 227.392);
@@ -154,28 +169,53 @@
   /* Stage デフォルト */
   --stage: var(--muted);
   --stage-foreground: var(--muted-foreground);
+
+  /* Shadows (light: slate-900 を低 alpha で重ねる) */
+  --shadow-card-value:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 4px 12px rgba(15, 23, 42, 0.06);
+  --shadow-card-hover-value:
+    0 1px 3px rgba(15, 23, 42, 0.06),
+    0 8px 20px rgba(15, 23, 42, 0.10);
+  --shadow-popover-value:
+    0 4px 6px rgba(15, 23, 42, 0.05),
+    0 10px 30px rgba(15, 23, 42, 0.15);
+  --shadow-modal-value:
+    0 20px 25px -5px rgba(15, 23, 42, 0.10),
+    0 8px 10px -6px rgba(15, 23, 42, 0.10);
 }
 
 /* ------------------------------------------------------------------ */
-/*  Dark theme                                                         */
+/*  Dark theme — slate 950 → 900 → 800 の 3 段階                        */
 /* ------------------------------------------------------------------ */
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.371 0 0);
-  --accent-foreground: oklch(0.985 0 0);
+  /* Tier 0 — body (slate-950) */
+  --background: #020617;
+  --foreground: #f1f5f9;       /* slate-100 */
 
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
+  /* Tier 2 — card (slate-800) */
+  --card: #1e293b;
+  --card-foreground: #f1f5f9;
 
+  /* Tier ⤴ — popover */
+  --popover: #1e293b;
+  --popover-foreground: #f1f5f9;
+
+  /* Tier ⊥ — muted (slate-900: card よりさらに奥) */
+  --muted: #0f172a;
+  --muted-foreground: #94a3b8; /* slate-400 */
+
+  /* accent */
+  --accent: #334155;           /* slate-700 */
+  --accent-foreground: #f1f5f9;
+
+  /* brand */
+  --primary: #f1f5f9;          /* slate-100 */
+  --primary-foreground: #0f172a;
+  --secondary: #1e293b;        /* slate-800 */
+  --secondary-foreground: #f1f5f9;
+
+  /* semantic (dark) */
   --info: oklch(0.7 0.18 250);
   --info-foreground: oklch(0.205 0 0);
   --info-soft: oklch(0.32 0.06 250);
@@ -189,32 +229,49 @@
   --destructive-foreground: oklch(0.985 0 0);
   --destructive-soft: oklch(0.32 0.08 27.325);
 
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  /* borders & rings */
+  --border: rgba(241, 245, 249, 0.10);  /* slate-100/10 */
+  --input: rgba(241, 245, 249, 0.15);
+  --ring: #475569;             /* slate-600 */
 
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.922 0 0);
-  --sidebar-primary-foreground: oklch(0.205 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.439 0 0);
+  /* Tier 1 — sidebar (slate-900) */
+  --sidebar: #0f172a;
+  --sidebar-foreground: #f1f5f9;
+  --sidebar-primary: #f1f5f9;
+  --sidebar-primary-foreground: #0f172a;
+  --sidebar-accent: #1e293b;   /* slate-800 */
+  --sidebar-accent-foreground: #f1f5f9;
+  --sidebar-border: rgba(241, 245, 249, 0.10);
+  --sidebar-ring: #475569;
 
+  /* Charts (dark) */
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
 
+  /* Stage デフォルト */
   --stage: var(--muted);
   --stage-foreground: var(--muted-foreground);
+
+  /* Shadows (dark: 黒を高 alpha で深く) */
+  --shadow-card-value:
+    0 1px 2px rgba(0, 0, 0, 0.30),
+    0 4px 12px rgba(0, 0, 0, 0.40);
+  --shadow-card-hover-value:
+    0 1px 3px rgba(0, 0, 0, 0.40),
+    0 8px 24px rgba(0, 0, 0, 0.55);
+  --shadow-popover-value:
+    0 4px 6px rgba(0, 0, 0, 0.40),
+    0 10px 30px rgba(0, 0, 0, 0.60);
+  --shadow-modal-value:
+    0 20px 25px -5px rgba(0, 0, 0, 0.50),
+    0 8px 10px -6px rgba(0, 0, 0, 0.50);
 }
 
 /* ------------------------------------------------------------------ */
-/*  ステージ別配色 (12 stages)                                          */
-/*  Badge / StageBadge 側で  data-stage="<id>" を付与すれば自動適用     */
+/*  ステージ別配色 (12 stages、OKLCH 維持で視認性を確保)                 */
 /* ------------------------------------------------------------------ */
 [data-stage="調査待ち"]      { --stage: var(--muted);          --stage-foreground: var(--muted-foreground); }
 [data-stage="調査完了"]      { --stage: var(--info-soft);      --stage-foreground: var(--info); }

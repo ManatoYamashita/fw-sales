@@ -6,6 +6,7 @@ function Card({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
     <div
       className={cn(
         "bg-card text-card-foreground border border-border rounded-lg shadow-card overflow-hidden",
+        "transition-shadow duration-200",
         className,
       )}
       {...props}
