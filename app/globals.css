@@ -130,16 +130,16 @@
   --secondary: #e2e8f0;        /* slate-200 */
   --secondary-foreground: #0f172a;
 
-  /* semantic (差別化のため OKLCH 維持) */
-  --info: oklch(0.55 0.18 250);
-  --info-foreground: oklch(0.985 0 0);
-  --info-soft: oklch(0.96 0.04 250);
+  /* semantic (色数最小化: success/destructive のみ色付き、他は slate) */
+  --info: #334155;             /* slate-700 (中性化) */
+  --info-foreground: #f8fafc;
+  --info-soft: #e2e8f0;        /* slate-200 */
   --success: oklch(0.58 0.16 145);
   --success-foreground: oklch(0.985 0 0);
   --success-soft: oklch(0.95 0.06 145);
-  --warning: oklch(0.7 0.16 80);
-  --warning-foreground: oklch(0.205 0 0);
-  --warning-soft: oklch(0.96 0.08 80);
+  --warning: #475569;          /* slate-600 (中性化) */
+  --warning-foreground: #f8fafc;
+  --warning-soft: #e2e8f0;     /* slate-200 */
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.985 0 0);
   --destructive-soft: oklch(0.96 0.04 27.325);
@@ -159,12 +159,12 @@
   --sidebar-border: #e2e8f0;
   --sidebar-ring: #94a3b8;
 
-  /* Charts (multi-hue) */
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
+  /* Charts (slate モノトーングラデーション、奥→前 = 薄→濃) */
+  --chart-1: #0f172a;          /* slate-900 (最濃) */
+  --chart-2: #334155;          /* slate-700 */
+  --chart-3: #64748b;          /* slate-500 */
+  --chart-4: #94a3b8;          /* slate-400 */
+  --chart-5: #cbd5e1;          /* slate-300 (最淡) */
 
   /* Stage デフォルト */
   --stage: var(--muted);
@@ -215,16 +215,16 @@
   --secondary: #1e293b;        /* slate-800 */
   --secondary-foreground: #f1f5f9;
 
-  /* semantic (dark) */
-  --info: oklch(0.7 0.18 250);
-  --info-foreground: oklch(0.205 0 0);
-  --info-soft: oklch(0.32 0.06 250);
+  /* semantic (dark): success/destructive のみ色付き */
+  --info: #cbd5e1;             /* slate-300 (中性化) */
+  --info-foreground: #0f172a;
+  --info-soft: #334155;        /* slate-700 */
   --success: oklch(0.74 0.16 145);
   --success-foreground: oklch(0.205 0 0);
   --success-soft: oklch(0.3 0.06 145);
-  --warning: oklch(0.83 0.16 80);
-  --warning-foreground: oklch(0.205 0 0);
-  --warning-soft: oklch(0.32 0.08 80);
+  --warning: #94a3b8;          /* slate-400 (中性化) */
+  --warning-foreground: #0f172a;
+  --warning-soft: #334155;     /* slate-700 */
   --destructive: oklch(0.704 0.191 22.216);
   --destructive-foreground: oklch(0.985 0 0);
   --destructive-soft: oklch(0.32 0.08 27.325);
@@ -244,12 +244,12 @@
   --sidebar-border: rgba(241, 245, 249, 0.10);
   --sidebar-ring: #475569;
 
-  /* Charts (dark) */
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
+  /* Charts (dark slate モノトーングラデーション、奥→前 = 薄→濃) */
+  --chart-1: #f1f5f9;          /* slate-100 (最濃= dark では明) */
+  --chart-2: #cbd5e1;          /* slate-300 */
+  --chart-3: #94a3b8;          /* slate-400 */
+  --chart-4: #64748b;          /* slate-500 */
+  --chart-5: #475569;          /* slate-600 (最淡) */
 
   /* Stage デフォルト */
   --stage: var(--muted);
@@ -271,25 +271,34 @@
 }
 
 /* ------------------------------------------------------------------ */
-/*  ステージ別配色 (12 stages、OKLCH 維持で視認性を確保)                 */
+/*  ステージ別配色 (12 stages)                                          */
+/*  色数最小化: 失注=destructive / 受注=success のみ色付き              */
+/*  他はすべて slate ベース (枠線 or 弱い背景)                          */
 /* ------------------------------------------------------------------ */
-[data-stage="調査待ち"]      { --stage: var(--muted);          --stage-foreground: var(--muted-foreground); }
-[data-stage="調査完了"]      { --stage: var(--info-soft);      --stage-foreground: var(--info); }
-[data-stage="一次接触準備"]  { --stage: var(--warning-soft);   --stage-foreground: var(--warning); }
-[data-stage="DM送信済み"]    { --stage: var(--info-soft);      --stage-foreground: var(--info); }
-[data-stage="テレアポ済み"]  { --stage: oklch(0.95 0.04 200);  --stage-foreground: oklch(0.5 0.13 200); }
-[data-stage="反応あり"]      { --stage: var(--success-soft);   --stage-foreground: var(--success); }
-[data-stage="商談化"]        { --stage: var(--success-soft);   --stage-foreground: oklch(0.45 0.16 145); }
-[data-stage="見積提出"]      { --stage: var(--warning-soft);   --stage-foreground: var(--warning); }
+[data-stage="調査待ち"]      { --stage: #f1f5f9; --stage-foreground: #64748b; }  /* slate-100/500 */
+[data-stage="調査完了"]      { --stage: #e2e8f0; --stage-foreground: #334155; }  /* slate-200/700 */
+[data-stage="一次接触準備"]  { --stage: #e2e8f0; --stage-foreground: #334155; }
+[data-stage="DM送信済み"]    { --stage: #e2e8f0; --stage-foreground: #334155; }
+[data-stage="テレアポ済み"]  { --stage: #e2e8f0; --stage-foreground: #334155; }
+[data-stage="反応あり"]      { --stage: #cbd5e1; --stage-foreground: #1e293b; }  /* slate-300/800 */
+[data-stage="商談化"]        { --stage: #cbd5e1; --stage-foreground: #1e293b; }
+[data-stage="見積提出"]      { --stage: #cbd5e1; --stage-foreground: #1e293b; }
 [data-stage="失注"]          { --stage: var(--destructive-soft); --stage-foreground: var(--destructive); }
-[data-stage="受注"]          { --stage: var(--success-soft);   --stage-foreground: oklch(0.4 0.16 145); }
-[data-stage="引き継ぎ待ち"]  { --stage: oklch(0.95 0.06 50);   --stage-foreground: oklch(0.5 0.16 50); }
-[data-stage="引き継ぎ完了"]  { --stage: var(--muted);          --stage-foreground: var(--muted-foreground); }
+[data-stage="受注"]          { --stage: var(--success-soft);     --stage-foreground: oklch(0.4 0.16 145); }
+[data-stage="引き継ぎ待ち"]  { --stage: #e2e8f0; --stage-foreground: #334155; }
+[data-stage="引き継ぎ完了"]  { --stage: #f1f5f9; --stage-foreground: #64748b; }
 
-.dark [data-stage="テレアポ済み"]  { --stage: oklch(0.32 0.06 200); --stage-foreground: oklch(0.78 0.13 200); }
-.dark [data-stage="商談化"]        { --stage: oklch(0.3 0.06 145);  --stage-foreground: oklch(0.78 0.16 145); }
+.dark [data-stage="調査待ち"]      { --stage: #1e293b; --stage-foreground: #94a3b8; }
+.dark [data-stage="調査完了"]      { --stage: #334155; --stage-foreground: #cbd5e1; }
+.dark [data-stage="一次接触準備"]  { --stage: #334155; --stage-foreground: #cbd5e1; }
+.dark [data-stage="DM送信済み"]    { --stage: #334155; --stage-foreground: #cbd5e1; }
+.dark [data-stage="テレアポ済み"]  { --stage: #334155; --stage-foreground: #cbd5e1; }
+.dark [data-stage="反応あり"]      { --stage: #475569; --stage-foreground: #f1f5f9; }
+.dark [data-stage="商談化"]        { --stage: #475569; --stage-foreground: #f1f5f9; }
+.dark [data-stage="見積提出"]      { --stage: #475569; --stage-foreground: #f1f5f9; }
 .dark [data-stage="受注"]          { --stage: oklch(0.3 0.06 145);  --stage-foreground: oklch(0.82 0.16 145); }
-.dark [data-stage="引き継ぎ待ち"]  { --stage: oklch(0.32 0.08 50);  --stage-foreground: oklch(0.82 0.16 50); }
+.dark [data-stage="引き継ぎ待ち"]  { --stage: #334155; --stage-foreground: #cbd5e1; }
+.dark [data-stage="引き継ぎ完了"]  { --stage: #1e293b; --stage-foreground: #94a3b8; }
 
 /* ------------------------------------------------------------------ */
 /*  Keyframes                                                          */

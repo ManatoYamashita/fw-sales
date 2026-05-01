@@ -15,18 +15,16 @@ const badgeVariants = cva(
         warning: "bg-warning-soft text-warning",
         destructive: "bg-destructive-soft text-destructive",
         outline: "border border-border text-foreground",
-        // 旧色名 (互換): dark mode の見え方も最低限担保
+        // 旧色名 (互換): 色数最小化の方針で全て neutral 系に統一
         neutral: "bg-secondary text-secondary-foreground",
         slate: "bg-secondary text-secondary-foreground",
-        blue: "bg-info-soft text-info",
-        cyan: "bg-cyan-100 text-cyan-700 dark:bg-cyan-950/40 dark:text-cyan-300",
+        blue: "bg-secondary text-secondary-foreground",
+        cyan: "bg-secondary text-secondary-foreground",
         green: "bg-success-soft text-success",
-        amber: "bg-warning-soft text-warning",
-        orange:
-          "bg-orange-100 text-orange-700 dark:bg-orange-950/40 dark:text-orange-300",
+        amber: "bg-secondary text-secondary-foreground",
+        orange: "bg-secondary text-secondary-foreground",
         red: "bg-destructive-soft text-destructive",
-        purple:
-          "bg-purple-100 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300",
+        purple: "bg-secondary text-secondary-foreground",
         // 動的トーン: data-stage 属性で配色決定
         stage: "bg-stage text-stage-foreground",
       },

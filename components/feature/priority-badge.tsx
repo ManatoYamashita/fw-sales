@@ -1,15 +1,18 @@
 import { Badge } from "@/components/ui/badge";
 import type { Priority } from "@/types/store";
 
+/**
+ * 色数最小化の方針: 高=destructive のみ色付き、中/低 は slate ベース
+ */
 const tone: Record<
   Priority,
-  "destructive" | "warning" | "secondary"
+  "destructive" | "secondary" | "outline"
 > = {
   高: "destructive",
-  中: "warning",
-  低: "secondary",
+  中: "secondary",
+  低: "outline",
 };
 
 export function PriorityBadge({ priority }: { priority: Priority }) {
-  return <Badge tone={tone[priority] ?? "secondary"}>{priority}</Badge>;
+  return <Badge tone={tone[priority] ?? "outline"}>{priority}</Badge>;
 }

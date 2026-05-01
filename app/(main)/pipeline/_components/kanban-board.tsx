@@ -40,10 +40,9 @@ function Column({ column }: ColumnProps) {
     <section
       aria-label={`${column.label} カラム`}
       className={cn(
-        "w-72 shrink-0 rounded-lg bg-muted/40 border border-border flex flex-col",
-        "max-h-[calc(100dvh-220px)] border-t-2",
+        "w-72 shrink-0 rounded-lg bg-card border border-border flex flex-col",
+        "max-h-[calc(100dvh-220px)]",
       )}
-      style={{ borderTopColor: column.color }}
       data-stage={column.id}
     >
       <header className="flex items-center justify-between px-3 py-2 border-b border-border">
