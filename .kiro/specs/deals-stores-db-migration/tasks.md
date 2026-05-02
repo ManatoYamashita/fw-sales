@@ -89,7 +89,7 @@
   - _Requirements: 1.1, 1.4, 2.1, 2.2, 2.3, 2.4, 2.5, 9.1, 10.1, 10.2_
   - _Boundary: lib/db/deal-repository.ts_
 
-- [ ] 3.2 (P) StoreRepository の Drizzle 実装と executor ファクトリ
+- [x] 3.2 (P) StoreRepository の Drizzle 実装と executor ファクトリ
   - `lib/db/store-repository.ts` で `makeStoreRepo(executor): StoreRepository` を実装
   - `dbStoreRepo = makeStoreRepo(db)` を export
   - `list(filter?)`: `StoreFilter` の `q` / `stage` / `channel` / `priority` をすべて WHERE 句にマップ。`q` は `name`/`city`/`prefecture`/`address`/`genre`/`memo` を連結した ILIKE 部分一致
