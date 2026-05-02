@@ -30,7 +30,7 @@
   - _Requirements: 6.3_
   - _Boundary: .env.example_
 
-- [ ] 1.4 (P) Drizzle Kit の設定ファイルを作成
+- [x] 1.4 (P) Drizzle Kit の設定ファイルを作成
   - `drizzle.config.ts` で schema パスを `lib/db/schema.ts`、出力ディレクトリを `drizzle/` に設定
   - `dbCredentials.url` を `DATABASE_URL` 環境変数から取得
   - 観測可能な完了状態: `pnpm drizzle-kit --help` 系の検証コマンドで設定が認識される、`pnpm drizzle-kit generate` の dry-run が走る
