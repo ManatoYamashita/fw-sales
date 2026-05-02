@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Menu, Zap } from "lucide-react";
+import { Menu, X, Zap } from "lucide-react";
 import { useState } from "react";
 import { NAV_ITEMS } from "@/lib/domain/nav";
 import { CURRENT_USER } from "@/lib/domain/staff";
@@ -47,7 +47,7 @@ export function Sidebar({ counts }: SidebarProps) {
           >
             <Zap className="h-4.5 w-4.5" />
           </span>
-          <div className="leading-tight min-w-0">
+          <div className="leading-tight min-w-0 flex-1">
             <p className="text-sm font-semibold tracking-tight text-sidebar-foreground truncate">
               Firstweb
             </p>
@@ -55,6 +55,18 @@ export function Sidebar({ counts }: SidebarProps) {
               Lead OS
             </p>
           </div>
+          <button
+            type="button"
+            aria-label="メニューを閉じる"
+            onClick={close}
+            className={cn(
+              "md:hidden -mr-2 inline-flex h-9 w-9 items-center justify-center rounded-md",
+              "text-muted-foreground hover:bg-accent hover:text-foreground transition-colors",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
+            )}
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
 
         {/* Nav */}
@@ -138,22 +150,24 @@ export function Sidebar({ counts }: SidebarProps) {
         </div>
       </aside>
 
-      {/* Mobile menu trigger */}
-      <button
-        type="button"
-        aria-label={open ? "メニューを閉じる" : "メニューを開く"}
-        aria-expanded={open}
-        aria-controls="sidebar-nav"
-        onClick={() => setOpen((v) => !v)}
-        className={cn(
-          "md:hidden fixed top-3 left-3 z-50 inline-flex h-9 w-9 items-center justify-center rounded-md",
-          "bg-card text-foreground border border-border shadow-card",
-          "hover:bg-accent transition-colors",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        )}
-      >
-        <Menu className="h-4 w-4" />
-      </button>
+      {/* Mobile menu trigger ─ サイドバー閉時のみ表示。開時は内側 X ボタンで閉じる */}
+      {!open ? (
+        <button
+          type="button"
+          aria-label="メニューを開く"
+          aria-expanded={open}
+          aria-controls="sidebar-nav"
+          onClick={() => setOpen(true)}
+          className={cn(
+            "md:hidden fixed top-3 left-3 z-50 inline-flex h-9 w-9 items-center justify-center rounded-md",
+            "bg-card text-foreground border border-border shadow-card",
+            "hover:bg-accent transition-colors",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          )}
+        >
+          <Menu className="h-4 w-4" />
+        </button>
+      ) : null}
     </>
   );
 }
