@@ -43,7 +43,7 @@
 
 - [ ] 2. テーブルスキーマ・クライアント singleton・初期マイグレーション
 
-- [ ] 2.1 stores と deals のテーブルスキーマを定義
+- [x] 2.1 stores と deals のテーブルスキーマを定義
   - `lib/db/schema.ts` で `pgTable("stores", {...})` と `pgTable("deals", {...})` を定義
   - `types/store.ts` `types/deal.ts` の全フィールドと 1:1 対応(text PK、`order_amount` のみ nullable、その他 NOT NULL)
   - `deals.store_id` に `references(() => stores.id)` で外部キー制約
