@@ -78,7 +78,7 @@
 
 - [ ] 3. Drizzle ベースの DealRepository / StoreRepository
 
-- [ ] 3.1 (P) DealRepository の Drizzle 実装と executor ファクトリ
+- [x] 3.1 (P) DealRepository の Drizzle 実装と executor ファクトリ
   - `lib/db/deal-repository.ts` で `makeDealRepo(executor: DbClient | Tx): DealRepository` を実装
   - `dbDealRepo = makeDealRepo(db)` を export
   - `list(storeId?)`: `created_at` 降順ソート、`storeId` 指定時は WHERE 絞り込み
