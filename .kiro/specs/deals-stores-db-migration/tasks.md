@@ -63,7 +63,7 @@
   - _Requirements: 1.2, 6.2, 6.4_
   - _Boundary: lib/db/client.ts_
 
-- [ ] 2.3 初期マイグレーション SQL を生成しコミット
+- [x] 2.3 初期マイグレーション SQL を生成しコミット
   - `pnpm drizzle-kit generate` で `drizzle/0000_init.sql` を生成
   - 生成 SQL に `CREATE TABLE stores (...)` と `CREATE TABLE deals (... FOREIGN KEY (store_id) REFERENCES stores(id))` が含まれること
   - `drizzle/meta/_journal.json` を含めて git に追加
@@ -243,6 +243,10 @@
   - _Requirements: 5.1, 5.2, 5.3, 5.4, 7.1, 11.3_
 
 ---
+
+## Implementation Notes
+
+- **2.3**: 設計の Physical Data Model に記載されたインデックス (`deals.store_id`, `deals.created_at desc`, `stores.created_at desc`) は schema.ts に未定義のため生成 SQL に含まれない。本仕様では Req に直接の AC が無いため不採用、Phase 7.1 の Supabase migrate 手順内で必要なら手動 SQL で追加するか別 Issue で対応する。
 
 ## カバレッジ確認(自己照合)
 
