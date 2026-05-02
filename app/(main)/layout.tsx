@@ -11,7 +11,7 @@ async function SidebarShell() {
 function SidebarFallback() {
   return (
     <aside
-      className="hidden md:flex w-60 shrink-0 bg-sidebar border-r border-sidebar-border min-h-dvh flex-col"
+      className="hidden md:flex md:sticky md:top-0 md:self-start w-60 shrink-0 bg-sidebar border-r border-sidebar-border h-dvh flex-col"
       aria-hidden
     >
       <div className="h-15 border-b border-sidebar-border" />

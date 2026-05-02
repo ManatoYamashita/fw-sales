@@ -32,7 +32,7 @@ export function Sidebar({ counts }: SidebarProps) {
         id="sidebar-nav"
         aria-label="メインナビゲーション"
         className={cn(
-          "fixed md:static z-40 h-dvh md:h-auto md:min-h-dvh w-60 shrink-0",
+          "fixed md:sticky md:top-0 md:self-start z-40 h-dvh w-60 shrink-0",
           "bg-sidebar text-sidebar-foreground border-r border-sidebar-border",
           "flex flex-col",
           "transition-transform duration-200 ease-out",
