@@ -53,7 +53,7 @@
   - _Requirements: 1.1, 10.1, 10.2, 10.3_
   - _Boundary: lib/db/schema.ts_
 
-- [ ] 2.2 DB クライアント singleton と起動時 health check を実装
+- [x] 2.2 DB クライアント singleton と起動時 health check を実装
   - `lib/db/client.ts` 冒頭に `import "server-only"`
   - `Symbol.for("__FW_SALES_DB__")` を `globalThis` に紐付け、HMR 跨ぎで `postgres()` と `drizzle()` を 1 つだけ生成
   - postgres オプション: `prepare: false`(Supabase Transaction Pooler 互換)、`max: Number(env.DATABASE_POOL_MAX ?? 10)`
