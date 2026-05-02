@@ -15,7 +15,7 @@
   - 観測可能な完了状態: `package.json` に 4 パッケージが記録され、`node_modules/drizzle-orm` と `node_modules/postgres` が存在する
   - _Requirements: 1.1, 9.1_
 
-- [ ] 1.2 (P) 環境変数バリデーションヘルパを実装
+- [x] 1.2 (P) 環境変数バリデーションヘルパを実装
   - `lib/env.ts` に `assertEnv(key)` と `readEnv(key, fallback?)` を実装
   - 必須キー欠落時は `Error("Missing required env: <key>")` を throw
   - 値の trim と空文字判定を含み、エラーメッセージにキー名のみを含める(値はマスク)
