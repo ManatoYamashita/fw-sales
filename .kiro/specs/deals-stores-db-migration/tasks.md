@@ -23,7 +23,7 @@
   - _Requirements: 6.1, 6.3_
   - _Boundary: lib/env.ts_
 
-- [ ] 1.3 (P) `.env.example` に必要キーを記載
+- [x] 1.3 (P) `.env.example` に必要キーを記載
   - `DATABASE_URL`、`USE_MOCK_DB`、`DATABASE_POOL_MAX` を記載
   - 各キーにコメントで Self-host (`max=10`) / Vercel (`max=1`) の使い分けを併記
   - 観測可能な完了状態: ファイルが存在し、開発者がコピーして `.env.local` を作成できる雛形になっている
