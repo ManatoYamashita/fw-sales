@@ -159,7 +159,7 @@
   - _Requirements: 7.1, 7.2, 7.3_
   - _Boundary: scripts/seed.ts_
 
-- [ ] 6.2 (P) `data-actions.ts` を DB / Mock 二経路に対応
+- [x] 6.2 (P) `data-actions.ts` を DB / Mock 二経路に対応
   - 冒頭に `isMockMode()` ヘルパを定義
   - `resetToSeedAction` (DB モード): `db.transaction` で `truncate deals; truncate stores;` 後に SEED を upsert + Mock 側 Research/Handoff を `resetMockDb` の該当部のみリセット
   - `clearAllAction` (DB モード): `db.transaction` で `truncate deals; truncate stores;` + Mock 側 Research/Handoff のみ `clearMockDb` 経由でクリア
@@ -247,6 +247,7 @@
 ## Implementation Notes
 
 - **2.3**: 設計の Physical Data Model に記載されたインデックス (`deals.store_id`, `deals.created_at desc`, `stores.created_at desc`) は schema.ts に未定義のため生成 SQL に含まれない。本仕様では Req に直接の AC が無いため不採用、Phase 7.1 の Supabase migrate 手順内で必要なら手動 SQL で追加するか別 Issue で対応する。
+- **6.2**: 副作用を持つモジュール(`lib/db/client.ts` の top-level `assertEnv`)を Mock モードでも安全に保つには、Server Action 内の `lib/db/*` 参照は env 分岐内の **動的 import (literal path)** に限定する必要がある。Mock モードのビルド検証は `unset DATABASE_URL && USE_MOCK_DB=true pnpm build` で必須化。同パターンは後続 6.3 (`app/api/export/route.ts`) にも適用。
 
 ## カバレッジ確認(自己照合)
 
