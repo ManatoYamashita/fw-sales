@@ -77,11 +77,103 @@ types/                         # Store / Research / Deal / Handoff / Stage
 - 各 Server Action は変更後に `revalidateTag(tag, "max")` を呼ぶ(stale-while-revalidate)
 - 主要タグは `lib/cache.ts` に集約(`stores`, `store:{id}`, `deals`, `handoffs`, `stats`, `kpi`, `pipeline`, `actionQueue` など)
 
-## DB に置き換える際の手順
+## DB セットアップ手順 (Supabase + Drizzle)
 
-1. `lib/db/store-repository.ts` 等を新設(Drizzle / Prisma など)
-2. `lib/repositories/index.ts` の `repos.store = mockStoreRepo` を新実装に差し替える
-3. Server Action とクエリは無修正で動作
+商談 (Deal) と店舗 (Store) を Supabase Postgres + Drizzle ORM で永続化する手順です。Mock のみで動作確認したい場合は最後の「Mock モード切替」を参照してください。
+
+### 1. Supabase プロジェクト作成
+
+1. [Supabase Console](https://supabase.com/dashboard) にログインし、新規プロジェクトを作成(Region は近接リージョン推奨)
+2. 作成完了後、`Project Settings` → `API` から `Project URL` を控える
+3. 同画面の `Service Role Key` を控える(本リポジトリは Service Role Key で Postgres へ直接接続する構成。クライアントへ晒さないこと)
+
+参考: [Supabase Docs — Connecting to Postgres](https://supabase.com/docs/guides/database/connecting-to-postgres)
+
+### 2. 接続文字列 (DATABASE_URL) の取得
+
+Supabase Dashboard → `Project Settings` → `Database` → `Connection string` セクションを開き、**Transaction pooler** (port `6543`) の接続文字列をコピーします。`postgres.js` の `prepare: false` 設定 (`lib/db/client.ts`) は Transaction Pooler 互換のため既に有効化されています。
+
+```text
+postgres://postgres.<project-ref>:<password>@aws-0-<region>.pooler.supabase.com:6543/postgres?sslmode=require
+```
+
+### 3. `.env.local` の作成
+
+```bash
+cp .env.example .env.local
+# エディタで .env.local を開き、DATABASE_URL に手順 2 で取得した接続文字列を貼り付ける
+```
+
+主な環境変数:
+
+| キー | 必須 | 用途 |
+|---|---|---|
+| `DATABASE_URL` | DB モード時必須 | Supabase Postgres 接続文字列 (Transaction pooler 推奨) |
+| `USE_MOCK_DB` | 任意 | `true` で Mock モード起動。未設定なら DB モード |
+| `DATABASE_POOL_MAX` | 任意 | `postgres.js` のコネクションプール最大数。既定 `10` |
+
+#### `DATABASE_POOL_MAX` の選び方
+
+| 配備形態 | 推奨値 | 理由 |
+|---|---|---|
+| Self-host (Node 長期プロセス, Docker, VPS 等) | `10` | プロセス内で複数接続を保持し再利用 |
+| Vercel / serverless / Edge-adjacent | `1` | 各実行環境で 1 接続に絞り、Supabase Pooler 側で多重化。`10` のままだと `too many connections` を誘発 |
+
+### 4. マイグレーションの適用
+
+`drizzle/` 配下の SQL を Supabase に適用します。
+
+```bash
+pnpm drizzle-kit migrate          # drizzle/*.sql を順次適用 (推奨)
+# あるいは開発初期のスキーマ調整中は push を併用
+pnpm drizzle-kit push             # スキーマ差分を直接反映 (本番運用では migrate を使用)
+```
+
+スキーマ定義 (`lib/db/schema.ts`) を変更した場合は `pnpm drizzle-kit generate` で SQL を再生成してから `migrate` を実行してください。
+
+参考: [Drizzle Kit Migrations](https://orm.drizzle.team/docs/kit-overview)
+
+### 5. SEED データの投入
+
+`SEED_STORES` / `SEED_DEALS` (`lib/mock/seed.ts`) と同等のデータを Postgres に upsert します。`ON CONFLICT DO UPDATE` でベキ等です。
+
+```bash
+pnpm tsx scripts/seed.ts
+```
+
+`USE_MOCK_DB=true` が設定されている環境ではスクリプトは警告のみ出してスキップします(誤実行防止)。
+
+### 6. 開発サーバー起動
+
+```bash
+pnpm dev          # DB モード (DATABASE_URL 必須)
+```
+
+起動時に `lib/db/client.ts` が `select 1` で接続ヘルスチェックを行い、失敗時は `process.exit(1)` で fail-fast します。
+
+### Mock モード切替
+
+外部 DB 接続なしで開発・E2E を行う場合は環境変数で Mock モードに切り替えられます。
+
+```bash
+USE_MOCK_DB=true pnpm dev
+```
+
+このモードでは `lib/db/*` は一切評価されず、`DATABASE_URL` 未設定でも起動できます。インメモリ Map + `globalThis` 永続化による従来 Mock 実装が選択されます。
+
+### 検証コマンド
+
+```bash
+pnpm typecheck && pnpm lint && pnpm build
+```
+
+DB モードでの動作確認は次の E2E が標準手順です(詳細は `.kiro/specs/deals-stores-db-migration/requirements.md` §11):
+
+1. `/stores/{storeId}` で新規商談を作成し「受注」で保存
+2. プロセスを再起動
+3. `/deals` に商談が残存していることを確認
+4. `/stores/{storeId}` で店舗 stage が「受注」に同期されていることを確認
+5. `/dashboard` / `/kpi` / `/pipeline` で受注金額・件数の集計反映を確認
 
 ## 既存資産の扱い
 

@@ -197,7 +197,7 @@
   - _Requirements: 1.1, 1.2_
   - _Boundary: Supabase project_
 
-- [ ] 7.2 (P) README に DB セットアップ手順を追記
+- [x] 7.2 (P) README に DB セットアップ手順を追記
   - Supabase プロジェクト作成・接続文字列取得手順
   - `.env.local` の設定例(`DATABASE_URL`、`USE_MOCK_DB`、`DATABASE_POOL_MAX`)
   - `pnpm drizzle-kit generate` / `migrate` のコマンド例
