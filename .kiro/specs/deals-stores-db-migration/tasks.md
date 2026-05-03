@@ -172,7 +172,7 @@
   - _Requirements: 8.2, 8.3, 8.4, 8.5_
   - _Boundary: lib/actions/data-actions.ts_
 
-- [ ] 6.3 (P) Export route に runtime 宣言と並列取得を追加
+- [x] 6.3 (P) Export route に runtime 宣言と並列取得を追加
   - `app/api/export/route.ts` 冒頭に `export const runtime = "nodejs"` を明示宣言
   - DB モード時: `Promise.all([repos.deal.list(), repos.store.list()])` で並列取得し、Research/Handoff は `snapshotMockDb()` から該当部のみ抽出して結合
   - Mock モード時: 従来通り `snapshotMockDb()` を一括返却
@@ -248,6 +248,7 @@
 
 - **2.3**: 設計の Physical Data Model に記載されたインデックス (`deals.store_id`, `deals.created_at desc`, `stores.created_at desc`) は schema.ts に未定義のため生成 SQL に含まれない。本仕様では Req に直接の AC が無いため不採用、Phase 7.1 の Supabase migrate 手順内で必要なら手動 SQL で追加するか別 Issue で対応する。
 - **6.2**: 副作用を持つモジュール(`lib/db/client.ts` の top-level `assertEnv`)を Mock モードでも安全に保つには、Server Action 内の `lib/db/*` 参照は env 分岐内の **動的 import (literal path)** に限定する必要がある。Mock モードのビルド検証は `unset DATABASE_URL && USE_MOCK_DB=true pnpm build` で必須化。同パターンは後続 6.3 (`app/api/export/route.ts`) にも適用。
+- **6.3**: Next.js 16 + Cache Components (`cacheComponents: true`) では Route Segment Config の `export const runtime = "nodejs"` 明示宣言が **ビルド時エラーで拒否**される(`Route segment config "runtime" is not compatible with nextConfig.cacheComponents`)。Cache Components は Node.js runtime を default かつ強制するため、design 意図(postgres.js Edge 非対応事故防止)は自動保証される。runtime export は省略し、コメントで意図を明記する運用に統一。design.md §「`app/api/export/route.ts` (修正)」の AC #1 はこの制約に合わせて読み替え。
 
 ## カバレッジ確認(自己照合)
 
