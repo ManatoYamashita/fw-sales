@@ -113,7 +113,7 @@
 
 - [ ] 4. Repository 集約と `repos.transaction()` API の構築
 
-- [ ] 4.1 `lib/repositories/index.ts` を Repos interface + 動的 import 化
+- [x] 4.1 `lib/repositories/index.ts` を Repos interface + 動的 import 化
   - `Repos` / `TxRepos` interface を定義し、`store` / `research` / `deal` / `handoff` / `transaction` の 5 フィールドを明示
   - `buildRepos()` を実装: `process.env.USE_MOCK_DB === "true"` で Mock 経路、それ以外で `await import("@/lib/db")` の動的 import で DB 経路を構築
   - DB 経路の `transaction` は `db.transaction(async tx => fn({ deal: makeDealRepo(tx), store: makeStoreRepo(tx) }))`、Mock 経路は擬似 tx (シリアル実行、rollback なし)
