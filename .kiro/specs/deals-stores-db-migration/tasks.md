@@ -99,7 +99,7 @@
   - _Requirements: 1.1, 1.4, 9.1, 10.1, 10.2_
   - _Boundary: lib/db/store-repository.ts_
 
-- [ ] 3.3 `lib/db/index.ts` で公開 API を集約
+- [x] 3.3 `lib/db/index.ts` で公開 API を集約
   - `lib/db/index.ts` で `db`、`sql`、`DbClient`、`Tx`、`makeDealRepo`、`dbDealRepo`、`makeStoreRepo`、`dbStoreRepo` を re-export
   - これにより上位レイヤは `import("@/lib/db")` だけで全シンボルを取得可能
   - 観測可能な完了状態: `await import("@/lib/db")` で 8 シンボルすべてが解決する
