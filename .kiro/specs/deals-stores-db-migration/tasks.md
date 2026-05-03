@@ -130,7 +130,7 @@
 
 - [ ] 5. Server Action を `repos.transaction()` 経由に書換
 
-- [ ] 5.1 `createDealAction` / `updateDealAction` を `repos.transaction()` 化
+- [x] 5.1 `createDealAction` / `updateDealAction` を `repos.transaction()` 化
   - `lib/actions/deal-actions.ts` から `lib/db/*` の直接 import を完全排除
   - `createDealAction`: 店舗存在確認 → `repos.transaction(async ({ deal, store }) => { ... })` の中で `deal.create(input)` と `store.update(storeId, { stage })` を実行
   - `updateDealAction`: 同様に tx 内で `deal.update(...)` + `store.update(...)` を不可分実行

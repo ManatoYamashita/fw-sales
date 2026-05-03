@@ -77,12 +77,23 @@ export async function createDealAction(
     assigned_sales: readString(formData, "assigned_sales") || store.assigned_sales,
   };
 
-  const created = await repos.deal.create(input);
-
-  // store.stage を商談ステージへ同期
-  const targetStage = STAGE_BY_DEAL_STATUS[status];
-  if (store.stage !== targetStage) {
-    await repos.store.update(storeId, { stage: targetStage });
+  // Deal 作成 + (差異がある場合のみ) Store ステージ同期を 1 トランザクションで実行。
+  // 失敗時は ROLLBACK されるため、tx 外側で invalidateDealScopes を呼ぶことで
+  // 部分失敗時のキャッシュ汚染を防ぐ。
+  let created: Awaited<ReturnType<typeof repos.deal.create>>;
+  try {
+    created = await repos.transaction(async ({ deal, store: storeTx }) => {
+      const c = await deal.create(input);
+      const targetStage = STAGE_BY_DEAL_STATUS[status];
+      if (store.stage !== targetStage) {
+        await storeTx.update(storeId, { stage: targetStage });
+      }
+      return c;
+    });
+  } catch (err) {
+    return failure(
+      err instanceof Error ? err.message : "商談の作成に失敗しました",
+    );
   }
 
   invalidateDealScopes(created.id, storeId);
@@ -98,22 +109,36 @@ export async function updateDealAction(
   if (!current) return failure("商談が見つかりませんでした");
 
   const status = asDealStatus(readString(formData, "status"));
-  const updated = await repos.deal.update(dealId, {
+  const patch = {
     status,
     discussion: readString(formData, "discussion"),
     proposal: readString(formData, "proposal"),
     estimate_amount: readNumber(formData, "estimate_amount", 0),
     order_amount: readNullableNumber(formData, "order_amount"),
     lost_reason: readString(formData, "lost_reason"),
-  });
-  if (!updated) return failure("更新に失敗しました");
-
-  // 受注/失注の場合は store.stage を同期
+  };
   const targetStage = STAGE_BY_DEAL_STATUS[status];
-  await repos.store.update(current.store_id, { stage: targetStage });
 
-  invalidateDealScopes(dealId, current.store_id);
-  return success({ id: dealId }, "商談を更新しました");
+  // Deal 更新 + Store ステージ同期を 1 トランザクションで実行。
+  // 失敗時は ROLLBACK されるため、tx 外側で invalidateDealScopes を呼ぶ。
+  let updatedId: string;
+  try {
+    updatedId = await repos.transaction(async ({ deal, store: storeTx }) => {
+      const updated = await deal.update(dealId, patch);
+      if (!updated) {
+        throw new Error("更新に失敗しました");
+      }
+      await storeTx.update(current.store_id, { stage: targetStage });
+      return updated.id;
+    });
+  } catch (err) {
+    return failure(
+      err instanceof Error ? err.message : "商談の更新に失敗しました",
+    );
+  }
+
+  invalidateDealScopes(updatedId, current.store_id);
+  return success({ id: updatedId }, "商談を更新しました");
 }
 
 export async function deleteDealAction(dealId: string): Promise<ActionResult> {
