@@ -148,7 +148,7 @@
 
 - [ ] 6. SEED スクリプト・データアクション・Export route の DB 経路対応
 
-- [ ] 6.1 (P) SEED 投入スクリプトを実装
+- [x] 6.1 (P) SEED 投入スクリプトを実装
   - `scripts/seed.ts` を作成し `tsx scripts/seed.ts` で実行可能に
   - `process.env.USE_MOCK_DB === "true"` の場合は警告を出して exit (誤実行防止)
   - `lib/db/client.ts` から `db` を直接 import し、`SEED_STORES` を先に投入後 `SEED_DEALS` を投入(FK 整合確保)
