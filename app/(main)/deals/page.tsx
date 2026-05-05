@@ -5,20 +5,29 @@ import { DataTable, type ColumnDef } from "@/components/ui/data-table";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { listDealsCached } from "@/lib/queries/deals";
+import { listStores } from "@/lib/queries/stores";
 import { formatDate } from "@/lib/utils/date";
 import { formatYen } from "@/lib/utils/format";
 import type { Deal, DealStatus } from "@/types/deal";
 import { Handshake } from "lucide-react";
+import {
+  DealCreateButton,
+  type DealCreateStoreOption,
+} from "./_components/deal-create-button";
+import { DealRowActions } from "./_components/deal-row-actions";
 
 export const metadata: Metadata = {
   title: "商談管理",
 };
 
-const statusTone: Record<DealStatus, "neutral" | "amber" | "green" | "red"> = {
-  継続追客: "neutral",
-  見積提出: "amber",
-  受注: "green",
-  失注: "red",
+const statusTone: Record<
+  DealStatus,
+  "default" | "secondary" | "success" | "destructive"
+> = {
+  継続追客: "default",
+  見積提出: "secondary",
+  受注: "success",
+  失注: "destructive",
 };
 
 const columns: ColumnDef<Deal>[] = [
@@ -48,7 +57,7 @@ const columns: ColumnDef<Deal>[] = [
     align: "right",
     cell: (d) =>
       d.order_amount ? (
-        <span className="text-green-700 font-semibold">
+        <span className="text-success font-semibold">
           {formatYen(d.order_amount)}
         </span>
       ) : (
@@ -61,14 +70,37 @@ const columns: ColumnDef<Deal>[] = [
     cell: (d) => <Badge tone={statusTone[d.status]}>{d.status}</Badge>,
   },
   { key: "sales", header: "担当", cell: (d) => d.assigned_sales || "—" },
+  {
+    key: "actions",
+    header: <span className="sr-only">操作</span>,
+    align: "right",
+    width: "92px",
+    cell: (d) => (
+      <DealRowActions dealId={d.id} storeName={d.store_name} />
+    ),
+  },
 ];
 
 export default async function DealsPage() {
-  const deals = await listDealsCached();
+  const [deals, stores] = await Promise.all([
+    listDealsCached(),
+    listStores({}),
+  ]);
+
+  const storeOptions: DealCreateStoreOption[] = stores.map((s) => ({
+    id: s.id,
+    name: s.name,
+    prefecture: s.prefecture,
+    city: s.city,
+  }));
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl md:text-2xl font-bold text-foreground">商談管理</h2>
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <h2 className="text-xl md:text-2xl font-bold text-foreground">
+          商談管理
+        </h2>
+        <DealCreateButton stores={storeOptions} />
       </div>
       <Card>
         <Card.Header>
@@ -83,7 +115,7 @@ export default async function DealsPage() {
             <EmptyState
               icon={<Handshake />}
               title="商談はまだありません"
-              description="店舗詳細から商談を作成してください。"
+              description="右上の「新規作成」ボタンから店舗を選んで商談を追加してください。"
             />
           }
         />

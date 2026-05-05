@@ -10,6 +10,7 @@ import { StarRating } from "@/components/ui/star-rating";
 import { listStores } from "@/lib/queries/stores";
 import { formatDate } from "@/lib/utils/date";
 import type { Store, StoreFilter } from "@/types/store";
+import { StoreRowActions } from "./store-row-actions";
 
 const columns: ColumnDef<Store>[] = [
   {
@@ -75,6 +76,13 @@ const columns: ColumnDef<Store>[] = [
         {formatDate(s.updated_at)}
       </span>
     ),
+  },
+  {
+    key: "actions",
+    header: <span className="sr-only">操作</span>,
+    align: "right",
+    width: "92px",
+    cell: (s) => <StoreRowActions storeId={s.id} storeName={s.name} />,
   },
 ];
 
