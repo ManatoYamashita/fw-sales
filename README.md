@@ -138,8 +138,10 @@ pnpm drizzle-kit push             # スキーマ差分を直接反映 (本番運
 `SEED_STORES` / `SEED_DEALS` (`lib/mock/seed.ts`) と同等のデータを Postgres に upsert します。`ON CONFLICT DO UPDATE` でベキ等です。
 
 ```bash
-pnpm tsx scripts/seed.ts
+pnpm seed
 ```
+
+内部的に `NODE_OPTIONS='--conditions=react-server' tsx scripts/seed.ts` を実行します(`server-only` パッケージを `react-server` condition で `empty.js` に解決させ、CLI 単体実行を可能にするため)。
 
 `USE_MOCK_DB=true` が設定されている環境ではスクリプトは警告のみ出してスキップします(誤実行防止)。
 

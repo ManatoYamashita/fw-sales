@@ -188,7 +188,7 @@
 
 - [ ] 7. Supabase 反映と README 更新
 
-- [ ] 7.1 Supabase へマイグレーションを適用
+- [x] 7.1 Supabase へマイグレーションを適用
   - Supabase プロジェクトを準備し `DATABASE_URL` を `.env.local` に設定
   - `pnpm drizzle-kit migrate` を実行し、Supabase 側に `stores` / `deals` テーブルを作成
   - 必要に応じて `deals.store_id` / `deals.created_at` / `stores.created_at` のインデックスを SQL で追加
@@ -249,6 +249,7 @@
 - **2.3**: 設計の Physical Data Model に記載されたインデックス (`deals.store_id`, `deals.created_at desc`, `stores.created_at desc`) は schema.ts に未定義のため生成 SQL に含まれない。本仕様では Req に直接の AC が無いため不採用、Phase 7.1 の Supabase migrate 手順内で必要なら手動 SQL で追加するか別 Issue で対応する。
 - **6.2**: 副作用を持つモジュール(`lib/db/client.ts` の top-level `assertEnv`)を Mock モードでも安全に保つには、Server Action 内の `lib/db/*` 参照は env 分岐内の **動的 import (literal path)** に限定する必要がある。Mock モードのビルド検証は `unset DATABASE_URL && USE_MOCK_DB=true pnpm build` で必須化。同パターンは後続 6.3 (`app/api/export/route.ts`) にも適用。
 - **6.3**: Next.js 16 + Cache Components (`cacheComponents: true`) では Route Segment Config の `export const runtime = "nodejs"` 明示宣言が **ビルド時エラーで拒否**される(`Route segment config "runtime" is not compatible with nextConfig.cacheComponents`)。Cache Components は Node.js runtime を default かつ強制するため、design 意図(postgres.js Edge 非対応事故防止)は自動保証される。runtime export は省略し、コメントで意図を明記する運用に統一。design.md §「`app/api/export/route.ts` (修正)」の AC #1 はこの制約に合わせて読み替え。
+- **7.1**: `pnpm tsx scripts/seed.ts` 実行時に `import "server-only"` で `Cannot find module 'server-only'` および "This module cannot be imported from a Client Component module" エラーが発生する。原因は (1) pnpm の strict hoisting で Next.js 内部依存の `server-only` がトップレベル `node_modules/` から見えない、(2) `server-only` パッケージは `react-server` condition を持つ環境のみ `empty.js` (no-op) に解決される。**解決**: `pnpm add -D server-only` で明示 devDep 追加 + `NODE_OPTIONS="--conditions=react-server"` 付きで実行。`package.json` の `scripts.seed` に `"seed": "NODE_OPTIONS='--conditions=react-server' tsx scripts/seed.ts"` を追加するのが恒久対応。
 
 ## カバレッジ確認(自己照合)
 
