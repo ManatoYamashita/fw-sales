@@ -49,9 +49,9 @@
 
 ---
 
-- [ ] 2. AI Service Layer: schema, prompt, validate, rate-limit, client
+- [x] 2. AI Service Layer: schema, prompt, validate, rate-limit, client
 
-- [ ] 2.1 Zod スキーマと JSON Schema 変換
+- [x] 2.1 Zod スキーマと JSON Schema 変換
   - `lib/ai/schema.ts` を新規作成、`AiAnalysisSchema`(5 フィールド `strengths_markdown` / `weaknesses_markdown` / `gourmet_paid_status` / `gbp_completeness` / `call_script` + `confidence` ネスト 5)を Zod で定義
   - `ConfidenceField = z.number().int().min(0).max(100)`、`call_script` に `.max(1500)`、`AiAnalysisSchema` を `.strict()` で extra prop 拒否
   - `getAiAnalysisJsonSchema(): Record<string, unknown>` で `zod-to-json-schema` 変換 + `propertyOrdering` 配列を埋込
@@ -60,7 +60,7 @@
   - _Requirements: 3.1, 3.2, 3.3_
   - _Boundary: lib/ai/schema_
 
-- [ ] 2.2 (P) Prompt Builder と Few-shot 静的埋込
+- [x] 2.2 (P) Prompt Builder と Few-shot 静的埋込
   - `lib/ai/prompt.ts` を新規作成、`buildAnalysisPrompt(input): { systemPrompt, userParts }` を実装(純関数)
   - system prompt に固定文(役割定義 + 出力規約 + 確信度判断基準 90-100/70-89/50-69/0-49)+ Few-shot 2 例(導楽 + 蕎楽亭、Issue #13 本文の架電スクリプトをそのまま埋込)
   - user message Parts: フォーム値 JSON、HTML 全文(空時は省略)、自由追加指示(空時は省略)を別 Part として並べる
@@ -71,7 +71,7 @@
   - _Boundary: lib/ai/prompt_
   - _Depends: 2.1_
 
-- [ ] 2.3 (P) Validator(Zod 二重検証)
+- [x] 2.3 (P) Validator(Zod 二重検証)
   - `lib/ai/validate.ts` を新規作成、`validateAiAnalysis(raw: unknown): Result<AiAnalysisResult, AiValidationError>` を実装
   - 内部で `AiAnalysisSchema.safeParse(raw)` を呼び、失敗時は Zod issues を簡素化した `zodIssues: string[]` で `{ ok: false, error: { kind: "schema_violation", zodIssues } }` を返す
   - 成功時は型安全な `AiAnalysisResult` を返す
@@ -80,7 +80,7 @@
   - _Boundary: lib/ai/validate_
   - _Depends: 2.1_
 
-- [ ] 2.4 (P) Rate Limiter
+- [x] 2.4 (P) Rate Limiter
   - `lib/ai/rate-limiter.ts` を新規作成、プロセス内 `Map<string, number[]>` ベースで per-store(同一 storeId 10 分以内 5 回) + global(60 秒以内 10 回)を実装
   - `checkRateLimit(storeId: string | null): RateLimitResult` を export、cleanup を呼出時に実施(別スレッド不要)
   - `storeId === null` の場合は per-store 判定をスキップし global のみチェック
@@ -89,7 +89,7 @@
   - _Requirements: 6.3_
   - _Boundary: lib/ai/rate-limiter_
 
-- [ ] 2.5 (P) Gemini Client(`@google/genai` ラッパ)
+- [x] 2.5 (P) Gemini Client(`@google/genai` ラッパ)
   - `lib/ai/client.ts` を新規作成、冒頭に `import 'server-only'` を必ず付与
   - `createGeminiClient(): GeminiClient` で `@google/genai` の `GoogleGenAI` を初期化、`process.env.GEMINI_MODEL ?? "gemini-2.5-flash"` をモデルとして使う
   - `generateAnalysis(input: AnalysisInput, signal: AbortSignal): Promise<unknown>` を実装、`config` に `responseMimeType: "application/json"`, `responseJsonSchema: input.jsonSchema`, `tools: [{ urlContext: {} }]`, `abortSignal: signal` を渡す
@@ -289,3 +289,5 @@
 - **Phase 1 完了時の TS エラー連鎖** (1.3 後 / commit `feat(ai-store-analysis): Phase 1 ...` 時点): `lib/actions/store-actions.ts:53`(`buildStoreInput` が新 3 フィールド欠落)、`lib/db/store-repository.ts:101,118`(DB layer で `ai_analysis_result: AiAnalysisResult | null` を text 列に渡せない)、`lib/actions/data-actions.ts:217`、`scripts/seed.ts:44,47`(Repository 経由のシリアライズ責務未対応)。これらは設計書 File Structure Plan の Modified Files に明示されていなかったが、**Task 4.2 のスコープに「`lib/db/store-repository.ts` と `scripts/seed.ts` の JSON.stringify/parse 変換経路追加」を含めて解消する**(`lib/actions/data-actions.ts` も同種の修正が連鎖、Task 4.2 で touch)。
 - **drizzle migration の自動生成**(1.4): `DATABASE_URL="" pnpm drizzle-kit generate --name=add_operator_and_ai_analysis` で `drizzle/0001_*.sql` + `meta/_journal.json` + `meta/0001_snapshot.json` が自動生成される(DB 接続不要)。今後の schema 変更時もこの方式が標準。
 - **`@google/genai` のビルドスクリプト警告**(1.1): `pnpm install` 時に「Ignored build scripts」警告が出るが、Vercel デプロイでは既定で問題なし。ローカルで native binding を使う場合のみ `pnpm approve-builds` を検討。
+- **Zod 4 + `zod-to-json-schema` 互換性**(2.1): Phase 1 で install した `zod-to-json-schema@3.25.2` は zod 3.x 専用で、zod 4.x の `ZodObject<..., $strict>` 型と互換性なし(`Argument of type 'ZodObject<...>' is not assignable to parameter of type 'ZodType<any, ZodTypeDef, any>'`)。Zod 4 内蔵の `z.toJSONSchema(schema, { target: "draft-2020-12" })` に切替て解決。`zod-to-json-schema` は **後続タスクで `pnpm remove` 候補**(現在は未使用 dep として残存)。
+- **`@google/genai` SDK 確認**(2.5): `Part` interface line 8854、`responseJsonSchema?: unknown`、`tools: [{ urlContext: {} }]` 形式が正規。`config.systemInstruction: ContentUnion` で system prompt を渡し、`contents` には user message の Part 配列のみ載せる。`abortSignal` は `AbortController.signal` 互換。
