@@ -1,27 +1,57 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Download, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { Download, AlertTriangle, CheckCircle2, XCircle } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { importFromUrlAction } from "@/lib/actions/url-parse-actions";
-import type { ApplyResult } from "@/lib/url-parser/types";
+import type { AppliedField, ApplyResult, ParsedSource } from "@/lib/url-parser/types";
+import {
+  confidenceTier,
+  confidenceToBg,
+  type ConfidenceTier,
+} from "@/lib/url-parser/confidence-color";
 import { toast } from "@/components/ui/toast";
 
 export interface UrlImportPanelProps {
   onApply: (suggested: ApplyResult) => void;
 }
 
+interface LastImport {
+  type: ParsedSource;
+  applied: AppliedField[];
+  chained: boolean;
+  ogpError?: string;
+}
+
+const TIER_ICON: Record<ConfidenceTier, "high" | "medium" | "low" | "missing"> = {
+  high: "high",
+  medium: "medium",
+  low: "low",
+  very_low: "low",
+  missing: "missing",
+};
+
+function tierLabel(tier: ConfidenceTier): string {
+  switch (tier) {
+    case "high":
+      return "高";
+    case "medium":
+      return "中";
+    case "low":
+      return "低";
+    case "very_low":
+      return "要確認";
+    case "missing":
+      return "未取得";
+  }
+}
+
 export function UrlImportPanel({ onApply }: UrlImportPanelProps) {
   const [url, setUrl] = useState("");
   const [pending, startTransition] = useTransition();
-  const [lastApplied, setLastApplied] = useState<{
-    type: string;
-    confidence: string;
-    name?: string;
-    error?: string;
-  } | null>(null);
+  const [lastImport, setLastImport] = useState<LastImport | null>(null);
 
   const importNow = () => {
     if (!url.trim()) {
@@ -30,22 +60,36 @@ export function UrlImportPanel({ onApply }: UrlImportPanelProps) {
     }
     startTransition(async () => {
       try {
-        const result = await importFromUrlAction(url, { fetchOgp: true });
+        const result = await importFromUrlAction(url, {
+          fetchOgp: true,
+          recursive: true,
+        });
         if (!result.parsed) {
           toast.error("認識できる形式の URL ではありません");
           return;
         }
         onApply(result.suggested);
-        setLastApplied({
+        setLastImport({
           type: result.parsed.type,
-          confidence: result.ogp?.ok ? "詳細取得済み" : "URL解析のみ",
-          name: result.suggested.name,
-          error: result.ogp?.error,
+          applied: result.applied,
+          chained: result.chained,
+          ogpError: result.ogp?.ok === false ? result.ogp.error : undefined,
         });
+
+        const hits = result.applied.filter((f) => f.value !== "" && typeof f.confidence === "number");
+        const tierCounts = hits.reduce(
+          (acc, f) => {
+            const tier = confidenceTier(f.confidence);
+            acc[tier] = (acc[tier] ?? 0) + 1;
+            return acc;
+          },
+          {} as Record<ConfidenceTier, number>,
+        );
+        const summary = `${result.applied.length} 項目中 ${hits.length} 項目を取得 (高:${tierCounts.high ?? 0} / 中:${tierCounts.medium ?? 0} / 低:${(tierCounts.low ?? 0) + (tierCounts.very_low ?? 0)})`;
         toast.success(
           result.suggested.name
-            ? `「${result.suggested.name}」の情報を反映しました`
-            : "URL から取得できる情報を反映しました",
+            ? `「${result.suggested.name}」: ${summary}`
+            : summary,
         );
       } catch (e) {
         toast.error(
@@ -65,7 +109,8 @@ export function UrlImportPanel({ onApply }: UrlImportPanelProps) {
           </h3>
           <p className="text-xs text-blue-800/80 mt-0.5">
             食べログ・Googleマップの店舗 URL を貼り付けて「読込」を押すと、
-            都道府県・市区・店名・口コミ件数などが自動入力されます。
+            都道府県・市区・店名・住所・口コミ件数などが自動入力されます。
+            色付きの背景は信頼度を示します(緑=高、黄=中、赤=要確認)。
           </p>
         </div>
       </div>
@@ -86,23 +131,62 @@ export function UrlImportPanel({ onApply }: UrlImportPanelProps) {
           {pending ? "読込中…" : "読込"}
         </Button>
       </div>
-      {lastApplied ? (
-        <div className="flex items-center gap-2 text-xs flex-wrap">
-          <Badge tone={lastApplied.error ? "amber" : "green"}>
-            {lastApplied.error ? (
-              <AlertTriangle className="h-3 w-3" />
-            ) : (
-              <CheckCircle2 className="h-3 w-3" />
-            )}
-            {lastApplied.type}
-          </Badge>
-          <span className="text-blue-900/80">{lastApplied.confidence}</span>
-          {lastApplied.error ? (
-            <span className="text-amber-700">
-              ({lastApplied.error})
+      {lastImport ? (
+        <details className="rounded border border-blue-200 bg-white/60 px-3 py-2 text-xs">
+          <summary className="flex items-center gap-2 cursor-pointer flex-wrap">
+            <Badge tone={lastImport.ogpError ? "amber" : "green"}>
+              {lastImport.ogpError ? (
+                <AlertTriangle className="h-3 w-3" />
+              ) : (
+                <CheckCircle2 className="h-3 w-3" />
+              )}
+              {lastImport.type}
+            </Badge>
+            {lastImport.chained ? (
+              <Badge tone="blue">公式 HP からも補完</Badge>
+            ) : null}
+            <span className="text-blue-900/80">
+              取得状況({
+                lastImport.applied.filter((f) => f.value !== "" && typeof f.confidence === "number").length
+              }
+              / {lastImport.applied.length})
             </span>
-          ) : null}
-        </div>
+            {lastImport.ogpError ? (
+              <span className="text-amber-700">
+                (OGP: {lastImport.ogpError})
+              </span>
+            ) : null}
+            <span className="text-blue-900/60 ml-auto">▾ 詳細</span>
+          </summary>
+          <ul className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+            {lastImport.applied.map((f) => {
+              const tier = confidenceTier(f.confidence);
+              const bg = confidenceToBg(f.confidence);
+              const icon = TIER_ICON[tier];
+              return (
+                <li
+                  key={f.key}
+                  className="flex items-center gap-2 px-2 py-1 rounded text-[11px]"
+                  style={bg ? { backgroundColor: bg } : undefined}
+                >
+                  {icon === "high" || icon === "medium" || icon === "low" ? (
+                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-green-700" />
+                  ) : (
+                    <XCircle className="h-3.5 w-3.5 shrink-0 text-gray-400" />
+                  )}
+                  <span className="font-medium shrink-0">{f.label}:</span>
+                  <span className="truncate">
+                    {f.value || <span className="text-gray-500">(取得失敗)</span>}
+                  </span>
+                  <span className="ml-auto text-[10px] text-gray-600 shrink-0">
+                    {tierLabel(tier)}
+                    {typeof f.confidence === "number" ? ` ${f.confidence}` : ""}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </details>
       ) : null}
     </div>
   );
