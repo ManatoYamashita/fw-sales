@@ -50,3 +50,21 @@ export function readEnv(key: string, fallback?: string): string | undefined {
   }
   return trimmed;
 }
+
+/**
+ * Gemini API キーが設定済みかを返す (boolean のみ、値そのものは返さない)。
+ *
+ * 用途: Server Component から取得した結果を Client Component に props で渡し、
+ * `[AI で分析]` ボタンの disabled 状態を制御する (Req 2.7)。
+ *
+ * 注意: API キーの実値は本関数では返さない。実値の取得は `lib/ai/client.ts`
+ * (`import "server-only"` 隔離) の内部でのみ行うこと。
+ */
+export function isApiKeyConfigured(): boolean {
+  return readEnv("GEMINI_API_KEY") !== undefined;
+}
+
+/** Gemini モデル名を返す。未設定時のデフォルトは `gemini-2.5-flash`。 */
+export function getGeminiModel(): string {
+  return readEnv("GEMINI_MODEL", "gemini-2.5-flash") ?? "gemini-2.5-flash";
+}

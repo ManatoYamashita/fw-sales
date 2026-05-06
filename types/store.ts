@@ -1,4 +1,5 @@
 import type { StageId } from "./stage";
+import type { AiAnalysisResult } from "./ai-analysis";
 
 export type Channel = "DM推奨" | "テレアポ推奨" | "未判定" | "要確認";
 export const CHANNELS: readonly Channel[] = [
@@ -13,6 +14,9 @@ export const PRIORITIES: readonly Priority[] = ["高", "中", "低"];
 
 export type ContactForm = "あり" | "なし" | "未確認";
 export const CONTACT_FORMS: readonly ContactForm[] = ["あり", "なし", "未確認"];
+
+export const OPERATOR_TYPES = ["個人店", "複数店舗運営", "未設定"] as const;
+export type OperatorType = (typeof OPERATOR_TYPES)[number];
 
 export interface Store {
   id: string;
@@ -35,6 +39,12 @@ export interface Store {
   memo: string;
   assigned_planner: string;
   assigned_sales: string;
+  /** 運営者種別: 個人店 / 複数店舗運営 / 未設定 (個人店判別シグナル) */
+  operator_type: OperatorType;
+  /** 運営者名: 法人名 (複数店舗運営) または個人オーナー名。未設定時は空文字。 */
+  operator_name: string;
+  /** AI 分析結果。未分析時は null。永続化時は JSON.stringify した text 列で保持。 */
+  ai_analysis_result: AiAnalysisResult | null;
   created_at: string; // YYYY-MM-DD
   updated_at: string;
 }

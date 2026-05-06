@@ -8,6 +8,13 @@
       "when": 1777745025561,
       "tag": "0000_living_darwin",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1778054652217,
+      "tag": "0001_add_operator_and_ai_analysis",
+      "breakpoints": true
     }
   ]
 }

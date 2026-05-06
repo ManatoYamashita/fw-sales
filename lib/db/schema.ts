@@ -31,6 +31,12 @@ export const stores = pgTable("stores", {
   memo: text("memo").notNull(),
   assigned_planner: text("assigned_planner").notNull(),
   assigned_sales: text("assigned_sales").notNull(),
+  /** 運営者種別 (個人店 / 複数店舗運営 / 未設定)。既存レコードは "未設定" にフォールバック。 */
+  operator_type: text("operator_type").notNull().default("未設定"),
+  /** 運営者名 (法人名 or 個人オーナー名)。空文字許容、デフォルト空文字。 */
+  operator_name: text("operator_name").notNull().default(""),
+  /** AI 分析結果の JSON 文字列 (`AiAnalysisResult` を JSON.stringify)。未分析時は NULL。 */
+  ai_analysis_result: text("ai_analysis_result"),
   created_at: text("created_at").notNull(),
   updated_at: text("updated_at").notNull(),
 });

@@ -14,34 +14,34 @@
 
 ## Tasks
 
-- [ ] 1. Foundation: dependencies, env, types, schema, mock seed
+- [x] 1. Foundation: dependencies, env, types, schema, mock seed
 
-- [ ] 1.1 npm 依存追加と環境変数 example 整備
+- [x] 1.1 npm 依存追加と環境変数 example 整備
   - `pnpm add @google/genai zod zod-to-json-schema` で 3 個追加
   - `.env.example` に `GEMINI_API_KEY=` および `GEMINI_MODEL=gemini-2.5-flash` を追記、未設定時の挙動コメントを併記
   - `package.json` の dependencies に 3 個が並び、`pnpm install` がエラーなく完了
   - _Requirements: 2.7_
 
-- [ ] 1.2 環境変数 helper の追加
+- [x] 1.2 環境変数 helper の追加
   - `lib/env.ts` に Gemini 関連 env を取得する関数(既存 `readEnv` パターン踏襲)+ `isApiKeyConfigured(): boolean` を追加
   - Mock mode で評価されない lazy 評価を維持(現行 `assertEnv` 同様)
   - `import { isApiKeyConfigured } from "@/lib/env"` 経由で server / client 双方から API キー有無の boolean を取得できる
   - _Requirements: 2.7_
 
-- [ ] 1.3 共通型の拡張(OperatorType + Store + AiAnalysisResult re-export 用ファイル)
+- [x] 1.3 共通型の拡張(OperatorType + Store + AiAnalysisResult re-export 用ファイル)
   - `types/store.ts` に `OPERATOR_TYPES = ["個人店", "複数店舗運営", "未設定"] as const` + `OperatorType` 型を追加、`Store` インターフェイスに `operator_type`, `operator_name`, `ai_analysis_result` 3 フィールドを追加
   - `types/ai-analysis.ts` を新規作成、後続 2.1 で実体定義される `AiAnalysisResult` / `AiAnalysisConfidence` / `ConfidenceFieldKey` の re-export 経路を用意(暫定 `export type AiAnalysisResult = unknown` でも可、2.1 で書き換え)
   - `pnpm typecheck` を走らせると Store 型に依存する既存ファイル(repositories / mock / actions / form)が新フィールド未対応で TypeScript エラーを出す(本タスクは fix を含まない、後続タスクで解消)
   - _Requirements: 1.5, 1.6, 5.1_
 
-- [ ] 1.4 DB スキーマ拡張と Drizzle マイグレーション
+- [x] 1.4 DB スキーマ拡張と Drizzle マイグレーション
   - `lib/db/schema.ts` の `stores` テーブルに `operator_type text NOT NULL DEFAULT '未設定'`, `operator_name text NOT NULL DEFAULT ''`, `ai_analysis_result text` 列追加
   - `drizzle/0001_add_operator_and_ai_analysis.sql` を新規作成、`ALTER TABLE stores ADD COLUMN ...` を 3 行で記述
   - DOWN マイグレーション(`DROP COLUMN`)文を `drizzle/0001_*.down.sql`(または README/コメント)で手元に用意
   - DB 環境で `pnpm drizzle-kit push` 実行後、`SELECT operator_type, operator_name, ai_analysis_result FROM stores LIMIT 1` がエラーなく実行できる
   - _Requirements: 1.5, 1.6, 5.1_
 
-- [ ] 1.5 Mock SEED 更新と Mock パススルー確認
+- [x] 1.5 Mock SEED 更新と Mock パススルー確認
   - `lib/mock/seed.ts` の SEED_STORES 各レコードに `operator_type: "未設定"`, `operator_name: ""`, `ai_analysis_result: null` を追加
   - `lib/mock/store.ts` の `create` / `update` が新フィールドを passthrough することを確認(変更なし想定)
   - `pnpm seed` 実行後(Mock mode)、UI 経由で店舗詳細を開くと operator フィールドが空 / 未設定で表示され、AI 分析結果が null として扱われる
@@ -286,6 +286,6 @@
 
 (タスク実行中に得られた cross-cutting 知見をここに追記する。各エントリは 1 行で、後続タスクが参照する想定)
 
-例:
-- `lib/ai/client.ts` の SDK 初期化は呼出毎ではなくモジュール読込時に singleton 化したほうがレイテンシ短縮(タスク 2.5 で確認後、本ノートに追記)
-- 食べログ HTML の `<script>` 除去で payload 35% 削減を実測(タスク 3.1)
+- **Phase 1 完了時の TS エラー連鎖** (1.3 後 / commit `feat(ai-store-analysis): Phase 1 ...` 時点): `lib/actions/store-actions.ts:53`(`buildStoreInput` が新 3 フィールド欠落)、`lib/db/store-repository.ts:101,118`(DB layer で `ai_analysis_result: AiAnalysisResult | null` を text 列に渡せない)、`lib/actions/data-actions.ts:217`、`scripts/seed.ts:44,47`(Repository 経由のシリアライズ責務未対応)。これらは設計書 File Structure Plan の Modified Files に明示されていなかったが、**Task 4.2 のスコープに「`lib/db/store-repository.ts` と `scripts/seed.ts` の JSON.stringify/parse 変換経路追加」を含めて解消する**(`lib/actions/data-actions.ts` も同種の修正が連鎖、Task 4.2 で touch)。
+- **drizzle migration の自動生成**(1.4): `DATABASE_URL="" pnpm drizzle-kit generate --name=add_operator_and_ai_analysis` で `drizzle/0001_*.sql` + `meta/_journal.json` + `meta/0001_snapshot.json` が自動生成される(DB 接続不要)。今後の schema 変更時もこの方式が標準。
+- **`@google/genai` のビルドスクリプト警告**(1.1): `pnpm install` 時に「Ignored build scripts」警告が出るが、Vercel デプロイでは既定で問題なし。ローカルで native binding を使う場合のみ `pnpm approve-builds` を検討。
