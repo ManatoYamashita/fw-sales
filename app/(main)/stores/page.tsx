@@ -6,8 +6,18 @@ import { StoresFilterBar } from "./_components/stores-filter-bar";
 import { StoresTable } from "./_components/stores-table";
 import { Spinner } from "@/components/ui/spinner";
 import { STAGE_IDS, type StageId } from "@/types/stage";
-import { CHANNELS, PRIORITIES, type Channel, type Priority } from "@/types/store";
-import type { StoreFilter } from "@/types/store";
+import {
+  CHANNELS,
+  DEFAULT_STORE_SORT,
+  PRIORITIES,
+  SORT_KEYS,
+  type Channel,
+  type Priority,
+  type SortDirection,
+  type StoreFilter,
+  type StoreSort,
+  type StoreSortKey,
+} from "@/types/store";
 
 export const metadata: Metadata = {
   title: "店舗一覧",
@@ -19,6 +29,8 @@ interface PageProps {
     stage?: string;
     channel?: string;
     priority?: string;
+    sort?: string;
+    dir?: string;
   }>;
 }
 
@@ -43,9 +55,19 @@ function parseFilter(params: Awaited<PageProps["searchParams"]>): StoreFilter {
   return filter;
 }
 
+function parseSort(params: Awaited<PageProps["searchParams"]>): StoreSort {
+  const key =
+    params.sort && (SORT_KEYS as readonly string[]).includes(params.sort)
+      ? (params.sort as StoreSortKey)
+      : DEFAULT_STORE_SORT.key;
+  const dir: SortDirection = params.dir === "asc" ? "asc" : "desc";
+  return { key, dir };
+}
+
 export default async function StoresPage({ searchParams }: PageProps) {
   const sp = await searchParams;
   const filter = parseFilter(sp);
+  const sort = parseSort(sp);
 
   return (
     <div className="space-y-4">
@@ -63,14 +85,14 @@ export default async function StoresPage({ searchParams }: PageProps) {
       <StoresFilterBar />
 
       <Suspense
-        key={JSON.stringify(filter)}
+        key={JSON.stringify({ filter, sort })}
         fallback={
           <div className="flex items-center gap-2 text-sm text-muted-foreground py-12 justify-center">
             <Spinner /> 読み込み中…
           </div>
         }
       >
-        <StoresTable filter={filter} />
+        <StoresTable filter={filter} sort={sort} />
       </Suspense>
     </div>
   );

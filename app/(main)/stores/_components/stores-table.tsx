@@ -9,7 +9,7 @@ import { PriorityBadge } from "@/components/feature/priority-badge";
 import { StarRating } from "@/components/ui/star-rating";
 import { listStores } from "@/lib/queries/stores";
 import { formatDate } from "@/lib/utils/date";
-import type { Store, StoreFilter } from "@/types/store";
+import type { Store, StoreFilter, StoreSort } from "@/types/store";
 import { StoreRowActions } from "./store-row-actions";
 
 const columns: ColumnDef<Store>[] = [
@@ -86,8 +86,14 @@ const columns: ColumnDef<Store>[] = [
   },
 ];
 
-export async function StoresTable({ filter }: { filter: StoreFilter }) {
-  const stores = await listStores(filter);
+export async function StoresTable({
+  filter,
+  sort,
+}: {
+  filter: StoreFilter;
+  sort?: StoreSort;
+}) {
+  const stores = await listStores(filter, sort);
   return (
     <Card>
       <Card.Header>

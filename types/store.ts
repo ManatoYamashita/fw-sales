@@ -48,3 +48,69 @@ export interface StoreFilter {
   channel?: Channel;
   priority?: Priority;
 }
+
+/* ------------------------------------------------------------------ */
+/*  並び替え                                                            */
+/* ------------------------------------------------------------------ */
+export type StoreSortKey =
+  | "updated"
+  | "name"
+  | "review_avg"
+  | "review_count"
+  | "priority";
+
+export type SortDirection = "asc" | "desc";
+
+export interface StoreSort {
+  key: StoreSortKey;
+  dir: SortDirection;
+}
+
+export const SORT_OPTIONS: ReadonlyArray<{
+  key: StoreSortKey;
+  label: string;
+  /** デフォルトの並び方向 (例: 更新日は新しい順 = desc) */
+  defaultDir: SortDirection;
+  ascLabel: string;
+  descLabel: string;
+}> = [
+  {
+    key: "updated",
+    label: "更新日",
+    defaultDir: "desc",
+    ascLabel: "古い順",
+    descLabel: "新しい順",
+  },
+  {
+    key: "name",
+    label: "店舗名",
+    defaultDir: "asc",
+    ascLabel: "あ→ん",
+    descLabel: "ん→あ",
+  },
+  {
+    key: "review_avg",
+    label: "口コミ評価",
+    defaultDir: "desc",
+    ascLabel: "低い順",
+    descLabel: "高い順",
+  },
+  {
+    key: "review_count",
+    label: "口コミ件数",
+    defaultDir: "desc",
+    ascLabel: "少ない順",
+    descLabel: "多い順",
+  },
+  {
+    key: "priority",
+    label: "優先度",
+    defaultDir: "desc",
+    ascLabel: "低→高",
+    descLabel: "高→低",
+  },
+];
+
+export const SORT_KEYS = SORT_OPTIONS.map((o) => o.key) as readonly StoreSortKey[];
+
+export const DEFAULT_STORE_SORT: StoreSort = { key: "updated", dir: "desc" };
