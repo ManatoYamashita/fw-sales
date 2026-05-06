@@ -93,33 +93,29 @@ export function StoreNewForm() {
       set(key, e.target.value as FormState[K]);
 
   const applyImport = (suggested: ApplyResult) => {
+    // URL 解析対象フィールドは前回値を保持せず、suggested の値で**強制上書き**する。
+    // (空文字なら空文字に戻す。別 URL を続けて読み込む際に前店舗情報が残る問題への対応。)
+    // priority / has_contact_form / channel / target_service / assigned_* は URL からは取れないため
+    // prev の手入力値を保持する。
     setForm((prev) => ({
       ...prev,
-      name: suggested.name || prev.name,
-      prefecture: suggested.prefecture || prev.prefecture,
-      city: suggested.city || prev.city,
-      address: suggested.address || prev.address,
-      genre: suggested.genre || prev.genre,
-      map_url: suggested.map_url || prev.map_url,
-      site_url: suggested.site_url || prev.site_url,
-      instagram_url: suggested.instagram_url || prev.instagram_url,
-      phone: suggested.phone || prev.phone,
+      name: suggested.name,
+      prefecture: suggested.prefecture,
+      city: suggested.city,
+      address: suggested.address,
+      genre: suggested.genre,
+      map_url: suggested.map_url,
+      site_url: suggested.site_url,
+      instagram_url: suggested.instagram_url,
+      phone: suggested.phone,
       review_count:
-        suggested.review_count !== null
-          ? String(suggested.review_count)
-          : prev.review_count,
+        suggested.review_count !== null ? String(suggested.review_count) : "",
       review_avg:
-        suggested.review_avg !== null
-          ? String(suggested.review_avg)
-          : prev.review_avg,
-      memo: suggested.memo
-        ? prev.memo
-          ? `${prev.memo}\n${suggested.memo}`
-          : suggested.memo
-        : prev.memo,
+        suggested.review_avg !== null ? String(suggested.review_avg) : "",
+      memo: suggested.memo,
     }));
-    // import 結果の confidence は前回の confidence に上書きマージ
-    setConfidence((prev) => ({ ...prev, ...suggested.confidence }));
+    // confidence も前回マーカーを完全に捨てて新規 import 結果のみで置き換える
+    setConfidence(suggested.confidence);
   };
 
   /** 信頼度スコアから入力欄の背景 style を生成 */
