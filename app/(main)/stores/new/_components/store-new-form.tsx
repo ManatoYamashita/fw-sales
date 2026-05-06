@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, type ChangeEvent } from "react";
+import { useState, useTransition, type ChangeEvent, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { Card } from "@/components/ui/card";
 import { FormField } from "@/components/ui/form-field";
@@ -15,7 +15,8 @@ import { decideChannel } from "@/lib/domain/channel";
 import { CONTACT_FORMS, PRIORITIES } from "@/types/store";
 import { PLANNERS, SALES } from "@/lib/domain/staff";
 import { toast } from "@/components/ui/toast";
-import type { ApplyResult } from "@/lib/url-parser/types";
+import type { ApplyConfidence, ApplyResult } from "@/lib/url-parser/types";
+import { confidenceToBg } from "@/lib/url-parser/confidence-color";
 
 type FormState = {
   name: string;
@@ -59,8 +60,12 @@ const INITIAL: FormState = {
   assigned_sales: "",
 };
 
+/** ApplyConfidence のキーと FormState のキーは大半が一致する。マッピング。 */
+type ConfidenceKey = keyof ApplyConfidence;
+
 export function StoreNewForm() {
   const [form, setForm] = useState<FormState>(INITIAL);
+  const [confidence, setConfidence] = useState<ApplyConfidence>({});
   const [pending, startTransition] = useTransition();
   const router = useRouter();
 
@@ -71,6 +76,13 @@ export function StoreNewForm() {
       if (key === "has_contact_form") {
         next.channel = decideChannel(value as FormState["has_contact_form"] as never);
       }
+      return next;
+    });
+    // ユーザーが手で値を変えたら confidence を解除(編集済みマーカー = 背景色解除)
+    setConfidence((prev) => {
+      if (!(key in prev)) return prev;
+      const next = { ...prev };
+      delete next[key as ConfidenceKey];
       return next;
     });
   };
@@ -89,6 +101,7 @@ export function StoreNewForm() {
       address: suggested.address || prev.address,
       genre: suggested.genre || prev.genre,
       map_url: suggested.map_url || prev.map_url,
+      site_url: suggested.site_url || prev.site_url,
       instagram_url: suggested.instagram_url || prev.instagram_url,
       phone: suggested.phone || prev.phone,
       review_count:
@@ -105,6 +118,14 @@ export function StoreNewForm() {
           : suggested.memo
         : prev.memo,
     }));
+    // import 結果の confidence は前回の confidence に上書きマージ
+    setConfidence((prev) => ({ ...prev, ...suggested.confidence }));
+  };
+
+  /** 信頼度スコアから入力欄の背景 style を生成 */
+  const bgStyle = (key: ConfidenceKey): CSSProperties | undefined => {
+    const bg = confidenceToBg(confidence[key]);
+    return bg ? { backgroundColor: bg } : undefined;
   };
 
   const submit = (formData: FormData) => {
@@ -136,6 +157,7 @@ export function StoreNewForm() {
               value={form.name}
               onChange={onText("name")}
               placeholder="例: 導楽"
+              style={bgStyle("name")}
             />
           </FormField>
           <FormField label="都道府県" htmlFor="prefecture">
@@ -145,6 +167,7 @@ export function StoreNewForm() {
               value={form.prefecture}
               onChange={onText("prefecture")}
               placeholder="例: 神奈川県"
+              style={bgStyle("prefecture")}
             />
           </FormField>
           <FormField label="市区町村" htmlFor="city">
@@ -154,6 +177,7 @@ export function StoreNewForm() {
               value={form.city}
               onChange={onText("city")}
               placeholder="例: 川崎市中原区"
+              style={bgStyle("city")}
             />
           </FormField>
           <FormField label="住所・最寄駅" htmlFor="address" className="md:col-span-2">
@@ -163,6 +187,7 @@ export function StoreNewForm() {
               value={form.address}
               onChange={onText("address")}
               placeholder="例: 新丸子駅周辺"
+              style={bgStyle("address")}
             />
           </FormField>
           <FormField label="業態" htmlFor="genre">
@@ -172,6 +197,7 @@ export function StoreNewForm() {
               value={form.genre}
               onChange={onText("genre")}
               placeholder="例: 居酒屋"
+              style={bgStyle("genre")}
             />
           </FormField>
           <FormField label="優先度" htmlFor="priority">
@@ -203,6 +229,7 @@ export function StoreNewForm() {
               value={form.map_url}
               onChange={onText("map_url")}
               placeholder="https://maps.google.com/..."
+              style={bgStyle("map_url")}
             />
           </FormField>
           <FormField label="公式サイトURL" htmlFor="site_url">
@@ -213,6 +240,7 @@ export function StoreNewForm() {
               value={form.site_url}
               onChange={onText("site_url")}
               placeholder="https://example.com"
+              style={bgStyle("site_url")}
             />
           </FormField>
           <FormField label="Instagram URL" htmlFor="instagram_url">
@@ -223,6 +251,7 @@ export function StoreNewForm() {
               value={form.instagram_url}
               onChange={onText("instagram_url")}
               placeholder="https://instagram.com/..."
+              style={bgStyle("instagram_url")}
             />
           </FormField>
           <FormField label="電話番号" htmlFor="phone">
@@ -232,6 +261,7 @@ export function StoreNewForm() {
               value={form.phone}
               onChange={onText("phone")}
               placeholder="例: 03-1234-5678"
+              style={bgStyle("phone")}
             />
           </FormField>
           <FormField
@@ -320,6 +350,7 @@ export function StoreNewForm() {
                 min={0}
                 value={form.review_count}
                 onChange={onText("review_count")}
+                style={bgStyle("review_count")}
               />
             </FormField>
             <FormField label="口コミ平均(0-5)" htmlFor="review_avg">
@@ -332,6 +363,7 @@ export function StoreNewForm() {
                 step={0.1}
                 value={form.review_avg}
                 onChange={onText("review_avg")}
+                style={bgStyle("review_avg")}
               />
             </FormField>
           </div>
@@ -343,6 +375,7 @@ export function StoreNewForm() {
               value={form.memo}
               onChange={onText("memo")}
               placeholder="現状の評価ポイント、気になる動向、調査メモなど"
+              style={bgStyle("memo")}
             />
           </FormField>
         </Card.Body>
