@@ -31,8 +31,14 @@ export async function fetchOgp(url: string): Promise<OgpResult> {
     if (!response.ok) {
       return { ok: false, error: `HTTP ${response.status}` };
     }
+    const finalUrl = response.url || url;
     const html = await response.text();
-    return extractFromHtml(html, url);
+    const result = extractFromHtml(html, finalUrl);
+    // 短縮 URL のリダイレクト後 URL を後段の再パースで利用するため保持
+    if (finalUrl && finalUrl !== url) {
+      result.final_url = finalUrl;
+    }
+    return result;
   } catch (e) {
     if (e instanceof DOMException && e.name === "AbortError") {
       return { ok: false, error: "タイムアウトしました" };

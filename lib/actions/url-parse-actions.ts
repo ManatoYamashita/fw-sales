@@ -124,6 +124,18 @@ async function enrichWithChainedOgp(
   return { updated, chained: true };
 }
 
+/**
+ * Google Maps 短縮 URL かどうかを判定。
+ * - https://maps.app.goo.gl/<id>
+ * - https://goo.gl/maps/<id>
+ *
+ * 短縮 URL は `parseGoogleMapsUrl` で name を抽出できないため、
+ * `fetchOgp` のリダイレクト追跡後の `final_url` から再パースする必要がある。
+ */
+function isGoogleMapsShortUrl(url: string): boolean {
+  return /(?:^https?:\/\/)?(?:maps\.app\.goo\.gl|goo\.gl\/maps)/i.test(url);
+}
+
 export async function importFromUrlAction(
   url: string,
   options: ImportOptions = { fetchOgp: true, recursive: true },
@@ -131,7 +143,7 @@ export async function importFromUrlAction(
   const fetchOgpFlag = options.fetchOgp !== false;
   const recursiveFlag = options.recursive !== false;
 
-  const parsed = parseStoreUrl(url);
+  let parsed = parseStoreUrl(url);
   let ogp: OgpResult | null = null;
 
   // OGP の取得は食べログ等の判定可能なソースに限定する
@@ -141,6 +153,29 @@ export async function importFromUrlAction(
     (parsed.type === "tabelog" || parsed.type === "google_maps" || parsed.type === "unknown")
   ) {
     ogp = await fetchOgp(url);
+  }
+
+  // 短縮 URL リダイレクト後の最終 URL から再パース。
+  // - parsed.type が google_maps だが name が取れていない、かつ短縮 URL 形式
+  // - ogp.final_url が元 URL と異なる(リダイレクトが起きた)
+  if (
+    parsed &&
+    parsed.type === "google_maps" &&
+    !parsed.name &&
+    isGoogleMapsShortUrl(url) &&
+    ogp?.final_url &&
+    ogp.final_url !== url
+  ) {
+    const reparsed = parseStoreUrl(ogp.final_url);
+    if (reparsed && reparsed.name) {
+      // 元 parsed のソース情報 (source_url, type) は保持しつつ、
+      // 詳細フィールドは reparsed の値で上書き。
+      // map_url は最終 URL を採用 — 後で開いた時に直接 Google Maps に行ける。
+      parsed = {
+        ...reparsed,
+        source_url: url,
+      };
+    }
   }
 
   let suggested = applyParsedData(parsed, ogp);

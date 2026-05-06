@@ -40,6 +40,12 @@ export interface OgpResult {
   phone?: string;
   /** 店舗の公式サイト URL(JSON-LD url、og:url、食べログのホームページリンク等) */
   site_url?: string;
+  /**
+   * リダイレクト追跡後の最終 URL(元 URL と異なる場合のみ設定)。
+   * 短縮 URL (maps.app.goo.gl / goo.gl/maps 等) の展開後の URL を保持する。
+   * `url-parse-actions.ts` で短縮 URL の再パースに利用する。
+   */
+  final_url?: string;
   error?: string;
 }
 
