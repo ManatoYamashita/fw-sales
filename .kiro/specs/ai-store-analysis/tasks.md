@@ -102,9 +102,9 @@
 
 ---
 
-- [ ] 3. URL Parser limited extension: HTML retention and operator extraction
+- [x] 3. URL Parser limited extension: HTML retention and operator extraction
 
-- [ ] 3.1 (P) OgpResult への HTML 保持と運営者抽出セレクタ追加
+- [x] 3.1 (P) OgpResult への HTML 保持と運営者抽出セレクタ追加
   - `lib/url-parser/types.ts` の `OgpResult` に `html?: string` と `operator?: { value: string; source: "tabelog_dom" | "json_ld" }` を追加、`ApplyResult` に `operator_type: OperatorType`, `operator_name: string` を追加、`ApplyConfidence` に `operator_name` キーを追加
   - `lib/url-parser/ogp.ts` の `extractFromHtml` で食べログ「店舗情報」テーブルの「運営者」行(cheerio セレクタ)と JSON-LD `Restaurant.parentOrganization.name` から `operator` を抽出(取れた方を採用、両方取れたら JSON-LD 優先)
   - cheerio で `<script>`, `<style>`, `<svg>` を除去後の `$.html()` を `OgpResult.html` に保存(payload 30〜40% 削減)
@@ -114,7 +114,7 @@
   - _Boundary: lib/url-parser/ogp, lib/url-parser/types_
   - _Depends: 1.3_
 
-- [ ] 3.2 applyParsedData の operator マージと信頼度同時セット
+- [x] 3.2 applyParsedData の operator マージと信頼度同時セット
   - `lib/url-parser/apply.ts` の `applyParsedData` で `OgpResult.operator` が取れた場合、`ApplyResult.operator_name` に value を反映、`ApplyResult.operator_type` は `"未設定"` を維持(法人 / 個人判別は LLM または手動)
   - `ApplyConfidence.operator_name` を source に応じて 85(`tabelog_dom`)または 90(`json_ld`)で同時セット
   - 食べログ運営者付き URL を `importFromUrlAction` で読込むと、`UrlImportResult.suggested.operator_name` に値、`confidence.operator_name` に 85 / 90 が入る
@@ -291,3 +291,4 @@
 - **`@google/genai` のビルドスクリプト警告**(1.1): `pnpm install` 時に「Ignored build scripts」警告が出るが、Vercel デプロイでは既定で問題なし。ローカルで native binding を使う場合のみ `pnpm approve-builds` を検討。
 - **Zod 4 + `zod-to-json-schema` 互換性**(2.1): Phase 1 で install した `zod-to-json-schema@3.25.2` は zod 3.x 専用で、zod 4.x の `ZodObject<..., $strict>` 型と互換性なし(`Argument of type 'ZodObject<...>' is not assignable to parameter of type 'ZodType<any, ZodTypeDef, any>'`)。Zod 4 内蔵の `z.toJSONSchema(schema, { target: "draft-2020-12" })` に切替て解決。`zod-to-json-schema` は **後続タスクで `pnpm remove` 候補**(現在は未使用 dep として残存)。
 - **`@google/genai` SDK 確認**(2.5): `Part` interface line 8854、`responseJsonSchema?: unknown`、`tools: [{ urlContext: {} }]` 形式が正規。`config.systemInstruction: ContentUnion` で system prompt を渡し、`contents` には user message の Part 配列のみ載せる。`abortSignal` は `AbortController.signal` 互換。
+- **Phase 3 のスコープ拡張**(3.2): `ApplyResult` への `operator_type` / `operator_name` 追加で `lib/actions/url-parse-actions.ts:FIELD_LABELS` の `Record` 制約が破綻 → `Exclude<..., "operator_type">` で除外し `operator_name: "運営者"` を追加、`types.ts:AppliedField.key` も同様に `Exclude` 化。設計書 File Structure Plan の Modified Files に明示なかったが、ApplyResult 拡張の自然な連鎖として本タスクのスコープに包含。`operator_type` は URL 解析だけでは法人/個人判別不可のため `AppliedField` 表示対象外、LLM 推定 (Phase 4 以降) または手動編集に委ねる方針を確定。

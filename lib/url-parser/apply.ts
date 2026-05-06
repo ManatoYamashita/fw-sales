@@ -99,6 +99,8 @@ export function applyParsedData(
     review_avg: null,
     review_count: null,
     memo: "",
+    operator_type: "未設定",
+    operator_name: "",
     confidence,
   };
 
@@ -169,6 +171,17 @@ export function applyParsedData(
       const tail = `概要: ${ogp.description.slice(0, 100)}`;
       fields.memo = fields.memo ? `${fields.memo}\n${tail}` : tail;
       // memo は既に URL_DIRECT スコア。description で追記しても下げない
+    }
+    // 運営者(法人名 / 個人オーナー名)を反映。
+    // 取得元に応じて信頼度を変える: JSON-LD = 90、食べログ DOM = 85。
+    // operator_type は URL 解析だけでは法人/個人判別が難しいため "未設定" を維持し、
+    // LLM 推定 (Phase 4 以降の analyzeStoreAction) または手動編集に委ねる。
+    if (ogp.operator && !fields.operator_name) {
+      fields.operator_name = ogp.operator.value;
+      confidence.operator_name =
+        ogp.operator.source === "json_ld"
+          ? SCORE.JSON_LD
+          : SCORE.TABELOG_HTML;
     }
   }
 

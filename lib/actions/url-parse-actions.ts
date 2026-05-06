@@ -26,7 +26,12 @@ interface ImportOptions {
   recursive?: boolean;
 }
 
-const FIELD_LABELS: Record<keyof Omit<ApplyResult, "confidence">, string> = {
+// operator_type は URL 解析では法人/個人判別ができないため、表示対象から除外。
+// `AppliedField.key` の型と `FIELD_LABELS` のキー集合が同期する。
+const FIELD_LABELS: Record<
+  Exclude<keyof Omit<ApplyResult, "confidence">, "operator_type">,
+  string
+> = {
   name: "店舗名",
   prefecture: "都道府県",
   city: "市区町村",
@@ -39,6 +44,7 @@ const FIELD_LABELS: Record<keyof Omit<ApplyResult, "confidence">, string> = {
   review_avg: "口コミ評価",
   review_count: "口コミ件数",
   memo: "メモ",
+  operator_name: "運営者",
 };
 
 function buildAppliedFields(suggested: ApplyResult): AppliedField[] {

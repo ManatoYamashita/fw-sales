@@ -99,6 +99,10 @@ interface JsonLdRestaurant {
   };
   description?: string;
   servesCuisine?: string | string[];
+  /** 親組織(法人運営の場合の運営会社名)。Schema.org `parentOrganization`。 */
+  parentOrganization?: {
+    name?: string;
+  };
 }
 
 function isRestaurantType(type: unknown): boolean {
@@ -239,6 +243,11 @@ function extractFromHtml(html: string, sourceUrl?: string): OgpResult {
         if (g) result.genre = g;
       }
     }
+    // 運営者(法人運営の場合の運営会社名)を JSON-LD から抽出
+    const parentOrgName = jsonLd.parentOrganization?.name?.trim();
+    if (parentOrgName) {
+      result.operator = { value: parentOrgName, source: "json_ld" };
+    }
   }
 
   // ---- OGP url / canonical (site_url のフォールバック) ----
@@ -331,6 +340,26 @@ function extractFromHtml(html: string, sourceUrl?: string): OgpResult {
     }
   }
 
+  // ---- 食べログ「店舗情報」テーブルの「運営」行から運営者抽出 ----
+  // JSON-LD で取れた場合は上書きしない(JSON-LD の方が信頼度 90、DOM は 85)
+  if (!result.operator) {
+    const operatorCandidates = [
+      'th:contains("運営者") + td',
+      'th:contains("運営会社") + td',
+      'th:contains("運営") + td',
+    ];
+    for (const sel of operatorCandidates) {
+      const text = $(sel).first().text().trim();
+      // 「店舗情報変更の申請をする」等のリンク文言が混入することがあるので、
+      // 短い先頭部分のみ採用(最初の改行 / "店舗情報" 等のキーワードで切る)
+      const head = text.split(/[\n\r]|店舗情報/)[0]?.trim() ?? "";
+      if (head && head.length > 0 && head.length < 100) {
+        result.operator = { value: head, source: "tabelog_dom" };
+        break;
+      }
+    }
+  }
+
   // ---- 食べログ「ホームページ」リンク → site_url 補完 ----
   if (!result.site_url) {
     const hpCandidates = [
@@ -384,6 +413,12 @@ function extractFromHtml(html: string, sourceUrl?: string): OgpResult {
     const m = html.match(/(0\d{1,4}[-－]\d{1,4}[-－]\d{4})/);
     if (m?.[1]) result.phone = m[1];
   }
+
+  // ---- HTML 全文の保持(AI 分析機能用、`<script>` / `<style>` / `<svg>` 除去) ----
+  // cheerio の同一インスタンスを再利用して payload 30〜40% を削減した HTML を保存。
+  // `OgpResult.html` は `/stores/new` の [AI で分析] が LLM への入力として再利用する。
+  $("script, style, svg, noscript").remove();
+  result.html = $.html();
 
   return result;
 }
