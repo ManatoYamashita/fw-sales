@@ -54,6 +54,24 @@ function pickMeta(html: string, property: string): string | undefined {
   return match?.[1] ?? match?.[2];
 }
 
+/**
+ * ジェネリックな汚染タイトル(サイト名そのもの)を name として採用しないためのブラックリスト。
+ * extractFromHtml では title / og:title をクレンジング後にも完全一致した場合は破棄する。
+ */
+const TITLE_NAME_BLACKLIST: readonly string[] = [
+  "Google マップ",
+  "Google Maps",
+  "Googleマップ",
+  "食べログ",
+  "Tabelog",
+];
+
+function isBlacklistedTitle(s: string): boolean {
+  const t = s.trim();
+  if (!t) return true;
+  return TITLE_NAME_BLACKLIST.some((bad) => t === bad);
+}
+
 function extractFromHtml(html: string): OgpResult {
   const result: OgpResult = { ok: true };
 
@@ -64,17 +82,20 @@ function extractFromHtml(html: string): OgpResult {
       .replace(/\s*[|｜]\s*Google.*$/i, "")
       .trim();
     const head = cleaned.split(/\s*[-－]\s*/)[0]?.trim();
-    if (head) result.name = head;
+    if (head && !isBlacklistedTitle(head)) result.name = head;
     const g = guessGenre(cleaned);
     if (g) result.genre = g;
   }
 
   const ogTitle = pickMeta(html, "og:title");
   if (ogTitle && !result.name) {
-    result.name = ogTitle
+    const cleaned = ogTitle
       .replace(/\s*[|｜]\s*食べログ.*$/i, "")
       .split(/[-－]/)[0]
       ?.trim();
+    if (cleaned && !isBlacklistedTitle(cleaned)) {
+      result.name = cleaned;
+    }
   }
 
   const ogDesc = pickMeta(html, "og:description");
