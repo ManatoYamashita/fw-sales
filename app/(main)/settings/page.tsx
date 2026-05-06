@@ -70,15 +70,7 @@ export default async function SettingsPage() {
         </Card.Header>
         <Card.Body className="space-y-2 text-sm text-muted-foreground leading-relaxed">
           <p>
-            現状はサーバ側インメモリストア(プロセス共有)で動作しています。
-            プロセスを再起動するとシードデータに戻ります。
-          </p>
-          <p>
-            将来 PostgreSQL/Drizzle 等の永続層に差し替える場合は、
-            <code className="px-1 py-0.5 mx-1 rounded bg-muted text-xs font-mono text-foreground">
-              lib/repositories/index.ts
-            </code>
-            の export を切り替えるだけで対応できます。
+            このプロジェクトは現在開発中です。一部モックデータを使用していることにご注意ください。
           </p>
         </Card.Body>
       </Card>
