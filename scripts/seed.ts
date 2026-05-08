@@ -24,6 +24,7 @@
 
 import { db, sql } from "@/lib/db/client";
 import { stores, deals } from "@/lib/db/schema";
+import { toDbRow as storeToDbRow } from "@/lib/db/store-repository";
 import { SEED_STORES, SEED_DEALS } from "@/lib/mock/seed";
 
 async function main(): Promise<void> {
@@ -38,13 +39,15 @@ async function main(): Promise<void> {
   // 全 SEED 投入をトランザクションで包み、途中失敗時は ROLLBACK
   await db.transaction(async (tx) => {
     // 親テーブル (stores) を先に upsert
+    // ai_analysis_result はオブジェクト ↔ text 列の変換のため toDbRow 経由
     for (const store of SEED_STORES) {
+      const row = storeToDbRow(store);
       await tx
         .insert(stores)
-        .values(store)
+        .values(row)
         .onConflictDoUpdate({
           target: stores.id,
-          set: store,
+          set: row,
         });
     }
 

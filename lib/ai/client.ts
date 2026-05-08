@@ -12,7 +12,7 @@
 
 import "server-only";
 
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, type Part } from "@google/genai";
 import {
   isApiKeyConfigured as envIsApiKeyConfigured,
   getGeminiModel,
@@ -23,7 +23,7 @@ export interface AnalysisInput {
   /** PromptBuilder が生成した system prompt 文字列 */
   systemPrompt: string;
   /** PromptBuilder が生成した user message Parts(JSON 化されたフォーム値、HTML、追加指示) */
-  userParts: Array<{ text: string }>;
+  userParts: Part[];
   /** `lib/ai/schema.ts:getAiAnalysisJsonSchema()` で生成した JSON Schema */
   jsonSchema: Record<string, unknown>;
 }

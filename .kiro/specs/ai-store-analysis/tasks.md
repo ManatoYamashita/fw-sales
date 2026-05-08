@@ -123,9 +123,9 @@
 
 ---
 
-- [ ] 4. Server Actions: AI analysis and store-actions extension
+- [x] 4. Server Actions: AI analysis and store-actions extension
 
-- [ ] 4.1 analyzeStoreAction Server Action 実装
+- [x] 4.1 analyzeStoreAction Server Action 実装
   - `lib/actions/ai-analysis-actions.ts` を新規作成、`"use server"` + `import 'server-only'` を冒頭付与
   - `analyzeStoreAction(formData: FormData): Promise<ActionResult<AiAnalysisResult>>` を実装
   - 順序: ① name non-empty チェック → ② `checkRateLimit(storeId)` → ③ `buildAnalysisPrompt({ formValues, htmlContent, additionalInstructions, assignedSales })` → ④ `createGeminiClient().generateAnalysis(input, AbortSignal.timeout(60_000))` → ⑤ `validateAiAnalysis(raw)`
@@ -136,7 +136,7 @@
   - _Boundary: lib/actions/ai-analysis-actions_
   - _Depends: 2.2, 2.3, 2.4, 2.5_
 
-- [ ] 4.2 createStoreAction の operator + AI 結果対応拡張
+- [x] 4.2 createStoreAction の operator + AI 結果対応拡張
   - `lib/actions/store-actions.ts` の `buildStoreInput` を拡張、FormData から `operator_type`(`asOperatorType` 型ガード経由)、`operator_name`、`ai_analysis_result`(JSON 文字列を `JSON.parse` 後 `validateAiAnalysis` で再検証、空文字なら null)を読出し
   - `asOperatorType(raw): OperatorType` 型ガード関数を新規追加(既存 `asContactForm` / `asChannel` / `asPriority` パターンに合わせる、不正値は `"未設定"` にフォールバック)
   - `updateStoreAction` も同じ `buildStoreInput` 経由のため自動追従
@@ -292,3 +292,6 @@
 - **Zod 4 + `zod-to-json-schema` 互換性**(2.1): Phase 1 で install した `zod-to-json-schema@3.25.2` は zod 3.x 専用で、zod 4.x の `ZodObject<..., $strict>` 型と互換性なし(`Argument of type 'ZodObject<...>' is not assignable to parameter of type 'ZodType<any, ZodTypeDef, any>'`)。Zod 4 内蔵の `z.toJSONSchema(schema, { target: "draft-2020-12" })` に切替て解決。`zod-to-json-schema` は **後続タスクで `pnpm remove` 候補**(現在は未使用 dep として残存)。
 - **`@google/genai` SDK 確認**(2.5): `Part` interface line 8854、`responseJsonSchema?: unknown`、`tools: [{ urlContext: {} }]` 形式が正規。`config.systemInstruction: ContentUnion` で system prompt を渡し、`contents` には user message の Part 配列のみ載せる。`abortSignal` は `AbortController.signal` 互換。
 - **Phase 3 のスコープ拡張**(3.2): `ApplyResult` への `operator_type` / `operator_name` 追加で `lib/actions/url-parse-actions.ts:FIELD_LABELS` の `Record` 制約が破綻 → `Exclude<..., "operator_type">` で除外し `operator_name: "運営者"` を追加、`types.ts:AppliedField.key` も同様に `Exclude` 化。設計書 File Structure Plan の Modified Files に明示なかったが、ApplyResult 拡張の自然な連鎖として本タスクのスコープに包含。`operator_type` は URL 解析だけでは法人/個人判別不可のため `AppliedField` 表示対象外、LLM 推定 (Phase 4 以降) または手動編集に委ねる方針を確定。
+- **Phase 4 の DB layer 双方向変換**(4.2): `lib/db/store-repository.ts` に `toDbRow(store): typeof stores.$inferInsert` (named export) と `fromDbRow(row): Store` を新設、`ai_analysis_result` をオブジェクト ↔ JSON 文字列 (`text` 列) で変換。`data-actions.ts` (reset/import 経路 2 箇所) と `scripts/seed.ts` でも `toDbRow` を再利用して insert に渡す。`fromDbRow` は `priority` / `stage` 等の literal types を `as Store` キャストで通す(既存パターン踏襲)。`parseStoredAiAnalysis` は破損 JSON や schema 違反を null にフェイルセーフ。
+- **PromptBuilder と Client の型整合**(4.1): `lib/ai/prompt.ts:buildAnalysisPrompt` は `Part[]` (`@google/genai`) を返すため、`lib/ai/client.ts:AnalysisInput.userParts` を `Part[]` に変更(当初 `Array<{ text: string }>` で型不整合)。`Part.text` は `string | undefined` で SDK の標準型に整合。
+- **Phase 4 完了で typecheck 全緑**(4.2): Phase 1 で観察した 9 errors すべて解消。`pnpm typecheck` exit 0。残作業は Phase 5 (UI) 以降、TypeScript の連鎖検出はここで一旦完了。

@@ -24,10 +24,80 @@ import "server-only";
 import { eq, desc, and, or, ilike, type SQL } from "drizzle-orm";
 import { db, type DbClient, type Tx } from "./client";
 import { stores } from "./schema";
-import type { Store, StoreInput, StorePatch, StoreFilter } from "@/types/store";
+import {
+  OPERATOR_TYPES,
+  type OperatorType,
+  type Store,
+  type StoreInput,
+  type StorePatch,
+  type StoreFilter,
+} from "@/types/store";
+import type { AiAnalysisResult } from "@/types/ai-analysis";
 import type { StoreRepository } from "@/lib/repositories/store-repository";
+import { validateAiAnalysis } from "@/lib/ai/validate";
 import { generateId } from "@/lib/utils/id";
 import { today } from "@/lib/utils/date";
+
+/**
+ * Drizzle schema から派生する DB row 型。`ai_analysis_result` は text 列のため
+ * `string | null` であり、`Store.ai_analysis_result: AiAnalysisResult | null`
+ * (オブジェクト形式) との間で双方向変換が必要(`toDbRow` / `fromDbRow`)。
+ */
+type StoreInsertRow = typeof stores.$inferInsert;
+type StoreSelectRow = typeof stores.$inferSelect;
+
+/**
+ * `Store` (オブジェクト) を DB row (text 列の JSON 文字列) に変換する。
+ * `data-actions.ts` / `scripts/seed.ts` でも `db.insert(stores).values(...)` の
+ * 引数生成に再利用するため named export。
+ *
+ * @see fromDbRow - 逆変換
+ */
+export function toDbRow(store: Store): StoreInsertRow {
+  return {
+    ...store,
+    ai_analysis_result:
+      store.ai_analysis_result === null
+        ? null
+        : JSON.stringify(store.ai_analysis_result),
+  };
+}
+
+function asOperatorType(raw: string): OperatorType {
+  return (OPERATOR_TYPES as readonly string[]).includes(raw)
+    ? (raw as OperatorType)
+    : "未設定";
+}
+
+/**
+ * 保存済 JSON 文字列を `AiAnalysisResult` に復元する。
+ * 古いデータや破損データに対しては null にフェイルセーフし、UI を空状態にする。
+ */
+function parseStoredAiAnalysis(raw: string | null): AiAnalysisResult | null {
+  if (raw === null || raw === "") return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    const result = validateAiAnalysis(parsed);
+    return result.ok ? result.value : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * DB row を `Store` 型 (オブジェクト) に変換する。
+ *
+ * `priority` / `stage` / `channel` / `has_contact_form` は schema 上 text 列のため
+ * `string` だが、Action 層で型ガード経由で投入する責務に従い、ここでは
+ * `as Store` キャストで literal types を通す(既存パターン踏襲)。
+ */
+function fromDbRow(row: StoreSelectRow): Store {
+  return {
+    ...row,
+    operator_type: asOperatorType(row.operator_type),
+    ai_analysis_result: parseStoredAiAnalysis(row.ai_analysis_result),
+  } as Store;
+}
 
 /**
  * `StoreFilter` から WHERE 条件 (`SQL`) を構築する。
@@ -78,7 +148,7 @@ export function makeStoreRepo(executor: DbClient | Tx): StoreRepository {
         .from(stores)
         .orderBy(desc(stores.created_at));
       const rows = where ? await query.where(where) : await query;
-      return rows as Store[];
+      return rows.map(fromDbRow);
     },
 
     async get(id) {
@@ -87,7 +157,8 @@ export function makeStoreRepo(executor: DbClient | Tx): StoreRepository {
         .from(stores)
         .where(eq(stores.id, id))
         .limit(1);
-      return (rows[0] as Store | undefined) ?? null;
+      const head = rows[0];
+      return head ? fromDbRow(head) : null;
     },
 
     async create(input: StoreInput) {
@@ -98,7 +169,7 @@ export function makeStoreRepo(executor: DbClient | Tx): StoreRepository {
         created_at: now,
         updated_at: now,
       };
-      await executor.insert(stores).values(row);
+      await executor.insert(stores).values(toDbRow(row));
       return row;
     },
 
@@ -108,14 +179,15 @@ export function makeStoreRepo(executor: DbClient | Tx): StoreRepository {
         .from(stores)
         .where(eq(stores.id, id))
         .limit(1);
-      const head = current[0] as Store | undefined;
-      if (!head) return null;
+      const headRow = current[0];
+      if (!headRow) return null;
+      const head = fromDbRow(headRow);
       const next: Store = {
         ...head,
         ...patch,
         updated_at: today(),
       };
-      await executor.update(stores).set(next).where(eq(stores.id, id));
+      await executor.update(stores).set(toDbRow(next)).where(eq(stores.id, id));
       return next;
     },
 

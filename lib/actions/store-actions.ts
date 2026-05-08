@@ -8,12 +8,16 @@ import { decideChannel } from "@/lib/domain/channel";
 import {
   CHANNELS,
   CONTACT_FORMS,
+  OPERATOR_TYPES,
   PRIORITIES,
   type Channel,
   type ContactForm,
+  type OperatorType,
   type Priority,
   type StoreInput,
 } from "@/types/store";
+import type { AiAnalysisResult } from "@/types/ai-analysis";
+import { validateAiAnalysis } from "@/lib/ai/validate";
 import { STAGE_IDS, type StageId } from "@/types/stage";
 import {
   failure,
@@ -47,6 +51,32 @@ function asStage(value: string): StageId {
     : "調査待ち";
 }
 
+function asOperatorType(value: string): OperatorType {
+  return (OPERATOR_TYPES as readonly string[]).includes(value)
+    ? (value as OperatorType)
+    : "未設定";
+}
+
+/**
+ * FormData の `ai_analysis_result` フィールドから AI 分析結果を読出す。
+ * - 空文字 / 不正な JSON / Zod スキーマ違反 はすべて `null` 扱いとし、保存処理は失敗させない
+ * - クライアントが信頼境界の外で改ざんした入力を受け取った時の防御 (Req 7.3)
+ */
+function readNullableAiAnalysis(
+  formData: FormData,
+  key: string,
+): AiAnalysisResult | null {
+  const raw = formData.get(key);
+  if (typeof raw !== "string" || raw.trim() === "") return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    const result = validateAiAnalysis(parsed);
+    return result.ok ? result.value : null;
+  } catch {
+    return null;
+  }
+}
+
 function buildStoreInput(formData: FormData): StoreInput {
   const has_contact_form = asContactForm(readString(formData, "has_contact_form"));
   const channelInput = asChannel(readString(formData, "channel"));
@@ -70,6 +100,9 @@ function buildStoreInput(formData: FormData): StoreInput {
     memo: readString(formData, "memo"),
     assigned_planner: readString(formData, "assigned_planner"),
     assigned_sales: readString(formData, "assigned_sales"),
+    operator_type: asOperatorType(readString(formData, "operator_type")),
+    operator_name: readString(formData, "operator_name"),
+    ai_analysis_result: readNullableAiAnalysis(formData, "ai_analysis_result"),
   };
 }
 

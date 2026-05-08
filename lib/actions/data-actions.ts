@@ -101,17 +101,22 @@ export async function resetToSeedAction(): Promise<ActionResult> {
     try {
       const { db } = await import("@/lib/db/client");
       const { stores, deals } = await import("@/lib/db/schema");
+      const { toDbRow: storeToDbRow } = await import(
+        "@/lib/db/store-repository"
+      );
       await db.transaction(async (tx) => {
         // FK (deals.store_id → stores.id) があるため deals → stores の順で削除
         await tx.delete(deals);
         await tx.delete(stores);
 
         // 親テーブル (stores) を先に upsert
+        // ai_analysis_result はオブジェクト ↔ text 列の変換のため toDbRow 経由
         for (const s of SEED_STORES) {
+          const row = storeToDbRow(s);
           await tx
             .insert(stores)
-            .values(s)
-            .onConflictDoUpdate({ target: stores.id, set: s });
+            .values(row)
+            .onConflictDoUpdate({ target: stores.id, set: row });
         }
         // 子テーブル (deals) を後から upsert
         for (const d of SEED_DEALS) {
@@ -207,14 +212,19 @@ export async function importJsonAction(
       if (importedStores || importedDeals) {
         const { db } = await import("@/lib/db/client");
         const { stores, deals } = await import("@/lib/db/schema");
+        const { toDbRow: storeToDbRow } = await import(
+          "@/lib/db/store-repository"
+        );
         await db.transaction(async (tx) => {
           // 親 (stores) を先に upsert
+          // ai_analysis_result はオブジェクト ↔ text 列の変換のため toDbRow 経由
           if (importedStores) {
             for (const s of importedStores) {
+              const row = storeToDbRow(s);
               await tx
                 .insert(stores)
-                .values(s)
-                .onConflictDoUpdate({ target: stores.id, set: s });
+                .values(row)
+                .onConflictDoUpdate({ target: stores.id, set: row });
             }
           }
           // 子 (deals) を後に upsert
