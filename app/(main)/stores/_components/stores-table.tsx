@@ -6,6 +6,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { StageBadge } from "@/components/feature/stage-badge";
 import { ChannelBadge } from "@/components/feature/channel-badge";
 import { PriorityBadge } from "@/components/feature/priority-badge";
+import { IndividualStoreBadge } from "@/components/feature/individual-store-badge";
 import { StarRating } from "@/components/ui/star-rating";
 import { listStores } from "@/lib/queries/stores";
 import { formatDate } from "@/lib/utils/date";
@@ -17,12 +18,15 @@ const columns: ColumnDef<Store>[] = [
     key: "name",
     header: "店舗名",
     cell: (s) => (
-      <Link
-        href={`/stores/${s.id}`}
-        className="font-semibold text-foreground hover:text-blue-700"
-      >
-        {s.name}
-      </Link>
+      <span className="inline-flex items-center gap-2 flex-wrap">
+        <Link
+          href={`/stores/${s.id}`}
+          className="font-semibold text-foreground hover:text-blue-700"
+        >
+          {s.name}
+        </Link>
+        <IndividualStoreBadge operatorType={s.operator_type} />
+      </span>
     ),
   },
   {

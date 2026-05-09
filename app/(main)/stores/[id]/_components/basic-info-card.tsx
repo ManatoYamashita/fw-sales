@@ -50,6 +50,12 @@ export function BasicInfoCard({ store }: { store: Store }) {
           <Row label="想定提案商材">
             <ServiceTagList services={store.target_service} />
           </Row>
+          <Row label="運営者種別">
+            {store.operator_type !== "未設定"
+              ? store.operator_type
+              : <span className="text-muted-foreground">—</span>}
+          </Row>
+          <Row label="運営者名">{store.operator_name || "—"}</Row>
           <Row label="プランナー">{store.assigned_planner || "—"}</Row>
           <Row label="営業担当">{store.assigned_sales || "—"}</Row>
           <Row label="登録日">{formatDate(store.created_at)}</Row>

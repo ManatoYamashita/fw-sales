@@ -11,6 +11,7 @@ import { ResearchSummaryCard } from "./_components/research-summary-card";
 import { DealsHistoryCard } from "./_components/deals-history-card";
 import { StageChangeButton } from "./_components/stage-change-button";
 import { DeleteStoreButton } from "./_components/delete-store-button";
+import { IndividualStoreBadge } from "@/components/feature/individual-store-badge";
 import { getStoreCached } from "@/lib/queries/stores";
 
 type Params = Promise<{ id: string }>;
@@ -46,8 +47,9 @@ export default async function StoreDetailPage({
           >
             ← 店舗一覧
           </Link>
-          <h2 className="text-xl md:text-2xl font-bold text-foreground mt-1">
+          <h2 className="text-xl md:text-2xl font-bold text-foreground mt-1 inline-flex items-center gap-2 flex-wrap">
             {store.name}
+            <IndividualStoreBadge operatorType={store.operator_type} />
           </h2>
           <p className="text-sm text-muted-foreground mt-0.5">
             {[store.prefecture, store.city, store.genre]
