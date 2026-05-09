@@ -39,7 +39,7 @@
 
 - [ ] 2. Drizzle ベースの ResearchRepository / HandoffRepository
 
-- [ ] 2.1 (P) ResearchRepository の Drizzle 実装と executor ファクトリ
+- [x] 2.1 (P) ResearchRepository の Drizzle 実装と executor ファクトリ
   - `lib/db/research-repository.ts` で `makeResearchRepo(executor: DbClient | Tx): ResearchRepository` を実装
   - `dbResearchRepo = makeResearchRepo(db)` を export
   - `list()`: `created_at` 降順ソート(全件)
@@ -54,7 +54,7 @@
   - _Requirements: 1.1, 1.4, 2.1, 2.2, 2.3, 2.4, 2.5, 9.5, 10.1, 10.2_
   - _Boundary: lib/db/research-repository.ts_
 
-- [ ] 2.2 (P) HandoffRepository の Drizzle 実装と executor ファクトリ
+- [x] 2.2 (P) HandoffRepository の Drizzle 実装と executor ファクトリ
   - `lib/db/handoff-repository.ts` で `makeHandoffRepo(executor: DbClient | Tx): HandoffRepository` を実装
   - `dbHandoffRepo = makeHandoffRepo(db)` を export
   - `list(storeId?)`: `created_at` 降順ソート、`storeId` 指定時のみ `where(eq(handoffs.store_id, storeId))` を追加
@@ -66,7 +66,7 @@
   - _Requirements: 1.1, 1.4, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 9.5, 10.1, 10.2, 10.3_
   - _Boundary: lib/db/handoff-repository.ts_
 
-- [ ] 2.3 lib/db バレルに research/handoff の re-export を追加
+- [x] 2.3 lib/db バレルに research/handoff の re-export を追加
   - `lib/db/index.ts` に `export { makeResearchRepo, dbResearchRepo } from "./research-repository";` を追記
   - 同様に `makeHandoffRepo` / `dbHandoffRepo` を追記
   - 既存の `db` / `sql` / `DbClient` / `Tx` / `makeDealRepo` / `dbDealRepo` / `makeStoreRepo` / `dbStoreRepo` の re-export は無修正

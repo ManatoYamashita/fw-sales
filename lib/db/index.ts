@@ -25,3 +25,5 @@ export { db, sql } from "./client";
 export type { DbClient, Tx } from "./client";
 export { makeDealRepo, dbDealRepo } from "./deal-repository";
 export { makeStoreRepo, dbStoreRepo } from "./store-repository";
+export { makeResearchRepo, dbResearchRepo } from "./research-repository";
+export { makeHandoffRepo, dbHandoffRepo } from "./handoff-repository";
