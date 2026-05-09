@@ -72,6 +72,29 @@ describe("fetchOgp + extractFromHtml (P1 cheerio + JSON-LD)", () => {
     expect(result.name).toBe("導楽");
   });
 
+  it("title からの name 抽出: ハイフン区切り + のご予約 suffix の組合せも除去", async () => {
+    mockFetch("<html><head><title>導楽のご予約 - 食べログ</title></head></html>");
+    const result = await fetchOgp(
+      "https://s.tabelog.com/kanagawa/A1405/A140504/14096697/",
+    );
+    expect(result.ok).toBe(true);
+    expect(result.name).toBe("導楽");
+  });
+
+  it("og:title からの name 抽出: ハイフン区切り + の予約 短縮 suffix の組合せも除去", async () => {
+    mockFetch(`
+      <html><head>
+        <title></title>
+        <meta property="og:title" content="導楽の予約 - 食べログ" />
+      </head></html>
+    `);
+    const result = await fetchOgp(
+      "https://s.tabelog.com/kanagawa/A1405/A140504/14096697/",
+    );
+    expect(result.ok).toBe(true);
+    expect(result.name).toBe("導楽");
+  });
+
   it("og:title からの name 抽出: title が空のとき og:title を使う", async () => {
     mockFetch(`
       <html><head>

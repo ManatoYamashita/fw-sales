@@ -71,14 +71,14 @@ function isBlacklistedTitle(s: string): boolean {
 }
 
 function cleanName(raw: string): string {
-  return raw
+  const headSection = raw.split(/\s*[-－]\s*/)[0]?.trim() ?? "";
+  return headSection
     .replace(/\s*[|｜]\s*食べログ.*$/i, "")
     .replace(/\s*[|｜]\s*Google.*$/i, "")
     .replace(/\s*\[食べログ\].*$/, "")
     .replace(/のご予約\s*$/, "")
     .replace(/の予約\s*$/, "")
-    .split(/\s*[-－]\s*/)[0]
-    ?.trim() ?? "";
+    .trim();
 }
 
 /**
