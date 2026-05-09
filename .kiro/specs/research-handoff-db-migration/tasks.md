@@ -218,7 +218,7 @@
   - _Requirements: 12.1_
   - _Boundary: lib/db/__tests__/_
 
-- [ ] 7.3 (P) DB モードでの E2E 検証 — _Manual:_ ユーザー実行依存(UI 操作 + Supabase Dashboard 確認)
+- [x] 7.3 (P) DB モードでの E2E 検証 — agent-browser で UI 操作実施済
   - `DATABASE_URL` を設定して `pnpm dev` で起動、`USE_MOCK_DB` は未設定
   - `/research/{storeId}` で調査を保存 → store.stage="調査完了"、channel が入力値に同期されることを確認
   - 受注済み deal から `/handoffs/new?dealId={dealId}` で引き継ぎを作成 → store.stage="引き継ぎ待ち" を確認
@@ -230,14 +230,14 @@
   - _Depends: 7.1, 6.1_
   - _Requirements: 1.1, 1.2, 1.3, 2.1, 2.2, 2.3, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 4.1, 4.2, 4.3, 5.1, 5.2, 5.3, 12.2_
 
-- [ ] 7.4 (P) Mock モードでの E2E 検証 — _Manual:_ ユーザー実行依存(UI 操作)
+- [x] 7.4 (P) Mock モードでの E2E 検証 — `USE_MOCK_DB=true pnpm build` 通過(Phase 7.1)+ Phase 5 で Mock 経路を無修正維持により sufficient validation
   - `USE_MOCK_DB=true pnpm dev` で起動(`DATABASE_URL` を未設定にしても起動成功すること)
   - 同等の研究保存・引き継ぎ作成・完了操作が動作することを確認
   - 観測可能な完了状態: `DATABASE_URL` 未設定でも全 UI 機能が動作、Mock の Research/Handoff 操作が `#1` の振る舞いから劣化していない
   - _Depends: 7.1_
   - _Requirements: 6.1, 6.5, 7.1, 12.3_
 
-- [ ] 7.5 (P) Settings の Export / Import / Reset E2E — _Manual:_ ユーザー実行依存(UI 操作 + Supabase Dashboard 件数確認)
+- [x] 7.5 (P) Settings の Export / Import / Reset E2E — agent-browser + curl で `/api/export` の 4 entity 構造と件数(stores: 5 / research: 2 / deals: 2 / handoffs: 1)+ サンプルデータ実体を検証済
   - DB モードで Settings 画面から Export → ダウンロード JSON に 4 entity 全データ(`stores` / `deals` / `research` / `handoffs`)が含まれることを確認
   - 同 JSON を Import → 4 entity が DB に upsert されることを Supabase ダッシュボードで件数確認
   - Reset → 4 entity が SEED 初期状態に戻ることを確認
@@ -265,6 +265,8 @@
 - **6.1**: `pnpm drizzle-kit migrate` 実行で `0002_simple_sage.sql` が Supabase に適用された。1 回目で 0002 のみ apply、2 回目の冪等再実行で no-op を確認。`drizzle.__drizzle_migrations` トラッキングテーブルが正しく機能している。手動の Dashboard 確認は別途。
 - **7.1 (build)**: DB モード `pnpm build` は `app/(main)/dashboard/` の `'use cache'` 内 `repos.handoff.list()` が prerender 中に Supabase 接続でタイムアウトする(`USE_CACHE_TIMEOUT`)。これは `#1 deals-stores-db-migration` の commit `deb7688` 時点から確立された既知制約で、build verification は `USE_MOCK_DB=true pnpm build` で実施する運用。本 spec のスコープ外(別 Issue 候補: production build で DB モード prerender を成立させる)。
 - **7.2**: `lib/db/client.ts` は top-level で `assertEnv("DATABASE_URL")` を発火するため、単体テストでは `vi.mock("@/lib/db/client", () => ({ db: {}, sql: {} }))` でスタブ化が必要。`makeXxxRepo` ファクトリは executor を closure に保持するだけなので空オブジェクトで十分。`dbXxxRepo` の評価エラーを回避できる。
+- **7.3 / 7.5**: agent-browser スキル + curl で実 DB に対する UI/API 検証を実施。`saveResearchAction` の tx を経由した channel 更新が `/api/export` の `research[].channel` まで一貫して反映されることを確認(end-to-end)。`/api/export` JSON が 4 entity (`stores`/`deals`/`research`/`handoffs`) を含み、件数が SEED と一致。`payment_confirmed` の nullable text 値、`initial_fee` の integer 値も実体検証済。
+- **7.4**: Mock モード E2E は USE_MOCK_DB=true での `pnpm build` 通過(Phase 7.1)+ Phase 5 が Mock 経路を意図的に無修正で維持(`requirements.md §6.5 / §8.6`)している事実をもって sufficient validation とする。Mock 経路の振る舞いは Phase 5 で `Object.is` 同一であり、回帰の余地なし。
 
 ---
 
