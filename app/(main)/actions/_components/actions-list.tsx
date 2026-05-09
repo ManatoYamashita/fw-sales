@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { cacheTag } from "next/cache";
+import { connection } from "next/server";
 import { Send } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -27,6 +28,10 @@ async function loadActionableStores() {
 }
 
 export async function ActionsList() {
+  // build 時 prerender を skip し runtime のみで実行する。
+  // Vercel build → Supabase 接続が 50s timeout を超える USE_CACHE_TIMEOUT
+  // 事象への対処 (Next.js 16 cacheComponents の公式推奨 pattern)。
+  await connection();
   const stores = await loadActionableStores();
   return (
     <Card>
