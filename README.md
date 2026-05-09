@@ -79,7 +79,7 @@ types/                         # Store / Research / Deal / Handoff / Stage
 
 ## DB セットアップ手順 (Supabase + Drizzle)
 
-商談 (Deal) と店舗 (Store) を Supabase Postgres + Drizzle ORM で永続化する手順です。Mock のみで動作確認したい場合は最後の「Mock モード切替」を参照してください。
+店舗 (Store) / 商談 (Deal) / 調査 (Research) / 引き継ぎ (Handoff) の 4 entity を Supabase Postgres + Drizzle ORM で永続化する手順です。Mock のみで動作確認したい場合は最後の「Mock モード切替」を参照してください。
 
 ### 1. Supabase プロジェクト作成
 
@@ -129,13 +129,13 @@ pnpm drizzle-kit migrate          # drizzle/*.sql を順次適用 (推奨)
 pnpm drizzle-kit push             # スキーマ差分を直接反映 (本番運用では migrate を使用)
 ```
 
-スキーマ定義 (`lib/db/schema.ts`) を変更した場合は `pnpm drizzle-kit generate` で SQL を再生成してから `migrate` を実行してください。
+複数の `drizzle/000N_*.sql` がある場合は番号順に適用されます (`0000` → `0001` → `0002` ...)。スキーマ定義 (`lib/db/schema.ts`) を変更した場合は `pnpm drizzle-kit generate` で SQL を再生成してから `migrate` を実行してください。
 
 参考: [Drizzle Kit Migrations](https://orm.drizzle.team/docs/kit-overview)
 
 ### 5. SEED データの投入
 
-`SEED_STORES` / `SEED_DEALS` (`lib/mock/seed.ts`) と同等のデータを Postgres に upsert します。`ON CONFLICT DO UPDATE` でベキ等です。
+`SEED_STORES` / `SEED_DEALS` / `SEED_RESEARCH` / `SEED_HANDOFFS` (`lib/mock/seed.ts`) と同等の 4 entity データを Postgres に upsert します。FK 整合のため `stores → deals → research → handoffs` の順で投入され、`ON CONFLICT DO UPDATE` でベキ等です。
 
 ```bash
 pnpm seed

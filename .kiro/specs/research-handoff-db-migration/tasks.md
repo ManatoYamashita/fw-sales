@@ -172,7 +172,7 @@
 
 - [ ] 6. Supabase 反映と README 更新
 
-- [ ] 6.1 Supabase へ research/handoffs マイグレーションを適用
+- [x] 6.1 Supabase へ research/handoffs マイグレーションを適用
   - Supabase プロジェクトの `DATABASE_URL` が `.env.local` に設定済であることを確認
   - `pnpm drizzle-kit migrate` を実行し、Supabase 側に `research` / `handoffs` テーブルおよび 3 つの FK を作成
   - 既存の `stores` / `deals` テーブルは無修正で残ることを Supabase ダッシュボードで確認
@@ -182,7 +182,7 @@
   - _Requirements: 1.1, 1.2_
   - _Boundary: Supabase project_
 
-- [ ] 6.2 (P) README の Supabase セットアップ節を 4 テーブル化
+- [x] 6.2 (P) README の Supabase セットアップ節を 4 テーブル化
   - 既存「DB に置き換える際の手順」/「Supabase + Drizzle DB セットアップ」節の対象テーブル記述を `stores / deals / research / handoffs` に更新
   - `pnpm seed` の出力件数の例を 4 entity に更新
   - `pnpm drizzle-kit migrate` で `0000_*.sql` および `0001_*.sql` の両方が適用される旨を明記
@@ -262,6 +262,7 @@
 - **5.1**: `mockDb` import を削除(`resetMockResearchAndHandoffOnly` / `clearMockResearchAndHandoffOnly` 関数の本体削除に伴い参照ゼロ)。`SEED_RESEARCH` / `SEED_HANDOFFS` / `restoreMockDb` / `snapshotMockDb` import は引き続き必要(DB 経路の SEED 投入と Mock 経路の復元/snapshot で使用)。
 - **5.1**: `importJsonAction` の DB tx 開始 gate を `if (importedStores \|\| importedDeals)` から 4-OR (`\|\| importedResearch \|\| importedHandoffs`)に拡張。Research / Handoff のみ含む JSON Import が機能するように。
 - **5.1 / 5.2 / 5.3**: TRUNCATE 順序は `handoffs → research → deals → stores`(子→親、FK 整合)、INSERT 順序は親→子に逆転。`scripts/seed.ts` も同 INSERT 順序を維持。
+- **6.1**: `pnpm drizzle-kit migrate` 実行で `0002_simple_sage.sql` が Supabase に適用された。1 回目で 0002 のみ apply、2 回目の冪等再実行で no-op を確認。`drizzle.__drizzle_migrations` トラッキングテーブルが正しく機能している。手動の Dashboard 確認は別途。
 
 ---
 
