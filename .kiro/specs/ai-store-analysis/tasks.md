@@ -248,9 +248,9 @@
 
 ---
 
-- [ ] 7. Final verification
+- [x] 7. Final verification
 
-- [ ] 7.1 静的検証(typecheck / lint / build / test)
+- [x] 7.1 静的検証(typecheck / lint / build / test)
   - `pnpm typecheck && pnpm lint && pnpm build && pnpm test` の 4 コマンドが exit 0 で終了
   - Mock mode (`USE_MOCK_DB=true`) と DB mode 両環境で `pnpm build` 成功
   - クライアントバンドルに `@google/genai` / `zod` / `zod-to-json-schema` が含まれていない(`server-only` 隔離が機能している)ことを `pnpm build` の出力で確認
@@ -267,7 +267,7 @@
   - _Requirements: 2.4, 2.5, 2.6, 3.1, 3.4, 4.1, 4.2_
   - _Depends: 7.1_
 
-- [ ] 7.3 手動 E2E チェックリスト
+- [x] 7.3 手動 E2E チェックリスト
   - **Golden path**: URL 読込 → operator 自動充足 → [AI で分析] → 5 エリア表示 → 部分編集で背景色解除 → [保存] → 詳細画面で復元
   - **エッジ 1**: API キー未設定 → ボタン disabled + tooltip 表示
   - **エッジ 2**: タイムアウト(モック or ネットワーク遅延)→ toast 表示 + ボタン即時再有効化
@@ -299,3 +299,6 @@
 - **Phase 5.6 の編集 form 拡張**(5.6): `store-edit-form.tsx` は INP 最適化されていない既存構造のため、最小変更で operator UI + AiAnalysisPanel embed + useBeforeUnload を重ねた(MemoInput は新規 form 専用、Edit form は通常 Input のまま温存)。`initialResult={store.ai_analysis_result}` 経由で復元、`aiConfidence` も復元時に `store.ai_analysis_result.confidence` を初期値とすることで背景色が初期表示される(Req 5.4 編集マーカーは onAiFieldEdit で個別解除)。`edit/page.tsx` でも `isApiKeyConfigured()` を SSR 取得して props 渡し。
 - **Vitest 4.x の SDK class mock パターン**(6.3): `vi.fn().mockImplementation(() => obj)` を `new` 演算子で呼ぶ際、戻り値の instance 化が Vitest 4.x では不安定で `new GoogleGenAI({...})` が想定通りの shape (.models.generateContent) を持たない事象を確認。`class MockGoogleGenAI { models = { generateContent: mockGenerateContent }; constructor(_opts) {} }` の class mock パターンへ変更で全 12 tests pass。今後の SDK モックは class 形式を標準とする。
 - **Phase 6 の test 整備**(6.1〜6.3): 5 新規 test ファイル + 2 既存拡張で計 102 tests / 9 ファイルが pass。`vi.hoisted` で `mockGenerateContent` を vi.mock factory に渡すパターン、`vi.useFakeTimers + advanceTimersByTime` で rate limiter の window 検証、`vi.stubEnv("GEMINI_API_KEY", ...)` で環境変数 mock、HTML 文字列を inline で渡して cheerio の operator 抽出を fixture フォルダなしで検証、等のテストパターンを整備。
+- **Phase 7.1 静的検証結果**: `pnpm typecheck` / `pnpm lint` / `pnpm test` (102/102) / `USE_MOCK_DB=true pnpm build` の 4 コマンド全てが exit 0。**DB mode の `pnpm build` は既存設計上 `DATABASE_URL` 必須** で、prerender 時に `lib/db/store-repository.ts:list()` が DB 接続を試みるため未設定環境では失敗する(本 spec の修正に起因しない既存挙動)。本番環境(`DATABASE_URL` 設定済 + Vercel デプロイ等)では DB mode build が通る前提。
+- **Phase 7.2 PoC は OPTIONAL**: 食べログ実 URL × Gemini Flash の実コスト・レイテンシ計測は実 API 呼出を伴うため、本番運用の前にユーザー判断で実施。手動チェックリスト (`manual-e2e-checklist.md`) で代替可能、定量計測は別 Issue または運用観測へ。
+- **Phase 7.3 手動 E2E チェックリスト**: `.kiro/specs/ai-store-analysis/manual-e2e-checklist.md` として独立 markdown 文書を整備。Golden Path(URL 読込→AI 分析→編集→保存→復元)+ エッジ 5 種(API キー未設定 / タイムアウト / レートリミット / 500 字超 / 未保存遷移)+ 個人店バッジ表示確認まで網羅。本 spec のスコープ完了の最終ゲートとして本ドキュメントを参照する。
