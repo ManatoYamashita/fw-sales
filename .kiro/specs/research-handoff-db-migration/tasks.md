@@ -10,7 +10,7 @@
 
 - [ ] 1. research / handoffs テーブルスキーマと migration
 
-- [ ] 1.1 research / handoffs のテーブルスキーマを定義
+- [x] 1.1 research / handoffs のテーブルスキーマを定義
   - `lib/db/schema.ts` に `pgTable("research", {...})` を追記、`types/research.ts` の 22 フィールドに 1:1 対応
   - `pgTable("handoffs", {...})` を追記、`types/handoff.ts` の 18 フィールドに 1:1 対応
   - `research.store_id` に `references(() => stores.id)` で FK 制約(NOT NULL)
@@ -23,7 +23,7 @@
   - _Requirements: 1.1, 2.5, 3.8, 10.1, 10.2, 10.3, 10.4, 10.5_
   - _Boundary: lib/db/schema.ts_
 
-- [ ] 1.2 research/handoffs マイグレーション SQL を生成しコミット
+- [x] 1.2 research/handoffs マイグレーション SQL を生成しコミット
   - `pnpm drizzle-kit generate` で `drizzle/0001_<auto>.sql` を自動生成
   - 生成 SQL に `CREATE TABLE research (...)` / `CREATE TABLE handoffs (...)` および 3 つの FK 制約 (`research.store_id`、`handoffs.store_id`、`handoffs.deal_id`) が含まれること
   - `drizzle/meta/_journal.json` を含めて git に追加
@@ -251,7 +251,7 @@
 
 ## Implementation Notes
 
-- **1.2**: drizzle-kit の自動命名は `0001_<adjective>_<noun>.sql` 形式(`#1` の `0000_living_darwin.sql` と同パターン)。Issue #2 本文の `0001_research_handoff.sql` 想定とは異なる可能性があるが、命名強制はせず drizzle-kit に委ねる(設計合意済)。
+- **1.2**: drizzle-kit の自動命名は `0001_<adjective>_<noun>.sql` 形式(`#1` の `0000_living_darwin.sql` と同パターン)。Issue #2 本文の `0001_research_handoff.sql` 想定とは異なる可能性があるが、命名強制はせず drizzle-kit に委ねる(設計合意済)。**実際の生成結果**: 別セッション(#13)が `0001_add_operator_and_ai_analysis.sql` を先に取得していたため、本 spec の migration は **`0002_simple_sage.sql`** として生成された。drizzle-kit が `0002` を自動採番する挙動が想定通りであることを確認。Phase 6 の Supabase 反映は `pnpm drizzle-kit migrate` で `0001` + `0002` の両方が順次 apply される。
 - **2.1 / 2.2**: 1:1 enforcement の race condition は **アプリ層担保** とし、DB-level UNIQUE 制約は採用しない(`research.store_id`)。並行保存で重複 research 行が稀に生じた場合は手動 cleanup で対応。本リスクは `requirements.md` の 1:1 セマンティクス(`getByStoreId` `limit(1)`)で運用上吸収。
 - **3.1**: `TxRepos` の **追加** は構造的型付けによる非破壊変更。`#1` の `createDealAction` / `updateDealAction` の `repos.transaction(async ({ deal, store }) => ...)` は分割代入で `research` / `handoff` を参照しないため、本 spec の変更で **コンパイルエラー / 振る舞い変更ともに発生しない**。
 - **5.1**: Documented exception(`lib/db/client.ts` / `lib/db/schema.ts` の直接 import)は `#1` から継続維持。本 spec で他ファイルへの追加は禁止。Mock モードで `DATABASE_URL` 未設定でも安全に動作させるため、import 文字列は静的に解析可能なリテラル(`@/lib/db/client` / `@/lib/db/schema`)を維持。

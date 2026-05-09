@@ -69,3 +69,81 @@ export const deals = pgTable("deals", {
   created_at: text("created_at").notNull(),
   updated_at: text("updated_at").notNull(),
 });
+
+/**
+ * research テーブル
+ *
+ * `types/research.ts` の `Research` インタフェースと 1:1 で対応します。
+ *
+ * - `store_id` は `stores.id` への外部キー制約を持ち、不存在 store_id への Research 作成を
+ *   DB レベルで拒否します (Req 2.5, 10.5)
+ * - 1 店舗 1 調査 (1:1) はアプリ層で担保。DB レベルの UNIQUE 制約は付けず、
+ *   Mock 慣習との整合と import 時のエラー設計回避を優先します (research-handoff-db-migration design Q1)
+ * - 列挙型 (`Channel` / `ResearchStatus`) は Postgres ENUM 化せず text として保持します
+ * - `created_at` / `updated_at` は `YYYY-MM-DD` 形式の text として保持 (Req 10.2)
+ */
+export const research = pgTable("research", {
+  id: text("id").primaryKey(),
+  store_id: text("store_id")
+    .notNull()
+    .references(() => stores.id),
+  store_name: text("store_name").notNull(),
+  total_review: text("total_review").notNull(),
+  strength1: text("strength1").notNull(),
+  strength2: text("strength2").notNull(),
+  strength3: text("strength3").notNull(),
+  weakness1: text("weakness1").notNull(),
+  weakness2: text("weakness2").notNull(),
+  weakness3: text("weakness3").notNull(),
+  review_positive: text("review_positive").notNull(),
+  review_negative: text("review_negative").notNull(),
+  meo_gap: text("meo_gap").notNull(),
+  hp_gap: text("hp_gap").notNull(),
+  instagram_gap: text("instagram_gap").notNull(),
+  channel: text("channel").notNull(),
+  channel_reason: text("channel_reason").notNull(),
+  sales_hook: text("sales_hook").notNull(),
+  entry_product: text("entry_product").notNull(),
+  main_product: text("main_product").notNull(),
+  researcher: text("researcher").notNull(),
+  status: text("status").notNull(),
+  created_at: text("created_at").notNull(),
+  updated_at: text("updated_at").notNull(),
+});
+
+/**
+ * handoffs テーブル
+ *
+ * `types/handoff.ts` の `Handoff` インタフェースと 1:1 で対応します。
+ *
+ * - `store_id` は `stores.id` への外部キー制約 (Req 3.8, 10.5)
+ * - `deal_id` は `deals.id` への外部キー制約 (Req 3.8, 10.5)
+ * - `payment_confirmed` のみ nullable text。未確認状態を `null` で表現可能 (Req 10.3)
+ * - その他のカラムは NOT NULL を基本とし、列挙型 (`HandoffStatus`) は text として保持します
+ */
+export const handoffs = pgTable("handoffs", {
+  id: text("id").primaryKey(),
+  store_id: text("store_id")
+    .notNull()
+    .references(() => stores.id),
+  store_name: text("store_name").notNull(),
+  deal_id: text("deal_id")
+    .notNull()
+    .references(() => deals.id),
+  contract_services: text("contract_services").notNull(),
+  initial_fee: integer("initial_fee").notNull(),
+  monthly_fee: integer("monthly_fee").notNull(),
+  contract_period: text("contract_period").notNull(),
+  expected_result: text("expected_result").notNull(),
+  contract_owner: text("contract_owner").notNull(),
+  caution: text("caution").notNull(),
+  ng_items: text("ng_items").notNull(),
+  due_date: text("due_date").notNull(),
+  materials_status: text("materials_status").notNull(),
+  ops_assignee: text("ops_assignee").notNull(),
+  contract_date: text("contract_date").notNull(),
+  payment_confirmed: text("payment_confirmed"),
+  status: text("status").notNull(),
+  created_at: text("created_at").notNull(),
+  updated_at: text("updated_at").notNull(),
+});

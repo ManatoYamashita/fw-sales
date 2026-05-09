@@ -15,6 +15,13 @@
       "when": 1778054652217,
       "tag": "0001_add_operator_and_ai_analysis",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1778308506678,
+      "tag": "0002_simple_sage",
+      "breakpoints": true
     }
   ]
 }
