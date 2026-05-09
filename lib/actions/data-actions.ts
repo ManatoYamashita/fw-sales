@@ -6,12 +6,12 @@
  * 役割:
  * - Settings 画面から呼ばれる Reset / Clear / Import の env 分岐エントリ。
  * - Mock モード (`USE_MOCK_DB=true`) では従来通り `lib/mock/db` の SEED 全エンティティ
- *   を取り扱う。DB モードでは `stores` / `deals` のみ DB へ直接適用し、
- *   Research / Handoff は引き続き Mock 越しに復元する (Req 8.4)。
+ *   を取り扱う。DB モードでは `stores` / `deals` / `research` / `handoffs` の
+ *   4 entity 全てを DB へ直接適用する (Req 8.1〜8.5、research-handoff-db-migration §8)。
  *
  * 制約 / 例外:
  * - 本ファイルは design.md の "Allowed Dependencies / Documented exception" に
- *   従い、`lib/db/client.ts` (`db`) と `lib/db/schema.ts` (`stores` / `deals`) を
+ *   従い、`lib/db/client.ts` (`db`) と `lib/db/schema.ts` (4 entity 全テーブル) を
  *   参照する。これは TRUNCATE / BULK UPSERT 等 Repository interface で
  *   表現できない DDL 級操作を扱うための data-actions.ts と scripts/seed.ts
  *   限定の例外であり、他ファイルでは追加してはならない。
@@ -26,8 +26,8 @@
  *   `getSnapshotForExportAction()`) と戻り値型は無修正で維持する (Req 9.1)。
  * - `next/cache` の `revalidateTag(_, "max")` 失効規約も従前の通り。
  *
- * 関連: requirements.md §8.2–8.5、design.md §「lib/actions/data-actions.ts (修正)」、
- *       Flow 3 (data-actions の env 分岐)、Issue 2 (lazy lib/db loading)
+ * 関連: requirements.md §8.1–8.6、design.md §「lib/actions/data-actions.ts (修正)」、
+ *       research-handoff-db-migration design Flow 4、Issue 2 (lazy lib/db loading)
  */
 
 import { revalidateTag } from "next/cache";
@@ -36,7 +36,6 @@ import {
   clearMockDb,
   restoreMockDb,
   snapshotMockDb,
-  mockDb,
   type DbSnapshot,
 } from "@/lib/mock/db";
 import {
@@ -67,49 +66,32 @@ function invalidateAll() {
   }
 }
 
-/**
- * Mock の Research / Handoff のみ SEED に戻す (DB モード時の部分リセット用)。
- * stores / deals は DB 側で別途リセットされるため、Mock の該当 Map は触らない。
- */
-function resetMockResearchAndHandoffOnly(): void {
-  mockDb.research.clear();
-  for (const r of SEED_RESEARCH) {
-    mockDb.research.set(r.id, { ...r });
-  }
-  mockDb.handoffs.clear();
-  for (const h of SEED_HANDOFFS) {
-    mockDb.handoffs.set(h.id, { ...h });
-  }
-}
-
-/**
- * Mock の Research / Handoff のみクリア (DB モード時の部分クリア用)。
- */
-function clearMockResearchAndHandoffOnly(): void {
-  mockDb.research.clear();
-  mockDb.handoffs.clear();
-}
-
 export async function resetToSeedAction(): Promise<ActionResult> {
   if (isMockMode()) {
-    // Mock モード: 既存通り全エンティティを SEED に戻す (Req 8.5)
+    // Mock モード: 既存通り全エンティティを SEED に戻す (Req 8.6)
     resetMockDb();
   } else {
-    // DB モード: stores / deals は DB をトランザクション内でリセット、
-    // Research / Handoff は Mock 側のみ SEED に戻す (Req 8.3, 8.4)。
+    // DB モード: 4 entity 全てを DB トランザクション内でリセット
+    // (research-handoff-db-migration §8.3, §8.4, §8.5)。
     // lib/db/* は DATABASE_URL 必須の副作用を持つため動的 import する (Issue 2)。
     try {
       const { db } = await import("@/lib/db/client");
-      const { stores, deals } = await import("@/lib/db/schema");
+      const { stores, deals, research, handoffs } = await import(
+        "@/lib/db/schema"
+      );
       const { toDbRow: storeToDbRow } = await import(
         "@/lib/db/store-repository"
       );
       await db.transaction(async (tx) => {
-        // FK (deals.store_id → stores.id) があるため deals → stores の順で削除
+        // FK 整合のため子→親の順で削除
+        // (handoffs.deal_id → deals, handoffs.store_id → stores,
+        //  research.store_id → stores, deals.store_id → stores)
+        await tx.delete(handoffs);
+        await tx.delete(research);
         await tx.delete(deals);
         await tx.delete(stores);
 
-        // 親テーブル (stores) を先に upsert
+        // 親→子の順で upsert
         // ai_analysis_result はオブジェクト ↔ text 列の変換のため toDbRow 経由
         for (const s of SEED_STORES) {
           const row = storeToDbRow(s);
@@ -118,16 +100,26 @@ export async function resetToSeedAction(): Promise<ActionResult> {
             .values(row)
             .onConflictDoUpdate({ target: stores.id, set: row });
         }
-        // 子テーブル (deals) を後から upsert
         for (const d of SEED_DEALS) {
           await tx
             .insert(deals)
             .values(d)
             .onConflictDoUpdate({ target: deals.id, set: d });
         }
+        // Research / Handoff は primitive のみで toDbRow 不要
+        for (const r of SEED_RESEARCH) {
+          await tx
+            .insert(research)
+            .values(r)
+            .onConflictDoUpdate({ target: research.id, set: r });
+        }
+        for (const h of SEED_HANDOFFS) {
+          await tx
+            .insert(handoffs)
+            .values(h)
+            .onConflictDoUpdate({ target: handoffs.id, set: h });
+        }
       });
-
-      resetMockResearchAndHandoffOnly();
     } catch (e) {
       return failure(
         e instanceof Error
@@ -143,22 +135,24 @@ export async function resetToSeedAction(): Promise<ActionResult> {
 
 export async function clearAllAction(): Promise<ActionResult> {
   if (isMockMode()) {
-    // Mock モード: 既存通り全エンティティを空にする (Req 8.5)
+    // Mock モード: 既存通り全エンティティを空にする (Req 8.6)
     clearMockDb();
   } else {
-    // DB モード: stores / deals は DB をトランザクション内で全削除、
-    // Research / Handoff は Mock 側のみクリア (Req 8.4)。
+    // DB モード: 4 entity 全てを DB トランザクション内で全削除
+    // (research-handoff-db-migration §8.4, §8.5)。
     // lib/db/* は DATABASE_URL 必須の副作用を持つため動的 import する (Issue 2)。
     try {
       const { db } = await import("@/lib/db/client");
-      const { stores, deals } = await import("@/lib/db/schema");
+      const { stores, deals, research, handoffs } = await import(
+        "@/lib/db/schema"
+      );
       await db.transaction(async (tx) => {
-        // FK 整合のため deals → stores の順で削除
+        // FK 整合のため子→親の順で削除
+        await tx.delete(handoffs);
+        await tx.delete(research);
         await tx.delete(deals);
         await tx.delete(stores);
       });
-
-      clearMockResearchAndHandoffOnly();
     } catch (e) {
       return failure(
         e instanceof Error
@@ -198,7 +192,7 @@ export async function importJsonAction(
       : undefined;
 
     if (isMockMode()) {
-      // Mock モード: 既存通り全エンティティを Mock へ復元 (Req 8.5)
+      // Mock モード: 既存通り全エンティティを Mock へ復元 (Req 8.6)
       restoreMockDb({
         stores: importedStores,
         research: importedResearch,
@@ -206,17 +200,24 @@ export async function importJsonAction(
         handoffs: importedHandoffs,
       });
     } else {
-      // DB モード: stores / deals は DB へトランザクション内で upsert、
-      // Research / Handoff は Mock 側のみ復元 (Req 8.2, 8.4)。
+      // DB モード: 4 entity 全てを DB へトランザクション内で upsert
+      // (research-handoff-db-migration §8.2, §8.4, §8.5)。
       // lib/db/* は DATABASE_URL 必須の副作用を持つため動的 import する (Issue 2)。
-      if (importedStores || importedDeals) {
+      if (
+        importedStores ||
+        importedDeals ||
+        importedResearch ||
+        importedHandoffs
+      ) {
         const { db } = await import("@/lib/db/client");
-        const { stores, deals } = await import("@/lib/db/schema");
+        const { stores, deals, research, handoffs } = await import(
+          "@/lib/db/schema"
+        );
         const { toDbRow: storeToDbRow } = await import(
           "@/lib/db/store-repository"
         );
         await db.transaction(async (tx) => {
-          // 親 (stores) を先に upsert
+          // 親 → 子の順で upsert (FK 整合)
           // ai_analysis_result はオブジェクト ↔ text 列の変換のため toDbRow 経由
           if (importedStores) {
             for (const s of importedStores) {
@@ -227,7 +228,6 @@ export async function importJsonAction(
                 .onConflictDoUpdate({ target: stores.id, set: row });
             }
           }
-          // 子 (deals) を後に upsert
           if (importedDeals) {
             for (const d of importedDeals) {
               await tx
@@ -236,14 +236,25 @@ export async function importJsonAction(
                 .onConflictDoUpdate({ target: deals.id, set: d });
             }
           }
+          // Research / Handoff は primitive のみで toDbRow 不要
+          if (importedResearch) {
+            for (const r of importedResearch) {
+              await tx
+                .insert(research)
+                .values(r)
+                .onConflictDoUpdate({ target: research.id, set: r });
+            }
+          }
+          if (importedHandoffs) {
+            for (const h of importedHandoffs) {
+              await tx
+                .insert(handoffs)
+                .values(h)
+                .onConflictDoUpdate({ target: handoffs.id, set: h });
+            }
+          }
         });
       }
-
-      // Mock 側は research / handoffs のみ復元 (stores / deals は触らない)
-      restoreMockDb({
-        research: importedResearch,
-        handoffs: importedHandoffs,
-      });
     }
 
     invalidateAll();
@@ -257,22 +268,22 @@ export async function importJsonAction(
 
 export async function getSnapshotForExportAction(): Promise<DbSnapshot> {
   if (isMockMode()) {
-    // Mock モード: 既存通り全エンティティを Mock から取得 (Req 8.5)
+    // Mock モード: 既存通り全エンティティを Mock から取得 (Req 8.6)
     return snapshotMockDb();
   }
 
-  // DB モード: stores / deals は DB から並列取得、Research / Handoff は Mock から
-  // 取得して合成する (Req 8.1, 8.4)
-  const [dbDeals, dbStores] = await Promise.all([
+  // DB モード: 4 entity を DB から並列取得 (Req 8.1, 8.4)。
+  const [dbDeals, dbStores, dbResearch, dbHandoffs] = await Promise.all([
     repos.deal.list(),
     repos.store.list(),
+    repos.research.list(),
+    repos.handoff.list(),
   ]);
-  const mockSnapshot = snapshotMockDb();
 
   return {
     stores: dbStores,
-    research: mockSnapshot.research,
+    research: dbResearch,
     deals: dbDeals,
-    handoffs: mockSnapshot.handoffs,
+    handoffs: dbHandoffs,
   };
 }

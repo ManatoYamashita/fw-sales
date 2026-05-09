@@ -130,7 +130,7 @@
 
 - [ ] 5. data-actions / export route / seed の 4 entity 統合
 
-- [ ] 5.1 (P) data-actions.ts の Mock パススルー削除と DB tx 4 entity 統合
+- [x] 5.1 (P) data-actions.ts の Mock パススルー削除と DB tx 4 entity 統合
   - `resetMockResearchAndHandoffOnly` / `clearMockResearchAndHandoffOnly` 関数を削除
   - `resetToSeedAction` (DB ブランチ): `db.transaction` 内で TRUNCATE 順序を `handoffs → research → deals → stores`(子→親、FK 整合)に拡張、INSERT 順序を `stores → deals → research → handoffs`(親→子)で全 4 entity を upsert
   - `clearAllAction` (DB ブランチ): 同 TRUNCATE 順序で 4 entity 全件削除
@@ -144,7 +144,7 @@
   - _Requirements: 8.1, 8.2, 8.3, 8.4, 8.5, 8.6_
   - _Boundary: lib/actions/data-actions.ts_
 
-- [ ] 5.2 (P) Export route の DB 経路を 4 entity 統一
+- [x] 5.2 (P) Export route の DB 経路を 4 entity 統一
   - `app/api/export/route.ts` の DB モード分岐を `Promise.all([repos.deal.list(), repos.store.list(), repos.research.list(), repos.handoff.list()])` に統一
   - `mockSnapshot` 変数の参照を Mock モード分岐のみに限定し、DB モードでの `mock.research` / `mock.handoffs` 参照を削除
   - 既存の Cache Components 関連コメント(Node.js runtime 強制を委ねる旨)は維持
@@ -153,7 +153,7 @@
   - _Requirements: 8.1, 8.4_
   - _Boundary: app/api/export/route.ts_
 
-- [ ] 5.3 (P) seed.ts に SEED_RESEARCH / SEED_HANDOFFS の upsert を追加
+- [x] 5.3 (P) seed.ts に SEED_RESEARCH / SEED_HANDOFFS の upsert を追加
   - `scripts/seed.ts` で `lib/mock/seed` から `SEED_RESEARCH` / `SEED_HANDOFFS` を import 追加(既存 `SEED_STORES` / `SEED_DEALS` import に並ぶ形)
   - `lib/db/schema` から `research` / `handoffs` を import 追加
   - `db.transaction` 内 upsert 順序を `stores → deals → research → handoffs`(FK 整合)に拡張
@@ -258,6 +258,10 @@
 - **5.3**: 既存 `scripts/seed.ts` は `pnpm seed`(`NODE_OPTIONS='--conditions=react-server' tsx scripts/seed.ts`)で実行する `package.json` 設定が `#1` で導入済。本 spec で seed コマンドの変更は不要。
 - **7.2**: 既存 `vitest.config.ts` は `server-only` を `empty.js` に alias し `react-server` condition を有効化済(`#10` Phase A 完了時)。新規 DB Repository テストは同設定で動作するが、実 DB 接続は不要(mock executor で SQL 発行を検証)。実 DB を使う Integration テストは Phase 7.3〜7.5 の手動 E2E に統合。
 - **7.3 / 7.5**: `requirements.md §12.2 / §12.4` の手動 E2E 手順を踏襲。Supabase ダッシュボードでの件数確認をエビデンスとして残す。
+- **5.1 / 5.3**: 別セッション(#13)が `lib/db/store-repository.ts` に追加した `toDbRow` ヘルパ(stores の `ai_analysis_result: AiAnalysisResult \| null` を `text` 列に JSON 直列化する変換)を **維持**。Research / Handoff には同等の変換が不要(全フィールド primitive、schema 1:1 対応)であることを Plan agent で再確認済。
+- **5.1**: `mockDb` import を削除(`resetMockResearchAndHandoffOnly` / `clearMockResearchAndHandoffOnly` 関数の本体削除に伴い参照ゼロ)。`SEED_RESEARCH` / `SEED_HANDOFFS` / `restoreMockDb` / `snapshotMockDb` import は引き続き必要(DB 経路の SEED 投入と Mock 経路の復元/snapshot で使用)。
+- **5.1**: `importJsonAction` の DB tx 開始 gate を `if (importedStores \|\| importedDeals)` から 4-OR (`\|\| importedResearch \|\| importedHandoffs`)に拡張。Research / Handoff のみ含む JSON Import が機能するように。
+- **5.1 / 5.2 / 5.3**: TRUNCATE 順序は `handoffs → research → deals → stores`(子→親、FK 整合)、INSERT 順序は親→子に逆転。`scripts/seed.ts` も同 INSERT 順序を維持。
 
 ---
 

@@ -25,21 +25,15 @@ export async function GET() {
     // Mock モード: Mock DB から一括 snapshot を取得。
     snapshot = snapshotMockDb();
   } else {
-    // DB モード:
-    // - Deal / Store は DB から並列取得 (waterfall 排除、design R5)
-    // - Research / Handoff は Mock の該当部分を抽出
-    //   (これらは別 Issue で DB 化される予定)
-    const [deals, stores, mock] = await Promise.all([
+    // DB モード: 4 entity を DB から並列取得 (waterfall 排除、design R5)。
+    // research-handoff-db-migration §8.1 / §8.4 で Mock 経由を排除済。
+    const [deals, stores, research, handoffs] = await Promise.all([
       repos.deal.list(),
       repos.store.list(),
-      Promise.resolve(snapshotMockDb()),
+      repos.research.list(),
+      repos.handoff.list(),
     ]);
-    snapshot = {
-      stores,
-      research: mock.research,
-      deals,
-      handoffs: mock.handoffs,
-    };
+    snapshot = { stores, research, deals, handoffs };
   }
 
   const body = JSON.stringify(snapshot, null, 2);
