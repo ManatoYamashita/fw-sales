@@ -3,11 +3,15 @@
  *
  * - API キーは `process.env.GEMINI_API_KEY`(`lib/env.ts` の `readEnv` 経由)
  * - `responseMimeType: "application/json"` + `responseJsonSchema` で構造化出力を強制
- * - `tools: [{ urlContext: {} }]` で公開 URL 参照を許可
+ * - **URL Context Tool は使用しない** — Gemini API は構造化出力(`responseMimeType:
+ *   "application/json"` + `responseJsonSchema`)と `tools` の同時設定を 400
+ *   (INVALID_ARGUMENT) で拒否する。SDK の TS 型は `unknown` で受けるが実機 API で発覚。
+ *   ページの主データは `prompt.ts` で HTML 全文を user Part として投入済(主軸経路)。
  * - SDK の生エラーは `AiClientError` discriminated union に正規化
  *   (API キー値や request ID の漏洩防止)
  *
- * 関連: design.md §「GeminiClient」, requirements.md §2.4, §2.6, §2.7, §6.1
+ * 関連: design.md §「GeminiClient」, requirements.md §2.4, §2.6, §2.7, §6.1,
+ *       research.md Topic 2(URL Context 制約の訂正)
  */
 
 import "server-only";
@@ -98,7 +102,6 @@ export function createGeminiClient(): GeminiClient {
             systemInstruction: input.systemPrompt,
             responseMimeType: "application/json",
             responseJsonSchema: input.jsonSchema,
-            tools: [{ urlContext: {} }],
             temperature: 0.4,
             maxOutputTokens: 4096,
             abortSignal: signal,
@@ -114,6 +117,13 @@ export function createGeminiClient(): GeminiClient {
         }
         return JSON.parse(text);
       } catch (err) {
+        if (process.env.NODE_ENV !== "production") {
+          console.error("[ai/client] generateAnalysis raw error:", err);
+          if (err instanceof Error) {
+            console.error("[ai/client] error.message:", err.message);
+            console.error("[ai/client] error.stack:", err.stack);
+          }
+        }
         throw normalizeSdkError(err);
       }
     },

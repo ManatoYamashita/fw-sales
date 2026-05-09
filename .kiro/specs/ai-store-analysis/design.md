@@ -188,6 +188,8 @@ types → lib/env → lib/cache → lib/db → lib/mock → lib/repositories
 
 詳細(モデル単価、SDK 既知の落とし穴、URL Context 制約)は `research.md` Topic 2 を参照。
 
+> **Note (2025-05-09 実機検証)**: Gemini API は構造化出力(`responseMimeType: "application/json"` + `responseJsonSchema`)と `tools` の同時設定を 400 (INVALID_ARGUMENT) で拒否する(SDK の TS 型は `unknown` で受けるため型チェックでは検出不可)。本 spec では構造化出力を主軸とするため、`tools: [{ urlContext: {} }]` は **未使用**。食べログ等の主データは `prompt.ts` で HTML 全文を user Part として投入する単一経路で運用する(`research.md` Topic 2 訂正済)。
+
 ---
 
 ## File Structure Plan

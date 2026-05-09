@@ -94,18 +94,59 @@ export const AI_ANALYSIS_PROPERTY_ORDERING = [
 ] as const;
 
 /**
+ * Gemini API がサポートしないプロパティ。`responseJsonSchema` で 400 を返す原因になる。
+ * 公式ドキュメント上の allow list に含まれないものを再帰除去する。
+ *
+ * 参照: node_modules/@google/genai/dist/genai.d.ts L4551-L4565
+ *   サポート: $id, $defs, $ref, $anchor, type, format, title, description,
+ *            enum, items, prefixItems, minItems, maxItems, minimum, maximum,
+ *            anyOf, oneOf, properties, additionalProperties, required, propertyOrdering
+ */
+const GEMINI_UNSUPPORTED_KEYS = new Set([
+  "$schema",
+  "minLength",
+  "maxLength",
+  "pattern",
+  "multipleOf",
+  "exclusiveMinimum",
+  "exclusiveMaximum",
+  "default",
+]);
+
+/** schema 内の Gemini 非対応 key を再帰除去する(クライアント側 validateAiAnalysis で再検証する前提)。 */
+function stripUnsupportedKeys(node: unknown): unknown {
+  if (Array.isArray(node)) {
+    return node.map(stripUnsupportedKeys);
+  }
+  if (node === null || typeof node !== "object") {
+    return node;
+  }
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+    if (GEMINI_UNSUPPORTED_KEYS.has(k)) continue;
+    out[k] = stripUnsupportedKeys(v);
+  }
+  return out;
+}
+
+/**
  * Gemini API に渡す JSON Schema を返す。
  *
  * `responseJsonSchema` フィールドに直接渡す前提で、`propertyOrdering` を明示する。
  * クライアント側では `validateAiAnalysis()` (`lib/ai/validate.ts`) で再検証するため、
  * API 側の schema 強制は補助的扱い(Req 3.5、research.md Decision 3)。
+ *
+ * Zod の `z.toJSONSchema()` は `$schema` / `maxLength` 等を出力するが、Gemini API は
+ * 限定的な subset しかサポートせず、非対応 key を含むと 400 を返す。`stripUnsupportedKeys`
+ * で除去してから API に渡す。
  */
 export function getAiAnalysisJsonSchema(): Record<string, unknown> {
   // Zod 4 内蔵の `z.toJSONSchema()` を使用(`zod-to-json-schema` v3.x は zod 4 と型互換性なし)。
   // Gemini API は JSON Schema Draft 2020-12 を受けるため、デフォルトの target で OK。
-  const schema = z.toJSONSchema(AiAnalysisSchema, {
+  const raw = z.toJSONSchema(AiAnalysisSchema, {
     target: "draft-2020-12",
-  }) as Record<string, unknown>;
+  });
+  const schema = stripUnsupportedKeys(raw) as Record<string, unknown>;
   schema.propertyOrdering = [...AI_ANALYSIS_PROPERTY_ORDERING];
   return schema;
 }

@@ -64,7 +64,8 @@
   - **SDK**: 旧 `@google/generative-ai` は **deprecated**(リポジトリ名が `google-gemini/deprecated-generative-ai-js` に変更、**2026-06-24 で完全削除**)。新規プロジェクトは **`@google/genai` v1.52.0+** 一択。Node.js 20+ 必須、ESM/CJS 両対応、Edge runtime 非推奨。
   - **Structured Output**: 2025-11-05 GA の **`responseJsonSchema`** が新標準。旧 `responseSchema` (OpenAPI 3.0 サブセット)よりも `anyOf` / `$ref` / `minimum` / `maximum` / `additionalProperties` をフルサポートし、Zod / `zodToJsonSchema` がそのまま動く。`propertyOrdering` を明示しないと出力順がぶれる。
   - **JSON Schema 違反は API 側で常に reject されない** — `string.maxLength`、`number.minimum`/`maximum` といったセマンティック制約はクライアント側で再検証必須。Zod の `.parse()` を Server Action 内で必ず通す。
-  - **URL Context**: 2025-08-18 GA。`tools: [{ urlContext: {} }]` で有効化。1 リクエストあたり最大 20 URL、URL あたり 34MB。**JS レンダリングされる動的部分は取れない**(食べログは静的 HTML 部分のみ取得可)。`responseJsonSchema` と併用可能。
+  - **URL Context**: 2025-08-18 GA。`tools: [{ urlContext: {} }]` で有効化。1 リクエストあたり最大 20 URL、URL あたり 34MB。**JS レンダリングされる動的部分は取れない**(食べログは静的 HTML 部分のみ取得可)。
+  - **【訂正・重要】 URL Context は構造化出力と同時使用不可**(2025-05-09 実機検証で判明、初出記載「`responseJsonSchema` と併用可能」は誤り)。`responseMimeType: "application/json"` + `responseJsonSchema` と `tools: [{ urlContext: {} }]` を同時設定すると Gemini API ゲートウェイが 400 (INVALID_ARGUMENT) を返す。SDK の TS 型は `unknown` で受けるため型エラーで検出不可、実機リクエストで初めて発覚。生エラー: `Tool use with a response mime type: 'application/json' is unsupported`。本 spec では構造化出力を主軸とするため URL Context は **不使用**。
   - **モデル**: `gemini-2.5-flash` がコスト($0.30/1M input + $2.50/1M output)・レイテンシ・1M context window のバランスで最適。1 回分析(HTML 50-150KB ≒ 15-45K input + 3-4K output)で **$0.013〜$0.024(約 2〜4 円)**。フォールバックは `gemini-2.5-pro`(約 4 倍コスト)を環境変数で切替可能にしておく。
   - **タイムアウト**: 通常 8〜15 秒、重い場合 30〜45 秒。**60 秒は妥当**。`AbortSignal.timeout(60_000)` を `config.abortSignal` に渡せば SDK が打ち切る。
   - **リトライ**: SDK は 429 / 5xx 自動リトライ内蔵。503 (Google 過負荷) のみ Server Action 層で 30〜60 秒待機の手動リトライ 1 回足すか、UI に「混雑のため再試行を」と表示する設計。
@@ -72,7 +73,7 @@
 - **Implications**:
   - 新規 dep: `@google/genai` + `zod` + `zod-to-json-schema` の 3 個追加が必要(現状 cheerio / vitest 以外の追加 dep は禁止傾向だが、本 spec の中核機能のため明示的に許可を取る)。
   - Zod は他箇所(URL 解析、フォームバリデーション等)でも将来使えるため戦略的価値が高い。
-  - URL Context を **補助参照**として併用するが、食べログの主データは **cheerio で取得済の HTML 全文を user message で直接投入** する経路を主軸とする。
+  - URL Context は構造化出力と併用不可のため **不使用**。食べログの主データは **cheerio で取得済の HTML 全文を user message で直接投入** する単一経路で運用する(2025-05-09 実機検証反映)。
 
 ### Topic 3: HTML 全文の保持戦略
 
