@@ -81,7 +81,7 @@
 
 - [ ] 3. repos の TxRepos と DB ブランチを 4 entity 化
 
-- [ ] 3.1 TxRepos / DB ブランチ / Mock 擬似 tx を 4 entity に拡張
+- [x] 3.1 TxRepos / DB ブランチ / Mock 擬似 tx を 4 entity に拡張
   - `lib/repositories/index.ts` の `TxRepos` interface に `research: ResearchRepository` と `handoff: HandoffRepository` を追加
   - DB 経路 `buildRepos`: `research: dbResearchRepo`、`handoff: dbHandoffRepo` を bind し、コメント「research / handoff は別 Issue で DB 化される予定。現状は mock のまま」を削除
   - DB 経路 `transaction`: `db.transaction(tx => fn({ deal: makeDealRepo(tx), store: makeStoreRepo(tx), research: makeResearchRepo(tx), handoff: makeHandoffRepo(tx) }))` で 4 entity factory を渡す

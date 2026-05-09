@@ -21,8 +21,10 @@
  *   シリアル実行のみ保証する (本物のトランザクション境界が欲しいテストでは
  *   DB 経路を利用すること)。
  *
- * 関連: design.md §「`lib/repositories/index.ts` (修正)」 (Issue 1/2 対応),
- *       requirements.md §3.2 §3.3 §5.1 §5.2 §5.4 §9.4
+ * 関連: design.md §「`lib/repositories/index.ts` (修正)」 (Issue 1/2 対応 +
+ *       research-handoff-db-migration §3),
+ *       requirements.md §3.2 §3.3 §5.1 §5.2 §5.4 §9.4 +
+ *       research-handoff-db-migration §4.4 §4.5 §6.x §9.4 §11.1〜§11.3
  */
 
 import "server-only";
@@ -47,10 +49,17 @@ export type {
 /**
  * トランザクション境界内で利用可能なリポジトリ集合。
  * `transaction` のコールバックに渡される `tx` 引数の型。
+ *
+ * research-handoff-db-migration spec で `research` / `handoff` を追加した。
+ * 構造的型付けのため、既存の `repos.transaction(async ({ deal, store }) => ...)`
+ * 利用箇所(`createDealAction` / `updateDealAction`)は分割代入で 2 entity しか
+ * 参照しないため非破壊で動作する。
  */
 export interface TxRepos {
   deal: DealRepository;
   store: StoreRepository;
+  research: ResearchRepository;
+  handoff: HandoffRepository;
 }
 
 /**
@@ -81,7 +90,12 @@ async function buildRepos(): Promise<Repos> {
       deal: mockDealRepo,
       handoff: mockHandoffRepo,
       transaction: async <T>(fn: (tx: TxRepos) => Promise<T>): Promise<T> =>
-        fn({ deal: mockDealRepo, store: mockStoreRepo }),
+        fn({
+          deal: mockDealRepo,
+          store: mockStoreRepo,
+          research: mockResearchRepo,
+          handoff: mockHandoffRepo,
+        }),
     }) satisfies Repos;
   }
 
@@ -89,17 +103,31 @@ async function buildRepos(): Promise<Repos> {
   // Mock モード時はこの import が評価されないため、DATABASE_URL 未設定でも
   // 起動可能 (Issue 1)。
   const dbModule = await import("@/lib/db");
-  const { db, dbDealRepo, dbStoreRepo, makeDealRepo, makeStoreRepo } = dbModule;
+  const {
+    db,
+    dbDealRepo,
+    dbStoreRepo,
+    dbResearchRepo,
+    dbHandoffRepo,
+    makeDealRepo,
+    makeStoreRepo,
+    makeResearchRepo,
+    makeHandoffRepo,
+  } = dbModule;
 
   return Object.freeze({
     store: dbStoreRepo,
-    // research / handoff は別 Issue で DB 化される予定。現状は mock のまま。
-    research: mockResearchRepo,
+    research: dbResearchRepo,
     deal: dbDealRepo,
-    handoff: mockHandoffRepo,
+    handoff: dbHandoffRepo,
     transaction: <T>(fn: (tx: TxRepos) => Promise<T>): Promise<T> =>
       db.transaction(async (tx) =>
-        fn({ deal: makeDealRepo(tx), store: makeStoreRepo(tx) }),
+        fn({
+          deal: makeDealRepo(tx),
+          store: makeStoreRepo(tx),
+          research: makeResearchRepo(tx),
+          handoff: makeHandoffRepo(tx),
+        }),
       ),
   }) satisfies Repos;
 }
