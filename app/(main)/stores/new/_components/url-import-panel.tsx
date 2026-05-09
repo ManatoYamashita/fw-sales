@@ -15,7 +15,13 @@ import {
 import { toast } from "@/components/ui/toast";
 
 export interface UrlImportPanelProps {
-  onApply: (suggested: ApplyResult) => void;
+  /**
+   * URL 解析成功時に呼ばれる。
+   * - `suggested`: ApplyResult(operator_name 含む)
+   * - `html`: 取得済 HTML 全文(`<script>`/`<style>`/`<svg>`/`<noscript>` 除去後)。
+   *   `null` のときは取得失敗または未取得。AI 分析機能の入力として再利用される。
+   */
+  onApply: (suggested: ApplyResult, html: string | null) => void;
 }
 
 interface LastImport {
@@ -68,7 +74,9 @@ export function UrlImportPanel({ onApply }: UrlImportPanelProps) {
           toast.error("認識できる形式の URL ではありません");
           return;
         }
-        onApply(result.suggested);
+        const html =
+          result.ogp && result.ogp.ok ? (result.ogp.html ?? null) : null;
+        onApply(result.suggested, html);
         setLastImport({
           type: result.parsed.type,
           applied: result.applied,

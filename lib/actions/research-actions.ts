@@ -58,31 +58,39 @@ export async function saveResearchAction(
   if (!store) return failure("店舗が見つかりませんでした");
 
   const input = buildResearchInput(formData, storeId, store.name);
-  const existing = await repos.research.getByStoreId(storeId);
 
-  let saved;
-  if (existing) {
-    saved = await repos.research.update(existing.id, input);
-  } else {
-    saved = await repos.research.create(input);
+  try {
+    // 研究 save と店舗 stage/channel 同期を 1 トランザクションで原子化
+    // (research-handoff-db-migration §4.1, §4.2, §4.4, §4.5)。
+    const saved = await repos.transaction(async ({ research, store: storeTx }) => {
+      const existing = await research.getByStoreId(storeId);
+      const r = existing
+        ? await research.update(existing.id, input)
+        : await research.create(input);
+      if (!r) throw new Error("保存に失敗しました");
+
+      // 店舗ステージ・チャネル同期。stage は「調査待ち」のときのみ「調査完了」へ遷移。
+      await storeTx.update(storeId, {
+        stage: store.stage === "調査待ち" ? "調査完了" : store.stage,
+        channel: input.channel,
+      });
+
+      return r;
+    });
+
+    // tx 成功後にのみ revalidateTag を呼ぶ。失敗時はキャッシュ汚染しない。
+    revalidateTag(CACHE_TAGS.research, "max");
+    revalidateTag(CACHE_TAGS.researchByStore(storeId), "max");
+    revalidateTag(CACHE_TAGS.stores, "max");
+    revalidateTag(CACHE_TAGS.store(storeId), "max");
+    revalidateTag(CACHE_TAGS.stats, "max");
+    revalidateTag(CACHE_TAGS.actionQueue, "max");
+    revalidateTag(CACHE_TAGS.pipeline, "max");
+
+    return success({ researchId: saved.id }, "調査結果を保存しました");
+  } catch (err) {
+    return failure(err instanceof Error ? err.message : "保存に失敗しました");
   }
-  if (!saved) return failure("保存に失敗しました");
-
-  // 調査が完了したら店舗ステージとチャネルも同期更新
-  await repos.store.update(storeId, {
-    stage: store.stage === "調査待ち" ? "調査完了" : store.stage,
-    channel: input.channel,
-  });
-
-  revalidateTag(CACHE_TAGS.research, "max");
-  revalidateTag(CACHE_TAGS.researchByStore(storeId), "max");
-  revalidateTag(CACHE_TAGS.stores, "max");
-  revalidateTag(CACHE_TAGS.store(storeId), "max");
-  revalidateTag(CACHE_TAGS.stats, "max");
-  revalidateTag(CACHE_TAGS.actionQueue, "max");
-  revalidateTag(CACHE_TAGS.pipeline, "max");
-
-  return success({ researchId: saved.id }, "調査結果を保存しました");
 }
 
 export async function saveResearchAndContinue(

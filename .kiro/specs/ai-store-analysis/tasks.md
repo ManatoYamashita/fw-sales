@@ -193,7 +193,7 @@
   - _Boundary: app/stores/new/ai-analysis-panel_
   - _Depends: 5.3_
 
-- [ ] 5.5 StoreNewForm 統合(operator UI + AiAnalysisPanel embed + useBeforeUnload + applyImport 拡張)
+- [x] 5.5 StoreNewForm 統合(operator UI + AiAnalysisPanel embed + useBeforeUnload + applyImport 拡張)
   - `app/(main)/stores/new/_components/store-new-form.tsx` の `FormState` を拡張、`operator_type`, `operator_name`, `additionalInstructions`, `htmlContent: string | null`, `aiResult: AiAnalysisResult | null` を追加、既存 `confidence` state を `ApplyConfidence & Partial<AiAnalysisConfidence>` に拡張
   - 「基本情報」セクションに operator セレクタ(`<Select>`)+ operator_name テキスト入力(`<Input>`)を追加、background style は既存 `bgStyle("operator_name")` を流用
   - 「営業メモ」セクション直下に `<AiAnalysisPanel>` を embed、callback で `aiResult` / `confidence` を親 state に統合
@@ -295,3 +295,4 @@
 - **Phase 4 の DB layer 双方向変換**(4.2): `lib/db/store-repository.ts` に `toDbRow(store): typeof stores.$inferInsert` (named export) と `fromDbRow(row): Store` を新設、`ai_analysis_result` をオブジェクト ↔ JSON 文字列 (`text` 列) で変換。`data-actions.ts` (reset/import 経路 2 箇所) と `scripts/seed.ts` でも `toDbRow` を再利用して insert に渡す。`fromDbRow` は `priority` / `stage` 等の literal types を `as Store` キャストで通す(既存パターン踏襲)。`parseStoredAiAnalysis` は破損 JSON や schema 違反を null にフェイルセーフ。
 - **PromptBuilder と Client の型整合**(4.1): `lib/ai/prompt.ts:buildAnalysisPrompt` は `Part[]` (`@google/genai`) を返すため、`lib/ai/client.ts:AnalysisInput.userParts` を `Part[]` に変更(当初 `Array<{ text: string }>` で型不整合)。`Part.text` は `string | undefined` で SDK の標準型に整合。
 - **Phase 4 完了で typecheck 全緑**(4.2): Phase 1 で観察した 9 errors すべて解消。`pnpm typecheck` exit 0。残作業は Phase 5 (UI) 以降、TypeScript の連鎖検出はここで一旦完了。
+- **Phase 5.5 で別セッションの INP 最適化を温存**(5.5): 別の Claude セッションが先行していた `store-new-form.tsx` の最適化(`useCallback` set / `useMemo` handlers / `useDeferredValue(confidence)` / `MemoInput`-`MemoTextarea` 経由化)を完全保持しつつ、AI Panel embed + operator UI 2 行 + useBeforeUnload(isDirty) 連動 + applyImport(html 引数) 拡張を重ねた。`memo-input.tsx` と `loading.tsx` の新規ファイルも本 commit に巻き込み(別セッションが pull で merge できる最終形)。`url-import-panel.tsx:onApply` のシグネチャを `(suggested, html)` に拡張、`page.tsx` で `isApiKeyConfigured()` を SSR 取得して props 渡し。

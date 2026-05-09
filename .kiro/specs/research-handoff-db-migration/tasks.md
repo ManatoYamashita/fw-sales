@@ -98,7 +98,7 @@
 
 - [ ] 4. saveResearch / createHandoff / completeHandoff を repos.transaction 経由に
 
-- [ ] 4.1 (P) saveResearchAction を repos.transaction 化
+- [x] 4.1 (P) saveResearchAction を repos.transaction 化
   - `lib/actions/research-actions.ts:saveResearchAction` の `repos.research.create or update` と `repos.store.update({stage, channel})` を `repos.transaction(async ({ research, store: storeTx }) => { ... })` で 1 単位化
   - tx 内で `research.getByStoreId(storeId)` → 既存有無で `update(existing.id, input)` or `create(input)` 分岐
   - tx 内で `storeTx.update(storeId, { stage: store.stage === "調査待ち" ? "調査完了" : store.stage, channel: input.channel })` を実行
@@ -111,7 +111,7 @@
   - _Requirements: 4.1, 4.2, 4.4, 4.5, 9.1, 9.4_
   - _Boundary: lib/actions/research-actions.ts_
 
-- [ ] 4.2 (P) createHandoffAction と completeHandoffAction を repos.transaction 化
+- [x] 4.2 (P) createHandoffAction と completeHandoffAction を repos.transaction 化
   - `lib/actions/handoff-actions.ts:createHandoffAction` の `repos.handoff.create(input)` と `repos.store.update(deal.store_id, { stage: "引き継ぎ待ち" })` を `repos.transaction(async ({ handoff, store }) => { ... })` で 1 単位化
   - `completeHandoffAction` の `repos.handoff.update(handoffId, { status: "完了" })` と `repos.store.update(current.store_id, { stage: "引き継ぎ完了" })` を同様に 1 tx に統合
   - tx 内で例外発生時はロールバックされ、`invalidate(...)` ヘルパを呼ばない(try/catch を tx 外側に置く)

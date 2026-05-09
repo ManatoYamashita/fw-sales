@@ -64,12 +64,22 @@ export async function createHandoffAction(
     store_name: deal.store_name,
     deal_id: dealId,
   });
-  const created = await repos.handoff.create(input);
 
-  await repos.store.update(deal.store_id, { stage: "引き継ぎ待ち" });
+  try {
+    // handoff create と店舗 stage 同期を 1 トランザクションで原子化
+    // (research-handoff-db-migration §4.3, §4.4, §4.5)。
+    const created = await repos.transaction(async ({ handoff, store }) => {
+      const c = await handoff.create(input);
+      await store.update(deal.store_id, { stage: "引き継ぎ待ち" });
+      return c;
+    });
 
-  invalidate(created.id, deal.store_id);
-  return success({ id: created.id }, "引き継ぎシートを作成しました");
+    // tx 成功後にのみキャッシュ失効を実行。
+    invalidate(created.id, deal.store_id);
+    return success({ id: created.id }, "引き継ぎシートを作成しました");
+  } catch (err) {
+    return failure(err instanceof Error ? err.message : "作成に失敗しました");
+  }
 }
 
 export async function updateHandoffAction(
@@ -107,11 +117,20 @@ export async function completeHandoffAction(
   const current = await repos.handoff.get(handoffId);
   if (!current) return failure("引き継ぎが見つかりませんでした");
 
-  await repos.handoff.update(handoffId, { status: "完了" });
-  await repos.store.update(current.store_id, { stage: "引き継ぎ完了" });
+  try {
+    // handoff status 更新と店舗 stage 同期を 1 トランザクションで原子化
+    // (research-handoff-db-migration §4.4, §4.5)。
+    await repos.transaction(async ({ handoff, store }) => {
+      await handoff.update(handoffId, { status: "完了" });
+      await store.update(current.store_id, { stage: "引き継ぎ完了" });
+    });
 
-  invalidate(handoffId, current.store_id);
-  return success(undefined, "運用への引き継ぎを完了しました");
+    // tx 成功後にのみキャッシュ失効を実行。
+    invalidate(handoffId, current.store_id);
+    return success(undefined, "運用への引き継ぎを完了しました");
+  } catch (err) {
+    return failure(err instanceof Error ? err.message : "完了に失敗しました");
+  }
 }
 
 export async function deleteHandoffAction(
