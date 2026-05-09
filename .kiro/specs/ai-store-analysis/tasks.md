@@ -148,7 +148,7 @@
 
 ---
 
-- [ ] 5. UI Layer: hooks, badge, AI panel, form integration, list/detail
+- [x] 5. UI Layer: hooks, badge, AI panel, form integration, list/detail
 
 - [x] 5.1 (P) useBeforeUnload hook
   - `lib/hooks/use-before-unload.ts` を新規作成、`"use client"` 冒頭付与
@@ -205,7 +205,7 @@
   - _Boundary: app/stores/new/store-new-form_
   - _Depends: 3.1, 4.2, 5.1, 5.2, 5.4_
 
-- [ ] 5.6 店舗詳細・一覧での個人店バッジ表示と AI 結果復元
+- [x] 5.6 店舗詳細・一覧での個人店バッジ表示と AI 結果復元
   - `app/(main)/stores/[id]/page.tsx` および店舗詳細表示コンポーネントで `<IndividualStoreBadge operatorType={store.operator_type}>` を組込、店舗名横に表示
   - 店舗一覧 `app/(main)/stores/page.tsx`(または該当 list component)でも同様にバッジ表示
   - 編集モード(または詳細表示)で `<AiAnalysisPanel initialResult={store.ai_analysis_result}>` を経由して過去の AI 分析結果と confidence を復元、`null` のとき空状態を維持
@@ -296,3 +296,4 @@
 - **PromptBuilder と Client の型整合**(4.1): `lib/ai/prompt.ts:buildAnalysisPrompt` は `Part[]` (`@google/genai`) を返すため、`lib/ai/client.ts:AnalysisInput.userParts` を `Part[]` に変更(当初 `Array<{ text: string }>` で型不整合)。`Part.text` は `string | undefined` で SDK の標準型に整合。
 - **Phase 4 完了で typecheck 全緑**(4.2): Phase 1 で観察した 9 errors すべて解消。`pnpm typecheck` exit 0。残作業は Phase 5 (UI) 以降、TypeScript の連鎖検出はここで一旦完了。
 - **Phase 5.5 で別セッションの INP 最適化を温存**(5.5): 別の Claude セッションが先行していた `store-new-form.tsx` の最適化(`useCallback` set / `useMemo` handlers / `useDeferredValue(confidence)` / `MemoInput`-`MemoTextarea` 経由化)を完全保持しつつ、AI Panel embed + operator UI 2 行 + useBeforeUnload(isDirty) 連動 + applyImport(html 引数) 拡張を重ねた。`memo-input.tsx` と `loading.tsx` の新規ファイルも本 commit に巻き込み(別セッションが pull で merge できる最終形)。`url-import-panel.tsx:onApply` のシグネチャを `(suggested, html)` に拡張、`page.tsx` で `isApiKeyConfigured()` を SSR 取得して props 渡し。
+- **Phase 5.6 の編集 form 拡張**(5.6): `store-edit-form.tsx` は INP 最適化されていない既存構造のため、最小変更で operator UI + AiAnalysisPanel embed + useBeforeUnload を重ねた(MemoInput は新規 form 専用、Edit form は通常 Input のまま温存)。`initialResult={store.ai_analysis_result}` 経由で復元、`aiConfidence` も復元時に `store.ai_analysis_result.confidence` を初期値とすることで背景色が初期表示される(Req 5.4 編集マーカーは onAiFieldEdit で個別解除)。`edit/page.tsx` でも `isApiKeyConfigured()` を SSR 取得して props 渡し。

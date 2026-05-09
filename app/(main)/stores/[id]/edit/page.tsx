@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { StoreEditForm } from "./_components/store-edit-form";
 import { getStoreCached } from "@/lib/queries/stores";
+import { isApiKeyConfigured } from "@/lib/env";
 
 type Params = Promise<{ id: string }>;
 
@@ -24,6 +25,8 @@ export default async function StoreEditPage({
   const { id } = await params;
   const store = await getStoreCached(id);
   if (!store) notFound();
+  // GEMINI_API_KEY の有無を SSR で判定して props で渡す(Req 2.7)
+  const apiKeyConfigured = isApiKeyConfigured();
   return (
     <div className="space-y-4 max-w-4xl mx-auto">
       <div>
@@ -37,7 +40,7 @@ export default async function StoreEditPage({
           店舗を編集
         </h2>
       </div>
-      <StoreEditForm store={store} />
+      <StoreEditForm store={store} isApiKeyConfigured={apiKeyConfigured} />
     </div>
   );
 }

@@ -9,14 +9,38 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { ServiceCheckboxGroup } from "@/app/(main)/stores/new/_components/service-checkbox-group";
+import {
+  AiAnalysisPanel,
+  type AiAnalysisFormSnapshot,
+} from "@/app/(main)/stores/new/_components/ai-analysis-panel";
 import { updateStoreAction } from "@/lib/actions/store-actions";
 import { decideChannel } from "@/lib/domain/channel";
-import { CONTACT_FORMS, PRIORITIES, CHANNELS } from "@/types/store";
+import {
+  CONTACT_FORMS,
+  OPERATOR_TYPES,
+  PRIORITIES,
+  CHANNELS,
+} from "@/types/store";
 import { PLANNERS, SALES } from "@/lib/domain/staff";
 import { toast } from "@/components/ui/toast";
+import { useBeforeUnload } from "@/lib/hooks/use-before-unload";
 import type { Store } from "@/types/store";
+import type {
+  AiAnalysisResult,
+  AiAnalysisConfidence,
+  ConfidenceFieldKey,
+} from "@/types/ai-analysis";
 
-export function StoreEditForm({ store }: { store: Store }) {
+export interface StoreEditFormProps {
+  store: Store;
+  /** SSR で取得した GEMINI_API_KEY 設定済み boolean(Req 2.7) */
+  isApiKeyConfigured: boolean;
+}
+
+export function StoreEditForm({
+  store,
+  isApiKeyConfigured,
+}: StoreEditFormProps) {
   const [form, setForm] = useState({
     name: store.name,
     prefecture: store.prefecture,
@@ -36,9 +60,24 @@ export function StoreEditForm({ store }: { store: Store }) {
     memo: store.memo,
     assigned_planner: store.assigned_planner,
     assigned_sales: store.assigned_sales,
+    operator_type: store.operator_type,
+    operator_name: store.operator_name,
   });
+  // 編集モードでは store.ai_analysis_result が初期値(復元、Req 5.2 / 5.4)
+  const [aiResult, setAiResult] = useState<AiAnalysisResult | null>(
+    store.ai_analysis_result,
+  );
+  // 復元時の confidence も初期値として保持(背景色が初期表示される)
+  const [aiConfidence, setAiConfidence] = useState<
+    Partial<AiAnalysisConfidence>
+  >(() => store.ai_analysis_result?.confidence ?? {});
+  // AI 結果が未保存(=編集中)かどうか。store と同期している間は true。
+  const [aiPersisted, setAiPersisted] = useState<boolean>(true);
   const [pending, startTransition] = useTransition();
   const router = useRouter();
+
+  // 未保存遷移警告(Req 6.4): AI 結果が編集された未保存状態のときのみ
+  useBeforeUnload(!aiPersisted);
 
   const set = <K extends keyof typeof form>(
     key: K,
@@ -58,10 +97,63 @@ export function StoreEditForm({ store }: { store: Store }) {
     (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
       set(key, e.target.value as (typeof form)[K]);
 
+  // ----- AI Analysis Panel callbacks -----
+
+  const getFormSnapshot = (): AiAnalysisFormSnapshot => ({
+    name: form.name,
+    prefecture: form.prefecture,
+    city: form.city,
+    address: form.address,
+    genre: form.genre,
+    phone: form.phone,
+    site_url: form.site_url,
+    instagram_url: form.instagram_url,
+    map_url: form.map_url,
+    review_avg: form.review_avg,
+    review_count: form.review_count,
+    memo: form.memo,
+    operator_type: form.operator_type,
+    operator_name: form.operator_name,
+    htmlContent: null, // 編集画面では URL 再取得していないため null
+    assignedSales: form.assigned_sales,
+  });
+
+  const onAiResult = (result: AiAnalysisResult) => {
+    setAiResult(result);
+    setAiConfidence(result.confidence);
+    setAiPersisted(false);
+  };
+
+  const onAiFieldEdit = (field: ConfidenceFieldKey) => {
+    setAiPersisted(false);
+    setAiConfidence((prev) => {
+      if (!(field in prev)) return prev;
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  };
+
+  const onAiResultFieldChange = (
+    field: keyof Omit<AiAnalysisResult, "confidence">,
+    value: string,
+  ) => {
+    setAiResult((prev) => {
+      if (!prev) return prev;
+      return { ...prev, [field]: value };
+    });
+  };
+
   const submit = (formData: FormData) => {
+    if (aiResult) {
+      formData.set("ai_analysis_result", JSON.stringify(aiResult));
+    } else {
+      formData.set("ai_analysis_result", "");
+    }
     startTransition(async () => {
       const result = await updateStoreAction(store.id, null, formData);
       if (result.ok) {
+        setAiPersisted(true);
         toast.success(result.message ?? "更新しました");
         router.push(`/stores/${store.id}`);
       } else {
@@ -140,6 +232,37 @@ export function StoreEditForm({ store }: { store: Store }) {
                 </option>
               ))}
             </Select>
+          </FormField>
+          <FormField
+            label="運営者種別"
+            htmlFor="operator_type"
+            hint="個人店は受注成約率が高い傾向があり営業優先度の判断に使います"
+          >
+            <Select
+              id="operator_type"
+              name="operator_type"
+              value={form.operator_type}
+              onChange={onText("operator_type")}
+            >
+              {OPERATOR_TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </Select>
+          </FormField>
+          <FormField
+            label="運営者名"
+            htmlFor="operator_name"
+            hint="法人名(複数店舗運営)もしくはオーナー名(個人店)"
+          >
+            <Input
+              id="operator_name"
+              name="operator_name"
+              value={form.operator_name}
+              onChange={onText("operator_name")}
+              placeholder="例: 株式会社○○ / 山田 太郎"
+            />
           </FormField>
         </Card.Body>
       </Card>
@@ -298,15 +421,29 @@ export function StoreEditForm({ store }: { store: Store }) {
           {/* 編集中の stage は維持(ステージ変更は詳細画面のボタンから行う) */}
           <input type="hidden" name="stage" value={store.stage} />
         </Card.Body>
-        <Card.Footer>
-          <Button type="button" variant="ghost" onClick={() => router.back()}>
-            キャンセル
-          </Button>
-          <Button type="submit" variant="primary" disabled={pending}>
-            {pending ? "保存中…" : "保存する"}
-          </Button>
-        </Card.Footer>
       </Card>
+
+      <AiAnalysisPanel
+        getFormSnapshot={getFormSnapshot}
+        initialResult={store.ai_analysis_result}
+        onResult={onAiResult}
+        onFieldEdit={onAiFieldEdit}
+        isApiKeyConfigured={isApiKeyConfigured}
+        currentResult={aiResult}
+        confidence={aiConfidence}
+        onResultFieldChange={onAiResultFieldChange}
+        storeId={store.id}
+      />
+
+      {/* Submit footer: AI Panel の下に独立配置 */}
+      <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border bg-muted/30 rounded-md">
+        <Button type="button" variant="ghost" onClick={() => router.back()}>
+          キャンセル
+        </Button>
+        <Button type="submit" variant="primary" disabled={pending}>
+          {pending ? "保存中…" : "保存する"}
+        </Button>
+      </div>
     </form>
   );
 }
