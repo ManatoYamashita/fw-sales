@@ -166,7 +166,7 @@
   - _Boundary: components/feature/individual-store-badge_
   - _Depends: 1.3_
 
-- [ ] 5.3 AiAnalysisPanel: CTA + 自由追加指示 + Server Action 連携
+- [x] 5.3 AiAnalysisPanel: CTA + 自由追加指示 + Server Action 連携
   - `app/(main)/stores/new/_components/ai-analysis-panel.tsx` を新規作成、`"use client"` 冒頭付与
   - props: `getFormSnapshot`, `initialResult`, `onResult`, `onFieldEdit`, `isApiKeyConfigured`, `currentResult`, `confidence`, `onResultFieldChange`, `storeId`
   - 上部に CTA `<Button variant="primary">[AI で分析]</Button>` + 自由追加指示 `<Textarea maxLength={500}>` を配置
@@ -180,7 +180,7 @@
   - _Boundary: app/stores/new/ai-analysis-panel_
   - _Depends: 2.1, 4.1_
 
-- [ ] 5.4 AiAnalysisPanel: 結果表示 5 エリア + 背景色 + 警告 + 編集 + コピー
+- [x] 5.4 AiAnalysisPanel: 結果表示 5 エリア + 背景色 + 警告 + 編集 + コピー
   - 同 `ai-analysis-panel.tsx` に 5 エリア(Markdown 2 個 + プレーンテキスト 3 個)を Card 内に追加レンダリング、各エリアは `<Textarea>` で編集可
   - 各エリアに `confidenceToBg(confidence[key])` で背景色適用(`lib/url-parser/confidence-color` から流用)
   - `confidence < 50` のとき "⚠ 要確認" インジケータをエリア横に表示
