@@ -150,7 +150,7 @@
 
 - [ ] 5. UI Layer: hooks, badge, AI panel, form integration, list/detail
 
-- [ ] 5.1 (P) useBeforeUnload hook
+- [x] 5.1 (P) useBeforeUnload hook
   - `lib/hooks/use-before-unload.ts` を新規作成、`"use client"` 冒頭付与
   - `useBeforeUnload(enabled: boolean): void` を実装、`useEffect` 内で `enabled === true` のときのみ `window.addEventListener("beforeunload", handler)` を登録、cleanup で removeEventListener
   - `handler` は `e.preventDefault(); e.returnValue = ""` のみ(モダンブラウザは独自メッセージ非対応)
@@ -158,7 +158,7 @@
   - _Requirements: 6.4_
   - _Boundary: lib/hooks/use-before-unload_
 
-- [ ] 5.2 (P) IndividualStoreBadge コンポーネント
+- [x] 5.2 (P) IndividualStoreBadge コンポーネント
   - `components/feature/individual-store-badge.tsx` を新規作成、`OperatorType` を受け取り `"個人店"` のときのみ Badge 表示、それ以外は null を返す
   - 既存の Badge プリミティブ(または Stage / Channel / Priority バッジパターン)に合わせて実装
   - 3 種の `operatorType` 値で render すると、`"個人店"` のみバッジが表示され、他の 2 値では描画されない
