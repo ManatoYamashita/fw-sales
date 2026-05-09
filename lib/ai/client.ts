@@ -117,13 +117,6 @@ export function createGeminiClient(): GeminiClient {
         }
         return JSON.parse(text);
       } catch (err) {
-        if (process.env.NODE_ENV !== "production") {
-          console.error("[ai/client] generateAnalysis raw error:", err);
-          if (err instanceof Error) {
-            console.error("[ai/client] error.message:", err.message);
-            console.error("[ai/client] error.stack:", err.stack);
-          }
-        }
         throw normalizeSdkError(err);
       }
     },
