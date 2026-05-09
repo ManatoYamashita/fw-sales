@@ -216,9 +216,9 @@
 
 ---
 
-- [ ] 6. Tests
+- [x] 6. Tests
 
-- [ ] 6.1 (P) AI Service Layer 単体テスト
+- [x] 6.1 (P) AI Service Layer 単体テスト
   - `lib/ai/__tests__/schema.test.ts`: `AiAnalysisSchema.safeParse` で正常入力成功、必須フィールド欠落 / confidence 範囲外 / call_script 1501 字 / 追加プロパティで失敗、`getAiAnalysisJsonSchema()` の `propertyOrdering` 順序検証
   - `lib/ai/__tests__/validate.test.ts`: 5 フィールド欠落、confidence -1 / 101 / 73.5、call_script 1501 字、追加プロパティ全パターンで `{ ok: false, error.zodIssues }`、正常入力で `{ ok: true, value }`
   - `lib/ai/__tests__/rate-limiter.test.ts`: per-store 5 回 OK / 6 回目 reject、`vi.useFakeTimers()` で 10 分後にクリア確認、global 10 回 OK / 11 回目 reject、storeId null での per-store スキップ、`_resetRateLimitForTest` の動作
@@ -228,7 +228,7 @@
   - _Boundary: lib/ai/__tests___
   - _Depends: 2.1, 2.2, 2.3, 2.4_
 
-- [ ] 6.2 (P) URL Parser 拡張テスト
+- [x] 6.2 (P) URL Parser 拡張テスト
   - `lib/url-parser/__tests__/ogp.test.ts` を拡張、食べログ運営者付き fixture HTML を `__fixtures__/` に追加、`fetchOgp` または `extractFromHtml` 経由で `OgpResult.operator` の value と source、`OgpResult.html` のサイズ削減(script/style/svg 除去後)を検証
   - `lib/url-parser/__tests__/apply.test.ts` を拡張、`applyParsedData` で `operator_name` の信頼度 85(cheerio) / 90(JSON-LD)が `confidence.operator_name` に正しく入ることを検証、`operator_type` は "未設定" を維持
   - 既存テストにリグレッションがないことも確認(name 抽出、connie 連鎖等)
@@ -237,7 +237,7 @@
   - _Boundary: lib/url-parser/__tests___
   - _Depends: 3.1, 3.2_
 
-- [ ] 6.3 (P) Server Action 統合テスト(Gemini SDK モック)
+- [x] 6.3 (P) Server Action 統合テスト(Gemini SDK モック)
   - `lib/actions/__tests__/ai-analysis-actions.test.ts` を新規作成、`vi.mock("@google/genai", ...)` で SDK インターセプト
   - 各経路を網羅: ① 正常成功(`ActionResult.success`)、② 空 name(`failure` + 早期 return)、③ rate limit(rate limiter の状態を直接操作 or 連続呼出 + `_resetRateLimitForTest` 後再検証)、④ timeout(SDK モックが promise を resolve しない、`AbortController` 動作)、⑤ API error 4xx / 5xx、⑥ 不正な JSON、⑦ schema 違反
   - 全経路で `ActionResult` のフォーマットと正規化済メッセージが期待通りであることを検証、実 API は叩かない
@@ -297,3 +297,5 @@
 - **Phase 4 完了で typecheck 全緑**(4.2): Phase 1 で観察した 9 errors すべて解消。`pnpm typecheck` exit 0。残作業は Phase 5 (UI) 以降、TypeScript の連鎖検出はここで一旦完了。
 - **Phase 5.5 で別セッションの INP 最適化を温存**(5.5): 別の Claude セッションが先行していた `store-new-form.tsx` の最適化(`useCallback` set / `useMemo` handlers / `useDeferredValue(confidence)` / `MemoInput`-`MemoTextarea` 経由化)を完全保持しつつ、AI Panel embed + operator UI 2 行 + useBeforeUnload(isDirty) 連動 + applyImport(html 引数) 拡張を重ねた。`memo-input.tsx` と `loading.tsx` の新規ファイルも本 commit に巻き込み(別セッションが pull で merge できる最終形)。`url-import-panel.tsx:onApply` のシグネチャを `(suggested, html)` に拡張、`page.tsx` で `isApiKeyConfigured()` を SSR 取得して props 渡し。
 - **Phase 5.6 の編集 form 拡張**(5.6): `store-edit-form.tsx` は INP 最適化されていない既存構造のため、最小変更で operator UI + AiAnalysisPanel embed + useBeforeUnload を重ねた(MemoInput は新規 form 専用、Edit form は通常 Input のまま温存)。`initialResult={store.ai_analysis_result}` 経由で復元、`aiConfidence` も復元時に `store.ai_analysis_result.confidence` を初期値とすることで背景色が初期表示される(Req 5.4 編集マーカーは onAiFieldEdit で個別解除)。`edit/page.tsx` でも `isApiKeyConfigured()` を SSR 取得して props 渡し。
+- **Vitest 4.x の SDK class mock パターン**(6.3): `vi.fn().mockImplementation(() => obj)` を `new` 演算子で呼ぶ際、戻り値の instance 化が Vitest 4.x では不安定で `new GoogleGenAI({...})` が想定通りの shape (.models.generateContent) を持たない事象を確認。`class MockGoogleGenAI { models = { generateContent: mockGenerateContent }; constructor(_opts) {} }` の class mock パターンへ変更で全 12 tests pass。今後の SDK モックは class 形式を標準とする。
+- **Phase 6 の test 整備**(6.1〜6.3): 5 新規 test ファイル + 2 既存拡張で計 102 tests / 9 ファイルが pass。`vi.hoisted` で `mockGenerateContent` を vi.mock factory に渡すパターン、`vi.useFakeTimers + advanceTimersByTime` で rate limiter の window 検証、`vi.stubEnv("GEMINI_API_KEY", ...)` で環境変数 mock、HTML 文字列を inline で渡して cheerio の operator 抽出を fixture フォルダなしで検証、等のテストパターンを整備。

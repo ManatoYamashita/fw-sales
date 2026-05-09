@@ -142,4 +142,128 @@ describe("fetchOgp + extractFromHtml (P1 cheerio + JSON-LD)", () => {
     const result = await fetchOgp("https://example.com/x");
     expect(result.phone).toBe("03-1234-5678");
   });
+
+  // ==========================================================================
+  // Phase 3.1: 運営者抽出 + HTML 全文保持(Req 1.3)
+  // ==========================================================================
+
+  it("運営者抽出: JSON-LD parentOrganization.name から取得 (source=json_ld)", async () => {
+    mockFetch(`
+      <html><head>
+        <script type="application/ld+json">
+        {
+          "@type": "Restaurant",
+          "name": "店舗A",
+          "parentOrganization": { "name": "株式会社テストフード" }
+        }
+        </script>
+      </head></html>
+    `);
+    const result = await fetchOgp("https://example.com/x");
+    expect(result.operator).toBeDefined();
+    expect(result.operator?.value).toBe("株式会社テストフード");
+    expect(result.operator?.source).toBe("json_ld");
+  });
+
+  it("運営者抽出: 食べログ DOM 「運営者」行から取得 (source=tabelog_dom)", async () => {
+    mockFetch(`
+      <html><body>
+        <table>
+          <tr>
+            <th>運営者</th>
+            <td>山田太郎</td>
+          </tr>
+        </table>
+      </body></html>
+    `);
+    const result = await fetchOgp("https://example.com/x");
+    expect(result.operator).toBeDefined();
+    expect(result.operator?.value).toBe("山田太郎");
+    expect(result.operator?.source).toBe("tabelog_dom");
+  });
+
+  it("運営者抽出: 「運営会社」ラベルでも DOM 抽出が動作", async () => {
+    mockFetch(`
+      <html><body>
+        <table>
+          <tr>
+            <th>運営会社</th>
+            <td>株式会社○○フードサービス</td>
+          </tr>
+        </table>
+      </body></html>
+    `);
+    const result = await fetchOgp("https://example.com/x");
+    expect(result.operator?.value).toBe("株式会社○○フードサービス");
+    expect(result.operator?.source).toBe("tabelog_dom");
+  });
+
+  it("運営者抽出: JSON-LD と DOM が両方あれば JSON-LD 優先", async () => {
+    mockFetch(`
+      <html>
+        <head>
+          <script type="application/ld+json">
+          {
+            "@type": "Restaurant",
+            "name": "店舗A",
+            "parentOrganization": { "name": "JSON-LD 由来の運営者" }
+          }
+          </script>
+        </head>
+        <body>
+          <table>
+            <tr>
+              <th>運営者</th>
+              <td>DOM 由来の運営者</td>
+            </tr>
+          </table>
+        </body>
+      </html>
+    `);
+    const result = await fetchOgp("https://example.com/x");
+    expect(result.operator?.value).toBe("JSON-LD 由来の運営者");
+    expect(result.operator?.source).toBe("json_ld");
+  });
+
+  it("運営者抽出: ラベル不在なら operator は undefined", async () => {
+    mockFetch(`<html><body><p>運営情報なし</p></body></html>`);
+    const result = await fetchOgp("https://example.com/x");
+    expect(result.operator).toBeUndefined();
+  });
+
+  it("HTML 全文保持: ok 時に html フィールドが含まれる", async () => {
+    mockFetch(
+      `<html><head><title>テスト</title></head><body><p>本文</p></body></html>`,
+    );
+    const result = await fetchOgp("https://example.com/x");
+    expect(result.html).toBeDefined();
+    expect(result.html).toMatch(/本文/);
+  });
+
+  it("HTML 全文保持: <script>/<style>/<svg>/<noscript> は除去される (payload 削減)", async () => {
+    const inputHtml = `
+      <html>
+        <head>
+          <script>const secret = "hidden";</script>
+          <style>.hidden { display: none }</style>
+        </head>
+        <body>
+          <noscript>fallback content</noscript>
+          <svg><circle cx="50" cy="50" r="40" /></svg>
+          <p>本文だけ残る</p>
+        </body>
+      </html>
+    `;
+    mockFetch(inputHtml);
+    const result = await fetchOgp("https://example.com/x");
+    expect(result.html).toBeDefined();
+    expect(result.html).toMatch(/本文だけ残る/);
+    // 除去対象タグの中身が含まれない
+    expect(result.html).not.toMatch(/const secret/);
+    expect(result.html).not.toMatch(/\.hidden\s*{/);
+    expect(result.html).not.toMatch(/fallback content/);
+    expect(result.html).not.toMatch(/<circle/);
+    // 当然 input より小さい
+    expect(result.html!.length).toBeLessThan(inputHtml.length);
+  });
 });

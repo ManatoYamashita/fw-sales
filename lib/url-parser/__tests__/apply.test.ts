@@ -155,4 +155,61 @@ describe("applyParsedData (P0 統合シナリオ)", () => {
     expect(result.site_url).toBe("https://example.com");
     expect(result.confidence.site_url).toBeDefined();
   });
+
+  // ==========================================================================
+  // Phase 3.2: operator マージと信頼度同時セット(Req 1.3)
+  // ==========================================================================
+
+  describe("運営者(operator)のマージ", () => {
+    const baseParsed: ParsedUrl = {
+      type: "tabelog",
+      source_url: "https://tabelog.com/x/y/z/1/",
+      confidence: {},
+    };
+
+    it("ogp.operator が json_ld 由来なら operator_name と信頼度 90", () => {
+      const ogp: OgpResult = {
+        ok: true,
+        name: "店舗A",
+        operator: { value: "株式会社テスト", source: "json_ld" },
+      };
+      const result = applyParsedData(baseParsed, ogp);
+      expect(result.operator_name).toBe("株式会社テスト");
+      expect(result.confidence.operator_name).toBe(90);
+    });
+
+    it("ogp.operator が tabelog_dom 由来なら operator_name と信頼度 85", () => {
+      const ogp: OgpResult = {
+        ok: true,
+        name: "店舗A",
+        operator: { value: "山田太郎", source: "tabelog_dom" },
+      };
+      const result = applyParsedData(baseParsed, ogp);
+      expect(result.operator_name).toBe("山田太郎");
+      expect(result.confidence.operator_name).toBe(85);
+    });
+
+    it("operator_type は URL 解析だけでは判別不可のため常に '未設定' を維持", () => {
+      const ogp: OgpResult = {
+        ok: true,
+        operator: { value: "株式会社テスト", source: "json_ld" },
+      };
+      const result = applyParsedData(baseParsed, ogp);
+      expect(result.operator_type).toBe("未設定");
+    });
+
+    it("ogp.operator が undefined なら operator_name は空文字、信頼度なし", () => {
+      const ogp: OgpResult = { ok: true, name: "店舗A" };
+      const result = applyParsedData(baseParsed, ogp);
+      expect(result.operator_name).toBe("");
+      expect(result.confidence.operator_name).toBeUndefined();
+    });
+
+    it("ogp が null でも operator_name は空文字 + operator_type は未設定 (デフォルト)", () => {
+      const result = applyParsedData(baseParsed, null);
+      expect(result.operator_name).toBe("");
+      expect(result.operator_type).toBe("未設定");
+      expect(result.confidence.operator_name).toBeUndefined();
+    });
+  });
 });
