@@ -51,8 +51,10 @@ export function StoreRowActions({
         <ModalContent title="店舗を削除しますか?" size="sm">
           <p className="text-sm text-foreground leading-relaxed">
             「<strong className="font-semibold">{storeName}</strong>」を削除します。
-            関連する調査・商談・引き継ぎは残りますが、店舗側の参照は失われます。
-            この操作は元に戻せません。
+            <br />
+            関連する商談も同時に削除されます。
+            <br />
+            この操作は取り消せません。
           </p>
           <ModalFooter>
             <Button

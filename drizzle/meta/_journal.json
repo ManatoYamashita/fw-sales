@@ -22,6 +22,13 @@
       "when": 1778308506678,
       "tag": "0002_simple_sage",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1778332257878,
+      "tag": "0003_add_store_geo_hours",
+      "breakpoints": true
     }
   ]
 }

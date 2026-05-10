@@ -1,20 +1,12 @@
 import Link from "next/link";
-import { cacheTag } from "next/cache";
 import { Handshake } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
-import { repos } from "@/lib/repositories";
-import { CACHE_TAGS } from "@/lib/cache";
+import { listDealsByStoreCached } from "@/lib/queries/deals";
 import { formatDate } from "@/lib/utils/date";
 import { formatYen } from "@/lib/utils/format";
 import type { DealStatus } from "@/types/deal";
-
-async function loadDealsByStore(storeId: string) {
-  "use cache";
-  cacheTag(CACHE_TAGS.dealsByStore(storeId), CACHE_TAGS.deals);
-  return repos.deal.list(storeId);
-}
 
 const statusTone: Record<DealStatus, "neutral" | "amber" | "green" | "red"> = {
   継続追客: "neutral",
@@ -24,7 +16,7 @@ const statusTone: Record<DealStatus, "neutral" | "amber" | "green" | "red"> = {
 };
 
 export async function DealsHistoryCard({ storeId }: { storeId: string }) {
-  const deals = await loadDealsByStore(storeId);
+  const deals = await listDealsByStoreCached(storeId);
   return (
     <Card>
       <Card.Header>

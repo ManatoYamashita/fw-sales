@@ -1,5 +1,6 @@
 import { type ReactNode } from "react";
 import { cn } from "@/lib/utils/cn";
+import { DataTableRow } from "./data-table-row";
 
 export interface ColumnDef<T> {
   key: string;
@@ -8,6 +9,11 @@ export interface ColumnDef<T> {
   width?: string;
   align?: "left" | "right" | "center";
   className?: string;
+  /**
+   * このカラム上でのクリックは行リンクへ伝搬させない (例: 操作カラム)。
+   * `rowHref` が設定されている時のみ意味を持つ。
+   */
+  preventRowClick?: boolean;
 }
 
 export type DataTableDensity = "compact" | "normal";
@@ -40,6 +46,7 @@ export function DataTable<T>({
   emptyState,
   className,
   density = "normal",
+  rowHref,
 }: DataTableProps<T>) {
   if (rows.length === 0) {
     return <div className={className}>{emptyState ?? null}</div>;
@@ -67,27 +74,35 @@ export function DataTable<T>({
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => (
-            <tr
-              key={rowKey(row)}
-              className="border-b border-border/60 last:border-b-0 hover:bg-muted/40 transition-colors"
-            >
-              {columns.map((col) => (
-                <td
-                  key={col.key}
-                  className={cn(
-                    ROW_PADDING[density],
-                    "align-middle text-foreground/90",
-                    col.align === "right" && "text-right tabular-nums",
-                    col.align === "center" && "text-center",
-                    col.className,
-                  )}
-                >
-                  {col.cell(row)}
-                </td>
-              ))}
-            </tr>
-          ))}
+          {rows.map((row) => {
+            const href = rowHref?.(row);
+            return (
+              <DataTableRow
+                key={rowKey(row)}
+                href={href}
+                className={cn(
+                  "border-b border-border/60 last:border-b-0 hover:bg-muted/40 transition-colors",
+                  href && "cursor-pointer",
+                )}
+              >
+                {columns.map((col) => (
+                  <td
+                    key={col.key}
+                    data-no-row-click={col.preventRowClick ? "true" : undefined}
+                    className={cn(
+                      ROW_PADDING[density],
+                      "align-middle text-foreground/90",
+                      col.align === "right" && "text-right tabular-nums",
+                      col.align === "center" && "text-center",
+                      col.className,
+                    )}
+                  >
+                    {col.cell(row)}
+                  </td>
+                ))}
+              </DataTableRow>
+            );
+          })}
         </tbody>
       </table>
     </div>

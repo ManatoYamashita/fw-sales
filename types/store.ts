@@ -45,6 +45,12 @@ export interface Store {
   operator_name: string;
   /** AI 分析結果。未分析時は null。永続化時は JSON.stringify した text 列で保持。 */
   ai_analysis_result: AiAnalysisResult | null;
+  /** 緯度。Google Map 埋め込み用。未取得時は null。 */
+  lat: number | null;
+  /** 経度。Google Map 埋め込み用。未取得時は null。 */
+  lng: number | null;
+  /** 営業時間 (フリーテキスト)。未設定時は空文字。 */
+  business_hours: string;
   created_at: string; // YYYY-MM-DD
   updated_at: string;
 }

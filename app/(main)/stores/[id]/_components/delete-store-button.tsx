@@ -10,9 +10,11 @@ import { toast } from "@/components/ui/toast";
 export function DeleteStoreButton({
   storeId,
   storeName,
+  dealCount,
 }: {
   storeId: string;
   storeName: string;
+  dealCount: number;
 }) {
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -38,10 +40,16 @@ export function DeleteStoreButton({
         <Trash2 className="h-4 w-4" /> 削除
       </Button>
       <ModalContent title="店舗を削除しますか?" size="sm">
-        <p className="text-sm text-foreground">
+        <p className="text-sm text-foreground leading-relaxed">
           「<strong>{storeName}</strong>」を削除します。
-          関連する調査・商談・引き継ぎは残りますが、店舗側の参照は失われます。
-          この操作は元に戻せません。
+          {dealCount > 0 ? (
+            <>
+              <br />
+              関連する商談 <strong>{dealCount}</strong> 件も同時に削除されます。
+            </>
+          ) : null}
+          <br />
+          この操作は取り消せません。
         </p>
         <ModalFooter>
           <Button

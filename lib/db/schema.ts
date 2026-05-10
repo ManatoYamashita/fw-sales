@@ -37,6 +37,12 @@ export const stores = pgTable("stores", {
   operator_name: text("operator_name").notNull().default(""),
   /** AI 分析結果の JSON 文字列 (`AiAnalysisResult` を JSON.stringify)。未分析時は NULL。 */
   ai_analysis_result: text("ai_analysis_result"),
+  /** 緯度。エリア検索 / Google Map 埋め込み用。未取得時は NULL。 */
+  lat: real("lat"),
+  /** 経度。エリア検索 / Google Map 埋め込み用。未取得時は NULL。 */
+  lng: real("lng"),
+  /** 営業時間。フリーテキスト(例: "11:00-23:00 / 日休")、未入力時は空文字。 */
+  business_hours: text("business_hours").notNull().default(""),
   created_at: text("created_at").notNull(),
   updated_at: text("updated_at").notNull(),
 });
