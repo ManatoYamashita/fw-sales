@@ -15,12 +15,14 @@ import {
   type OperatorType,
   type Priority,
   type StoreInput,
+  type StorePatch,
 } from "@/types/store";
 import type { AiAnalysisResult } from "@/types/ai-analysis";
 import { validateAiAnalysis } from "@/lib/ai/validate";
 import { STAGE_IDS, type StageId } from "@/types/stage";
 import {
   failure,
+  readNullableNumber,
   readNumber,
   readString,
   success,
@@ -103,6 +105,9 @@ function buildStoreInput(formData: FormData): StoreInput {
     operator_type: asOperatorType(readString(formData, "operator_type")),
     operator_name: readString(formData, "operator_name"),
     ai_analysis_result: readNullableAiAnalysis(formData, "ai_analysis_result"),
+    lat: readNullableNumber(formData, "lat"),
+    lng: readNullableNumber(formData, "lng"),
+    business_hours: readString(formData, "business_hours"),
   };
 }
 
@@ -163,9 +168,44 @@ export async function updateStoreStageAction(
   return success(undefined, `ステージを「${stage}」に変更しました`);
 }
 
+/**
+ * インライン編集用の Server Action。
+ * 詳細画面の各セクションが部分パッチを直接送信し、原子的に更新する。
+ *
+ * - FormData ではなく直接 patch オブジェクトを受け取る(Server Action は object 引数 OK)
+ * - patch に含まれないフィールドは現状維持
+ * - 成功時は updated_at が当日に更新される(repository 側の責務)
+ */
+export async function updateStorePatchAction(
+  id: string,
+  patch: StorePatch,
+): Promise<ActionResult> {
+  const updated = await repos.store.update(id, patch);
+  if (!updated) return failure("店舗が見つかりませんでした");
+  invalidateAllStoreScopes(id);
+  return success(undefined, "更新しました");
+}
+
 export async function deleteStoreAction(id: string): Promise<ActionResult> {
-  const removed = await repos.store.delete(id);
-  if (!removed) return failure("店舗が見つかりませんでした");
-  invalidateAllStoreScopes();
+  const dealsToDelete = await repos.deal.list(id);
+  try {
+    await repos.transaction(async ({ deal, store }) => {
+      for (const d of dealsToDelete) {
+        await deal.delete(d.id);
+      }
+      const removed = await store.delete(id);
+      if (!removed) throw new Error("店舗が見つかりませんでした");
+    });
+  } catch (err) {
+    return failure(
+      err instanceof Error ? err.message : "店舗の削除に失敗しました",
+    );
+  }
+  invalidateAllStoreScopes(id);
+  revalidateTag(CACHE_TAGS.deals, "max");
+  revalidateTag(CACHE_TAGS.dealsByStore(id), "max");
+  for (const d of dealsToDelete) {
+    revalidateTag(CACHE_TAGS.deal(d.id), "max");
+  }
   redirect("/stores");
 }

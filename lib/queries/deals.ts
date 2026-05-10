@@ -15,3 +15,9 @@ export async function getDealCached(id: string): Promise<Deal | null> {
   cacheTag(CACHE_TAGS.deal(id), CACHE_TAGS.deals);
   return repos.deal.get(id);
 }
+
+export async function listDealsByStoreCached(storeId: string): Promise<Deal[]> {
+  "use cache";
+  cacheTag(CACHE_TAGS.dealsByStore(storeId), CACHE_TAGS.deals);
+  return repos.deal.list(storeId);
+}

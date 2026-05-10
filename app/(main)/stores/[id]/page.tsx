@@ -5,14 +5,19 @@ import type { Metadata } from "next";
 import { Edit2, Search, Send, Handshake } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
+import { StoreTitleSection } from "./_components/store-title-section";
+import { MapEmbedCard } from "./_components/map-embed-card";
 import { BasicInfoCard } from "./_components/basic-info-card";
 import { WebAssetCard } from "./_components/web-asset-card";
+import { AiAnalysisDetailSection } from "./_components/ai-analysis-detail-section";
 import { ResearchSummaryCard } from "./_components/research-summary-card";
 import { DealsHistoryCard } from "./_components/deals-history-card";
+import { MemoCard } from "./_components/memo-card";
 import { StageChangeButton } from "./_components/stage-change-button";
 import { DeleteStoreButton } from "./_components/delete-store-button";
-import { IndividualStoreBadge } from "@/components/feature/individual-store-badge";
 import { getStoreCached } from "@/lib/queries/stores";
+import { listDealsByStoreCached } from "@/lib/queries/deals";
+import { isApiKeyConfigured } from "@/lib/env";
 
 type Params = Promise<{ id: string }>;
 
@@ -36,26 +41,20 @@ export default async function StoreDetailPage({
   const { id } = await params;
   const store = await getStoreCached(id);
   if (!store) notFound();
+  const dealCount = (await listDealsByStoreCached(store.id)).length;
+  const apiKeyConfigured = isApiKeyConfigured();
 
   return (
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div>
+        <div className="space-y-1">
           <Link
             href="/stores"
             className="text-xs text-muted-foreground hover:text-foreground"
           >
             ← 店舗一覧
           </Link>
-          <h2 className="text-xl md:text-2xl font-bold text-foreground mt-1 inline-flex items-center gap-2 flex-wrap">
-            {store.name}
-            <IndividualStoreBadge operatorType={store.operator_type} />
-          </h2>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {[store.prefecture, store.city, store.genre]
-              .filter(Boolean)
-              .join(" / ") || "—"}
-          </p>
+          <StoreTitleSection store={store} />
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <StageChangeButton storeId={store.id} current={store.stage} />
@@ -79,17 +78,27 @@ export default async function StoreDetailPage({
           </Link>
           <Link
             href={`/stores/${store.id}/edit`}
-            className="inline-flex items-center gap-1 h-9 px-3 rounded-md text-sm bg-primary text-primary-foreground hover:bg-primary/90"
+            className="inline-flex items-center gap-1 h-9 px-3 rounded-md text-sm border border-border bg-card hover:bg-muted/40 text-foreground"
+            title="フル編集 + AI 再実行ページ"
           >
-            <Edit2 className="h-4 w-4" /> 編集
+            <Edit2 className="h-4 w-4" /> フル編集
           </Link>
-          <DeleteStoreButton storeId={store.id} storeName={store.name} />
+          <DeleteStoreButton
+            storeId={store.id}
+            storeName={store.name}
+            dealCount={dealCount}
+          />
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 space-y-4">
+          <MapEmbedCard store={store} />
           <BasicInfoCard store={store} />
+          <AiAnalysisDetailSection
+            store={store}
+            isApiKeyConfigured={apiKeyConfigured}
+          />
           <Suspense fallback={<SectionFallback label="調査" />}>
             <ResearchSummaryCard storeId={store.id} />
           </Suspense>
@@ -100,18 +109,7 @@ export default async function StoreDetailPage({
 
         <div className="space-y-4">
           <WebAssetCard store={store} />
-          {store.memo ? (
-            <Card>
-              <Card.Header>
-                <Card.Title>メモ</Card.Title>
-              </Card.Header>
-              <Card.Body>
-                <p className="text-sm text-foreground whitespace-pre-wrap leading-6">
-                  {store.memo}
-                </p>
-              </Card.Body>
-            </Card>
-          ) : null}
+          <MemoCard store={store} />
         </div>
       </div>
     </div>

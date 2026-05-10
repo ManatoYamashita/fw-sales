@@ -420,6 +420,15 @@ export function StoreEditForm({
           </FormField>
           {/* 編集中の stage は維持(ステージ変更は詳細画面のボタンから行う) */}
           <input type="hidden" name="stage" value={store.stage} />
+          {/* /edit からの save 時に lat/lng/business_hours を消失させないための保全 hidden。
+              これらの値は詳細画面のインライン編集で更新する想定。 */}
+          <input type="hidden" name="lat" value={store.lat ?? ""} />
+          <input type="hidden" name="lng" value={store.lng ?? ""} />
+          <input
+            type="hidden"
+            name="business_hours"
+            value={store.business_hours}
+          />
         </Card.Body>
       </Card>
 

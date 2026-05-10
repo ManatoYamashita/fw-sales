@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { Inbox } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { DataTable, type ColumnDef } from "@/components/ui/data-table";
@@ -19,12 +18,7 @@ const columns: ColumnDef<Store>[] = [
     header: "店舗名",
     cell: (s) => (
       <span className="inline-flex items-center gap-2 flex-wrap">
-        <Link
-          href={`/stores/${s.id}`}
-          className="font-semibold text-foreground hover:text-blue-700"
-        >
-          {s.name}
-        </Link>
+        <span className="font-semibold text-foreground">{s.name}</span>
         <IndividualStoreBadge operatorType={s.operator_type} />
       </span>
     ),
@@ -86,6 +80,7 @@ const columns: ColumnDef<Store>[] = [
     header: <span className="sr-only">操作</span>,
     align: "right",
     width: "92px",
+    preventRowClick: true,
     cell: (s) => <StoreRowActions storeId={s.id} storeName={s.name} />,
   },
 ];
@@ -108,6 +103,7 @@ export async function StoresTable({
         columns={columns}
         rows={stores}
         rowKey={(s) => s.id}
+        rowHref={(s) => `/stores/${s.id}`}
         emptyState={
           <EmptyState
             icon={<Inbox />}
