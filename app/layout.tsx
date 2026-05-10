@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter, Noto_Sans_JP } from "next/font/google";
 import { Toaster } from "@/components/ui/toaster";
 import { ThemeProvider } from "@/components/theme/theme-provider";
@@ -17,12 +17,88 @@ const notoSansJP = Noto_Sans_JP({
   display: "swap",
 });
 
+const APP_NAME = "Firstweb Lead OS";
+const APP_DESCRIPTION =
+  "飲食店向け WEB 集客の営業活動 (店舗調査・商談・引き継ぎ・KPI) を一元管理する社内向けリードマネジメントシステム。";
+// metadataBase は OGP の絶対 URL 解決に使われる。env 未設定時はローカルにフォールバック。
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+
 export const metadata: Metadata = {
+  metadataBase: new URL(APP_URL),
   title: {
-    default: "Firstweb Lead OS",
-    template: "%s | Firstweb Lead OS",
+    default: APP_NAME,
+    template: `%s | ${APP_NAME}`,
   },
-  description: "飲食店向けWEB集客の営業管理システム",
+  description: APP_DESCRIPTION,
+  applicationName: APP_NAME,
+  generator: "Next.js",
+  referrer: "strict-origin-when-cross-origin",
+  formatDetection: {
+    email: false,
+    address: false,
+    telephone: false,
+  },
+  icons: {
+    icon: [
+      { url: "/icon.webp", type: "image/webp", sizes: "500x500" },
+      { url: "/icon.png", type: "image/png", sizes: "500x500" },
+    ],
+    shortcut: "/favicon.ico",
+    apple: [{ url: "/icon.png", sizes: "180x180", type: "image/png" }],
+  },
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    title: APP_NAME,
+    statusBarStyle: "default",
+  },
+  openGraph: {
+    type: "website",
+    siteName: APP_NAME,
+    title: APP_NAME,
+    description: APP_DESCRIPTION,
+    url: "/",
+    locale: "ja_JP",
+    images: [
+      {
+        url: "/ogp.webp",
+        width: 1920,
+        height: 1080,
+        alt: `${APP_NAME} — 飲食店向け WEB 集客リード OS`,
+        type: "image/webp",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: APP_NAME,
+    description: APP_DESCRIPTION,
+    images: ["/ogp.webp"],
+  },
+  // 社内ツール: 検索エンジンのインデックスを完全拒否する。
+  robots: {
+    index: false,
+    follow: false,
+    nocache: true,
+    googleBot: {
+      index: false,
+      follow: false,
+      noimageindex: true,
+      "max-snippet": -1,
+      "max-image-preview": "none",
+      "max-video-preview": -1,
+    },
+  },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f1f5f9" },
+    { media: "(prefers-color-scheme: dark)", color: "#020617" },
+  ],
+  colorScheme: "light dark",
 };
 
 export default function RootLayout({
