@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
+import { connection } from "next/server";
 import Link from "next/link";
 import { Mail, Phone, Lightbulb, ThumbsUp, Wrench } from "lucide-react";
 import { Card } from "@/components/ui/card";
@@ -30,6 +31,8 @@ export default async function ActionDetailPage({
 }: {
   params: Params;
 }) {
+  // build 時 prerender を skip (USE_CACHE_TIMEOUT 対策)。
+  await connection();
   const { storeId } = await params;
   const [store, research] = await Promise.all([
     getStoreCached(storeId),

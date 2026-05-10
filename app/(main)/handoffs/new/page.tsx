@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
+import { connection } from "next/server";
 import Link from "next/link";
 import { HandoffNewForm } from "./_components/handoff-new-form";
 import { getDealCached } from "@/lib/queries/deals";
@@ -11,6 +12,8 @@ interface PageProps {
 }
 
 export default async function NewHandoffPage({ searchParams }: PageProps) {
+  // build 時 prerender を skip (USE_CACHE_TIMEOUT 対策)。
+  await connection();
   const sp = await searchParams;
   if (!sp.deal) notFound();
   const deal = await getDealCached(sp.deal);
