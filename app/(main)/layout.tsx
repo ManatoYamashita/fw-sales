@@ -1,9 +1,12 @@
 import { Suspense, type ReactNode } from "react";
+import { connection } from "next/server";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
 import { loadNavBadgeCounts } from "@/components/layout/nav-badges";
 
 async function SidebarShell() {
+  // build 時 prerender を skip (USE_CACHE_TIMEOUT 対策)。
+  await connection();
   const counts = await loadNavBadgeCounts();
   return <Sidebar counts={counts} />;
 }

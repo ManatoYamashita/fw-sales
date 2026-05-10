@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { connection } from "next/server";
 import { Tabs, TabsList, TabsTrigger, TabsPanel } from "@/components/ui/tabs";
 import { getResearchQueue } from "@/lib/queries/research";
 import { WaitingList, DoneList } from "./_components/research-list";
@@ -8,6 +9,8 @@ export const metadata: Metadata = {
 };
 
 export default async function ResearchPage() {
+  // build 時 prerender を skip (USE_CACHE_TIMEOUT 対策)。
+  await connection();
   const queue = await getResearchQueue();
   return (
     <div className="space-y-4">
