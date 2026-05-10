@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { cacheTag } from "next/cache";
+import { connection } from "next/server";
 import { Handshake } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -24,6 +25,8 @@ const statusTone: Record<DealStatus, "neutral" | "amber" | "green" | "red"> = {
 };
 
 export async function DealsHistoryCard({ storeId }: { storeId: string }) {
+  // build 時 prerender を skip (USE_CACHE_TIMEOUT 対策)。
+  await connection();
   const deals = await loadDealsByStore(storeId);
   return (
     <Card>

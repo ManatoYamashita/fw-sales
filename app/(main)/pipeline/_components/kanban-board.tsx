@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { cacheTag } from "next/cache";
+import { connection } from "next/server";
 import { ChannelBadge } from "@/components/feature/channel-badge";
 import { PriorityBadge } from "@/components/feature/priority-badge";
 import { getPipelineColumns } from "@/lib/queries/pipeline";
@@ -15,6 +16,8 @@ async function loadColumns(filter: StoreFilter) {
 }
 
 export async function KanbanBoard({ filter }: { filter: StoreFilter }) {
+  // build 時 prerender を skip (USE_CACHE_TIMEOUT 対策)。
+  await connection();
   const columns = await loadColumns(filter);
   return (
     <div className="flex gap-3 overflow-x-auto pb-4 -mx-4 md:-mx-6 px-4 md:px-6 scrollbar-none">

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { cacheTag } from "next/cache";
+import { connection } from "next/server";
 import { Card } from "@/components/ui/card";
 import { Stat } from "@/components/ui/stat";
 import { Heading, Text } from "@/components/ui/typography";
@@ -39,6 +40,8 @@ async function loadCounts() {
 }
 
 export default async function SettingsPage() {
+  // build 時 prerender を skip (USE_CACHE_TIMEOUT 対策)。
+  await connection();
   const counts = await loadCounts();
   return (
     <div className="space-y-6 max-w-4xl">

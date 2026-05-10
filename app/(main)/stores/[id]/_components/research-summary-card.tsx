@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { cacheTag } from "next/cache";
+import { connection } from "next/server";
 import { Search } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -13,6 +14,8 @@ async function loadResearchByStore(storeId: string) {
 }
 
 export async function ResearchSummaryCard({ storeId }: { storeId: string }) {
+  // build 時 prerender を skip (USE_CACHE_TIMEOUT 対策)。
+  await connection();
   const research = await loadResearchByStore(storeId);
   if (!research) {
     return (
