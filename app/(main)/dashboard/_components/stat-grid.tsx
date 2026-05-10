@@ -1,4 +1,5 @@
 import { cacheTag } from "next/cache";
+import { connection } from "next/server";
 import {
   Store as StoreIcon,
   Search,
@@ -21,6 +22,8 @@ async function loadStats() {
 }
 
 export async function StatGrid() {
+  // build 時 prerender を skip (USE_CACHE_TIMEOUT 対策)。
+  await connection();
   const stats = await loadStats();
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
