@@ -29,6 +29,13 @@
       "when": 1778332257878,
       "tag": "0003_add_store_geo_hours",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1778419304391,
+      "tag": "0004_add_profiles_and_assignee_user_id",
+      "breakpoints": true
     }
   ]
 }

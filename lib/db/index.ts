@@ -27,3 +27,8 @@ export { makeDealRepo, dbDealRepo } from "./deal-repository";
 export { makeStoreRepo, dbStoreRepo } from "./store-repository";
 export { makeResearchRepo, dbResearchRepo } from "./research-repository";
 export { makeHandoffRepo, dbHandoffRepo } from "./handoff-repository";
+export { makeProfileRepo, dbProfileRepo } from "./profile-repository";
+export {
+  makeNotificationRepo,
+  dbNotificationRepo,
+} from "./notification-repository";

@@ -1,14 +1,32 @@
 import { Suspense, type ReactNode } from "react";
+import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
 import { loadNavBadgeCounts } from "@/components/layout/nav-badges";
+import { getCurrentProfile } from "@/lib/supabase/server";
 
 async function SidebarShell() {
   // build 時 prerender を skip (USE_CACHE_TIMEOUT 対策)。
   await connection();
   const counts = await loadNavBadgeCounts();
   return <Sidebar counts={counts} />;
+}
+
+/**
+ * Topbar に currentProfile を注入する RSC ラッパ。
+ *
+ * middleware が `(main)` 配下を保護するため通常はここに到達しているなら
+ * 認証済のはずだが、防御的に profile が null の場合は `/login` に redirect する
+ * (auth-and-notifications spec §1.1, §1.5)。
+ */
+async function TopbarShell() {
+  await connection();
+  const profile = await getCurrentProfile();
+  if (!profile) {
+    redirect("/login");
+  }
+  return <Topbar currentProfile={profile} />;
 }
 
 function SidebarFallback() {
@@ -39,7 +57,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
       </Suspense>
       <div className="flex-1 flex flex-col min-w-0">
         <Suspense fallback={<TopbarFallback />}>
-          <Topbar />
+          <TopbarShell />
         </Suspense>
         <main className="flex-1 px-4 md:px-6 py-6 md:py-8 max-w-screen-2xl 4xl:max-w-screen-4xl mx-auto w-full">
           {children}

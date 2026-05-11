@@ -22,6 +22,12 @@ export interface Deal {
   lost_reason: string;
   status: DealStatus;
   assigned_sales: string;
+  /**
+   * 営業担当ユーザー参照 (auth-and-notifications Phase 1 で追加)。
+   * Phase 6 でバックフィル → Phase 7 でアプリ層が参照に切替 → Phase 8 で旧 text 列 DROP。
+   * 段階移行中の互換性確保のため optional として宣言。
+   */
+  assigned_sales_user_id?: string | null;
   created_at: string;
   updated_at: string;
 }

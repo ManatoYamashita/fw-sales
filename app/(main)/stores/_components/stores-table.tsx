@@ -16,16 +16,24 @@ const columns: ColumnDef<Store>[] = [
   {
     key: "name",
     header: "店舗名",
+    truncate: true,
+    maxWidth: "260px",
+    title: (s) => s.name,
     cell: (s) => (
-      <span className="inline-flex items-center gap-2 flex-wrap">
-        <span className="font-semibold text-foreground">{s.name}</span>
-        <IndividualStoreBadge operatorType={s.operator_type} />
+      <span className="inline-flex items-center gap-2 min-w-0 max-w-full align-middle">
+        <span className="font-semibold text-foreground truncate">{s.name}</span>
+        <span className="flex-shrink-0">
+          <IndividualStoreBadge operatorType={s.operator_type} />
+        </span>
       </span>
     ),
   },
   {
     key: "location",
     header: "エリア",
+    truncate: true,
+    maxWidth: "200px",
+    title: (s) => [s.prefecture, s.city].filter(Boolean).join(" / ") || undefined,
     cell: (s) => (
       <span className="text-foreground/80">
         {[s.prefecture, s.city].filter(Boolean).join(" / ") || "—"}
@@ -64,6 +72,9 @@ const columns: ColumnDef<Store>[] = [
   {
     key: "sales",
     header: "営業担当",
+    truncate: true,
+    maxWidth: "140px",
+    title: (s) => s.assigned_sales || undefined,
     cell: (s) => s.assigned_sales || "—",
   },
   {

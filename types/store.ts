@@ -39,6 +39,18 @@ export interface Store {
   memo: string;
   assigned_planner: string;
   assigned_sales: string;
+  /**
+   * 企画担当ユーザー参照 (auth-and-notifications Phase 1 で追加)。
+   * Phase 6 ではバックフィル後に値が入る nullable 列、Phase 7 でアプリ層が
+   * 参照に切替わり、Phase 8 で旧 `assigned_planner` (text) が DROP される。
+   * 段階移行中の互換性確保のため optional として宣言。
+   */
+  assigned_planner_user_id?: string | null;
+  /**
+   * 営業担当ユーザー参照 (auth-and-notifications Phase 1 で追加)。
+   * 上記 `assigned_planner_user_id` と同様の段階移行ライフサイクル。
+   */
+  assigned_sales_user_id?: string | null;
   /** 運営者種別: 個人店 / 複数店舗運営 / 未設定 (個人店判別シグナル) */
   operator_type: OperatorType;
   /** 運営者名: 法人名 (複数店舗運営) または個人オーナー名。未設定時は空文字。 */
