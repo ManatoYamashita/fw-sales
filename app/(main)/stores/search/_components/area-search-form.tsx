@@ -53,7 +53,7 @@ export function AreaSearchForm() {
           <FormField
             label="キーワード"
             htmlFor="keyword"
-            hint="業態・店舗名など"
+            hint="業態・店舗名など（必須）"
           >
             <Input
               id="keyword"

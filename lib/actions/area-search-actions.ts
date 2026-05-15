@@ -12,8 +12,8 @@ export async function searchPlacesAction(
   keyword: string,
   area: string,
 ): Promise<ActionResult<PlaceResult[]>> {
-  if (!keyword.trim() && !area.trim()) {
-    return failure("キーワードまたはエリアを入力してください");
+  if (!keyword.trim()) {
+    return failure("キーワードを入力してください");
   }
   try {
     const results = await searchPlaces(keyword, area);

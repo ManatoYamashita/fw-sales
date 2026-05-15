@@ -41,6 +41,25 @@ interface PlacesResponse {
   places?: RawPlace[];
 }
 
+const FOOD_TYPES: ReadonlySet<string> = new Set([
+  "restaurant",
+  "food",
+  "cafe",
+  "bar",
+  "bakery",
+  "ramen_restaurant",
+  "sushi_restaurant",
+  "japanese_restaurant",
+  "italian_restaurant",
+  "chinese_restaurant",
+  "pizza_restaurant",
+  "hamburger_restaurant",
+]);
+
+function isFoodPlace(types: string[]): boolean {
+  return types.some((t) => FOOD_TYPES.has(t));
+}
+
 function toPlaceResult(raw: RawPlace): PlaceResult {
   return {
     placeId: raw.id,
@@ -84,5 +103,7 @@ export async function searchPlaces(
   }
 
   const data = (await response.json()) as PlacesResponse;
-  return (data.places ?? []).map(toPlaceResult);
+  return (data.places ?? [])
+    .map(toPlaceResult)
+    .filter((p) => isFoodPlace(p.types));
 }
