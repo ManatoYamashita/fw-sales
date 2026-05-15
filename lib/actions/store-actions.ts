@@ -108,6 +108,7 @@ function buildStoreInput(formData: FormData): StoreInput {
     lat: readNullableNumber(formData, "lat"),
     lng: readNullableNumber(formData, "lng"),
     business_hours: readString(formData, "business_hours"),
+    google_place_id: null,
   };
 }
 
