@@ -75,6 +75,13 @@ export interface StoreFilter {
   stage?: StageId;
   channel?: Channel;
   priority?: Priority;
+  /**
+   * 営業担当者の絞り込み。`Store.assigned_sales` カラムと完全一致(`eq()` / `===`)で比較する。
+   * 表記揺れ正規化(全角半角・前後空白・大小文字)は行わない。
+   * 担当者マスタ ID 化は後続 Issue (`auth-and-notifications` 系列) で対応するため、
+   * 本機能では文字列のまま保持する。
+   */
+  sales?: string;
 }
 
 /* ------------------------------------------------------------------ */

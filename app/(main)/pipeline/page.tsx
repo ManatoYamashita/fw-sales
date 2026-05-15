@@ -24,7 +24,7 @@ export default async function PipelinePage({ searchParams }: PageProps) {
   if (sp.priority && (PRIORITIES as readonly string[]).includes(sp.priority)) {
     filter.priority = sp.priority as Priority;
   }
-  // sales フィルタはクライアント側カラム表示後に絞り込む(KanbanBoardでは未対応 → 後日)
+  if (sp.sales) filter.sales = sp.sales;
 
   return (
     <div className="space-y-4">

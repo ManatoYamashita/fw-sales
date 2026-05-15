@@ -9,6 +9,7 @@ function matches(store: Store, filter: StoreFilter): boolean {
   if (filter.stage && store.stage !== filter.stage) return false;
   if (filter.priority && store.priority !== filter.priority) return false;
   if (filter.channel && store.channel !== filter.channel) return false;
+  if (filter.sales && store.assigned_sales !== filter.sales) return false;
   if (filter.q) {
     const q = filter.q.trim().toLowerCase();
     if (!q) return true;
