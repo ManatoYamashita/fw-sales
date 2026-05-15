@@ -6,15 +6,20 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "@/components/ui/toast";
 import { addStoreFromPlaceAction } from "@/lib/actions/area-search-actions";
-import type { PlaceResult } from "@/lib/places/types";
 
 interface AddStoreButtonProps {
-  place: PlaceResult;
+  placeId: string;
+  placeName: string;
   isAdded: boolean;
   onAdded: (placeId: string) => void;
 }
 
-export function AddStoreButton({ place, isAdded, onAdded }: AddStoreButtonProps) {
+export function AddStoreButton({
+  placeId,
+  placeName,
+  isAdded,
+  onAdded,
+}: AddStoreButtonProps) {
   const [isPending, startTransition] = useTransition();
 
   if (isAdded) {
@@ -28,10 +33,10 @@ export function AddStoreButton({ place, isAdded, onAdded }: AddStoreButtonProps)
 
   const handleClick = () => {
     startTransition(async () => {
-      const result = await addStoreFromPlaceAction(place);
+      const result = await addStoreFromPlaceAction(placeId);
       if (result.ok) {
-        onAdded(place.placeId);
-        toast.success(result.message ?? `「${place.name}」を追加しました`);
+        onAdded(placeId);
+        toast.success(result.message ?? `「${placeName}」を追加しました`);
       } else {
         toast.error(result.error);
       }

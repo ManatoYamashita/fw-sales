@@ -56,7 +56,8 @@ export function PlaceResultList({ results, addedIds, onAdded }: PlaceResultListP
 
                 <div className="shrink-0">
                   <AddStoreButton
-                    place={place}
+                    placeId={place.placeId}
+                    placeName={place.name}
                     isAdded={addedIds.has(place.placeId)}
                     onAdded={onAdded}
                   />

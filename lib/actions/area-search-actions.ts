@@ -3,10 +3,10 @@
 import { revalidateTag } from "next/cache";
 import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
-import { searchPlaces } from "@/lib/places/google";
+import { searchPlaces, getPlaceById } from "@/lib/places/google";
 import { placeResultToStoreInput } from "@/lib/places/to-store-input";
-import { success, failure, type ActionResult } from "./_helpers";
 import type { PlaceResult } from "@/lib/places/types";
+import { success, failure, type ActionResult } from "./_helpers";
 
 export async function searchPlacesAction(
   keyword: string,
@@ -23,10 +23,21 @@ export async function searchPlacesAction(
   }
 }
 
+/**
+ * クライアントからは placeId のみ受け取り、サーバー側で Google Places API から
+ * 最新データを再取得して保存する。クライアント送信データは一切 DB に書き込まない。
+ */
 export async function addStoreFromPlaceAction(
-  place: PlaceResult,
+  placeId: string,
 ): Promise<ActionResult<{ id: string }>> {
+  if (!placeId || typeof placeId !== "string") {
+    return failure("placeId が不正です");
+  }
   try {
+    const place: PlaceResult | null = await getPlaceById(placeId);
+    if (!place) {
+      return failure("店舗情報を取得できませんでした");
+    }
     const input = placeResultToStoreInput(place);
     const created = await repos.store.create(input);
     revalidateTag(CACHE_TAGS.stores, "max");
