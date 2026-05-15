@@ -8,7 +8,10 @@ import { Button } from "@/components/ui/button";
 import { FormField } from "@/components/ui/form-field";
 import { Spinner } from "@/components/ui/spinner";
 import { PlaceResultList } from "./place-result-list";
-import { searchPlacesWithMatchesAction } from "@/lib/actions/area-search-actions";
+import {
+  searchPlacesWithMatchesAction,
+  bulkAddStoresFromPlacesAction,
+} from "@/lib/actions/area-search-actions";
 import type { PlaceWithMatch } from "@/lib/places/types";
 
 export function AreaSearchForm() {
@@ -17,10 +20,18 @@ export function AreaSearchForm() {
   const [results, setResults] = useState<PlaceWithMatch[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [addedIds, setAddedIds] = useState<ReadonlySet<string>>(new Set());
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
+  const [bulkResult, setBulkResult] = useState<{
+    added: number;
+    failed: number;
+  } | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [isBulkPending, startBulkTransition] = useTransition();
 
   const handleSearch = () => {
     setError(null);
+    setSelectedIds(new Set());
+    setBulkResult(null);
     startTransition(async () => {
       const result = await searchPlacesWithMatchesAction(keyword, area);
       if (result.ok) {
@@ -41,7 +52,59 @@ export function AreaSearchForm() {
 
   const handleAdded = (placeId: string) => {
     setAddedIds((prev) => new Set([...prev, placeId]));
+    // 個別追加されたら選択状態も解除
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.delete(placeId);
+      return next;
+    });
   };
+
+  const handleToggle = (placeId: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(placeId)) {
+        next.delete(placeId);
+      } else {
+        next.add(placeId);
+      }
+      return next;
+    });
+  };
+
+  const handleSelectAll = () => {
+    const eligible = (results ?? [])
+      .filter(
+        ({ place, matchedStore }) =>
+          matchedStore === null && !addedIds.has(place.placeId),
+      )
+      .map(({ place }) => place.placeId);
+    setSelectedIds(new Set(eligible));
+  };
+
+  const handleDeselectAll = () => {
+    setSelectedIds(new Set());
+  };
+
+  const handleBulkAdd = () => {
+    setBulkResult(null);
+    const ids = [...selectedIds];
+    startBulkTransition(async () => {
+      const result = await bulkAddStoresFromPlacesAction(ids);
+      if (result.ok) {
+        const { added, failed, failedPlaceIds } = result.data;
+        const failedSet = new Set(failedPlaceIds);
+        const succeededIds = ids.filter((id) => !failedSet.has(id));
+        setAddedIds((prev) => new Set([...prev, ...succeededIds]));
+        setSelectedIds(new Set());
+        setBulkResult({ added, failed });
+      } else {
+        setError(result.error);
+      }
+    });
+  };
+
+  const hasResults = results !== null && results.length > 0;
 
   return (
     <div className="space-y-4">
@@ -110,12 +173,54 @@ export function AreaSearchForm() {
         </div>
       )}
 
-      {results !== null && results.length > 0 && (
-        <PlaceResultList
-          results={results}
-          addedIds={addedIds}
-          onAdded={handleAdded}
-        />
+      {hasResults && (
+        <>
+          {/* 一括操作コントロール */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <Button variant="outline" size="sm" onClick={handleSelectAll}>
+              全選択
+            </Button>
+            <Button variant="ghost" size="sm" onClick={handleDeselectAll}>
+              選択解除
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={handleBulkAdd}
+              disabled={selectedIds.size === 0 || isBulkPending}
+              className="gap-1.5"
+            >
+              {isBulkPending ? (
+                <>
+                  <Spinner className="text-primary-foreground" />
+                  追加中…
+                </>
+              ) : selectedIds.size > 0 ? (
+                `選択して追加 (${selectedIds.size})`
+              ) : (
+                "選択して追加"
+              )}
+            </Button>
+            {bulkResult && (
+              <span className="text-sm text-muted-foreground">
+                {bulkResult.added}件追加しました
+                {bulkResult.failed > 0 && (
+                  <span className="text-destructive">
+                    {" "}/ {bulkResult.failed}件失敗しました
+                  </span>
+                )}
+              </span>
+            )}
+          </div>
+
+          <PlaceResultList
+            results={results}
+            addedIds={addedIds}
+            selectedIds={selectedIds}
+            onAdded={handleAdded}
+            onToggle={handleToggle}
+          />
+        </>
       )}
     </div>
   );

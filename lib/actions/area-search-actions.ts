@@ -6,6 +6,7 @@ import { CACHE_TAGS } from "@/lib/cache";
 import { searchPlaces, getPlaceById } from "@/lib/places/google";
 import { placeResultToStoreInput } from "@/lib/places/to-store-input";
 import { attachStoreMatches } from "@/lib/places/match-store";
+import { deduplicatePlaceIds } from "@/lib/places/bulk-utils";
 import type { PlaceResult, PlaceWithMatch } from "@/lib/places/types";
 import { success, failure, type ActionResult } from "./_helpers";
 
@@ -73,4 +74,64 @@ export async function addStoreFromPlaceAction(
   } catch (e) {
     return failure(e instanceof Error ? e.message : "追加に失敗しました");
   }
+}
+
+/**
+ * 複数の placeId を受け取り、Google Places API から順次再取得して一括追加する。
+ * - Clientからは placeId の配列のみ受け取る (PlaceResult全体は渡さない)
+ * - 1件失敗しても全体を止めず続行する
+ * - API制限を考慮して直列処理
+ * - 成功件数・失敗件数・作成した Store ID・失敗した placeId を返す
+ */
+export async function bulkAddStoresFromPlacesAction(
+  placeIds: string[],
+): Promise<
+  ActionResult<{
+    added: number;
+    failed: number;
+    createdIds: string[];
+    failedPlaceIds: string[];
+  }>
+> {
+  if (!Array.isArray(placeIds) || placeIds.length === 0) {
+    return failure("追加する店舗を選択してください");
+  }
+
+  const uniqueIds = deduplicatePlaceIds(placeIds);
+  if (uniqueIds.length === 0) {
+    return failure("追加する店舗を選択してください");
+  }
+
+  const createdIds: string[] = [];
+  const failedPlaceIds: string[] = [];
+
+  for (const placeId of uniqueIds) {
+    try {
+      const place = await getPlaceById(placeId);
+      if (!place) {
+        failedPlaceIds.push(placeId);
+        continue;
+      }
+      const input = placeResultToStoreInput(place);
+      const created = await repos.store.create(input);
+      createdIds.push(created.id);
+    } catch {
+      failedPlaceIds.push(placeId);
+    }
+  }
+
+  if (createdIds.length > 0) {
+    revalidateTag(CACHE_TAGS.stores, "max");
+    revalidateTag(CACHE_TAGS.stats, "max");
+    revalidateTag(CACHE_TAGS.pipeline, "max");
+    revalidateTag(CACHE_TAGS.kpi, "max");
+    revalidateTag(CACHE_TAGS.actionQueue, "max");
+  }
+
+  return success({
+    added: createdIds.length,
+    failed: failedPlaceIds.length,
+    createdIds,
+    failedPlaceIds,
+  });
 }
