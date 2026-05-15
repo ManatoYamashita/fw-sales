@@ -7,6 +7,8 @@ import { NAV_ITEMS } from "@/lib/domain/nav";
 import { Breadcrumb, type BreadcrumbItem } from "@/components/ui/breadcrumb";
 import { buttonVariants } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
+import { UserMenu } from "@/components/layout/user-menu";
+import type { Profile } from "@/types/profile";
 import { cn } from "@/lib/utils/cn";
 
 function deriveBreadcrumb(pathname: string): BreadcrumbItem[] {
@@ -34,7 +36,11 @@ function deriveBreadcrumb(pathname: string): BreadcrumbItem[] {
   return [{ label: "Firstweb Lead OS" }];
 }
 
-export function Topbar() {
+interface TopbarProps {
+  readonly currentProfile?: Profile;
+}
+
+export function Topbar({ currentProfile }: TopbarProps) {
   const pathname = usePathname();
   const items = deriveBreadcrumb(pathname);
 
@@ -59,6 +65,7 @@ export function Topbar() {
           <Plus className="h-4 w-4" />
           <span className="hidden sm:inline">店舗登録</span>
         </Link>
+        {currentProfile ? <UserMenu profile={currentProfile} /> : null}
       </div>
     </header>
   );

@@ -1,4 +1,54 @@
-import { pgTable, text, integer, real } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, real, uuid } from "drizzle-orm/pg-core";
+
+/**
+ * profiles テーブル (auth-and-notifications spec, Issue #16)
+ *
+ * `auth.users` (Supabase 管理スキーマ) と 1:1 対応するアプリ側プロフィール。
+ *
+ * - `id` は uuid PK、`auth.users.id` への FK 制約 (ON DELETE CASCADE) を
+ *   マイグレーション側で raw SQL で付与する (cross-schema FK は drizzle 表現外)
+ * - `auth.users` への INSERT は `handle_new_user()` trigger により本テーブルへ
+ *   自動展開される (Req 2.1, 2.2)
+ * - `email` は UNIQUE 制約付き、placeholder の場合は `placeholder-{slug}@local.invalid`
+ * - `created_at` / `updated_at` は既存規約に従い `YYYY-MM-DD` 形式 text を継続使用
+ */
+export const profiles = pgTable("profiles", {
+  id: uuid("id").primaryKey(),
+  email: text("email").notNull().unique(),
+  display_name: text("display_name").notNull(),
+  avatar_url: text("avatar_url"),
+  /** `'member' | 'placeholder'` のいずれか。アプリ層型ガードで担保 (既存規約) */
+  role: text("role").notNull().default("member"),
+  created_at: text("created_at").notNull(),
+  updated_at: text("updated_at").notNull(),
+});
+
+/**
+ * notifications テーブル (auth-and-notifications spec, Issue #16)
+ *
+ * テーブル本体および UI (通知ベル) は別仕様 (#14) が所有。本仕様では
+ * `user_id` 列の追加と「ベルが本人通知のみ表示する」契約を提供する。
+ *
+ * - `id` は text PK (`<entity>_<id>` 形式の既存規約に揃える)
+ * - `user_id` は nullable uuid → `profiles.id` への FK (Req 7.1, 7.2, 7.3)
+ *   NULL は「全員向け通知」として将来拡張余地を残す
+ * - `kind` は text + アプリ層型ガード (`NotificationKind` 型) で担保
+ * - `read_at` は既読時刻 (NULL = 未読)
+ *
+ * 注: `#14` がこのテーブルを正式新設する場合は、本仕様の定義は #14 の最終形に
+ * 整合させる (本仕様 §Boundary Commitments)。
+ */
+export const notifications = pgTable("notifications", {
+  id: text("id").primaryKey(),
+  user_id: uuid("user_id"),
+  kind: text("kind").notNull(),
+  title: text("title").notNull(),
+  body: text("body").notNull(),
+  link_url: text("link_url"),
+  read_at: text("read_at"),
+  created_at: text("created_at").notNull(),
+  updated_at: text("updated_at").notNull(),
+});
 
 /**
  * stores テーブル
@@ -31,6 +81,22 @@ export const stores = pgTable("stores", {
   memo: text("memo").notNull(),
   assigned_planner: text("assigned_planner").notNull(),
   assigned_sales: text("assigned_sales").notNull(),
+  /**
+   * 企画担当ユーザーへの参照 (auth-and-notifications spec, Phase 1)。
+   * `profiles.id` への uuid FK (nullable)。Phase 2 で旧 text 列 `assigned_planner` を DROP し、
+   * 本列が単一の真実となる。
+   */
+  assigned_planner_user_id: uuid("assigned_planner_user_id").references(
+    () => profiles.id,
+  ),
+  /**
+   * 営業担当ユーザーへの参照 (auth-and-notifications spec, Phase 1)。
+   * `profiles.id` への uuid FK (nullable)。Phase 2 で旧 text 列 `assigned_sales` を DROP し、
+   * 本列が単一の真実となる。
+   */
+  assigned_sales_user_id: uuid("assigned_sales_user_id").references(
+    () => profiles.id,
+  ),
   /** 運営者種別 (個人店 / 複数店舗運営 / 未設定)。既存レコードは "未設定" にフォールバック。 */
   operator_type: text("operator_type").notNull().default("未設定"),
   /** 運営者名 (法人名 or 個人オーナー名)。空文字許容、デフォルト空文字。 */
@@ -72,6 +138,14 @@ export const deals = pgTable("deals", {
   lost_reason: text("lost_reason").notNull(),
   status: text("status").notNull(),
   assigned_sales: text("assigned_sales").notNull(),
+  /**
+   * 営業担当ユーザーへの参照 (auth-and-notifications spec, Phase 1)。
+   * `profiles.id` への uuid FK (nullable)。Phase 2 で旧 text 列 `assigned_sales` を DROP し、
+   * 本列が単一の真実となる。
+   */
+  assigned_sales_user_id: uuid("assigned_sales_user_id").references(
+    () => profiles.id,
+  ),
   created_at: text("created_at").notNull(),
   updated_at: text("updated_at").notNull(),
 });

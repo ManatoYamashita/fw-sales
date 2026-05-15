@@ -19,4 +19,9 @@ export const CACHE_TAGS = {
   pipeline: "pipeline",
   kpi: "kpi",
   actionQueue: "action-queue",
+  // auth-and-notifications spec (Issue #16)
+  profiles: "profiles",
+  profile: (id: string) => `profile:${id}`,
+  notifications: "notifications",
+  notification: (id: string) => `notification:${id}`,
 } as const;

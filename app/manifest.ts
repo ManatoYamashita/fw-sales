@@ -1,0 +1,39 @@
+import type { MetadataRoute } from "next";
+
+export default function manifest(): MetadataRoute.Manifest {
+  return {
+    name: "Firstweb Lead OS",
+    short_name: "Lead OS",
+    description:
+      "飲食店向け WEB 集客の営業活動を一元管理する社内向けリードマネジメントシステム。",
+    start_url: "/dashboard",
+    scope: "/",
+    display: "standalone",
+    orientation: "portrait",
+    lang: "ja",
+    dir: "ltr",
+    background_color: "#f1f5f9",
+    theme_color: "#0f172a",
+    icons: [
+      { src: "/favicon.ico", sizes: "any", type: "image/x-icon" },
+      {
+        src: "/icon.webp",
+        sizes: "500x500",
+        type: "image/webp",
+        purpose: "any",
+      },
+      {
+        src: "/icon.png",
+        sizes: "500x500",
+        type: "image/png",
+        purpose: "any",
+      },
+      {
+        src: "/icon.png",
+        sizes: "500x500",
+        type: "image/png",
+        purpose: "maskable",
+      },
+    ],
+  };
+}

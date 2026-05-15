@@ -14,6 +14,12 @@ export interface ColumnDef<T> {
    * `rowHref` が設定されている時のみ意味を持つ。
    */
   preventRowClick?: boolean;
+  /** セル内容を 1 行省略 (…) で切り詰める。`maxWidth` と組み合わせて使用。 */
+  truncate?: boolean;
+  /** truncate 時のセル最大幅。例: "260px"。 */
+  maxWidth?: string;
+  /** truncate 時の native tooltip (title 属性) として表示する全文。 */
+  title?: (row: T) => string | undefined;
 }
 
 export type DataTableDensity = "compact" | "normal";
@@ -61,12 +67,16 @@ export function DataTable<T>({
                 key={col.key}
                 className={cn(
                   HEADER_PADDING[density],
-                  "font-semibold",
+                  "font-semibold whitespace-nowrap",
                   col.align === "right" && "text-right",
                   col.align === "center" && "text-center",
                   col.className,
                 )}
-                style={col.width ? { width: col.width } : undefined}
+                style={
+                  col.width || col.maxWidth
+                    ? { width: col.width, maxWidth: col.maxWidth }
+                    : undefined
+                }
               >
                 {col.header}
               </th>
@@ -91,13 +101,20 @@ export function DataTable<T>({
                     data-no-row-click={col.preventRowClick ? "true" : undefined}
                     className={cn(
                       ROW_PADDING[density],
-                      "align-middle text-foreground/90",
+                      "align-middle text-foreground/90 whitespace-nowrap",
                       col.align === "right" && "text-right tabular-nums",
                       col.align === "center" && "text-center",
                       col.className,
                     )}
+                    style={col.maxWidth ? { maxWidth: col.maxWidth } : undefined}
                   >
-                    {col.cell(row)}
+                    {col.truncate ? (
+                      <div className="truncate" title={col.title?.(row)}>
+                        {col.cell(row)}
+                      </div>
+                    ) : (
+                      col.cell(row)
+                    )}
                   </td>
                 ))}
               </DataTableRow>
