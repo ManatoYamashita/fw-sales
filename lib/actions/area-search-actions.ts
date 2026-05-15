@@ -5,8 +5,32 @@ import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
 import { searchPlaces, getPlaceById } from "@/lib/places/google";
 import { placeResultToStoreInput } from "@/lib/places/to-store-input";
-import type { PlaceResult } from "@/lib/places/types";
+import { attachStoreMatches } from "@/lib/places/match-store";
+import type { PlaceResult, PlaceWithMatch } from "@/lib/places/types";
 import { success, failure, type ActionResult } from "./_helpers";
+
+/**
+ * Google Places 検索 + 既存DB照合を1回のServer Actionで行う。
+ * 各検索結果に matchedStore (DB登録済み情報) を付与して返す。
+ * 既存の searchPlacesAction は壊さず維持する。
+ */
+export async function searchPlacesWithMatchesAction(
+  keyword: string,
+  area: string,
+): Promise<ActionResult<PlaceWithMatch[]>> {
+  if (!keyword.trim()) {
+    return failure("キーワードを入力してください");
+  }
+  try {
+    const [places, stores] = await Promise.all([
+      searchPlaces(keyword, area),
+      repos.store.list(),
+    ]);
+    return success(attachStoreMatches(places, stores));
+  } catch (e) {
+    return failure(e instanceof Error ? e.message : "検索に失敗しました");
+  }
+}
 
 export async function searchPlacesAction(
   keyword: string,

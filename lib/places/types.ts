@@ -1,3 +1,16 @@
+/** DBに既存の店舗が見つかった場合に返す最小限の情報 */
+export type MatchedStoreSummary = {
+  id: string;
+  name: string;
+};
+
+/** 検索結果1件 + DB照合結果を組み合わせた型 */
+export type PlaceWithMatch = {
+  place: PlaceResult;
+  /** DB登録済みの場合は { id, name }。未登録の場合は null。 */
+  matchedStore: MatchedStoreSummary | null;
+};
+
 /** Google Places API New (v2) Text Search の検索結果 1件分 */
 export interface PlaceResult {
   /** places.id (例: "ChIJ...") */

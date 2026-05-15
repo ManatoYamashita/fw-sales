@@ -8,13 +8,13 @@ import { Button } from "@/components/ui/button";
 import { FormField } from "@/components/ui/form-field";
 import { Spinner } from "@/components/ui/spinner";
 import { PlaceResultList } from "./place-result-list";
-import { searchPlacesAction } from "@/lib/actions/area-search-actions";
-import type { PlaceResult } from "@/lib/places/types";
+import { searchPlacesWithMatchesAction } from "@/lib/actions/area-search-actions";
+import type { PlaceWithMatch } from "@/lib/places/types";
 
 export function AreaSearchForm() {
   const [keyword, setKeyword] = useState("");
   const [area, setArea] = useState("");
-  const [results, setResults] = useState<PlaceResult[] | null>(null);
+  const [results, setResults] = useState<PlaceWithMatch[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [addedIds, setAddedIds] = useState<ReadonlySet<string>>(new Set());
   const [isPending, startTransition] = useTransition();
@@ -22,7 +22,7 @@ export function AreaSearchForm() {
   const handleSearch = () => {
     setError(null);
     startTransition(async () => {
-      const result = await searchPlacesAction(keyword, area);
+      const result = await searchPlacesWithMatchesAction(keyword, area);
       if (result.ok) {
         setResults(result.data);
         if (result.data.length === 0) {

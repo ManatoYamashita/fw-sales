@@ -1,13 +1,16 @@
 "use client";
 
+import Link from "next/link";
 import { MapPin, Phone } from "lucide-react";
 import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { buttonVariants } from "@/components/ui/button";
 import { StarRating } from "@/components/ui/star-rating";
 import { AddStoreButton } from "./add-store-button";
-import type { PlaceResult } from "@/lib/places/types";
+import type { PlaceWithMatch } from "@/lib/places/types";
 
 interface PlaceResultListProps {
-  results: PlaceResult[];
+  results: PlaceWithMatch[];
   addedIds: ReadonlySet<string>;
   onAdded: (placeId: string) => void;
 }
@@ -19,7 +22,7 @@ export function PlaceResultList({ results, addedIds, onAdded }: PlaceResultListP
         {results.length} 件の店舗が見つかりました
       </p>
       <ul className="space-y-2">
-        {results.map((place) => (
+        {results.map(({ place, matchedStore }) => (
           <li key={place.placeId}>
             <Card>
               <Card.Body className="flex items-start justify-between gap-4 py-4">
@@ -54,13 +57,27 @@ export function PlaceResultList({ results, addedIds, onAdded }: PlaceResultListP
                   )}
                 </div>
 
-                <div className="shrink-0">
-                  <AddStoreButton
-                    placeId={place.placeId}
-                    placeName={place.name}
-                    isAdded={addedIds.has(place.placeId)}
-                    onAdded={onAdded}
-                  />
+                <div className="shrink-0 flex flex-col items-end gap-1.5">
+                  {matchedStore !== null ? (
+                    // DB登録済み: バッジ + 編集リンク
+                    <>
+                      <Badge tone="success">DB登録済み</Badge>
+                      <Link
+                        href={`/stores/${matchedStore.id}`}
+                        className={buttonVariants({ variant: "outline", size: "sm" })}
+                      >
+                        編集
+                      </Link>
+                    </>
+                  ) : (
+                    // 未登録: 追加ボタン (追加済みバッジも内包)
+                    <AddStoreButton
+                      placeId={place.placeId}
+                      placeName={place.name}
+                      isAdded={addedIds.has(place.placeId)}
+                      onAdded={onAdded}
+                    />
+                  )}
                 </div>
               </Card.Body>
             </Card>
