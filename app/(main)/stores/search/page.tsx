@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { isPlacesApiKeyConfigured } from "@/lib/env";
 import { AreaSearchForm } from "./_components/area-search-form";
 
 export const metadata: Metadata = {
@@ -6,6 +7,8 @@ export const metadata: Metadata = {
 };
 
 export default function AreaSearchPage() {
+  const isPlacesApiConfigured = isPlacesApiKeyConfigured();
+
   return (
     <div className="space-y-4 max-w-4xl mx-auto">
       <div>
@@ -13,11 +16,11 @@ export default function AreaSearchPage() {
           エリアで店舗を検索
         </h2>
         <p className="text-sm text-muted-foreground mt-1">
-          キーワードとエリアを入力して Google Places から店舗候補を検索します。
-          見つかった店舗を 1 件ずつ営業リストに追加できます。
+          エリアやキーワードから飲食店を検索し、営業リストに追加できます。
+          登録済み店舗は自動で判定され、未登録店舗は 1 件ずつ、または複数選択して一括追加できます。
         </p>
       </div>
-      <AreaSearchForm />
+      <AreaSearchForm isPlacesApiConfigured={isPlacesApiConfigured} />
     </div>
   );
 }

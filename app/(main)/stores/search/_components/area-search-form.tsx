@@ -14,7 +14,12 @@ import {
 } from "@/lib/actions/area-search-actions";
 import type { PlaceWithMatch } from "@/lib/places/types";
 
-export function AreaSearchForm() {
+interface AreaSearchFormProps {
+  /** SSR で取得した GOOGLE_PLACES_API_KEY 設定済み boolean。値そのものは渡さない。 */
+  isPlacesApiConfigured: boolean;
+}
+
+export function AreaSearchForm({ isPlacesApiConfigured }: AreaSearchFormProps) {
   const [keyword, setKeyword] = useState("");
   const [area, setArea] = useState("");
   const [results, setResults] = useState<PlaceWithMatch[] | null>(null);
@@ -29,6 +34,7 @@ export function AreaSearchForm() {
   const [isBulkPending, startBulkTransition] = useTransition();
 
   const handleSearch = () => {
+    if (!isPlacesApiConfigured) return;
     setError(null);
     setSelectedIds(new Set());
     setBulkResult(null);
@@ -47,7 +53,7 @@ export function AreaSearchForm() {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.nativeEvent.isComposing) handleSearch();
+    if (e.key === "Enter" && !e.nativeEvent.isComposing && isPlacesApiConfigured) handleSearch();
   };
 
   const handleAdded = (placeId: string) => {
@@ -108,6 +114,28 @@ export function AreaSearchForm() {
 
   return (
     <div className="space-y-4">
+      {!isPlacesApiConfigured && (
+        <div
+          role="alert"
+          className="rounded-md border border-border bg-muted/50 px-4 py-3 text-sm space-y-1"
+        >
+          <p className="font-medium text-foreground">
+            Google Places APIキーが未設定です
+          </p>
+          <p className="text-muted-foreground">
+            エリア検索を利用するには{" "}
+            <code className="font-mono text-xs bg-background rounded border border-border px-1 py-0.5">
+              .env.local
+            </code>{" "}
+            に{" "}
+            <code className="font-mono text-xs bg-background rounded border border-border px-1 py-0.5">
+              GOOGLE_PLACES_API_KEY
+            </code>{" "}
+            を設定してください。
+          </p>
+        </div>
+      )}
+
       <Card>
         <Card.Header>
           <Card.Title>検索条件</Card.Title>
@@ -146,7 +174,7 @@ export function AreaSearchForm() {
           <Button
             variant="primary"
             onClick={handleSearch}
-            disabled={isPending}
+            disabled={isPending || !isPlacesApiConfigured}
             className="gap-2"
           >
             {isPending ? (
