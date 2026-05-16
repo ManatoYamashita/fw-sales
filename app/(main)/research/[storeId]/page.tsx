@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
+import { connection } from "next/server";
 import Link from "next/link";
 import { ResearchForm } from "./_components/research-form";
 import { getStoreCached } from "@/lib/queries/stores";
@@ -24,6 +25,8 @@ export default async function ResearchDetailPage({
 }: {
   params: Params;
 }) {
+  // build 時 prerender を skip (USE_CACHE_TIMEOUT 対策)。
+  await connection();
   const { storeId } = await params;
   const [store, research] = await Promise.all([
     getStoreCached(storeId),

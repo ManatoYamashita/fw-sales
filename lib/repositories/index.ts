@@ -33,17 +33,23 @@ import { mockDealRepo } from "@/lib/mock/deal";
 import { mockStoreRepo } from "@/lib/mock/store";
 import { mockResearchRepo } from "@/lib/mock/research";
 import { mockHandoffRepo } from "@/lib/mock/handoff";
+import { mockProfileRepo } from "@/lib/mock/profile";
+import { mockNotificationRepo } from "@/lib/mock/notification";
 
 import type { DealRepository } from "./deal-repository";
 import type { StoreRepository } from "./store-repository";
 import type { ResearchRepository } from "./research-repository";
 import type { HandoffRepository } from "./handoff-repository";
+import type { ProfileRepository } from "./profile-repository";
+import type { NotificationRepository } from "./notification-repository";
 
 export type {
   DealRepository,
   StoreRepository,
   ResearchRepository,
   HandoffRepository,
+  ProfileRepository,
+  NotificationRepository,
 };
 
 /**
@@ -60,6 +66,8 @@ export interface TxRepos {
   store: StoreRepository;
   research: ResearchRepository;
   handoff: HandoffRepository;
+  profile: ProfileRepository;
+  notification: NotificationRepository;
 }
 
 /**
@@ -70,6 +78,8 @@ export interface Repos {
   research: ResearchRepository;
   deal: DealRepository;
   handoff: HandoffRepository;
+  profile: ProfileRepository;
+  notification: NotificationRepository;
   /**
    * 複数リポジトリ書込みを 1 トランザクションで実行する。
    * - DB 経路: `db.transaction` で BEGIN/COMMIT/ROLLBACK を自動制御。
@@ -89,12 +99,16 @@ async function buildRepos(): Promise<Repos> {
       research: mockResearchRepo,
       deal: mockDealRepo,
       handoff: mockHandoffRepo,
+      profile: mockProfileRepo,
+      notification: mockNotificationRepo,
       transaction: async <T>(fn: (tx: TxRepos) => Promise<T>): Promise<T> =>
         fn({
           deal: mockDealRepo,
           store: mockStoreRepo,
           research: mockResearchRepo,
           handoff: mockHandoffRepo,
+          profile: mockProfileRepo,
+          notification: mockNotificationRepo,
         }),
     }) satisfies Repos;
   }
@@ -109,10 +123,14 @@ async function buildRepos(): Promise<Repos> {
     dbStoreRepo,
     dbResearchRepo,
     dbHandoffRepo,
+    dbProfileRepo,
+    dbNotificationRepo,
     makeDealRepo,
     makeStoreRepo,
     makeResearchRepo,
     makeHandoffRepo,
+    makeProfileRepo,
+    makeNotificationRepo,
   } = dbModule;
 
   return Object.freeze({
@@ -120,6 +138,8 @@ async function buildRepos(): Promise<Repos> {
     research: dbResearchRepo,
     deal: dbDealRepo,
     handoff: dbHandoffRepo,
+    profile: dbProfileRepo,
+    notification: dbNotificationRepo,
     transaction: <T>(fn: (tx: TxRepos) => Promise<T>): Promise<T> =>
       db.transaction(async (tx) =>
         fn({
@@ -127,6 +147,8 @@ async function buildRepos(): Promise<Repos> {
           store: makeStoreRepo(tx),
           research: makeResearchRepo(tx),
           handoff: makeHandoffRepo(tx),
+          profile: makeProfileRepo(tx),
+          notification: makeNotificationRepo(tx),
         }),
       ),
   }) satisfies Repos;
