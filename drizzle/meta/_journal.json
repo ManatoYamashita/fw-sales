@@ -36,6 +36,13 @@
       "when": 1778419304391,
       "tag": "0004_add_profiles_and_assignee_user_id",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1778912383976,
+      "tag": "0005_drop_legacy_assignee_text_columns",
+      "breakpoints": true
     }
   ]
 }

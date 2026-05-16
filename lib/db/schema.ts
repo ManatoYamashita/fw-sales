@@ -79,20 +79,18 @@ export const stores = pgTable("stores", {
   review_count: integer("review_count").notNull(),
   review_avg: real("review_avg").notNull(),
   memo: text("memo").notNull(),
-  assigned_planner: text("assigned_planner").notNull(),
-  assigned_sales: text("assigned_sales").notNull(),
   /**
-   * 企画担当ユーザーへの参照 (auth-and-notifications spec, Phase 1)。
-   * `profiles.id` への uuid FK (nullable)。Phase 2 で旧 text 列 `assigned_planner` を DROP し、
-   * 本列が単一の真実となる。
+   * 企画担当ユーザーへの参照 (auth-and-notifications spec)。
+   * `profiles.id` への uuid FK (nullable)。
+   * Phase 8 (0005 マイグレーション) で旧 `assigned_planner` (text) を DROP し、本列が単一の真実となった。
    */
   assigned_planner_user_id: uuid("assigned_planner_user_id").references(
     () => profiles.id,
   ),
   /**
-   * 営業担当ユーザーへの参照 (auth-and-notifications spec, Phase 1)。
-   * `profiles.id` への uuid FK (nullable)。Phase 2 で旧 text 列 `assigned_sales` を DROP し、
-   * 本列が単一の真実となる。
+   * 営業担当ユーザーへの参照 (auth-and-notifications spec)。
+   * `profiles.id` への uuid FK (nullable)。
+   * Phase 8 で旧 `assigned_sales` (text) DROP 済。本列が単一の真実。
    */
   assigned_sales_user_id: uuid("assigned_sales_user_id").references(
     () => profiles.id,
@@ -137,11 +135,10 @@ export const deals = pgTable("deals", {
   order_amount: integer("order_amount"),
   lost_reason: text("lost_reason").notNull(),
   status: text("status").notNull(),
-  assigned_sales: text("assigned_sales").notNull(),
   /**
-   * 営業担当ユーザーへの参照 (auth-and-notifications spec, Phase 1)。
-   * `profiles.id` への uuid FK (nullable)。Phase 2 で旧 text 列 `assigned_sales` を DROP し、
-   * 本列が単一の真実となる。
+   * 営業担当ユーザーへの参照 (auth-and-notifications spec)。
+   * `profiles.id` への uuid FK (nullable)。
+   * Phase 8 で旧 `assigned_sales` (text) DROP 済。本列が単一の真実。
    */
   assigned_sales_user_id: uuid("assigned_sales_user_id").references(
     () => profiles.id,

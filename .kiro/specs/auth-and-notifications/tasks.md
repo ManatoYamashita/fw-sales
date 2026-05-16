@@ -313,7 +313,7 @@
 
 ## 8. Migration Phase 2
 
-- [ ] 8.1 旧 text カラム DROP マイグレーション
+- [x] 8.1 旧 text カラム DROP マイグレーション
   - `drizzle/0005_drop_legacy_assignee_text_columns.sql` を作成
   - `stores.assigned_planner` / `stores.assigned_sales` / `deals.assigned_sales` を DROP
   - `store_research_jobs.triggered_by`(text)を DROP し `triggered_by_user_id` を `triggered_by` にリネーム(該当時のみ)
@@ -322,7 +322,7 @@
   - _Boundary: drizzle/0005_*.sql_
   - _Depends: 7.5, 6.6_
 
-- [ ] 8.2 lib/db/schema.ts から旧カラム定義を除去
+- [x] 8.2 lib/db/schema.ts から旧カラム定義を除去
   - schema.ts の `assigned_planner` / `assigned_sales` 行を削除し、`triggered_by` を `uuid("triggered_by")` に維持(リネーム後の最終状態)
   - 完了状態: schema.ts と DB の実カラムが完全一致、`pnpm typecheck` 通過
   - _Requirements: 3.6_
@@ -539,6 +539,9 @@
 - **Phase 7 (2026-05-16)**: `StoreFilter.sales` は Phase 7 で **profile.id (uuid) 参照に切替**。`lib/db/store-repository.ts` の WHERE 句 / `lib/mock/store.ts` の `matches()` を `assigned_sales_user_id` 比較に置換。PR #24 (`feat/pipeline-sales-filter-5`) は旧 text 比較で実装されていたが、本 Phase で同セマンティクスを user_id に統一(URL クエリ `?sales=<uuid>` 仕様に変更、旧 `?sales=渡部` URL は失効)。
 - **Phase 7 (2026-05-16)**: `lib/actions/_helpers.ts` に `readNullableString()` を新設(`""` → `null` 化)、担当者 user_id の未割当を `null` で表現する規約に統一。`validateAssignedUserIds()` を `store-actions.ts` に追加し、`null` でない uuid が `profiles.id` に存在することを `repos.profile.findById()` で検証 → 不正値は `failure(...)` で早期返却(FK 違反の Server Action 層 ガード)。
 - **Phase 7 (2026-05-16)**: `lib/domain/staff.ts` から `PLANNERS` / `SALES` / `CURRENT_USER` を**完全撤廃**し OPS_MEMBERS のみ残置(handoff 関連 user 参照化は別 Issue)。`components/layout/sidebar.tsx` は `currentProfile?: Profile` props を `SidebarShell` (in `app/(main)/layout.tsx`) から受け取る形に変更し、`getCurrentProfile()` 経由で動的にユーザ情報を表示。
+- **Phase 8 (2026-05-16)**: `drizzle-kit generate --name=drop_legacy_assignee_text_columns` で 0005 マイグレーション SQL を生成、Phase 1 と異なり cross-schema FK や trigger は不要のため raw SQL 追記なし(コメントヘッダのみ追記)。Phase 1 ロールバックと異なり、本マイグレーションはデータ消失を伴うため backup からの個別 UPDATE が必要 → ステージング検証必須を SQL コメントで明示。
+- **Phase 8 (2026-05-16)**: `scripts/backfill-assignees.ts` を**完全削除**。理由: 本スクリプトは Phase 1 deploy → backfill apply → Phase 2 deploy の遷移時のみ機能し、Phase 8 で対象カラム DROP 後は機能不能。schema.ts 経由の型参照が残ると typecheck が破綻するため、git 履歴から復元前提で削除した(必要なら `git checkout 0ccee53 -- scripts/backfill-assignees.ts`)。
+- **Phase 8 (2026-05-16)**: 連鎖整理は app code 3 ファイル + Mock seed の計 4 ファイル。`app/(main)/deals/page.tsx` / `app/(main)/deals/[id]/page.tsx` は profile.display_name 解決(前者は Map、後者は `getProfileById`)を導入、`app/(main)/stores/[id]/_components/ai-analysis-detail-section.tsx` は parent RSC で事前解決した `assignedSalesName` props を受け取る形に変更。`lib/mock/seed.ts` の旧 text フィールド 12 行を `sed` で一括除去。
 
 ---
 

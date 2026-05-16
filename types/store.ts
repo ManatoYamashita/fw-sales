@@ -38,24 +38,13 @@ export interface Store {
   review_avg: number;
   memo: string;
   /**
-   * @deprecated Phase 7 で `assigned_planner_user_id` に移行済。
-   * 段階移行中(Phase 7-8)は DB の text 列が並存するため型に残すが、
-   * Phase 8(0005 マイグレーション)で本フィールドおよび DB 列を削除する。
-   */
-  assigned_planner: string;
-  /**
-   * @deprecated Phase 7 で `assigned_sales_user_id` に移行済。
-   * Phase 8 で本フィールドおよび DB 列を削除する。
-   */
-  assigned_sales: string;
-  /**
-   * 企画担当ユーザー参照 (auth-and-notifications Phase 7 でアプリ層の主参照に昇格)。
+   * 企画担当ユーザー参照 (auth-and-notifications)。
    * `null` は未割当。`profiles.id` (uuid) を保持し、表示時は `getProfileById` で
-   * 名前解決する。Phase 8 で旧 `assigned_planner` 列 DROP 後はこれが唯一の担当者参照。
+   * 名前解決する。Phase 8 (0005 マイグレーション) で旧 `assigned_planner` (text) 列 DROP 済。
    */
   assigned_planner_user_id: string | null;
   /**
-   * 営業担当ユーザー参照 (auth-and-notifications Phase 7 でアプリ層の主参照に昇格)。
+   * 営業担当ユーザー参照 (auth-and-notifications)。
    * 上記 `assigned_planner_user_id` と同等のライフサイクル。
    */
   assigned_sales_user_id: string | null;

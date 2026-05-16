@@ -84,9 +84,7 @@ export async function createDealAction(
     order_amount: readNullableNumber(formData, "order_amount"),
     lost_reason: readString(formData, "lost_reason"),
     status,
-    // Phase 7 で主参照を user_id に切替。旧 text 列は Phase 8 で DROP 予定のため
-    // 空文字で保持(直接の書込みは行わない)。
-    assigned_sales: "",
+    // Phase 8 で旧 text 列 DROP 済。user_id 列のみを保持する。
     assigned_sales_user_id: assignedSalesUserId,
   };
 

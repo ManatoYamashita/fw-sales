@@ -101,11 +101,7 @@ function buildStoreInput(formData: FormData): StoreInput {
     review_count: readNumber(formData, "review_count", 0),
     review_avg: readNumber(formData, "review_avg", 0),
     memo: readString(formData, "memo"),
-    // Phase 7 で主参照を user_id に切替。旧 text 列は Phase 8 で DROP 予定のため
-    // 空文字で保持(直接の書込みは行わない)。Repository 層が必要に応じて
-    // user_id → display_name 解決を行う想定。
-    assigned_planner: "",
-    assigned_sales: "",
+    // Phase 8 で旧 text 列 DROP 済。user_id 列のみを保持する。
     assigned_planner_user_id: readNullableString(formData, "assigned_planner_user_id"),
     assigned_sales_user_id: readNullableString(formData, "assigned_sales_user_id"),
     operator_type: asOperatorType(readString(formData, "operator_type")),
