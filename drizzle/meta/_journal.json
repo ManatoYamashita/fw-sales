@@ -43,6 +43,13 @@
       "when": 1778912383976,
       "tag": "0005_drop_legacy_assignee_text_columns",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1778913870724,
+      "tag": "0006_notifications_user_id_fk",
+      "breakpoints": true
     }
   ]
 }

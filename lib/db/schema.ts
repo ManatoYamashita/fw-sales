@@ -40,7 +40,12 @@ export const profiles = pgTable("profiles", {
  */
 export const notifications = pgTable("notifications", {
   id: text("id").primaryKey(),
-  user_id: uuid("user_id"),
+  /**
+   * 通知受信者の profile.id (uuid)。
+   * Phase 10 (0006 マイグレーション) で `profiles.id` への FK 制約を追加。
+   * `null` は「全員宛 / システム通知」用に予約 (#14 通知ベル UI が解釈)。
+   */
+  user_id: uuid("user_id").references(() => profiles.id),
   kind: text("kind").notNull(),
   title: text("title").notNull(),
   body: text("body").notNull(),

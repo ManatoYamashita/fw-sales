@@ -28,3 +28,9 @@ export {
   type DealReminderMode,
   type ReminderDealItem,
 } from "./templates/deal-reminder";
+
+export {
+  sendResearchJobNotification,
+  type ResearchJobNotificationInput,
+  type ResearchJobNotificationKind,
+} from "./research-job-notification";

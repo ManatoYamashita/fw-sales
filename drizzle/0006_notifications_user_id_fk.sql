@@ -1,0 +1,14 @@
+-- ============================================================================
+-- Migration 0006: notifications.user_id → profiles.id FK 制約追加
+--   (auth-and-notifications Phase 10.1 / #14 連携の本仕様責務)
+-- ----------------------------------------------------------------------------
+-- 前提:
+--   - 0004 で notifications テーブル + user_id uuid 列 + idx_notifications_user_id を作成済
+--   - profiles テーブル存在
+-- ----------------------------------------------------------------------------
+-- 適用前に notifications.user_id に profiles に存在しない uuid が含まれていないか確認:
+--   SELECT COUNT(*) FROM notifications n WHERE n.user_id IS NOT NULL
+--     AND NOT EXISTS (SELECT 1 FROM profiles p WHERE p.id = n.user_id);
+-- 上記が 0 でなければ FK 適用が失敗するため、事前に該当行を整理する。
+-- ============================================================================
+ALTER TABLE "notifications" ADD CONSTRAINT "notifications_user_id_profiles_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."profiles"("id") ON DELETE no action ON UPDATE no action;

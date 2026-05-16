@@ -364,7 +364,7 @@
 
 ## 10. #14 連携(通知 / ジョブフック)
 
-- [ ] 10.1 notifications.user_id 追加(本仕様の責務)
+- [x] 10.1 notifications.user_id 追加(本仕様の責務)
   - `#14` が `notifications` テーブルを未新設の場合: 6.2 の 0004 マイグレーションに `notifications.user_id uuid REFERENCES profiles(id)` 追加 + `CREATE INDEX idx_notifications_user_id ON notifications(user_id)` を含める
   - `#14` が新設済の場合: 別マイグレーション `drizzle/000X_add_user_id_to_notifications.sql` で `ALTER TABLE notifications ADD COLUMN user_id uuid REFERENCES profiles(id)` + index を追加
   - 完了状態: `notifications.user_id` カラムが DB 上に存在し、`repos.notification.findByUserId(uid)` が動作
@@ -372,7 +372,7 @@
   - _Boundary: drizzle/, lib/db/schema.ts_
   - _Depends: 6.2, 2.5_
 
-- [ ] 10.2 ジョブフック契約と研究ジョブメール送信
+- [x] 10.2 ジョブフック契約と研究ジョブメール送信
   - `lib/jobs/research-worker.ts`(#14 が所有)に対して、本仕様で「`status: 'completed' | 'failed'` 遷移時に email を呼ぶ」フックを挿入
   - フック関数 `sendResearchJobNotification(job, kind)` を `lib/email/index.ts` から提供:
     - `repos.profile.findById(job.triggered_by)` で受信者解決
@@ -545,6 +545,9 @@
 - **Phase 9 (2026-05-16)**: `getDealsDueSoon(mode)` は `repos.deal.list()` 全件取得 + in-memory filter で実装(内部ツール規模のため専用 SQL 化せず)。将来 deal 件数が増えた場合は `DealRepository.findManyByDate` を追加して O(N) → indexed query に最適化。
 - **Phase 9 (2026-05-16)**: JST 暦日計算は `Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo' })` で `YYYY-MM-DD` 文字列を生成 → 文字列レベルで日数加減算する方式を採用。`Date.setDate()` ベースだと JST/UTC オフセット境界(深夜) で 1 日ズレるバグを避けるための明示的選択。
 - **Phase 9 (2026-05-16)**: Cron Route Handler は **常に 200 で返す** 方針 (送信失敗は error ログ + `failed` カウンタのみ)。Vercel Cron は失敗時に自動リトライしないため、個別失敗で全体を 500 にすると当日分が失われるリスクを回避(Req 4.1〜4.3 / 6.8)。Resend API 未設定環境では `emailClient.send()` 自体が `kind: 'noop'` を返すため、`skipped` として記録される。
+- **Phase 10 (2026-05-16)**: 0006 マイグレーション (`notifications.user_id` → `profiles.id` FK) を追加。`drizzle-kit generate` が自動生成し raw SQL 追記不要。適用前確認 SQL (孤児 user_id チェック) を SQL ヘッダコメントで明示。`ON DELETE no action` を採用 (CASCADE しない理由: profile 削除時に通知履歴を残す方が監査上安全)。
+- **Phase 10 (2026-05-16)**: `sendResearchJobNotification(job, kind)` は `lib/email/research-job-notification.ts` に新設、`lib/email/index.ts` から re-export。**throw しない**設計を徹底: 受信者 profile 不在 → error ログのみで return、`emailClient.send()` 失敗 → error ログのみ。これは #14 ジョブワーカー側で DB ステータス更新完了後に呼ぶ前提で、メール処理の失敗がジョブ全体の失敗を引き起こさないようにするため。
+- **Phase 10 (2026-05-16)**: `ResearchJobNotificationInput.triggered_by` は Phase 2 後の `store_research_jobs.triggered_by` (uuid) を前提に命名。Phase 1 期間中は #14 側で `triggered_by_user_id` を `triggered_by` にマップして渡す責務 (両仕様間の合意事項)。
 
 ---
 
