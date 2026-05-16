@@ -7,9 +7,14 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { PRIORITIES } from "@/types/store";
-import { SALES } from "@/lib/domain/staff";
+import type { Profile } from "@/types/profile";
 
-export function PipelineFilters() {
+export interface PipelineFiltersProps {
+  /** 担当者選択肢 (RSC で `getAllProfiles()` 経由で取得) */
+  profiles: readonly Profile[];
+}
+
+export function PipelineFilters({ profiles }: PipelineFiltersProps) {
   const router = useRouter();
   const params = useSearchParams();
   const [pending, startTransition] = useTransition();
@@ -57,9 +62,9 @@ export function PipelineFilters() {
         className="w-auto min-w-32"
       >
         <option value="">担当者すべて</option>
-        {SALES.map((s) => (
-          <option key={s} value={s}>
-            {s}
+        {profiles.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.display_name}
           </option>
         ))}
       </Select>

@@ -21,13 +21,18 @@ export interface Deal {
   order_amount: number | null;
   lost_reason: string;
   status: DealStatus;
+  /**
+   * @deprecated Phase 7 で `assigned_sales_user_id` に移行済。
+   * 段階移行中(Phase 7-8)は DB の text 列が並存するため型に残すが、
+   * Phase 8(0005 マイグレーション)で本フィールドおよび DB 列を削除する。
+   */
   assigned_sales: string;
   /**
-   * 営業担当ユーザー参照 (auth-and-notifications Phase 1 で追加)。
-   * Phase 6 でバックフィル → Phase 7 でアプリ層が参照に切替 → Phase 8 で旧 text 列 DROP。
-   * 段階移行中の互換性確保のため optional として宣言。
+   * 営業担当ユーザー参照 (auth-and-notifications Phase 7 でアプリ層の主参照に昇格)。
+   * `null` は未割当。`profiles.id` (uuid) を保持し、表示時は `getProfileById` で
+   * 名前解決する。Phase 8 で旧 `assigned_sales` 列 DROP 後はこれが唯一の担当者参照。
    */
-  assigned_sales_user_id?: string | null;
+  assigned_sales_user_id: string | null;
   created_at: string;
   updated_at: string;
 }

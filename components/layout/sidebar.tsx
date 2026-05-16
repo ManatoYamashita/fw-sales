@@ -5,15 +5,24 @@ import { usePathname } from "next/navigation";
 import { Menu, X, Zap } from "lucide-react";
 import { useState } from "react";
 import { NAV_ITEMS } from "@/lib/domain/nav";
-import { CURRENT_USER } from "@/lib/domain/staff";
 import { cn } from "@/lib/utils/cn";
 import type { NavBadgeCounts } from "@/lib/queries/stats";
+import type { Profile } from "@/types/profile";
 
 export interface SidebarProps {
   counts?: Partial<NavBadgeCounts>;
+  /**
+   * 現在ログイン中の profile (Phase 7 で `CURRENT_USER` 定数を撤廃)。
+   * null は未認証想定だが middleware が拾うため通常は到達しない。
+   */
+  currentProfile?: Profile | null;
 }
 
-export function Sidebar({ counts }: SidebarProps) {
+export function Sidebar({ counts, currentProfile }: SidebarProps) {
+  const displayName = currentProfile?.display_name ?? "ゲスト";
+  // 現状 ProfileRole は "member" | "placeholder" の 2 値。
+  // 表示は placeholder の場合のみラベルを変える(管理者ロールは将来 Issue で追加)。
+  const role = currentProfile?.role === "placeholder" ? "未登録" : "メンバー";
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const close = () => setOpen(false);
@@ -136,14 +145,14 @@ export function Sidebar({ counts }: SidebarProps) {
               className="h-9 w-9 rounded-full bg-secondary text-secondary-foreground flex items-center justify-center text-sm font-semibold shrink-0 ring-1 ring-border"
               aria-hidden
             >
-              {CURRENT_USER.name.slice(0, 1)}
+              {displayName.slice(0, 1)}
             </span>
             <div className="min-w-0 flex-1 leading-tight">
               <p className="text-sm font-semibold text-sidebar-foreground truncate">
-                {CURRENT_USER.name}
+                {displayName}
               </p>
               <p className="text-[11px] text-muted-foreground truncate">
-                {CURRENT_USER.role}
+                {role}
               </p>
             </div>
           </div>

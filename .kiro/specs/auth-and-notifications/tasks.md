@@ -266,7 +266,7 @@
 
 ## 7. 担当者 user 参照化(アプリ側)
 
-- [ ] 7.1 担当者カラム関連の型を更新
+- [x] 7.1 担当者カラム関連の型を更新
   - `types/store.ts` に `assigned_planner_user_id: string | null` / `assigned_sales_user_id: string | null` を追加、旧 `assigned_planner` / `assigned_sales` を削除(またはコメントで deprecate)
   - `types/deal.ts` の `assigned_sales` を `assigned_sales_user_id: string | null` に置換
   - 完了状態: `pnpm typecheck` 通過。型の参照箇所が後続タスクで全件補正可能
@@ -274,7 +274,7 @@
   - _Boundary: types/store.ts, types/deal.ts_
   - _Depends: 6.1_
 
-- [ ] 7.2 Server Action の FormData 読込を user 参照化
+- [x] 7.2 Server Action の FormData 読込を user 参照化
   - `lib/actions/store-actions.ts` の `readString(formData, "assigned_planner")` を `readNullableString(formData, "assigned_planner_user_id")` に置換、空文字 → null 化
   - `lib/actions/deal-actions.ts` も `assigned_sales_user_id` に置換
   - profile 存在検証(値が NULL でない場合に `repos.profile.findById(...)` で確認)を追加、不正時は `failure(...)`
@@ -283,7 +283,7 @@
   - _Boundary: lib/actions/store-actions.ts, lib/actions/deal-actions.ts_
   - _Depends: 7.1, 2.6_
 
-- [ ] 7.3 担当者選択フォームを Combobox 化
+- [x] 7.3 担当者選択フォームを Combobox 化
   - `app/(main)/stores/new/_components/store-new-form.tsx` の `assigned_planner` / `assigned_sales` text input を `<select>` または既存 UI ライブラリの Combobox に変更、選択肢は `getAllProfiles({excludePlaceholders: false})` の結果から構築
   - `app/(main)/deals/new/_components/deal-new-form.tsx` の `assigned_sales` も同様に Combobox 化(default は `getCurrentProfile()` の id)
   - 「未割当(NULL)」の選択肢を含める
@@ -292,7 +292,7 @@
   - _Boundary: app/(main)/stores/new/_components/store-new-form.tsx, app/(main)/deals/new/_components/deal-new-form.tsx_
   - _Depends: 7.2_
 
-- [ ] 7.4 表示コンポーネントで profile 名 join を反映
+- [x] 7.4 表示コンポーネントで profile 名 join を反映
   - `app/(main)/stores/_components/stores-table.tsx`、`app/(main)/pipeline/_components/kanban-board.tsx` 等で `assigned_*_user_id` を profile 名に解決して表示
   - 解決ヘルパは `lib/queries/profiles.ts` の `getProfileById` または map 化した `getAllProfiles()` をローカルで使う
   - 完了状態: 一覧 / Kanban の担当者列に表示名が出る、未割当は空表示 or `—`
@@ -300,7 +300,7 @@
   - _Boundary: app/(main)/stores/_components, app/(main)/pipeline/_components_
   - _Depends: 7.3_
 
-- [ ] 7.5 `lib/domain/staff.ts` の整理と参照置換
+- [x] 7.5 `lib/domain/staff.ts` の整理と参照置換
   - `PLANNERS` / `SALES` / `CURRENT_USER` 定数を削除し、`@deprecated` コメントで `lib/queries/profiles.ts` への移行を案内
   - `OPS_MEMBERS` は handoff 関連が user 参照化される別 Issue まで暫定維持(コメントで保留理由を明示)
   - `grep -r "PLANNERS\|SALES\b\|CURRENT_USER" --include="*.ts" --include="*.tsx" .` の全件をリストし、各参照箇所を `getCurrentProfile()` / `getAllProfiles()` に置換、または用途消失で削除
@@ -534,6 +534,11 @@
 - **Phase 6 (2026-05-11)**: Phase 7.1 でカラムを最終形(`assigned_*_user_id` を必須・旧 text を削除)に切替えるまで `types/store.ts` / `types/deal.ts` の `assigned_*_user_id` を **optional (`?: string | null`)** に保つ。これにより既存コード(旧 text フィールドを参照する serializer / Mock / 表示コンポーネント)を破壊せず段階移行できる。Phase 7.1 で `?` を外して必須化する手順を tasks.md に明記。
 - **Phase 6 (2026-05-11)**: タスク 6.4 / 6.5 は「Mock / DB リポジトリを新スキーマに追従」だが、`stores.findAll()` 等は `select(stores)` ベースの素通しで、追加カラムは自動的に row に乗る。Mock 側も `Map<string, Store>` を返すだけで filter / sort ロジックは旧 text を参照していなかったため、**コード変更は発生しなかった**(SEED 更新と型 optional 追加のみで担保)。Phase 7.x で UI 側 filter / Server Action 側 readNullableString を反映する際に初めて差分が出る想定。
 - **Phase 6 (2026-05-11)**: `scripts/backfill-assignees.ts` の `slugify()` は日本語表示名(漢字 / カナ)を `[^a-z0-9-]` で `-` 置換するため、純日本語表示名は空文字に縮退する。空 fallback として `unknown-${Date.now()}` を返し placeholder email 衝突を回避(同名 placeholder は profileCache で吸収)。dry-run は読取専用のため `dbProfileRepo.createPlaceholder` を呼ばず、別 `dryCache` 上で「(would create placeholder for ...)」のプレビュー文字列を表示する設計とした。
+- **Phase 7 (2026-05-16)**: `types/store.ts` / `types/deal.ts` の旧 `assigned_planner` / `assigned_sales` (text) は **@deprecated コメント付きで残置**(Phase 8 で削除)、`assigned_*_user_id` を **必須 (`string | null`)** に格上げ。Server Action 側 `buildStoreInput()` / `createDealAction()` で旧 text 列は空文字でハードコードして書込まない方式に切替えた。これにより `repos.store.update()` / `repos.deal.create()` の呼び出し側を破壊せず段階移行できる。
+- **Phase 7 (2026-05-16)**: 担当者 UI は **profile 名 Combobox** 化済(store/new・store/edit・store/[id] 基本情報カード・deal/new・research/[storeId]・pipeline-filters)。Parent RSC で `getAllProfiles({excludePlaceholders: false})` を呼び profiles を props 経由で Client Component に渡す方式。default 値は `getCurrentProfile()` の id を採用(deal は store の `assigned_sales_user_id` を最優先)。
+- **Phase 7 (2026-05-16)**: `StoreFilter.sales` は Phase 7 で **profile.id (uuid) 参照に切替**。`lib/db/store-repository.ts` の WHERE 句 / `lib/mock/store.ts` の `matches()` を `assigned_sales_user_id` 比較に置換。PR #24 (`feat/pipeline-sales-filter-5`) は旧 text 比較で実装されていたが、本 Phase で同セマンティクスを user_id に統一(URL クエリ `?sales=<uuid>` 仕様に変更、旧 `?sales=渡部` URL は失効)。
+- **Phase 7 (2026-05-16)**: `lib/actions/_helpers.ts` に `readNullableString()` を新設(`""` → `null` 化)、担当者 user_id の未割当を `null` で表現する規約に統一。`validateAssignedUserIds()` を `store-actions.ts` に追加し、`null` でない uuid が `profiles.id` に存在することを `repos.profile.findById()` で検証 → 不正値は `failure(...)` で早期返却(FK 違反の Server Action 層 ガード)。
+- **Phase 7 (2026-05-16)**: `lib/domain/staff.ts` から `PLANNERS` / `SALES` / `CURRENT_USER` を**完全撤廃**し OPS_MEMBERS のみ残置(handoff 関連 user 参照化は別 Issue)。`components/layout/sidebar.tsx` は `currentProfile?: Profile` props を `SidebarShell` (in `app/(main)/layout.tsx`) から受け取る形に変更し、`getCurrentProfile()` 経由で動的にユーザ情報を表示。
 
 ---
 

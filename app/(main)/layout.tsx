@@ -9,8 +9,11 @@ import { getCurrentProfile } from "@/lib/supabase/server";
 async function SidebarShell() {
   // build 時 prerender を skip (USE_CACHE_TIMEOUT 対策)。
   await connection();
-  const counts = await loadNavBadgeCounts();
-  return <Sidebar counts={counts} />;
+  const [counts, profile] = await Promise.all([
+    loadNavBadgeCounts(),
+    getCurrentProfile(),
+  ]);
+  return <Sidebar counts={counts} currentProfile={profile} />;
 }
 
 /**

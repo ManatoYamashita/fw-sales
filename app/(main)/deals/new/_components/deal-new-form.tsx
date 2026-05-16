@@ -10,12 +10,20 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { createDealAction } from "@/lib/actions/deal-actions";
 import { DEAL_STATUSES, MEETING_TYPES } from "@/types/deal";
-import { SALES } from "@/lib/domain/staff";
 import { today } from "@/lib/utils/date";
 import { toast } from "@/components/ui/toast";
 import type { Store } from "@/types/store";
+import type { Profile } from "@/types/profile";
 
-export function DealNewForm({ store }: { store: Store }) {
+export interface DealNewFormProps {
+  store: Store;
+  /** 担当者選択肢 (RSC で `getAllProfiles()` 経由で取得) */
+  profiles: readonly Profile[];
+  /** 現在ログイン中の profile.id (デフォルト担当者として使用) */
+  currentProfileId: string | null;
+}
+
+export function DealNewForm({ store, profiles, currentProfileId }: DealNewFormProps) {
   const [form, setForm] = useState({
     date: today(),
     meeting_type: "対面",
@@ -23,7 +31,8 @@ export function DealNewForm({ store }: { store: Store }) {
     proposal: "",
     estimate_amount: "",
     status: "継続追客",
-    assigned_sales: store.assigned_sales || "佐藤",
+    // 店舗の営業担当を優先、なければ現在ユーザを既定値に
+    assigned_sales_user_id: store.assigned_sales_user_id ?? currentProfileId ?? "",
   });
   const [pending, startTransition] = useTransition();
   const router = useRouter();
@@ -125,16 +134,17 @@ export function DealNewForm({ store }: { store: Store }) {
               ))}
             </Select>
           </FormField>
-          <FormField label="営業担当" htmlFor="assigned_sales">
+          <FormField label="営業担当" htmlFor="assigned_sales_user_id">
             <Select
-              id="assigned_sales"
-              name="assigned_sales"
-              value={form.assigned_sales}
-              onChange={onText("assigned_sales")}
+              id="assigned_sales_user_id"
+              name="assigned_sales_user_id"
+              value={form.assigned_sales_user_id}
+              onChange={onText("assigned_sales_user_id")}
             >
-              {SALES.map((s) => (
-                <option key={s} value={s}>
-                  {s}
+              <option value="">未割当</option>
+              {profiles.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.display_name}
                 </option>
               ))}
             </Select>
