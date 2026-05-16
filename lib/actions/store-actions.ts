@@ -79,7 +79,13 @@ function readNullableAiAnalysis(
   }
 }
 
-function buildStoreInput(formData: FormData): StoreInput {
+/**
+ * FormData から StoreInput の共通フィールドを読み取る。
+ * google_place_id は通常フォームに存在しないため含めない。
+ * create 時は呼び出し側で `google_place_id: null` を付与する。
+ * update 時はそのまま StorePatch として渡し、既存値を保持する。
+ */
+function buildStoreInput(formData: FormData): Omit<StoreInput, "google_place_id"> {
   const has_contact_form = asContactForm(readString(formData, "has_contact_form"));
   const channelInput = asChannel(readString(formData, "channel"));
   return {
@@ -124,7 +130,7 @@ export async function createStoreAction(
   _prev: ActionResult<{ id: string }> | null,
   formData: FormData,
 ): Promise<ActionResult<{ id: string }>> {
-  const input = buildStoreInput(formData);
+  const input: StoreInput = { ...buildStoreInput(formData), google_place_id: null };
   if (!input.name) return failure("店舗名を入力してください");
 
   const created = await repos.store.create(input);
@@ -136,7 +142,7 @@ export async function createStoreAction(
 }
 
 export async function createStoreAndRedirect(formData: FormData) {
-  const input = buildStoreInput(formData);
+  const input: StoreInput = { ...buildStoreInput(formData), google_place_id: null };
   if (!input.name) {
     throw new Error("店舗名を入力してください");
   }
@@ -150,9 +156,9 @@ export async function updateStoreAction(
   _prev: ActionResult<{ id: string }> | null,
   formData: FormData,
 ): Promise<ActionResult<{ id: string }>> {
-  const input = buildStoreInput(formData);
-  if (!input.name) return failure("店舗名を入力してください");
-  const updated = await repos.store.update(id, input);
+  const patch = buildStoreInput(formData);
+  if (!patch.name) return failure("店舗名を入力してください");
+  const updated = await repos.store.update(id, patch);
   if (!updated) return failure("店舗が見つかりませんでした");
   invalidateAllStoreScopes(id);
   return success({ id }, "更新しました");

@@ -12,6 +12,7 @@
  */
 
 import type { ReactNode } from "react";
+import { Suspense } from "react";
 import { GoogleSignInButton } from "./_components/google-signin-button";
 
 interface LoginPageProps {
@@ -46,12 +47,28 @@ function ErrorBanner({ children }: { children: ReactNode }) {
   );
 }
 
-export default async function LoginPage({ searchParams }: LoginPageProps) {
+/**
+ * searchParams を await する動的部分。cacheComponents: true 環境では
+ * Suspense 境界の内側で動的データにアクセスする必要がある。
+ */
+async function LoginPageContent({
+  searchParams,
+}: {
+  searchParams: LoginPageProps["searchParams"];
+}) {
   const { redirect, error } = await searchParams;
   const errorMessage = deriveErrorMessage(error);
   const redirectTo =
     redirect && redirect.startsWith("/") ? redirect : "/dashboard";
+  return (
+    <>
+      {errorMessage ? <ErrorBanner>{errorMessage}</ErrorBanner> : null}
+      <GoogleSignInButton redirectTo={redirectTo} />
+    </>
+  );
+}
 
+export default function LoginPage({ searchParams }: LoginPageProps) {
   return (
     <main className="flex min-h-dvh items-center justify-center bg-background px-4 py-10 text-foreground">
       <div className="w-full max-w-sm space-y-6">
@@ -64,9 +81,9 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
           </p>
         </div>
 
-        {errorMessage ? <ErrorBanner>{errorMessage}</ErrorBanner> : null}
-
-        <GoogleSignInButton redirectTo={redirectTo} />
+        <Suspense>
+          <LoginPageContent searchParams={searchParams} />
+        </Suspense>
 
         <p className="text-center text-xs text-muted-foreground">
           サインインにより、利用規約と社内ポリシーに同意したものとみなされます。
