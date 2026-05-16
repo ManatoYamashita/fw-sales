@@ -333,7 +333,7 @@
 
 ## 9. リマインダー Cron
 
-- [ ] 9.1 deals-due-soon クエリ
+- [x] 9.1 deals-due-soon クエリ
   - `lib/queries/deals-due-soon.ts` に `getDealsDueSoon(mode: 'tomorrow'|'today'): Promise<ReminderBundle[]>` を実装
   - JST 基準で対象日を計算(`Asia/Tokyo` で当日 / 翌日の `YYYY-MM-DD` 文字列)、`assigned_sales_user_id IS NOT NULL` でフィルタ
   - 結果はユーザー単位に集約(`Map<userId, deals[]>`)、profile 情報を join して `ReminderBundle = { profile, deals }` の配列で返す
@@ -342,7 +342,7 @@
   - _Boundary: lib/queries/deals-due-soon.ts_
   - _Depends: 2.5, 7.1_
 
-- [ ] 9.2 Vercel Cron Route Handler
+- [x] 9.2 Vercel Cron Route Handler
   - `app/api/cron/deal-reminders/route.ts` で GET ハンドラを実装、`Authorization: Bearer ${CRON_SECRET}` 検証(不一致は 401)
   - クエリ `mode ∈ {tomorrow, today}` を検証(不一致は 400)
   - `getDealsDueSoon(mode)` 結果が 0 件なら早期 return + `{ sent: 0, skipped: 0 }` を返す
@@ -353,7 +353,7 @@
   - _Boundary: app/api/cron/deal-reminders/route.ts_
   - _Depends: 9.1, 5.4_
 
-- [ ] 9.3 Vercel Cron スケジュール設定
+- [x] 9.3 Vercel Cron スケジュール設定
   - `vercel.json` を新規作成、`crons` 配列に `{ path: "/api/cron/deal-reminders?mode=tomorrow", schedule: "0 22 * * *" }`(JST 7:00)と `{ path: ..., mode=today, schedule: "0 23 * * *" }`(JST 8:00)を登録
   - 完了状態: `vercel.json` がリポジトリにコミットされ、Vercel デプロイ時に Cron が登録される(本番運用時に手動確認)
   - _Requirements: 6.1, 6.2, 6.3_
@@ -542,6 +542,9 @@
 - **Phase 8 (2026-05-16)**: `drizzle-kit generate --name=drop_legacy_assignee_text_columns` で 0005 マイグレーション SQL を生成、Phase 1 と異なり cross-schema FK や trigger は不要のため raw SQL 追記なし(コメントヘッダのみ追記)。Phase 1 ロールバックと異なり、本マイグレーションはデータ消失を伴うため backup からの個別 UPDATE が必要 → ステージング検証必須を SQL コメントで明示。
 - **Phase 8 (2026-05-16)**: `scripts/backfill-assignees.ts` を**完全削除**。理由: 本スクリプトは Phase 1 deploy → backfill apply → Phase 2 deploy の遷移時のみ機能し、Phase 8 で対象カラム DROP 後は機能不能。schema.ts 経由の型参照が残ると typecheck が破綻するため、git 履歴から復元前提で削除した(必要なら `git checkout 0ccee53 -- scripts/backfill-assignees.ts`)。
 - **Phase 8 (2026-05-16)**: 連鎖整理は app code 3 ファイル + Mock seed の計 4 ファイル。`app/(main)/deals/page.tsx` / `app/(main)/deals/[id]/page.tsx` は profile.display_name 解決(前者は Map、後者は `getProfileById`)を導入、`app/(main)/stores/[id]/_components/ai-analysis-detail-section.tsx` は parent RSC で事前解決した `assignedSalesName` props を受け取る形に変更。`lib/mock/seed.ts` の旧 text フィールド 12 行を `sed` で一括除去。
+- **Phase 9 (2026-05-16)**: `getDealsDueSoon(mode)` は `repos.deal.list()` 全件取得 + in-memory filter で実装(内部ツール規模のため専用 SQL 化せず)。将来 deal 件数が増えた場合は `DealRepository.findManyByDate` を追加して O(N) → indexed query に最適化。
+- **Phase 9 (2026-05-16)**: JST 暦日計算は `Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo' })` で `YYYY-MM-DD` 文字列を生成 → 文字列レベルで日数加減算する方式を採用。`Date.setDate()` ベースだと JST/UTC オフセット境界(深夜) で 1 日ズレるバグを避けるための明示的選択。
+- **Phase 9 (2026-05-16)**: Cron Route Handler は **常に 200 で返す** 方針 (送信失敗は error ログ + `failed` カウンタのみ)。Vercel Cron は失敗時に自動リトライしないため、個別失敗で全体を 500 にすると当日分が失われるリスクを回避(Req 4.1〜4.3 / 6.8)。Resend API 未設定環境では `emailClient.send()` 自体が `kind: 'noop'` を返すため、`skipped` として記録される。
 
 ---
 
