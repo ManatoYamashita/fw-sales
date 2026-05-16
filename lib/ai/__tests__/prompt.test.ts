@@ -56,12 +56,15 @@ describe("buildAnalysisPrompt", () => {
     expect(systemPrompt).toMatch(/私ファーストWEBの渡部と申しまして/);
   });
 
-  it("assigned_sales 空文字時は neutral placeholder「ファーストWEBの担当者」を使用", () => {
+  it("assigned_sales 空文字時は neutral placeholder「担当者」を使用し、prefix 重複が起きない (Issue #18)", () => {
     const { systemPrompt } = buildAnalysisPrompt({
       ...baseInput,
       assignedSales: "",
     });
-    expect(systemPrompt).toMatch(/ファーストWEBの担当者/);
+    // prefix が一回だけ挿入される
+    expect(systemPrompt).toMatch(/私ファーストWEBの担当者と申しまして/);
+    // 重複した形が含まれない (regression guard for Issue #18)
+    expect(systemPrompt).not.toMatch(/ファーストWEBのファーストWEBの/);
     // "渡部" や他の固有名は含まれない
     expect(systemPrompt).not.toMatch(/私ファーストWEBの渡部/);
   });
