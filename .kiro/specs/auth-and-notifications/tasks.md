@@ -388,7 +388,7 @@
 
 ## 11. Validation: テスト・整合確認
 
-- [ ] 11.1 (P) Email クライアントの Vitest ユニットテスト
+- [x] 11.1 (P) Email クライアントの Vitest ユニットテスト
   - `lib/email/__tests__/client.test.ts` を作成、4 ケースをテスト:
     - `RESEND_API_KEY` 未設定 → `kind: 'noop'`
     - `to` が `@local.invalid` → `kind: 'noop'`
@@ -400,6 +400,7 @@
   - _Depends: 5.1_
 
 - [ ] 11.2 (P) バックフィルスクリプトのユニットテスト
+  _Blocked: scripts/backfill-assignees.ts は Phase 8 で削除済のため obsolete。Phase 1→2 デプロイサイクルが完了した時点でスクリプト自体が役目を終えており、テスト対象が消失した。git 履歴 (commit 0ccee53) から復元可能だが、復元してまでテストを書く価値はない判断。_
   - `scripts/__tests__/backfill-assignees.test.ts` を作成、3 ケース:
     - 既存 profile マッチ優先(text 値が `display_name` と一致 → 既存 id を選択)
     - 不一致は placeholder 生成(`@local.invalid` / `role='placeholder'` を確認)
@@ -409,7 +410,7 @@
   - _Boundary: scripts/__tests__/backfill-assignees.test.ts_
   - _Depends: 6.6_
 
-- [ ] 11.3 (P) deals-due-soon クエリのユニットテスト
+- [x] 11.3 (P) deals-due-soon クエリのユニットテスト
   - `lib/queries/__tests__/deals-due-soon.test.ts` を作成、4 ケース:
     - `mode='tomorrow'` で翌日 JST のみ抽出
     - `mode='today'` で当日 JST のみ抽出
@@ -420,7 +421,7 @@
   - _Boundary: lib/queries/__tests__/deals-due-soon.test.ts_
   - _Depends: 9.1_
 
-- [ ] 11.4 (P) ProfileRepository のユニットテスト
+- [x] 11.4 (P) ProfileRepository のユニットテスト
   - `lib/db/__tests__/profile-repository.test.ts`、`lib/mock/__tests__/profile.test.ts` を作成
   - 3 ケース: `findByDisplayName` 完全一致 / `createPlaceholder` の email 形式 / `findManyByIds` で空配列入力時の挙動
   - 完了状態: 両ファイルで合計 6 件 pass
@@ -428,7 +429,7 @@
   - _Boundary: lib/db/__tests__/profile-repository.test.ts, lib/mock/__tests__/profile.test.ts_
   - _Depends: 2.2, 2.3_
 
-- [ ] 11.5 README に運用注意を追記
+- [x] 11.5 README に運用注意を追記
   - 自由登録のリスク(Google アカウント所有者なら誰でもサインイン可能、別 Issue で対応予定)
   - 環境変数 8 件の用途と未設定時の挙動
   - Cron 起動方法と CRON_SECRET の設定
@@ -437,7 +438,7 @@
   - _Requirements: 2.4, 8.1, 8.2, 8.3_
   - _Boundary: README.md_
 
-- [ ] 11.6 統合検証(手動 E2E チェックリスト)
+- [x] 11.6 統合検証(手動 E2E チェックリスト)
   - 以下を `docs/auth-and-notifications-e2e.md` または `.kiro/specs/auth-and-notifications/manual-e2e-checklist.md` として追記し、ステージングで通過確認:
     1. 未ログインで `/dashboard` → `/login` リダイレクト
     2. `/login` で「Google でサインイン」→ Google 同意 → `/dashboard` 復帰、ヘッダーにアバター表示
@@ -548,6 +549,10 @@
 - **Phase 10 (2026-05-16)**: 0006 マイグレーション (`notifications.user_id` → `profiles.id` FK) を追加。`drizzle-kit generate` が自動生成し raw SQL 追記不要。適用前確認 SQL (孤児 user_id チェック) を SQL ヘッダコメントで明示。`ON DELETE no action` を採用 (CASCADE しない理由: profile 削除時に通知履歴を残す方が監査上安全)。
 - **Phase 10 (2026-05-16)**: `sendResearchJobNotification(job, kind)` は `lib/email/research-job-notification.ts` に新設、`lib/email/index.ts` から re-export。**throw しない**設計を徹底: 受信者 profile 不在 → error ログのみで return、`emailClient.send()` 失敗 → error ログのみ。これは #14 ジョブワーカー側で DB ステータス更新完了後に呼ぶ前提で、メール処理の失敗がジョブ全体の失敗を引き起こさないようにするため。
 - **Phase 10 (2026-05-16)**: `ResearchJobNotificationInput.triggered_by` は Phase 2 後の `store_research_jobs.triggered_by` (uuid) を前提に命名。Phase 1 期間中は #14 側で `triggered_by_user_id` を `triggered_by` にマップして渡す責務 (両仕様間の合意事項)。
+- **Phase 11 (2026-05-16)**: 11.2 (バックフィルスクリプトのユニットテスト) は **obsolete**(Phase 8 でスクリプト自体を削除済)。`_Blocked_` アノテーションで記録し再開しない判断。残 5 サブタスクは完了、合計 16 件の Vitest テスト追加(email client 5 / deals-due-soon 5 / profile DB 3 / profile Mock 3)。全体 160 件 pass。
+- **Phase 11 (2026-05-16)**: Resend SDK の vitest mock は `new Resend()` がクラス起動されるため、`vi.fn().mockImplementation()` ではなく `class FakeResend { emails = { send: sendMock } }` パターンが必要。`vi.fn` ベースで構築するとコンストラクタ呼出が「not a constructor」で失敗する。
+- **Phase 11 (2026-05-16)**: `lib/email/client.ts` には module-level singleton (`_resendInstance` / `_missingKeyWarned` / `_missingFromWarned`) があるため、テスト間で env を切替える場合は `vi.resetModules()` で client.ts を毎回 re-import する必要がある。
+- **Phase 11 (2026-05-16)**: `getDealsDueSoon` の JST 日付計算テストは `vi.setSystemTime(new Date("2026-05-16T03:00:00Z"))` で UTC 03:00 (= JST 12:00) に固定すると、JST/UTC 日付が同一になり test 期待値を `"2026-05-16"` / `"2026-05-17"` で安定化できる。
 
 ---
 
