@@ -29,7 +29,7 @@ async function TopbarShell() {
   if (!profile) {
     redirect("/login");
   }
-  return <Topbar currentProfile={profile} />;
+  return <Topbar />;
 }
 
 function SidebarFallback() {
@@ -58,7 +58,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
       <Suspense fallback={<SidebarFallback />}>
         <SidebarShell />
       </Suspense>
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 overflow-x-clip">
         <Suspense fallback={<TopbarFallback />}>
           <TopbarShell />
         </Suspense>

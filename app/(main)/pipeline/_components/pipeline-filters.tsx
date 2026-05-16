@@ -30,7 +30,7 @@ export function PipelineFilters({ profiles }: PipelineFiltersProps) {
 
   return (
     <div className="bg-card border border-border rounded-lg shadow-card p-3 flex flex-wrap items-center gap-2">
-      <div className="relative flex-1 min-w-[200px]">
+      <div className="relative flex-1 min-w-[180px] basis-full sm:basis-auto">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/70" />
         <Input
           defaultValue={params.get("q") ?? ""}
