@@ -17,6 +17,29 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { updateSession } from "@/lib/supabase/middleware";
 
+/**
+ * 一時的に利用不可にしているメニューの URL プレフィクス。
+ * `lib/domain/nav.ts` の `NAV_ITEMS[].disabled` と整合させる単一の真実とし、
+ * 解除する際は両者を同時に戻す。
+ */
+const DISABLED_ROUTE_PREFIXES: readonly string[] = [
+  "/dashboard",
+  "/research",
+  "/pipeline",
+  "/actions",
+  "/deals",
+  "/handoffs",
+  "/kpi",
+];
+
+const FALLBACK_ENABLED_ROUTE = "/stores";
+
+function isDisabledPath(pathname: string): boolean {
+  return DISABLED_ROUTE_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
+}
+
 export async function middleware(request: NextRequest) {
   const { response, isAuthenticated } = await updateSession(request);
 
@@ -24,6 +47,10 @@ export async function middleware(request: NextRequest) {
     const redirectUrl = new URL("/login", request.url);
     redirectUrl.searchParams.set("redirect", request.nextUrl.pathname);
     return NextResponse.redirect(redirectUrl);
+  }
+
+  if (isDisabledPath(request.nextUrl.pathname)) {
+    return NextResponse.redirect(new URL(FALLBACK_ENABLED_ROUTE, request.url));
   }
 
   return response;

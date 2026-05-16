@@ -9,13 +9,13 @@ export default function MainNotFound() {
         ページが見つかりませんでした
       </p>
       <p className="text-sm text-muted-foreground max-w-sm">
-        URLを再確認するか、ダッシュボードからやり直してください。
+        URLを再確認するか、店舗一覧からやり直してください。
       </p>
       <Link
-        href="/dashboard"
+        href="/stores"
         className="mt-2 inline-flex h-10 px-4 items-center justify-center rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-secondary transition-colors"
       >
-        ダッシュボードへ戻る
+        店舗一覧へ戻る
       </Link>
     </div>
   );
