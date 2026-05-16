@@ -553,6 +553,7 @@
 - **Phase 11 (2026-05-16)**: Resend SDK の vitest mock は `new Resend()` がクラス起動されるため、`vi.fn().mockImplementation()` ではなく `class FakeResend { emails = { send: sendMock } }` パターンが必要。`vi.fn` ベースで構築するとコンストラクタ呼出が「not a constructor」で失敗する。
 - **Phase 11 (2026-05-16)**: `lib/email/client.ts` には module-level singleton (`_resendInstance` / `_missingKeyWarned` / `_missingFromWarned`) があるため、テスト間で env を切替える場合は `vi.resetModules()` で client.ts を毎回 re-import する必要がある。
 - **Phase 11 (2026-05-16)**: `getDealsDueSoon` の JST 日付計算テストは `vi.setSystemTime(new Date("2026-05-16T03:00:00Z"))` で UTC 03:00 (= JST 12:00) に固定すると、JST/UTC 日付が同一になり test 期待値を `"2026-05-16"` / `"2026-05-17"` で安定化できる。
+- **Phase 12 (2026-05-16, build-fix)**: `kiro-validate-impl` の build smoke が Phase 5 (email templates) と Phase 9 (cron route) の統合点で Turbopack エラーを検出: "You're importing a component that imports react-dom/server"。App Route の transitive import に `react-dom/server` が含まれると Next.js 16 / Turbopack がビルドを失敗させる。fix: `lib/email/templates/_layout.tsx` の `renderToStaticMarkup` を **dynamic import** (`await import("react-dom/server")`) でラップし、App Route の static import graph から切り離した。`renderEmail` は async 化、3 つの builder (`buildDealReminderEmail` / `buildResearchJobCompletedEmail` / `buildResearchJobFailedEmail`) と 2 つの caller (`app/api/cron/deal-reminders/route.ts` / `lib/email/research-job-notification.ts`) を `await` 対応に連鎖修正。per-task review では検出不可能で、feature-level の build smoke 検証が責務を果たした事例。
 
 ---
 

@@ -85,7 +85,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   for (const bundle of bundles) {
     try {
-      const message = buildDealReminderEmail({
+      const message = await buildDealReminderEmail({
         profile: bundle.profile,
         mode,
         deals: bundle.deals,

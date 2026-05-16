@@ -10,7 +10,23 @@
 
 import "server-only";
 import type { ReactElement, ReactNode } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
+
+/**
+ * `react-dom/server` を **dynamic import** で読込む。
+ *
+ * Next.js 16 / Turbopack は App Route の transitive import に `react-dom/server`
+ * が含まれるとビルドエラーを発する(ブラウザ流入リスクの静的解析)。
+ * メールテンプレートは Cron Route Handler から呼ばれるため、本ヘルパで動的解決し
+ * Route の静的 import グラフから `react-dom/server` を切り離す。
+ */
+type RenderToStaticMarkup = (element: ReactElement) => string;
+let _renderToStaticMarkupCache: RenderToStaticMarkup | null = null;
+async function loadRenderToStaticMarkup(): Promise<RenderToStaticMarkup> {
+  if (_renderToStaticMarkupCache) return _renderToStaticMarkupCache;
+  const mod = await import("react-dom/server");
+  _renderToStaticMarkupCache = mod.renderToStaticMarkup as RenderToStaticMarkup;
+  return _renderToStaticMarkupCache;
+}
 
 const COLORS = {
   background: "#f4f4f5",
@@ -118,7 +134,11 @@ export const EMAIL_COLORS = COLORS;
 /**
  * メールテンプレート (React Element) を HTML 文字列に変換する。
  * `<!doctype html>` を先頭に付与し、メールクライアントでの DOCTYPE 解釈を安定化させる。
+ *
+ * 注: dynamic import 化に伴い **async** 関数に変更。callers (build*Email) も
+ * Promise<EmailMessage> を返すよう連動更新済 (Phase 12 ビルド修正)。
  */
-export function renderEmail(element: ReactElement): string {
+export async function renderEmail(element: ReactElement): Promise<string> {
+  const renderToStaticMarkup = await loadRenderToStaticMarkup();
   return `<!doctype html>${renderToStaticMarkup(element)}`;
 }

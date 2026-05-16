@@ -136,11 +136,11 @@ function ResearchJobCompletedBody({
   );
 }
 
-export function buildResearchJobCompletedEmail(
+export async function buildResearchJobCompletedEmail(
   input: ResearchJobCompletedInput,
-): EmailMessage {
+): Promise<EmailMessage> {
   const subject = `エリア調査ジョブ完了 (成功 ${input.job.completed_count} 件 / 失敗 ${input.job.failed_count} 件)`;
-  const html = renderEmail(<ResearchJobCompletedBody {...input} />);
+  const html = await renderEmail(<ResearchJobCompletedBody {...input} />);
   const text = [
     `${input.profile.display_name} さん`,
     "",

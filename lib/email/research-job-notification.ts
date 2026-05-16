@@ -73,12 +73,12 @@ export async function sendResearchJobNotification(
   const appBaseUrl = getAppBaseUrl();
   const message =
     kind === "completed"
-      ? buildResearchJobCompletedEmail({
+      ? await buildResearchJobCompletedEmail({
           profile,
           job: job.summary,
           appBaseUrl,
         })
-      : buildResearchJobFailedEmail({
+      : await buildResearchJobFailedEmail({
           profile,
           job: {
             target_count: job.summary.target_count,
