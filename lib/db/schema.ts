@@ -1,4 +1,4 @@
-import { pgTable, text, integer, real, uuid } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, real, index, uuid } from "drizzle-orm/pg-core";
 
 /**
  * profiles テーブル (auth-and-notifications spec, Issue #16)
@@ -112,9 +112,13 @@ export const stores = pgTable("stores", {
   lng: real("lng"),
   /** 営業時間。フリーテキスト(例: "11:00-23:00 / 日休")、未入力時は空文字。 */
   business_hours: text("business_hours").notNull().default(""),
+  /** Google Places ID。エリア検索経由で登録した店舗のみ格納。手動登録時は NULL。 */
+  google_place_id: text("google_place_id"),
   created_at: text("created_at").notNull(),
   updated_at: text("updated_at").notNull(),
-});
+}, (table) => [
+  index("stores_google_place_id_idx").on(table.google_place_id),
+]);
 
 /**
  * deals テーブル
