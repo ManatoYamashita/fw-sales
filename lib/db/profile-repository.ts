@@ -4,7 +4,9 @@
  * 役割:
  * - `lib/repositories/profile-repository.ts` の `ProfileRepository` interface を Drizzle で 1:1 実装する
  * - `makeProfileRepo(executor)` ファクトリで `DbClient` または `Tx` を受け取り、
- *   トランザクション境界を呼び出し側 (Action / scripts/backfill-assignees.ts) で制御できるようにする
+ *   トランザクション境界を呼び出し側 (Action 等) で制御できるようにする
+ *   (旧 `scripts/backfill-assignees.ts` は Phase 8 で削除済、既存ユーザー backfill は
+ *    drizzle/0007_backfill_existing_auth_users.sql で恒久化)
  * - 既定 export `dbProfileRepo` は `db` (singleton) を束縛したインスタンス
  *
  * 制約:
