@@ -108,8 +108,7 @@ cp .env.example .env.local
 
 | キー | 必須 | 用途 |
 |---|---|---|
-| `DATABASE_URL` | DB モード時必須 | Supabase Postgres 接続文字列 (Transaction pooler 推奨) |
-| `USE_MOCK_DB` | 任意 | `true` で Mock モード起動。未設定なら DB モード |
+| `DATABASE_URL` | 必須 | Supabase Postgres 接続文字列 (Transaction pooler 推奨)。未設定だと `lib/db/client.ts` が fail-fast で `process.exit(1)` する |
 | `DATABASE_POOL_MAX` | 任意 | `postgres.js` のコネクションプール最大数。既定 `10` |
 
 #### `DATABASE_POOL_MAX` の選び方
@@ -135,7 +134,7 @@ pnpm drizzle-kit push             # スキーマ差分を直接反映 (本番運
 
 ### 5. SEED データの投入
 
-`SEED_STORES` / `SEED_DEALS` / `SEED_RESEARCH` / `SEED_HANDOFFS` (`lib/mock/seed.ts`) と同等の 4 entity データを Postgres に upsert します。FK 整合のため `stores → deals → research → handoffs` の順で投入され、`ON CONFLICT DO UPDATE` でベキ等です。
+`SEED_STORES` / `SEED_DEALS` / `SEED_RESEARCH` / `SEED_HANDOFFS` (`lib/db/seed-data.ts`) の 4 entity データを Postgres に upsert します。FK 整合のため `stores → deals → research → handoffs` の順で投入され、`ON CONFLICT DO UPDATE` でベキ等です。
 
 ```bash
 pnpm seed
@@ -143,25 +142,15 @@ pnpm seed
 
 内部的に `NODE_OPTIONS='--conditions=react-server' tsx scripts/seed.ts` を実行します(`server-only` パッケージを `react-server` condition で `empty.js` に解決させ、CLI 単体実行を可能にするため)。
 
-`USE_MOCK_DB=true` が設定されている環境ではスクリプトは警告のみ出してスキップします(誤実行防止)。
+担当者紐付け (`assigned_planner_user_id` / `assigned_sales_user_id`) は seed-data 内で全て null です。実運用で担当者を割り当てたい場合は、Supabase Auth で作成した実ユーザーの UUID で別途 UPDATE してください。
 
 ### 6. 開発サーバー起動
 
 ```bash
-pnpm dev          # DB モード (DATABASE_URL 必須)
+pnpm dev          # DATABASE_URL 必須
 ```
 
 起動時に `lib/db/client.ts` が `select 1` で接続ヘルスチェックを行い、失敗時は `process.exit(1)` で fail-fast します。
-
-### Mock モード切替
-
-外部 DB 接続なしで開発・E2E を行う場合は環境変数で Mock モードに切り替えられます。
-
-```bash
-USE_MOCK_DB=true pnpm dev
-```
-
-このモードでは `lib/db/*` は一切評価されず、`DATABASE_URL` 未設定でも起動できます。インメモリ Map + `globalThis` 永続化による従来 Mock 実装が選択されます。
 
 ### 検証コマンド
 
@@ -169,7 +158,7 @@ USE_MOCK_DB=true pnpm dev
 pnpm typecheck && pnpm lint && pnpm build
 ```
 
-DB モードでの動作確認は次の E2E が標準手順です(詳細は `.kiro/specs/deals-stores-db-migration/requirements.md` §11):
+動作確認は次の E2E が標準手順です(詳細は `.kiro/specs/deals-stores-db-migration/requirements.md` §11):
 
 1. `/stores/{storeId}` で新規商談を作成し「受注」で保存
 2. プロセスを再起動
@@ -200,10 +189,6 @@ Supabase 側の Google OAuth プロバイダーで **誰でもサインイン可
 | `SUPABASE_SERVICE_ROLE_KEY` | (将来用) Service Role キー | 現状未使用 |
 | `GOOGLE_OAUTH_CLIENT_ID` | Supabase Provider 側で設定する Google OAuth Client ID | Supabase 側設定がなければサインイン失敗 |
 | `GOOGLE_OAUTH_CLIENT_SECRET` | 同上 Secret | 同上 |
-
-### Mock モードでの認証バイパス
-
-`USE_MOCK_DB=true` で起動した場合、Supabase Auth は呼び出されず、固定の **placeholder dev profile** (`id = 00000000-0000-0000-0000-000000000001`) が現在ユーザーとして返ります。フォーム / 担当者選択 / ヘッダーのアバター表示はすべて Mock seed 上のプロフィールで動作。
 
 ### ~~Vercel Cron (商談リマインダー)~~ — 削除済 (2026-05-17)
 

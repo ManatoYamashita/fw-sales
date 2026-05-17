@@ -18,14 +18,9 @@ export interface SignOutResult {
 /**
  * 現在のセッションを破棄し、`/login` への遷移先を返す。
  *
- * - `USE_MOCK_DB=true` のときは `getSupabaseServerClient()` が throw するため
- *   try/catch で握り潰し、Mock 経路でも UX を阻害しない (常に成功扱い)
- * - 本番モードで失敗した場合のみ `failure(...)` を返し、UI 側でメッセージ表示
+ * 失敗した場合は `failure(...)` を返し、UI 側でメッセージ表示する。
  */
 export async function signOutAction(): Promise<ActionResult<SignOutResult>> {
-  if (process.env.USE_MOCK_DB === "true") {
-    return success({ redirectTo: "/login" });
-  }
   try {
     const supabase = await getSupabaseServerClient();
     const { error } = await supabase.auth.signOut();

@@ -49,10 +49,10 @@
 - [ ] `/pipeline` Kanban カード下部に営業担当名が表示される
 - [ ] `/deals` 一覧 / `/deals/{id}` ヘッダーにも担当者名が表示される
 
-### 6. Mock モード動作確認
-- [ ] `USE_MOCK_DB=true pnpm dev` で起動 → `/login` を介さず `/dashboard` に直接到達できる
-- [ ] ヘッダーアバターが固定 mock profile (`PLACEHOLDER_DEV_PROFILE_ID = 佐藤`) を表示
-- [ ] 担当者 Select に Mock seed の 4 profile (佐藤 / 渡部 / 田中 / 山田) が出る
+### ~~6. Mock モード動作確認~~ — 削除済 (Issue #39)
+- ~~`USE_MOCK_DB=true pnpm dev` で起動 → `/login` を介さず `/dashboard` に直接到達できる~~
+- ~~ヘッダーアバターが固定 mock profile を表示~~
+- ~~担当者 Select に Mock seed の 4 profile が出る~~
 
 ### ~~7. 商談リマインダー Cron~~ — 削除済 (2026-05-17)
 - ~~商談を翌日付で 1 件以上作成 (`/deals/new` で `date=翌日 JST`)~~

@@ -5,7 +5,6 @@
  * - postgres.js + drizzle インスタンスをアプリ全体で 1 つだけ生成し export する。
  * - Next.js の HMR (dev) 跨ぎでも接続を多重生成しないよう、
  *   `Symbol.for("__FW_SALES_DB__")` を `globalThis` に紐付けて singleton 化する。
- *   (Mock 側 `lib/mock/db.ts` の `__FW_SALES_MOCK_DB__` パターンを踏襲)
  * - 初回 import 時に fire-and-forget で `select 1` を発行し、接続不可の場合は
  *   `process.exit(1)` でプロセスを落とす fail-fast health check を行う。
  *

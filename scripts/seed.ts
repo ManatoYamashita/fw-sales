@@ -2,17 +2,13 @@
  * SEED 投入スクリプト
  *
  * 役割:
- * - `lib/mock/seed.ts` の `SEED_STORES` / `SEED_DEALS` / `SEED_RESEARCH` /
+ * - `lib/db/seed-data.ts` の `SEED_STORES` / `SEED_DEALS` / `SEED_RESEARCH` /
  *   `SEED_HANDOFFS` の 4 entity を Postgres (Supabase) にベキ等な upsert で投入する。
- *   Mock と DB の双方で同一データを再現する目的。
- *   (requirements.md §7.1, §7.2, §7.3 / research-handoff-db-migration §7)
  *
  * 実行例:
  * - `pnpm seed`
  *
  * 制約・設計判断:
- * - `process.env.USE_MOCK_DB === "true"` の場合は誤実行防止のため警告のみで終了する
- *   (requirements.md §7.4)
  * - `lib/db/client.ts` および `lib/db/schema.ts` / `lib/db/store-repository.ts` を
  *   直接 import する。これは design.md の「Allowed Dependencies / Documented exception」
  *   に明記された `scripts/seed.ts` 限定の例外的措置である
@@ -22,8 +18,9 @@
  * - `db.transaction(...)` で全件 upsert を 1 単位とし、途中失敗時は ROLLBACK
  * - スクリプト終了時は `sql.end()` で接続を明示クリーンアップする
  * - Research / Handoff は全フィールド primitive のため `toDbRow` 不要
- *
- * 関連: requirements.md §7、design.md §「`scripts/seed.ts`」
+ * - profiles テーブルの seed は本スクリプトの責務外。担当者紐付け
+ *   (`assigned_*_user_id`) は seed-data.ts で全て null にしており、必要であれば
+ *   別途 UPDATE する運用とする (Issue #39 USE_MOCK_DB 廃止に伴う方針)。
  */
 
 import { db, sql } from "@/lib/db/client";
@@ -34,17 +31,9 @@ import {
   SEED_DEALS,
   SEED_RESEARCH,
   SEED_HANDOFFS,
-} from "@/lib/mock/seed";
+} from "@/lib/db/seed-data";
 
 async function main(): Promise<void> {
-  // Mock モードでの誤実行を防止 (requirements.md §7.3)
-  if (process.env.USE_MOCK_DB === "true") {
-    console.warn(
-      "[seed] USE_MOCK_DB=true detected — DB seed をスキップします。Mock モードでは本スクリプトは不要です。",
-    );
-    process.exit(0);
-  }
-
   // 全 SEED 投入をトランザクションで包み、途中失敗時は ROLLBACK
   // 親→子の順 (stores → deals → research → handoffs) で FK 整合を保つ
   await db.transaction(async (tx) => {

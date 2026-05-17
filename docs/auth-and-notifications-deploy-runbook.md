@@ -133,7 +133,7 @@ open https://github.com/ManatoYamashita/fw-sales/pull/30
 - [ ] 3. サインアウト
 - [ ] 4. 担当者選択 UI (Combobox 化)
 - [ ] 5. 表示への profile 名 join
-- [ ] 6. Mock モード動作確認 (`USE_MOCK_DB=true pnpm dev`)
+- ~~[ ] 6. Mock モード動作確認 (`USE_MOCK_DB=true pnpm dev`)~~ — 削除済 (Issue #39)
 - ~~[ ] 7. Cron リマインダー (curl で疑似発火 → メール受信確認)~~ — 削除済
 - ~~[ ] 8. 認証バイパス系の防御 (CRON_SECRET 不一致 401 / mode クエリ不正 400 / RESEND_API_KEY 未設定でも 200)~~ — 削除済
 - [ ] 9. 全体品質ゲート (`pnpm typecheck && pnpm lint && pnpm build && pnpm test`)
