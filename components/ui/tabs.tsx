@@ -112,7 +112,7 @@ export function TabsTrigger({
       data-state={active ? "active" : "inactive"}
       className={cn(
         "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium",
-        "transition-[color,background-color,box-shadow] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "transition-[color,background-color,box-shadow] duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         isPill ? "rounded-full px-4 py-1.5" : "rounded-sm px-3 py-1.5",
         active
           ? isPill

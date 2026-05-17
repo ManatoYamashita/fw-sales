@@ -29,24 +29,52 @@ export interface UrlLoadPayload {
 // ---- Manual ----------------------------------------------------------------
 
 export interface ManualStartPanelProps {
-  onStart: () => void;
+  onStart: (name: string) => void;
 }
 
 export function ManualStartPanel({ onStart }: ManualStartPanelProps) {
+  const [storeName, setStoreName] = useState("");
+
+  const submit = () => {
+    const v = storeName.trim();
+    if (!v) return;
+    onStart(v);
+  };
+
+  const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      submit();
+    }
+  };
+
+  const canSubmit = storeName.trim().length > 0;
+
   return (
-    <div className="flex flex-col items-center gap-3 py-2 text-center">
-      <div className="space-y-1">
-        <p className="text-sm font-medium text-foreground">
-          手動で店舗情報を入力する
-        </p>
-        <p className="text-xs text-muted-foreground">
-          食べログ・Googleマップ URL もエリア検索も使わず、フォームに直接入力します。
-        </p>
+    <div className="space-y-3">
+      <p className="text-xs text-muted-foreground">
+        食べログ・Googleマップ URL もエリア検索も使わず、フォームに直接入力します。
+        まず店舗名を入力し、Enter または「フォームを開く」で他の項目を入力できます。
+      </p>
+      <div className="flex flex-col sm:flex-row gap-2">
+        <Input
+          value={storeName}
+          onChange={(e) => setStoreName(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="店舗名を入力"
+          className="flex-1"
+          aria-label="店舗名"
+        />
+        <Button
+          variant="primary"
+          onClick={submit}
+          disabled={!canSubmit}
+          className="sm:w-40 gap-2"
+        >
+          <Pencil className="h-4 w-4" />
+          フォームを開く
+        </Button>
       </div>
-      <Button variant="primary" onClick={onStart} className="gap-2">
-        <Pencil className="h-4 w-4" />
-        フォームを開く
-      </Button>
     </div>
   );
 }
