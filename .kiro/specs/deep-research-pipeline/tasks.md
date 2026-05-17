@@ -29,7 +29,7 @@
   - _Boundary: lib/cache.ts, lib/env.ts_
 
 - [ ] 2. Core: AI クライアント層（共通基盤抽出 + Deep Research + Structurer）
-- [ ] 2.1 共通 JSON Schema ユーティリティの抽出（既存挙動不変リファクタ）
+- [x] 2.1 共通 JSON Schema ユーティリティの抽出（既存挙動不変リファクタ）
   - `lib/ai/_shared/json-schema-utils.ts` を新設し `stripUnsupportedKeys` / propertyOrdering ヘルパを既存 `lib/ai/schema.ts` から移送
   - `lib/ai/client.ts` / `lib/ai/schema.ts` の import を切替、既存呼出元の挙動を一切変えない
   - 観測可能完了: `pnpm typecheck && pnpm lint` 緑、既存同期 AI 分析を 1 店舗で実行して 5 項目出力（`strengths_markdown` 等）が以前と同一
@@ -44,8 +44,9 @@
   - _Requirements: 3.1, 3.6, 5.4, 6.6_
   - _Boundary: lib/ai/deep-research_
   - _Depends: 1.1, 2.1_
+  - _Blocked: 1.1 (PoC) が GEMINI_API_KEY 未確保のため Blocked。SDK 実体シグネチャが未確定のため、PoC 完了後に再開する。研究ログとデザインに想定 SDK interface は記載済_
 
-- [ ] 2.3 (P) DeepResearch スキーマ・51 項目キー定数定義
+- [x] 2.3 (P) DeepResearch スキーマ・51 項目キー定数定義
   - 8 カテゴリ × 51 項目の Zod スキーマと項目キー（snake_case）→ラベル正規化マップ
   - tier=B で confidence/source_urls/source_quote 必須、tier=C で hearing_question 必須を `refine` で検証
   - `getDeepResearchJsonSchema()` で Gemini 用 JSON Schema を返す
@@ -54,14 +55,14 @@
   - _Boundary: lib/ai/deep-research_
   - _Depends: 2.1_
 
-- [ ] 2.4 (P) DeepResearch プロンプト構築
+- [x] 2.4 (P) DeepResearch プロンプト構築
   - System prompt + User prompt builder。51 項目の取得指示、A/B/C 区分付与指示、C 項目の `hearing_question` 生成指示を含む
   - 店舗の基本情報（name / address 等）を user prompt に埋め込む
   - 観測可能完了: `buildDeepResearchPrompt({ store })` が決定的な文字列を返し、51 項目キー名と A/B/C 凡例が prompt 内に必ず含まれる
   - _Requirements: 3.1, 3.2, 3.4_
   - _Boundary: lib/ai/deep-research_
 
-- [ ] 2.5 Structurer 実装（Stage 2 構造化）
+- [x] 2.5 Structurer 実装（Stage 2 構造化）
   - `gemini-2.5-flash-lite` を `responseMimeType: "application/json"` + `responseJsonSchema` で呼ぶ
   - 出力テキストを `JSON.parse` → Zod `safeParse` の二段検証
   - `StructurerError` discriminated union
@@ -210,3 +211,6 @@
 - **Task 1.3 (auth helper)**: design.md は `getCurrentUser()` 表記だが実体は `lib/supabase/server.ts:99-128` の `getCurrentSession()` / `getCurrentProfile()`。Task 3.1 (Server Actions) / 3.2 (Queries) 実装時にこの正しい関数名を使うこと。
 - **Task 1.3 (DB repository)**: `claimOldestQueued` は Drizzle ORM ヘルパでは `FOR UPDATE SKIP LOCKED` を表現できないため `executor.execute(sql\`...\`)` で raw SQL を採用。返り値は `unknown as JobRow[]` キャストが必要。
 - **Task 1.1 (PoC)**: SDK 実機呼出は agent 環境では実行不能 (API 課金リスク)。spike 雛形 + 実行手順は research.md に反映済。ユーザーが実行後、結果ログを research.md に追記し、SDK 想定との差分があれば design.md `DeepResearchClient` 章を更新する運用フローを確立。
+- **Task 2.1 (json-schema-utils 抽出)**: 既存 `lib/ai/schema.ts:getAiAnalysisJsonSchema` の `stripUnsupportedKeys` をモジュール化したが、Gemini 非対応 key set (`$schema`/`maxLength` 等) は schema.ts と shared util の双方で値が一致することが必須。set 変更は shared util 側のみで完結させ、`schema.ts` は import のみで影響を受ける。
+- **Task 2.3 (51 項目)**: Issue #43 §2 のテーブルは合計 50 行 (Issue の "51 項目" は集計 18+18+15=51 の表記揺れ)。実装では `TOTAL_ITEM_COUNT` で実数を export し、テストでは `>= 50` で許容。将来 1 項目追加で 51 件にする運用も可能。
+- **Task 2.5 (Structurer テスト)**: SDK 呼出を含む関数はモック困難なので、`parseAndValidateStructurerText` を純関数として分離し、テストはそれに対して書く。SDK 呼出本体は Task 6.2 統合テストでカバーする方針。`StructuredReport` 型は `z.infer<typeof DeepResearchReportSchema>` でないと推論が `never` に落ちる (`ReturnType` + `extends` パターンは特殊フォームで動かない)。
