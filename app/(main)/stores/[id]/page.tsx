@@ -11,6 +11,7 @@ import { MapEmbedCard } from "./_components/map-embed-card";
 import { BasicInfoCard } from "./_components/basic-info-card";
 import { WebAssetCard } from "./_components/web-asset-card";
 import { AiAnalysisDetailSection } from "./_components/ai-analysis-detail-section";
+import { DeepResearchSection } from "./_components/deep-research-section";
 import { ResearchSummaryCard } from "./_components/research-summary-card";
 import { DealsHistoryCard } from "./_components/deals-history-card";
 import { MemoCard } from "./_components/memo-card";
@@ -112,6 +113,9 @@ export default async function StoreDetailPage({
             isApiKeyConfigured={apiKeyConfigured}
             assignedSalesName={assignedSalesName}
           />
+          <Suspense fallback={<SectionFallback label="Deep Research" />}>
+            <DeepResearchSection storeId={store.id} />
+          </Suspense>
           <Suspense fallback={<SectionFallback label="調査" />}>
             <ResearchSummaryCard storeId={store.id} />
           </Suspense>

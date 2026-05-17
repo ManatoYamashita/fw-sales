@@ -129,13 +129,13 @@
   - _Depends: 4.1_
 
 - [ ] 5. Core: UI コンポーネント
-- [ ] 5.1 (P) ResearchStatusBadge コンポーネント
+- [x] 5.1 (P) ResearchStatusBadge コンポーネント
   - 5 状態（queued / researching / structuring / done / failed）の Badge を `data-status` 属性で色決定（既存 `stage-badge.tsx` パターン）
   - 観測可能完了: 5 状態それぞれで視覚的に区別された Badge が描画されるストーリーブック相当の確認（Playwright スナップショット or 手動）
   - _Requirements: 5.1, 2.3_
   - _Boundary: components/feature_
 
-- [ ] 5.2 DeepResearchEnqueueButton（Client Component, CTA + 状態 + 再投入）
+- [x] 5.2 DeepResearchEnqueueButton（Client Component, CTA + 状態 + 再投入）
   - `currentJob: DeepResearchJob | null` を props に取り、null / 進行中 / failed の 3 状態で表示分岐
   - `useTransition` + `useToasts` でフィードバック、`enqueueDeepResearchAction` / `retryDeepResearchAction` を呼ぶ
   - 観測可能完了: 進行中なら disabled、null なら CTA、failed なら「再投入」ラベルで Action 呼出 → Toast 表示
@@ -143,14 +143,14 @@
   - _Boundary: app/(main)/stores/[id]/_components_
   - _Depends: 3.1, 5.1_
 
-- [ ] 5.3 (P) DeepResearchReportView（RSC, 8 カテゴリ × 51 項目表示 + 凡例）
+- [x] 5.3 (P) DeepResearchReportView（RSC, 8 カテゴリ × 51 項目表示 + 凡例）
   - Tabs プリミティブで 8 カテゴリ切替、各項目に tier Badge / confidence / source_urls リンク / source_quote / hearing_question
   - 画面上部に A/B/C 凡例と最終生成日時を表示（R7.3）
   - 観測可能完了: レポートを持つ店舗で全 51 項目が 8 タブで閲覧可、未充足項目もスケルトン表示で可視化される
   - _Requirements: 3.1, 3.5, 7.3_
   - _Boundary: app/(main)/stores/[id]/_components_
 
-- [ ] 5.4 DeepResearchTab + store-detail-tabs.tsx 拡張（4 タブ目を追加）
+- [x] 5.4 DeepResearchTab + store-detail-tabs.tsx 拡張（4 タブ目を追加）
   - `deep-research-tab.tsx` で表示分岐（レポートあり → `DeepResearchReportView` / 進行中 → 状態 + CTA disabled / なし → CTA active）
   - `store-detail-tabs.tsx` に「Deep Research」タブを追加、既存 3 タブ（基本情報・補足情報・AI 分析）の動作は不変
   - 観測可能完了: 店舗詳細画面で 4 タブが見え、Deep Research タブの中身が R5.2 のレポート存在状態に応じて切替、既存 AI 分析タブの 5 項目表示が変わらない
@@ -158,7 +158,7 @@
   - _Boundary: app/(main)/stores/[id]/_components_
   - _Depends: 5.2, 5.3, 3.2_
 
-- [ ] 5.5 (P) NotificationBell + topbar 統合
+- [x] 5.5 (P) NotificationBell + topbar 統合
   - `components/layout/notification-bell.tsx` で Client Component、未読件数 Badge、ドロップダウンで最新 10 件表示
   - `topbar.tsx` 既存 Bell スタブ箇所に `NotificationBell` をマウント
   - `kind === "deep_research_done"` / `"deep_research_failed"` のクリックで該当店舗の Deep Research タブへ遷移
@@ -218,3 +218,6 @@
 - **Task 3.1 (テスト)**: `lib/env` を mock する際は `vi.mock(import("@/lib/env"), async (importOriginal) => { const actual = await importOriginal(); return { ...actual, ... }; })` で partial mock しないと `assertEnv` 等の他関数の export が消えて `lib/db/client.ts` 経由で実行時エラーになる。
 - **Task 3.3 (型拡張)**: `ProfileRole` に `'admin'` を追加。既存 `asProfileRole` フェイルセーフ関数の更新と、`lib/db/profile-repository.ts` の `findAll({ excludePlaceholders: true })` を `inArray(["member", "admin"])` に変更する必要あり (member だけだと admin が漏れる)。
 - **Task 3.3 (NotificationKind 拡張)**: `types/notification.ts` の `NotificationKind` に 3 値 (`deep_research_done` / `deep_research_failed` / `deep_research_budget_warning`) を追加。既存 2 値 (`research_job_completed` / `research_job_failed`) は #16 由来で現状未使用だが、型互換性のため残存させる。
+- **Task 5.4 (design 乖離)**: design.md は「store-detail-tabs.tsx に 4 タブ目を追加」を想定していたが、実態の `app/(main)/stores/[id]/page.tsx` は Tabs 構造ではなくカード集約レイアウトだった (基本情報/AI 分析/調査/商談履歴 が縦並びカード)。タスク 5.4 は「DeepResearchSection カードを page.tsx の AiAnalysisDetailSection の直後に挿入」する形で実装。design 当初の「タブ」概念は `DeepResearchReportView` の内部 8 カテゴリ Tabs に降格 (R7.2 視覚的区別は別カードとして担保)。
+- **Task 5 (UI テスト戦略)**: `@testing-library/react` が未導入のため、Task 5 各サブタスクは個別の vitest UI テストを書かず、typecheck + lint + `pnpm build` 成功 + Task 6.3 の E2E (Playwright/Cypress) で観測完了とする。`ResearchStatusBadge` は元々「ストーリーブック相当の確認 or 手動」が観測完了条件だったため整合。
+- **Task 5.5 (Topbar 通知)**: `Topbar` を Client 維持しつつ `notifications?: readonly Notification[]` props を追加。`(main)/layout.tsx` の `TopbarShell` (RSC) が `getRecentNotifications(profile.id, 10)` の結果を props 経由で渡す。既存 Bell スタブを `<NotificationBell>` に置換。
