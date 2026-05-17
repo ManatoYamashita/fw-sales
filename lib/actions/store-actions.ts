@@ -23,6 +23,7 @@ import { STAGE_IDS, type StageId } from "@/types/stage";
 import {
   failure,
   readNullableNumber,
+  readNullableString,
   readNumber,
   readString,
   success,
@@ -79,7 +80,13 @@ function readNullableAiAnalysis(
   }
 }
 
-function buildStoreInput(formData: FormData): StoreInput {
+/**
+ * FormData から StoreInput の共通フィールドを読み取る。
+ * google_place_id は通常フォームに存在しないため含めない。
+ * create 時は呼び出し側で `google_place_id: null` を付与する。
+ * update 時はそのまま StorePatch として渡し、既存値を保持する。
+ */
+function buildStoreInput(formData: FormData): Omit<StoreInput, "google_place_id"> {
   const has_contact_form = asContactForm(readString(formData, "has_contact_form"));
   const channelInput = asChannel(readString(formData, "channel"));
   return {
@@ -100,8 +107,9 @@ function buildStoreInput(formData: FormData): StoreInput {
     review_count: readNumber(formData, "review_count", 0),
     review_avg: readNumber(formData, "review_avg", 0),
     memo: readString(formData, "memo"),
-    assigned_planner: readString(formData, "assigned_planner"),
-    assigned_sales: readString(formData, "assigned_sales"),
+    // Phase 8 で旧 text 列 DROP 済。user_id 列のみを保持する。
+    assigned_planner_user_id: readNullableString(formData, "assigned_planner_user_id"),
+    assigned_sales_user_id: readNullableString(formData, "assigned_sales_user_id"),
     operator_type: asOperatorType(readString(formData, "operator_type")),
     operator_name: readString(formData, "operator_name"),
     ai_analysis_result: readNullableAiAnalysis(formData, "ai_analysis_result"),
@@ -109,6 +117,27 @@ function buildStoreInput(formData: FormData): StoreInput {
     lng: readNullableNumber(formData, "lng"),
     business_hours: readString(formData, "business_hours"),
   };
+}
+
+/**
+ * StoreInput の `assigned_*_user_id` がいずれも有効な profile.id を指していることを
+ * 検証する。`null` (未割当) は OK、UUID が profiles に存在しなければエラーメッセージを返す。
+ * 不正値による FK 違反を Server Action 層で早期検出するための防御層。
+ * 成功時は null を返す。
+ */
+async function validateAssignedUserIds(
+  input: Pick<StoreInput, "assigned_planner_user_id" | "assigned_sales_user_id">,
+): Promise<string | null> {
+  const ids = [input.assigned_planner_user_id, input.assigned_sales_user_id].filter(
+    (id): id is string => id !== null && id !== "",
+  );
+  for (const id of ids) {
+    const profile = await repos.profile.findById(id);
+    if (!profile) {
+      return `担当者が見つかりませんでした (id: ${id})`;
+    }
+  }
+  return null;
 }
 
 function invalidateAllStoreScopes(id?: string) {
@@ -124,8 +153,10 @@ export async function createStoreAction(
   _prev: ActionResult<{ id: string }> | null,
   formData: FormData,
 ): Promise<ActionResult<{ id: string }>> {
-  const input = buildStoreInput(formData);
+  const input: StoreInput = { ...buildStoreInput(formData), google_place_id: null };
   if (!input.name) return failure("店舗名を入力してください");
+  const assigneeError = await validateAssignedUserIds(input);
+  if (assigneeError) return failure(assigneeError);
 
   const created = await repos.store.create(input);
   invalidateAllStoreScopes(created.id);
@@ -136,9 +167,13 @@ export async function createStoreAction(
 }
 
 export async function createStoreAndRedirect(formData: FormData) {
-  const input = buildStoreInput(formData);
+  const input: StoreInput = { ...buildStoreInput(formData), google_place_id: null };
   if (!input.name) {
     throw new Error("店舗名を入力してください");
+  }
+  const assigneeError = await validateAssignedUserIds(input);
+  if (assigneeError) {
+    throw new Error(assigneeError);
   }
   const created = await repos.store.create(input);
   invalidateAllStoreScopes(created.id);
@@ -152,6 +187,8 @@ export async function updateStoreAction(
 ): Promise<ActionResult<{ id: string }>> {
   const input = buildStoreInput(formData);
   if (!input.name) return failure("店舗名を入力してください");
+  const assigneeError = await validateAssignedUserIds(input);
+  if (assigneeError) return failure(assigneeError);
   const updated = await repos.store.update(id, input);
   if (!updated) return failure("店舗が見つかりませんでした");
   invalidateAllStoreScopes(id);

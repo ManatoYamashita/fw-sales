@@ -21,13 +21,12 @@ export interface Deal {
   order_amount: number | null;
   lost_reason: string;
   status: DealStatus;
-  assigned_sales: string;
   /**
-   * 営業担当ユーザー参照 (auth-and-notifications Phase 1 で追加)。
-   * Phase 6 でバックフィル → Phase 7 でアプリ層が参照に切替 → Phase 8 で旧 text 列 DROP。
-   * 段階移行中の互換性確保のため optional として宣言。
+   * 営業担当ユーザー参照 (auth-and-notifications)。
+   * `null` は未割当。`profiles.id` (uuid) を保持し、表示時は `getProfileById` で
+   * 名前解決する。Phase 8 (0005 マイグレーション) で旧 `assigned_sales` (text) 列 DROP 済。
    */
-  assigned_sales_user_id?: string | null;
+  assigned_sales_user_id: string | null;
   created_at: string;
   updated_at: string;
 }

@@ -16,7 +16,6 @@ import { ServiceCheckboxGroup } from "@/app/(main)/stores/new/_components/servic
 import { toast } from "@/components/ui/toast";
 import { updateStorePatchAction } from "@/lib/actions/store-actions";
 import { decideChannel } from "@/lib/domain/channel";
-import { PLANNERS, SALES } from "@/lib/domain/staff";
 import { formatDate } from "@/lib/utils/date";
 import {
   CONTACT_FORMS,
@@ -26,6 +25,7 @@ import {
   type Store,
   type StorePatch,
 } from "@/types/store";
+import type { Profile } from "@/types/profile";
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -36,7 +36,13 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
-export function BasicInfoCard({ store }: { store: Store }) {
+export interface BasicInfoCardProps {
+  store: Store;
+  /** 担当者選択肢 (Phase 7: profiles に基づく Select オプション) */
+  profiles: readonly Profile[];
+}
+
+export function BasicInfoCard({ store, profiles }: BasicInfoCardProps) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -51,8 +57,9 @@ export function BasicInfoCard({ store }: { store: Store }) {
     target_service: store.target_service,
     operator_type: store.operator_type,
     operator_name: store.operator_name,
-    assigned_planner: store.assigned_planner,
-    assigned_sales: store.assigned_sales,
+    // Phase 7: text フィールドから user_id 参照へ移行
+    assigned_planner_user_id: store.assigned_planner_user_id ?? "",
+    assigned_sales_user_id: store.assigned_sales_user_id ?? "",
     business_hours: store.business_hours,
   });
 
@@ -88,8 +95,8 @@ export function BasicInfoCard({ store }: { store: Store }) {
       target_service: store.target_service,
       operator_type: store.operator_type,
       operator_name: store.operator_name,
-      assigned_planner: store.assigned_planner,
-      assigned_sales: store.assigned_sales,
+      assigned_planner_user_id: store.assigned_planner_user_id ?? "",
+      assigned_sales_user_id: store.assigned_sales_user_id ?? "",
       business_hours: store.business_hours,
     });
   };
@@ -251,30 +258,30 @@ export function BasicInfoCard({ store }: { store: Store }) {
                 placeholder="例: 株式会社○○ / 山田 太郎"
               />
             </FormField>
-            <FormField label="プランナー" htmlFor="assigned_planner">
+            <FormField label="プランナー" htmlFor="assigned_planner_user_id">
               <Select
-                id="assigned_planner"
-                value={form.assigned_planner}
-                onChange={onText("assigned_planner")}
+                id="assigned_planner_user_id"
+                value={form.assigned_planner_user_id}
+                onChange={onText("assigned_planner_user_id")}
               >
                 <option value="">未割当</option>
-                {PLANNERS.map((p) => (
-                  <option key={p} value={p}>
-                    {p}
+                {profiles.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.display_name}
                   </option>
                 ))}
               </Select>
             </FormField>
-            <FormField label="営業担当" htmlFor="assigned_sales">
+            <FormField label="営業担当" htmlFor="assigned_sales_user_id">
               <Select
-                id="assigned_sales"
-                value={form.assigned_sales}
-                onChange={onText("assigned_sales")}
+                id="assigned_sales_user_id"
+                value={form.assigned_sales_user_id}
+                onChange={onText("assigned_sales_user_id")}
               >
                 <option value="">未割当</option>
-                {SALES.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
+                {profiles.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.display_name}
                   </option>
                 ))}
               </Select>
@@ -318,8 +325,18 @@ export function BasicInfoCard({ store }: { store: Store }) {
               )}
             </Row>
             <Row label="運営者名">{store.operator_name || "—"}</Row>
-            <Row label="プランナー">{store.assigned_planner || "—"}</Row>
-            <Row label="営業担当">{store.assigned_sales || "—"}</Row>
+            <Row label="プランナー">
+              {(store.assigned_planner_user_id &&
+                profiles.find((p) => p.id === store.assigned_planner_user_id)
+                  ?.display_name) ||
+                "—"}
+            </Row>
+            <Row label="営業担当">
+              {(store.assigned_sales_user_id &&
+                profiles.find((p) => p.id === store.assigned_sales_user_id)
+                  ?.display_name) ||
+                "—"}
+            </Row>
             <Row label="登録日">{formatDate(store.created_at)}</Row>
             <Row label="最終更新">{formatDate(store.updated_at)}</Row>
           </dl>

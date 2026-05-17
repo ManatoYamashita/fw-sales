@@ -1,4 +1,4 @@
-import { pgTable, text, integer, real, uuid } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, real, index, uuid } from "drizzle-orm/pg-core";
 
 /**
  * profiles テーブル (auth-and-notifications spec, Issue #16)
@@ -40,7 +40,12 @@ export const profiles = pgTable("profiles", {
  */
 export const notifications = pgTable("notifications", {
   id: text("id").primaryKey(),
-  user_id: uuid("user_id"),
+  /**
+   * 通知受信者の profile.id (uuid)。
+   * Phase 10 (0006 マイグレーション) で `profiles.id` への FK 制約を追加。
+   * `null` は「全員宛 / システム通知」用に予約 (#14 通知ベル UI が解釈)。
+   */
+  user_id: uuid("user_id").references(() => profiles.id),
   kind: text("kind").notNull(),
   title: text("title").notNull(),
   body: text("body").notNull(),
@@ -79,20 +84,18 @@ export const stores = pgTable("stores", {
   review_count: integer("review_count").notNull(),
   review_avg: real("review_avg").notNull(),
   memo: text("memo").notNull(),
-  assigned_planner: text("assigned_planner").notNull(),
-  assigned_sales: text("assigned_sales").notNull(),
   /**
-   * 企画担当ユーザーへの参照 (auth-and-notifications spec, Phase 1)。
-   * `profiles.id` への uuid FK (nullable)。Phase 2 で旧 text 列 `assigned_planner` を DROP し、
-   * 本列が単一の真実となる。
+   * 企画担当ユーザーへの参照 (auth-and-notifications spec)。
+   * `profiles.id` への uuid FK (nullable)。
+   * Phase 8 (0005 マイグレーション) で旧 `assigned_planner` (text) を DROP し、本列が単一の真実となった。
    */
   assigned_planner_user_id: uuid("assigned_planner_user_id").references(
     () => profiles.id,
   ),
   /**
-   * 営業担当ユーザーへの参照 (auth-and-notifications spec, Phase 1)。
-   * `profiles.id` への uuid FK (nullable)。Phase 2 で旧 text 列 `assigned_sales` を DROP し、
-   * 本列が単一の真実となる。
+   * 営業担当ユーザーへの参照 (auth-and-notifications spec)。
+   * `profiles.id` への uuid FK (nullable)。
+   * Phase 8 で旧 `assigned_sales` (text) DROP 済。本列が単一の真実。
    */
   assigned_sales_user_id: uuid("assigned_sales_user_id").references(
     () => profiles.id,
@@ -109,9 +112,13 @@ export const stores = pgTable("stores", {
   lng: real("lng"),
   /** 営業時間。フリーテキスト(例: "11:00-23:00 / 日休")、未入力時は空文字。 */
   business_hours: text("business_hours").notNull().default(""),
+  /** Google Places ID。エリア検索経由で登録した店舗のみ格納。手動登録時は NULL。 */
+  google_place_id: text("google_place_id"),
   created_at: text("created_at").notNull(),
   updated_at: text("updated_at").notNull(),
-});
+}, (table) => [
+  index("stores_google_place_id_idx").on(table.google_place_id),
+]);
 
 /**
  * deals テーブル
@@ -137,11 +144,10 @@ export const deals = pgTable("deals", {
   order_amount: integer("order_amount"),
   lost_reason: text("lost_reason").notNull(),
   status: text("status").notNull(),
-  assigned_sales: text("assigned_sales").notNull(),
   /**
-   * 営業担当ユーザーへの参照 (auth-and-notifications spec, Phase 1)。
-   * `profiles.id` への uuid FK (nullable)。Phase 2 で旧 text 列 `assigned_sales` を DROP し、
-   * 本列が単一の真実となる。
+   * 営業担当ユーザーへの参照 (auth-and-notifications spec)。
+   * `profiles.id` への uuid FK (nullable)。
+   * Phase 8 で旧 `assigned_sales` (text) DROP 済。本列が単一の真実。
    */
   assigned_sales_user_id: uuid("assigned_sales_user_id").references(
     () => profiles.id,

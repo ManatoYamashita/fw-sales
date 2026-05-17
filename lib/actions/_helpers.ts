@@ -17,6 +17,20 @@ export function readString(formData: FormData, name: string): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+/**
+ * FormData の name フィールドから文字列を読出し、空 / 未設定なら null を返す。
+ * 担当者選択(user_id)のような「未割当」を NULL で表現するフィールド向け。
+ */
+export function readNullableString(
+  formData: FormData,
+  name: string,
+): string | null {
+  const value = formData.get(name);
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed === "" ? null : trimmed;
+}
+
 export function readNumber(
   formData: FormData,
   name: string,

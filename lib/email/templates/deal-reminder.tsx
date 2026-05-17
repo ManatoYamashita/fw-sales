@@ -108,12 +108,12 @@ function DealReminderBody({
   );
 }
 
-export function buildDealReminderEmail(
+export async function buildDealReminderEmail(
   input: DealReminderInput,
-): EmailMessage {
+): Promise<EmailMessage> {
   const label = MODE_LABEL[input.mode];
   const subject = `${label}の商談リマインダー (${input.deals.length} 件)`;
-  const html = renderEmail(<DealReminderBody {...input} />);
+  const html = await renderEmail(<DealReminderBody {...input} />);
   const text = [
     `${input.profile.display_name} さん`,
     "",

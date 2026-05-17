@@ -4,6 +4,7 @@ import { connection } from "next/server";
 import { ChannelBadge } from "@/components/feature/channel-badge";
 import { PriorityBadge } from "@/components/feature/priority-badge";
 import { getPipelineColumns } from "@/lib/queries/pipeline";
+import { getAllProfiles } from "@/lib/queries/profiles";
 import { CACHE_TAGS } from "@/lib/cache";
 import { cn } from "@/lib/utils/cn";
 import type { Store, StoreFilter } from "@/types/store";
@@ -18,11 +19,16 @@ async function loadColumns(filter: StoreFilter) {
 export async function KanbanBoard({ filter }: { filter: StoreFilter }) {
   // build 時 prerender を skip (USE_CACHE_TIMEOUT 対策)。
   await connection();
-  const columns = await loadColumns(filter);
+  const [columns, profiles] = await Promise.all([
+    loadColumns(filter),
+    getAllProfiles({ excludePlaceholders: false }),
+  ]);
+  // Phase 7: 営業担当の表示は profile.display_name を id 経由で解決する。
+  const profileNameById = new Map(profiles.map((p) => [p.id, p.display_name]));
   return (
     <div className="flex gap-3 overflow-x-auto pb-4 -mx-4 md:-mx-6 px-4 md:px-6 scrollbar-none">
       {columns.map((col) => (
-        <Column key={col.id} column={col} />
+        <Column key={col.id} column={col} profileNameById={profileNameById} />
       ))}
     </div>
   );
@@ -36,9 +42,10 @@ interface ColumnProps {
     bg: string;
     stores: Store[];
   };
+  profileNameById: Map<string, string>;
 }
 
-function Column({ column }: ColumnProps) {
+function Column({ column, profileNameById }: ColumnProps) {
   return (
     <section
       aria-label={`${column.label} カラム`}
@@ -62,14 +69,30 @@ function Column({ column }: ColumnProps) {
             該当なし
           </p>
         ) : (
-          column.stores.map((store) => <KanbanCard key={store.id} store={store} />)
+          column.stores.map((store) => (
+            <KanbanCard
+              key={store.id}
+              store={store}
+              profileNameById={profileNameById}
+            />
+          ))
         )}
       </div>
     </section>
   );
 }
 
-function KanbanCard({ store }: { store: Store }) {
+function KanbanCard({
+  store,
+  profileNameById,
+}: {
+  store: Store;
+  profileNameById: Map<string, string>;
+}) {
+  // Phase 7: user_id → display_name に解決して表示。未割当 / 解決失敗時は省略。
+  const assignedSalesName = store.assigned_sales_user_id
+    ? (profileNameById.get(store.assigned_sales_user_id) ?? null)
+    : null;
   return (
     <Link
       href={`/stores/${store.id}`}
@@ -86,9 +109,9 @@ function KanbanCard({ store }: { store: Store }) {
       </p>
       <div className="flex items-center justify-between mt-2 gap-2">
         <ChannelBadge channel={store.channel} />
-        {store.assigned_sales ? (
+        {assignedSalesName ? (
           <span className="text-xs text-muted-foreground">
-            {store.assigned_sales}
+            {assignedSalesName}
           </span>
         ) : null}
       </div>

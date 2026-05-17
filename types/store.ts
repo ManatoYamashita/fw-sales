@@ -37,20 +37,17 @@ export interface Store {
   review_count: number;
   review_avg: number;
   memo: string;
-  assigned_planner: string;
-  assigned_sales: string;
   /**
-   * 企画担当ユーザー参照 (auth-and-notifications Phase 1 で追加)。
-   * Phase 6 ではバックフィル後に値が入る nullable 列、Phase 7 でアプリ層が
-   * 参照に切替わり、Phase 8 で旧 `assigned_planner` (text) が DROP される。
-   * 段階移行中の互換性確保のため optional として宣言。
+   * 企画担当ユーザー参照 (auth-and-notifications)。
+   * `null` は未割当。`profiles.id` (uuid) を保持し、表示時は `getProfileById` で
+   * 名前解決する。Phase 8 (0005 マイグレーション) で旧 `assigned_planner` (text) 列 DROP 済。
    */
-  assigned_planner_user_id?: string | null;
+  assigned_planner_user_id: string | null;
   /**
-   * 営業担当ユーザー参照 (auth-and-notifications Phase 1 で追加)。
-   * 上記 `assigned_planner_user_id` と同様の段階移行ライフサイクル。
+   * 営業担当ユーザー参照 (auth-and-notifications)。
+   * 上記 `assigned_planner_user_id` と同等のライフサイクル。
    */
-  assigned_sales_user_id?: string | null;
+  assigned_sales_user_id: string | null;
   /** 運営者種別: 個人店 / 複数店舗運営 / 未設定 (個人店判別シグナル) */
   operator_type: OperatorType;
   /** 運営者名: 法人名 (複数店舗運営) または個人オーナー名。未設定時は空文字。 */
@@ -63,6 +60,8 @@ export interface Store {
   lng: number | null;
   /** 営業時間 (フリーテキスト)。未設定時は空文字。 */
   business_hours: string;
+  /** Google Places ID。エリア検索で追加した店舗のみ格納。手動登録時は null。 */
+  google_place_id: string | null;
   created_at: string; // YYYY-MM-DD
   updated_at: string;
 }
@@ -76,10 +75,9 @@ export interface StoreFilter {
   channel?: Channel;
   priority?: Priority;
   /**
-   * 営業担当者の絞り込み。`Store.assigned_sales` カラムと完全一致(`eq()` / `===`)で比較する。
-   * 表記揺れ正規化(全角半角・前後空白・大小文字)は行わない。
-   * 担当者マスタ ID 化は後続 Issue (`auth-and-notifications` 系列) で対応するため、
-   * 本機能では文字列のまま保持する。
+   * 営業担当者の絞り込み。`Store.assigned_sales_user_id` (profile.id) と完全一致で比較する。
+   * Phase 7 で旧 `assigned_sales` (text) 参照から user_id 参照へ切替済。
+   * `""` (空文字) は未指定扱い、UUID は profiles テーブルの id を想定。
    */
   sales?: string;
 }

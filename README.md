@@ -177,6 +177,51 @@ DB モードでの動作確認は次の E2E が標準手順です(詳細は `.ki
 4. `/stores/{storeId}` で店舗 stage が「受注」に同期されていることを確認
 5. `/dashboard` / `/kpi` / `/pipeline` で受注金額・件数の集計反映を確認
 
+## Authentication & Notifications (#16)
+
+本リポジトリは Supabase Auth (Google OAuth) と Resend ベースのメール通知を統合した認証/通知基盤を持ちます。詳細仕様は `.kiro/specs/auth-and-notifications/` 参照。
+
+### 自由登録のリスク (運用注意)
+
+Supabase 側の Google OAuth プロバイダーで **誰でもサインイン可能** な状態のため、内部ツールとして使う場合は **以下の運用統制が必須**:
+
+- Supabase Project Settings > Authentication > Providers > Google で `Authorized client IDs` / `Authorized email domains` を設定し、社内ドメインのみ許可する
+- もしくは Vercel / Supabase Edge Function 側で email allowlist を実装する(将来 Issue 予定)
+- placeholder profile (`role='placeholder'` / `email='placeholder-*@local.invalid'`) は Backfill 時に旧 text 担当者値を引き継いだ仮レコード。実ユーザーが対応する場合は Admin UI でマージする運用(将来 Issue)
+
+### 環境変数 (8 件)
+
+| 変数 | 用途 | 未設定時の挙動 |
+|---|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase プロジェクト URL | サインイン失敗 (`/login` で OAuth 起動不可) |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon 公開キー | 同上 |
+| `SUPABASE_SERVICE_ROLE_KEY` | (将来用) Service Role キー | 現状未使用 |
+| `GOOGLE_OAUTH_CLIENT_ID` | Supabase Provider 側で設定する Google OAuth Client ID | Supabase 側設定がなければサインイン失敗 |
+| `GOOGLE_OAUTH_CLIENT_SECRET` | 同上 Secret | 同上 |
+| `RESEND_API_KEY` | Resend API キー (メール送信用) | 全メール送信が no-op + warn ログのみ |
+| `RESEND_FROM_EMAIL` | 送信元アドレス (Resend で verified) | 同上 (no-op) |
+| `CRON_SECRET` | Vercel Cron 認証用 Bearer Token | `/api/cron/*` 全リクエストが 401 |
+
+### Mock モードでの認証バイパス
+
+`USE_MOCK_DB=true` で起動した場合、Supabase Auth は呼び出されず、固定の **placeholder dev profile** (`id = 00000000-0000-0000-0000-000000000001`) が現在ユーザーとして返ります。フォーム / 担当者選択 / ヘッダーのアバター表示はすべて Mock seed 上のプロフィールで動作。
+
+### Vercel Cron (商談リマインダー)
+
+`vercel.json` で 2 つの Cron を登録済:
+
+- `/api/cron/deal-reminders?mode=tomorrow` → 毎日 UTC 22:00 (JST 07:00) — 翌日商談リマインダー
+- `/api/cron/deal-reminders?mode=today` → 毎日 UTC 23:00 (JST 08:00) — 当日商談リマインダー
+
+ローカルで疑似発火する場合:
+
+```bash
+curl -H "Authorization: Bearer ${CRON_SECRET}" \
+  'http://localhost:3000/api/cron/deal-reminders?mode=tomorrow'
+```
+
+`CRON_SECRET` 未設定だと 401、`RESEND_API_KEY` 未設定だと送信は no-op (`skipped` カウントに記録) で 200 が返ります。
+
 ## 既存資産の扱い
 
 - 旧来のバニラJS実装は `legacy/vanilla-js` ブランチと `v0-legacy` タグで保全

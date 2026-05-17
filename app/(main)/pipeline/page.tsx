@@ -4,6 +4,7 @@ import { KanbanBoard } from "./_components/kanban-board";
 import { PipelineFilters } from "./_components/pipeline-filters";
 import { Spinner } from "@/components/ui/spinner";
 import { PRIORITIES, type Priority, type StoreFilter } from "@/types/store";
+import { getAllProfiles } from "@/lib/queries/profiles";
 
 export const metadata: Metadata = {
   title: "パイプライン",
@@ -18,12 +19,16 @@ interface PageProps {
 }
 
 export default async function PipelinePage({ searchParams }: PageProps) {
-  const sp = await searchParams;
+  const [sp, profiles] = await Promise.all([
+    searchParams,
+    getAllProfiles({ excludePlaceholders: false }),
+  ]);
   const filter: StoreFilter = {};
   if (sp.q) filter.q = sp.q;
   if (sp.priority && (PRIORITIES as readonly string[]).includes(sp.priority)) {
     filter.priority = sp.priority as Priority;
   }
+  // Phase 7 で `filter.sales` は profile.id を保持する仕様に切替。
   if (sp.sales) filter.sales = sp.sales;
 
   return (
@@ -36,7 +41,7 @@ export default async function PipelinePage({ searchParams }: PageProps) {
           ステージ別に店舗を一望し、ボトルネックを早期に発見します。
         </p>
       </div>
-      <PipelineFilters />
+      <PipelineFilters profiles={profiles} />
       <Suspense
         key={JSON.stringify(filter)}
         fallback={

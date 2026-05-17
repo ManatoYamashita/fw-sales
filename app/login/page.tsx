@@ -49,13 +49,14 @@ function ErrorBanner({ children }: { children: ReactNode }) {
 }
 
 // searchParams 依存部分は <Suspense> 境界内の async 子コンポーネントに分離する
-// (Next.js 16: page 関数本体で Promise を await するとページ全体がブロックされるため)
+// (Next.js 16 / cacheComponents: page 関数本体で Promise を await すると
+//  ページ全体がブロックされ、Suspense 境界の内側で動的データにアクセスする必要があるため)
+// Issue #26: 既定遷移先は /dashboard ではなく /stores (現時点で /dashboard は無効化済)
 async function LoginActions({ searchParams }: { searchParams: LoginSearchParams }) {
   const { redirect, error } = await searchParams;
   const errorMessage = deriveErrorMessage(error);
   const redirectTo =
     redirect && redirect.startsWith("/") ? redirect : "/stores";
-
   return (
     <>
       {errorMessage ? <ErrorBanner>{errorMessage}</ErrorBanner> : null}

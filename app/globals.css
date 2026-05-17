@@ -326,6 +326,11 @@
 
   html, body {
     height: 100%;
+    /*
+     * 横はみ出し防止。`clip` は scroll container を生成しないため
+     * 内側の Topbar / Sidebar の `position: sticky` を壊さない。
+     */
+    overflow-x: clip;
   }
 
   body {

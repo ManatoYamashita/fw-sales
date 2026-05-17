@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ResearchForm } from "./_components/research-form";
 import { getStoreCached } from "@/lib/queries/stores";
 import { getResearchByStore } from "@/lib/queries/research";
+import { getAllProfiles } from "@/lib/queries/profiles";
 
 type Params = Promise<{ storeId: string }>;
 
@@ -28,9 +29,10 @@ export default async function ResearchDetailPage({
   // build 時 prerender を skip (USE_CACHE_TIMEOUT 対策)。
   await connection();
   const { storeId } = await params;
-  const [store, research] = await Promise.all([
+  const [store, research, profiles] = await Promise.all([
     getStoreCached(storeId),
     getResearchByStore(storeId),
+    getAllProfiles({ excludePlaceholders: false }),
   ]);
   if (!store) notFound();
 
@@ -50,7 +52,7 @@ export default async function ResearchDetailPage({
           口コミと WEB 資産を分析し、最適な営業チャネルとフックを記録します。
         </p>
       </div>
-      <ResearchForm store={store} research={research} />
+      <ResearchForm store={store} research={research} profiles={profiles} />
     </div>
   );
 }

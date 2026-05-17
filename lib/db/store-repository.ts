@@ -113,7 +113,8 @@ function buildFilterConditions(filter: StoreFilter): SQL | undefined {
   if (filter.stage) conditions.push(eq(stores.stage, filter.stage));
   if (filter.priority) conditions.push(eq(stores.priority, filter.priority));
   if (filter.channel) conditions.push(eq(stores.channel, filter.channel));
-  if (filter.sales) conditions.push(eq(stores.assigned_sales, filter.sales));
+  // Phase 7 で user_id 参照に切替。filter.sales は profiles.id (uuid) を想定。
+  if (filter.sales) conditions.push(eq(stores.assigned_sales_user_id, filter.sales));
 
   if (filter.q && filter.q.trim() !== "") {
     const like = `%${filter.q.trim()}%`;

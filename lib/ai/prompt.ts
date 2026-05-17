@@ -4,7 +4,7 @@
  * - system prompt: 役割定義 + 出力規約 + 確信度判断基準 + Few-shot 2 例(導楽 / 蕎楽亭)を静的埋込
  * - user message Parts: フォーム値 JSON / 取得済 HTML 全文 / 自由追加指示 を別 Part として並べる
  *   - HTML と追加指示は空時に省略
- * - assigned_sales が空文字の場合は neutral placeholder「ファーストWEBの担当者」に差替
+ * - assigned_sales が空文字の場合は neutral placeholder「担当者」に差替(prefix「私ファーストWEBの」はテンプレート側が保持)
  *
  * 関連: design.md §「PromptBuilder」, requirements.md §2.4, §3.4, §7.1, §7.2
  */
@@ -45,7 +45,7 @@ export interface BuiltPrompt {
   userParts: Part[];
 }
 
-const NEUTRAL_SALES_PLACEHOLDER = "ファーストWEBの担当者";
+const NEUTRAL_SALES_PLACEHOLDER = "担当者";
 
 const SYSTEM_PROMPT_PREAMBLE = `あなたは飲食店向け WEB 集客の営業支援 AI です。
 飲食店の店舗情報を分析し、営業判断に直結する以下を構造化出力 (JSON Schema) で生成します:

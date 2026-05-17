@@ -16,6 +16,7 @@ import { today } from "@/lib/utils/date";
 import {
   failure,
   readNullableNumber,
+  readNullableString,
   readNumber,
   readString,
   success,
@@ -63,6 +64,15 @@ export async function createDealAction(
   if (!store) return failure("店舗が見つかりませんでした");
 
   const status = asDealStatus(readString(formData, "status") || "継続追客");
+  const assignedSalesUserId =
+    readNullableString(formData, "assigned_sales_user_id") ??
+    store.assigned_sales_user_id;
+  if (assignedSalesUserId) {
+    const profile = await repos.profile.findById(assignedSalesUserId);
+    if (!profile) {
+      return failure(`営業担当が見つかりませんでした (id: ${assignedSalesUserId})`);
+    }
+  }
   const input: DealInput = {
     store_id: storeId,
     store_name: store.name,
@@ -74,7 +84,8 @@ export async function createDealAction(
     order_amount: readNullableNumber(formData, "order_amount"),
     lost_reason: readString(formData, "lost_reason"),
     status,
-    assigned_sales: readString(formData, "assigned_sales") || store.assigned_sales,
+    // Phase 8 で旧 text 列 DROP 済。user_id 列のみを保持する。
+    assigned_sales_user_id: assignedSalesUserId,
   };
 
   // Deal 作成 + (差異がある場合のみ) Store ステージ同期を 1 トランザクションで実行。
