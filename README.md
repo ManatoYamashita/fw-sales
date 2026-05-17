@@ -222,6 +222,51 @@ curl -H "Authorization: Bearer ${CRON_SECRET}" \
 
 `CRON_SECRET` 未設定だと 401、`RESEND_API_KEY` 未設定だと送信は no-op (`skipped` カウントに記録) で 200 が返ります。
 
+## 初回ローカル開発セットアップ (TL;DR)
+
+新規メンバー / 別マシンでの開発再開向けチェックリスト。詳細は本 README の各章を参照。
+
+### A. 認証なし最速モード (Mock DB)
+
+実 DB / Supabase Auth に繋がず UI / 業務ロジックのみ確認したい場合:
+
+```bash
+pnpm install
+cp .env.example .env.local       # USE_MOCK_DB=true を有効化
+pnpm dev                          # http://localhost:3000 (認証バイパス、固定 mock profile)
+```
+
+### B. 本番モード (Supabase Auth + Cloud DB)
+
+1. **依存インストール**: `pnpm install`
+2. **環境変数設定**: `.env.example` を参考に `.env.local` を作成し、以下を埋める
+   - `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` (Supabase Dashboard → Project Settings → API → Legacy anon/service_role)
+   - `DATABASE_URL` (Supabase Dashboard → Project Settings → Database → Connection string (Transaction pooler))
+   - `RESEND_API_KEY` / `RESEND_FROM_EMAIL` (メール送信、未設定なら no-op で起動可)
+   - `CRON_SECRET` (例: `openssl rand -hex 32`、Vercel Cron 認証用、未設定なら `/api/cron/*` が 401)
+3. **Supabase Dashboard 設定** (初回のみ):
+   - Authentication → URL Configuration → Site URL: `http://localhost:3000` / Redirect URLs: `http://localhost:3000/**`
+   - Authentication → Providers → Google を Enable + Google Cloud Console で OAuth 2.0 Client (Web) を作成し Authorized redirect URIs に `https://<project-ref>.supabase.co/auth/v1/callback` を登録 → Client ID/Secret を Supabase の Google Provider 設定に貼り付け
+4. **DB マイグレーション適用**: `pnpm db:migrate` (#27 で導入された short-cut、`.env.local` を自動読込)
+5. (任意) **シード投入**: `USE_MOCK_DB=false pnpm seed`
+6. **開発サーバ起動**: `pnpm dev`
+7. **動作確認**: http://localhost:3000/login → Google でサインイン → `/stores` に着地、ヘッダーにアバター + 表示名
+
+> #28 で `0007_backfill_existing_auth_users.sql` が追加され、ステップ 4 で既存 `auth.users` の profiles row が自動的に揃います(以前必要だった手動 SQL 実行は不要)。
+
+## トラブルシューティング
+
+| 症状 | 原因 | 対応 |
+|---|---|---|
+| `Supabase environment variables are not set. Sign-in is unavailable.` | `.env.local` の Supabase 3 変数が未設定 | 「初回セットアップ B」ステップ 2 を確認、または `USE_MOCK_DB=true` に切替 |
+| `/login` で blocking-route エラー (`Runtime data such as cookies()/searchParams was accessed outside of <Suspense>`) | Next.js 16 で page 関数本体が dynamic API を await している | 動的 access を Suspense 境界内の async 子 component に分離 (`app/login/page.tsx:65` 参照) |
+| `/dashboard` で `Failed query: select ... from "profiles" where id = $1` | `profiles` テーブル不在、または既存 `auth.users` user に対応する row 不在 | ステップ 4 (`pnpm db:migrate`) を実行 — #28 で 0007 が backfill 自動化済 |
+| Google サインイン後 `/login?error=oauth_failed` | Google Cloud Console の Authorized redirect URIs に Supabase callback (`https://<ref>.supabase.co/auth/v1/callback`) 未登録、または Google Provider に Client Secret 未設定 | ステップ 3 の Google Provider 設定を再確認 |
+| `/api/cron/deal-reminders?mode=tomorrow` が 401 | `CRON_SECRET` 未設定 / 不一致 | ステップ 2 で設定。curl 時は `Authorization: Bearer ${CRON_SECRET}` ヘッダ必須。詳細は `Authentication & Notifications` セクション |
+| `pnpm typecheck` / `pnpm build` が `Cannot find module .next/types/.../route.js` で失敗 | 別ブランチで新規追加されたファイル参照が `.next/types/` キャッシュに残っている | `rm -rf .next` してから再実行 |
+
+> Next.js 16 はこのプロジェクトのトレーニングデータと異なる挙動が多い (`AGENTS.md` 冒頭参照)。実装前に `node_modules/next/dist/docs/` の該当ガイドを必ず確認すること。
+
 ## 既存資産の扱い
 
 - 旧来のバニラJS実装は `legacy/vanilla-js` ブランチと `v0-legacy` タグで保全
