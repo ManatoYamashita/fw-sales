@@ -55,11 +55,18 @@ export function StoreRegistrationTabs({
   );
 
   return (
-    <Tabs value={mode} onValueChange={handleChange} defaultValue={initialMode}>
-      <TabsList>
-        <TabsTrigger value="url">URL 貼付</TabsTrigger>
-        <TabsTrigger value="area">エリア検索</TabsTrigger>
-      </TabsList>
+    <Tabs
+      value={mode}
+      onValueChange={handleChange}
+      defaultValue={initialMode}
+      variant="pill"
+    >
+      <div className="flex justify-center">
+        <TabsList>
+          <TabsTrigger value="url">URL 貼付</TabsTrigger>
+          <TabsTrigger value="area">エリア検索</TabsTrigger>
+        </TabsList>
+      </div>
       <TabsPanel value="url">
         <StoreNewForm
           isApiKeyConfigured={isApiKeyConfigured}
