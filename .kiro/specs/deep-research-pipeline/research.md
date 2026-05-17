@@ -227,3 +227,31 @@
 - **成果物**: `spike/deep-research-poc.ts` で 1 件分の Stage 1 + Stage 2 を実行、ログを本 research.md に追記
 - **設計影響**: 想定と乖離があった場合 `design.md` の SDK 章 (`DeepResearchClient` の `startTask`/`getTask` シグネチャ) を修正。interface 自体は維持し、`lib/ai/deep-research/client.ts` 実装で差異を吸収
 - **着手判断**: Phase 1.1 (Drizzle マイグレーション) は PoC と並行可能。Phase 1.2 (AI クライアント実装) は PoC 完了後に着手
+
+---
+
+## Phase 0 PoC Execution Log
+
+**実行ステータス**: 未実行（agent 環境では Gemini API 課金リスクのため実行を保留）
+
+### PoC 成果物
+- `spike/deep-research-poc.ts` — Phase 0 PoC スクリプト雛形（コミット対象外、`.gitignore` 登録済）
+- 確認項目（実行前に research.md に書込済）:
+  1. `@google/genai@1.52.0` の Deep Research API シグネチャ実体（`interactions.create` / `interactions.get` / cancel 系）
+  2. `gemini-2.5-flash-lite` の `responseMimeType: "application/json"` + `responseJsonSchema` 動作
+  3. SDK レスポンスの token usage / コスト概算露出
+- 認証ヘルパ確認: `lib/supabase/server.ts:99-128` に `getCurrentSession()` / `getCurrentProfile()` あり。`getCurrentUser()` という名称のヘルパは存在しないため、design.md / 実装側で正しい関数名へ置換すること
+
+### ユーザー実行手順
+1. `.env.local` に `GEMINI_API_KEY=...` を設定
+2. `pnpm tsx spike/deep-research-poc.ts` で実行
+3. 結果ログを本セクション末尾に追記（実行日時、SDK 応答形、確認できた点、想定との差分）
+4. 想定と乖離があれば `design.md` §DeepResearchClient interface 章を更新
+
+### 期待されるアウトプット例
+```
+=== Phase 0 PoC ===
+[Step 1] Created interaction: { name: "interactions/...", state: "in_progress" }
+[Step 2] Response text: { "name": "サンプル", ... }
+[Step 2] Usage metadata: { "promptTokenCount": ..., "candidatesTokenCount": ... }
+```

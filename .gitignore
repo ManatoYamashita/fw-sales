@@ -40,3 +40,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# deep-research-pipeline Phase 0 PoC (Issue #43)
+/spike/
