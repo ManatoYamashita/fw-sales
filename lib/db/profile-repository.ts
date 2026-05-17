@@ -32,11 +32,13 @@ import { today } from "@/lib/utils/date";
 type ProfileSelectRow = typeof profiles.$inferSelect;
 
 /**
- * `'member' | 'placeholder'` 以外の role 値が DB に紛れ込んだ場合のフェイルセーフ。
- * 当面は member 扱いとし、将来 admin 等を追加する際にここを拡張する。
+ * 既知の role 値以外が DB に紛れ込んだ場合のフェイルセーフ。
+ * 未知の値は member 扱い (権限拡張の取り違えを防ぐ安全側のデフォルト)。
  */
 function asProfileRole(raw: string): ProfileRole {
-  return raw === "placeholder" ? "placeholder" : "member";
+  if (raw === "placeholder") return "placeholder";
+  if (raw === "admin") return "admin";
+  return "member";
 }
 
 function fromDbRow(row: ProfileSelectRow): Profile {
@@ -100,10 +102,18 @@ export function makeProfileRepo(executor: DbClient | Tx): ProfileRepository {
         const rows = await executor
           .select()
           .from(profiles)
-          .where(eq(profiles.role, "member"));
+          .where(inArray(profiles.role, ["member", "admin"]));
         return rows.map(fromDbRow);
       }
       const rows = await executor.select().from(profiles);
+      return rows.map(fromDbRow);
+    },
+
+    async findAdmins() {
+      const rows = await executor
+        .select()
+        .from(profiles)
+        .where(eq(profiles.role, "admin"));
       return rows.map(fromDbRow);
     },
 

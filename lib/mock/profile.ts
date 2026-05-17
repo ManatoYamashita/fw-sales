@@ -55,6 +55,10 @@ export const mockProfileRepo: ProfileRepository = {
     return all;
   },
 
+  async findAdmins() {
+    return [...mockDb.profiles.values()].filter((p) => p.role === "admin");
+  },
+
   async createPlaceholder(input: PlaceholderProfileInput) {
     const now = today();
     const profile: Profile = {
