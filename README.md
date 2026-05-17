@@ -179,7 +179,9 @@ DB モードでの動作確認は次の E2E が標準手順です(詳細は `.ki
 
 ## Authentication & Notifications (#16)
 
-本リポジトリは Supabase Auth (Google OAuth) と Resend ベースのメール通知を統合した認証/通知基盤を持ちます。詳細仕様は `.kiro/specs/auth-and-notifications/` 参照。
+> **2026-05-17 更新**: 商談リマインダー (Vercel Cron + Resend メール通知) と Resend 関連実装一式を削除しました。詳細は本セクション末尾の取り消し線付き履歴を参照。Supabase Auth (Google OAuth) 部分は引き続き稼働します。
+
+本リポジトリは Supabase Auth (Google OAuth) を統合した認証基盤を持ちます。詳細仕様は `.kiro/specs/auth-and-notifications/` 参照(メール通知部分は削除済)。
 
 ### 自由登録のリスク (運用注意)
 
@@ -189,7 +191,7 @@ Supabase 側の Google OAuth プロバイダーで **誰でもサインイン可
 - もしくは Vercel / Supabase Edge Function 側で email allowlist を実装する(将来 Issue 予定)
 - placeholder profile (`role='placeholder'` / `email='placeholder-*@local.invalid'`) は Backfill 時に旧 text 担当者値を引き継いだ仮レコード。実ユーザーが対応する場合は Admin UI でマージする運用(将来 Issue)
 
-### 環境変数 (8 件)
+### 環境変数 (5 件)
 
 | 変数 | 用途 | 未設定時の挙動 |
 |---|---|---|
@@ -198,29 +200,25 @@ Supabase 側の Google OAuth プロバイダーで **誰でもサインイン可
 | `SUPABASE_SERVICE_ROLE_KEY` | (将来用) Service Role キー | 現状未使用 |
 | `GOOGLE_OAUTH_CLIENT_ID` | Supabase Provider 側で設定する Google OAuth Client ID | Supabase 側設定がなければサインイン失敗 |
 | `GOOGLE_OAUTH_CLIENT_SECRET` | 同上 Secret | 同上 |
-| `RESEND_API_KEY` | Resend API キー (メール送信用) | 全メール送信が no-op + warn ログのみ |
-| `RESEND_FROM_EMAIL` | 送信元アドレス (Resend で verified) | 同上 (no-op) |
-| `CRON_SECRET` | Vercel Cron 認証用 Bearer Token | `/api/cron/*` 全リクエストが 401 |
 
 ### Mock モードでの認証バイパス
 
 `USE_MOCK_DB=true` で起動した場合、Supabase Auth は呼び出されず、固定の **placeholder dev profile** (`id = 00000000-0000-0000-0000-000000000001`) が現在ユーザーとして返ります。フォーム / 担当者選択 / ヘッダーのアバター表示はすべて Mock seed 上のプロフィールで動作。
 
-### Vercel Cron (商談リマインダー)
+### ~~Vercel Cron (商談リマインダー)~~ — 削除済 (2026-05-17)
 
-`vercel.json` で 2 つの Cron を登録済:
+> 以下は履歴参照用。`vercel.json` の `crons` セクション、`/api/cron/deal-reminders` route、`lib/email/*` 一式、`RESEND_API_KEY` / `RESEND_FROM_EMAIL` / `CRON_SECRET` env、`resend` npm 依存はすべて削除済。再導入時は本コミットの revert と spec 復活が起点。
 
-- `/api/cron/deal-reminders?mode=tomorrow` → 毎日 UTC 22:00 (JST 07:00) — 翌日商談リマインダー
-- `/api/cron/deal-reminders?mode=today` → 毎日 UTC 23:00 (JST 08:00) — 当日商談リマインダー
+~~`vercel.json` で 2 つの Cron を登録済:~~
 
-ローカルで疑似発火する場合:
+- ~~`/api/cron/deal-reminders?mode=tomorrow` → 毎日 UTC 22:00 (JST 07:00) — 翌日商談リマインダー~~
+- ~~`/api/cron/deal-reminders?mode=today` → 毎日 UTC 23:00 (JST 08:00) — 当日商談リマインダー~~
 
-```bash
-curl -H "Authorization: Bearer ${CRON_SECRET}" \
-  'http://localhost:3000/api/cron/deal-reminders?mode=tomorrow'
-```
+~~ローカルで疑似発火する場合:~~
 
-`CRON_SECRET` 未設定だと 401、`RESEND_API_KEY` 未設定だと送信は no-op (`skipped` カウントに記録) で 200 が返ります。
+~~`curl -H "Authorization: Bearer ${CRON_SECRET}" 'http://localhost:3000/api/cron/deal-reminders?mode=tomorrow'`~~
+
+~~`CRON_SECRET` 未設定だと 401、`RESEND_API_KEY` 未設定だと送信は no-op (`skipped` カウントに記録) で 200 が返ります。~~
 
 ## 既存資産の扱い
 

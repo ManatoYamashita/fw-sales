@@ -28,9 +28,11 @@ E2E 検証: `docs/auth-and-notifications-e2e.md` 参照。
 
 ## 事前準備 (両環境共通)
 
+> **2026-05-17 更新**: 商談リマインダー Cron + Resend メール通知関連を削除。env は 8 件 → 5 件に縮小。削除済 env (`RESEND_API_KEY` / `RESEND_FROM_EMAIL` / `CRON_SECRET`) は取り消し線で履歴残存。
+
 ### env 変数チェックリスト
 
-`.env.local` (ステージング/本番別) に以下 8 件設定済かを確認:
+`.env.local` (ステージング/本番別) に以下 5 件設定済かを確認:
 
 ```bash
 # Supabase Auth
@@ -42,17 +44,15 @@ SUPABASE_SERVICE_ROLE_KEY=eyJ...    # 将来用 (現状未使用)
 GOOGLE_OAUTH_CLIENT_ID=xxx.apps.googleusercontent.com
 GOOGLE_OAUTH_CLIENT_SECRET=GOCSPX-xxx
 
-# Email (Resend)
-RESEND_API_KEY=re_xxx
-RESEND_FROM_EMAIL=noreply@your-domain.com     # Resend で verified 済
-
-# Vercel Cron 認証
-CRON_SECRET=<32文字以上ランダム>
-
 # 既存
 DATABASE_URL=postgres://...
-NEXT_PUBLIC_APP_URL=https://your-domain.com   # メール本文の店舗詳細リンク用
+NEXT_PUBLIC_APP_URL=https://your-domain.com
 ```
+
+~~削除済 env (履歴):~~
+- ~~`RESEND_API_KEY=re_xxx`~~ — Resend API キー
+- ~~`RESEND_FROM_EMAIL=noreply@your-domain.com`~~ — Resend verified 済送信元
+- ~~`CRON_SECRET=<32文字以上ランダム>`~~ — Vercel Cron 認証 Bearer
 
 ### Supabase Project 側設定
 
@@ -134,8 +134,8 @@ open https://github.com/ManatoYamashita/fw-sales/pull/30
 - [ ] 4. 担当者選択 UI (Combobox 化)
 - [ ] 5. 表示への profile 名 join
 - [ ] 6. Mock モード動作確認 (`USE_MOCK_DB=true pnpm dev`)
-- [ ] 7. Cron リマインダー (curl で疑似発火 → メール受信確認)
-- [ ] 8. 認証バイパス系の防御 (CRON_SECRET 不一致 401 / mode クエリ不正 400 / RESEND_API_KEY 未設定でも 200)
+- ~~[ ] 7. Cron リマインダー (curl で疑似発火 → メール受信確認)~~ — 削除済
+- ~~[ ] 8. 認証バイパス系の防御 (CRON_SECRET 不一致 401 / mode クエリ不正 400 / RESEND_API_KEY 未設定でも 200)~~ — 削除済
 - [ ] 9. 全体品質ゲート (`pnpm typecheck && pnpm lint && pnpm build && pnpm test`)
 
 ### Step 4: 本番 DB に 0004 適用
@@ -178,7 +178,7 @@ Vercel auto-deploy が走り、本番 app コードに Phase 1-12 が反映さ�
 1. 未ログインで `/dashboard` → `/login` リダイレクト
 2. Google サインインで `/dashboard` 復帰、ヘッダーアバター表示
 3. `/stores` 一覧で担当者列に profile 名が表示される
-4. `/api/cron/deal-reminders` を curl で疑似発火し 200 が返る
+4. ~~`/api/cron/deal-reminders` を curl で疑似発火し 200 が返る~~ — 削除済
 
 問題があれば即 Vercel ダッシュボードから前リビジョン (PR #23 時点) にロールバック。
 
@@ -259,6 +259,6 @@ SELECT trigger_name, event_object_table FROM information_schema.triggers
 -- 0 行なら 0004 マイグレーションが未適用
 ```
 
-### 「Cron が動かない」
+### ~~「Cron が動かない」~~ — 削除済 (2026-05-17)
 
-`vercel.json` の cron が登録されているか Vercel ダッシュボードで確認。`CRON_SECRET` 環境変数が Vercel 側にも設定されているかを確認 (Vercel Project Settings > Environment Variables)。
+~~`vercel.json` の cron が登録されているか Vercel ダッシュボードで確認。`CRON_SECRET` 環境変数が Vercel 側にも設定されているかを確認 (Vercel Project Settings > Environment Variables)。~~
