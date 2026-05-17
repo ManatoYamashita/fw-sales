@@ -12,7 +12,8 @@
     "seed": "NODE_OPTIONS='--conditions=react-server' tsx scripts/seed.ts",
     "db:migrate": "node --env-file-if-exists=.env.local ./node_modules/drizzle-kit/bin.cjs migrate",
     "db:generate": "node --env-file-if-exists=.env.local ./node_modules/drizzle-kit/bin.cjs generate",
-    "db:studio": "node --env-file-if-exists=.env.local ./node_modules/drizzle-kit/bin.cjs studio"
+    "db:studio": "node --env-file-if-exists=.env.local ./node_modules/drizzle-kit/bin.cjs studio",
+    "db:check": "bash scripts/check-drizzle-migrations.sh"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",
