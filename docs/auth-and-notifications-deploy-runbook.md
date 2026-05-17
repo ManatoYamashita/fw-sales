@@ -262,3 +262,56 @@ SELECT trigger_name, event_object_table FROM information_schema.triggers
 ### 「Cron が動かない」
 
 `vercel.json` の cron が登録されているか Vercel ダッシュボードで確認。`CRON_SECRET` 環境変数が Vercel 側にも設定されているかを確認 (Vercel Project Settings > Environment Variables)。
+
+### 「本番で `column "..." does not exist` の 500」(孤児マイグレーションの検出・復旧)
+
+複数ブランチが並行開発で同一 idx の Drizzle マイグレーションを生成し、merge 時にファイル名衝突を解消せずマージされた場合、後者は `_journal.json` に登録されない **孤児** となる。`pnpm drizzle-kit migrate` は journal 未登録 SQL を無視するため、本番 DB に DDL が未適用の状態が発生する。
+
+**過去事例**: `0004_add_store_google_place_id.sql` (Issue #14 area-search × Issue #16 auth-and-notifications) — `stores.google_place_id` 列欠落で本番 `/stores` が 500 を返した。`0007_add_store_google_place_id.sql` として再生成し決着。
+
+#### 検出
+
+```bash
+# drizzle/ 配下の SQL ファイル数と _journal.json の entries 数を比較
+ls drizzle/*.sql | wc -l
+jq '.entries | length' drizzle/meta/_journal.json
+# 値が異なる、または同一 idx (例: 0004) の SQL が複数存在する場合は孤児あり
+ls drizzle/ | grep -E '^[0-9]{4}_' | awk -F'_' '{print $1}' | sort | uniq -d
+# 出力に番号が出れば、その idx が衝突している
+```
+
+#### 復旧手順
+
+1. **本番 DB に DDL を冪等で先行適用** (`drizzle-kit migrate` は走らせない):
+
+   Supabase Dashboard → SQL Editor で、孤児 SQL の DDL を `IF NOT EXISTS` 付きで実行。
+
+   ```sql
+   -- 例: stores.google_place_id 列の場合
+   ALTER TABLE stores ADD COLUMN IF NOT EXISTS google_place_id text;
+   CREATE INDEX IF NOT EXISTS stores_google_place_id_idx ON stores(google_place_id);
+   ```
+
+   `__drizzle_migrations` テーブルには触れない (後続のチームメンバーが migrate を流した際、idx が補完される設計)。
+
+2. **リポジトリの孤児を削除 → drizzle-kit で再生成**:
+
+   ```bash
+   rm drizzle/0004_<orphan-name>.sql   # 孤児を削除
+   pnpm drizzle-kit generate --name <descriptive-name>
+   # → drizzle/00NN_<name>.sql、drizzle/meta/00NN_snapshot.json、journal idx=NN が生成
+   ```
+
+3. **生成 SQL を `IF NOT EXISTS` に手編集** (本番に既に列が存在するため、`drizzle-kit migrate` 時の重複適用を防ぐ):
+
+   ```sql
+   ALTER TABLE "stores" ADD COLUMN IF NOT EXISTS "google_place_id" text;
+   CREATE INDEX IF NOT EXISTS "stores_google_place_id_idx" ON "stores" USING btree ("google_place_id");
+   ```
+
+4. **PR をマージ後、次回 migrate 実行時に journal が自動補完される** (`IF NOT EXISTS` で no-op、tracking テーブルに idx が追記)。
+
+#### 再発防止
+
+- PR レビュー時、`drizzle/` ディレクトリの変更があれば必ず `_journal.json` の最大 idx と SQL ファイルの最大番号が一致しているかを確認。
+- 同一 idx の SQL ファイルが複数存在しないかを `ls drizzle/ | awk -F'_' '{print $1}' | sort | uniq -d` で機械的にチェックする CI step を将来導入検討。

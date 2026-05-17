@@ -50,6 +50,13 @@
       "when": 1778913870724,
       "tag": "0006_notifications_user_id_fk",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1778977441913,
+      "tag": "0007_add_store_google_place_id",
+      "breakpoints": true
     }
   ]
 }
