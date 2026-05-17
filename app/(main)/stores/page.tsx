@@ -75,7 +75,7 @@ export default async function StoresPage({ searchParams }: PageProps) {
         <h2 className="text-xl md:text-2xl font-bold text-foreground">店舗一覧</h2>
         <div className="flex items-center gap-2">
           <Link
-            href="/stores/search"
+            href="/stores/new?mode=area"
             className="inline-flex items-center gap-1.5 h-10 px-4 rounded-lg border border-input bg-background text-foreground text-sm font-medium hover:bg-accent transition-colors"
           >
             <Search className="h-4 w-4" />
