@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Plus, Search } from "lucide-react";
+import { Plus } from "lucide-react";
 import { StoresFilterBar } from "./_components/stores-filter-bar";
 import { StoresTable } from "./_components/stores-table";
 import { Spinner } from "@/components/ui/spinner";
@@ -74,13 +74,6 @@ export default async function StoresPage({ searchParams }: PageProps) {
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <h2 className="text-xl md:text-2xl font-bold text-foreground">店舗一覧</h2>
         <div className="flex items-center gap-2">
-          <Link
-            href="/stores/new?mode=area"
-            className="inline-flex items-center gap-1.5 h-10 px-4 rounded-lg border border-input bg-background text-foreground text-sm font-medium hover:bg-accent transition-colors"
-          >
-            <Search className="h-4 w-4" />
-            エリアで検索
-          </Link>
           <Link
             href="/stores/new"
             className="inline-flex items-center gap-1.5 h-10 px-4 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-secondary transition-colors"
