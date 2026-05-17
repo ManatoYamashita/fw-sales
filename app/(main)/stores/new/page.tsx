@@ -10,9 +10,12 @@ export const metadata: Metadata = {
 
 type SearchParams = Promise<{ mode?: string | string[] }>;
 
-function normalizeMode(raw: string | string[] | undefined): "url" | "area" {
+function normalizeMode(
+  raw: string | string[] | undefined,
+): "manual" | "url" | "area" {
   const v = Array.isArray(raw) ? raw[0] : raw;
-  return v === "area" ? "area" : "url";
+  if (v === "manual" || v === "area") return v;
+  return "url";
 }
 
 export default async function NewStorePage({
