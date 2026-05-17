@@ -216,7 +216,9 @@ export function AiAnalysisPanel({
   const bgStyleFor = (key: ConfidenceFieldKey): CSSProperties | undefined => {
     const score = confidence[key];
     const bg = confidenceToBg(score);
-    return bg ? { backgroundColor: bg } : undefined;
+    // confidenceToBg は lightness 92% の薄い背景色を返すため、ダークモードでも
+    // 必ず濃い文字色 (slate-900 相当) を強制してコントラストを確保する。
+    return bg ? { backgroundColor: bg, color: "hsl(222 47% 11%)" } : undefined;
   };
 
   const isLowConfidence = (key: ConfidenceFieldKey): boolean => {
