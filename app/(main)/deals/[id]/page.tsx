@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { DealStatusForm } from "./_components/deal-status-form";
 import { getDealCached } from "@/lib/queries/deals";
 import { getStoreCached } from "@/lib/queries/stores";
+import { getProfileById } from "@/lib/queries/profiles";
 import { formatDate } from "@/lib/utils/date";
 import { formatYen } from "@/lib/utils/format";
 import type { DealStatus } from "@/types/deal";
@@ -41,7 +42,14 @@ export default async function DealDetailPage({
   const { id } = await params;
   const deal = await getDealCached(id);
   if (!deal) notFound();
-  const store = await getStoreCached(deal.store_id);
+  // Phase 8: assigned_sales (text) DROP 済。user_id → display_name に解決。
+  const [store, assignedSalesProfile] = await Promise.all([
+    getStoreCached(deal.store_id),
+    deal.assigned_sales_user_id
+      ? getProfileById(deal.assigned_sales_user_id)
+      : Promise.resolve(null),
+  ]);
+  const assignedSalesName = assignedSalesProfile?.display_name ?? "—";
 
   return (
     <div className="space-y-4 max-w-4xl mx-auto">
@@ -58,7 +66,7 @@ export default async function DealDetailPage({
           </h2>
           <p className="text-sm text-muted-foreground mt-0.5">
             {formatDate(deal.date)} / {deal.meeting_type} / 担当{" "}
-            {deal.assigned_sales || "—"}
+            {assignedSalesName}
           </p>
         </div>
         <Badge tone={statusTone[deal.status]}>{deal.status}</Badge>

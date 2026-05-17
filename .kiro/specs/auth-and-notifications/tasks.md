@@ -266,7 +266,7 @@
 
 ## 7. 担当者 user 参照化(アプリ側)
 
-- [ ] 7.1 担当者カラム関連の型を更新
+- [x] 7.1 担当者カラム関連の型を更新
   - `types/store.ts` に `assigned_planner_user_id: string | null` / `assigned_sales_user_id: string | null` を追加、旧 `assigned_planner` / `assigned_sales` を削除(またはコメントで deprecate)
   - `types/deal.ts` の `assigned_sales` を `assigned_sales_user_id: string | null` に置換
   - 完了状態: `pnpm typecheck` 通過。型の参照箇所が後続タスクで全件補正可能
@@ -274,7 +274,7 @@
   - _Boundary: types/store.ts, types/deal.ts_
   - _Depends: 6.1_
 
-- [ ] 7.2 Server Action の FormData 読込を user 参照化
+- [x] 7.2 Server Action の FormData 読込を user 参照化
   - `lib/actions/store-actions.ts` の `readString(formData, "assigned_planner")` を `readNullableString(formData, "assigned_planner_user_id")` に置換、空文字 → null 化
   - `lib/actions/deal-actions.ts` も `assigned_sales_user_id` に置換
   - profile 存在検証(値が NULL でない場合に `repos.profile.findById(...)` で確認)を追加、不正時は `failure(...)`
@@ -283,7 +283,7 @@
   - _Boundary: lib/actions/store-actions.ts, lib/actions/deal-actions.ts_
   - _Depends: 7.1, 2.6_
 
-- [ ] 7.3 担当者選択フォームを Combobox 化
+- [x] 7.3 担当者選択フォームを Combobox 化
   - `app/(main)/stores/new/_components/store-new-form.tsx` の `assigned_planner` / `assigned_sales` text input を `<select>` または既存 UI ライブラリの Combobox に変更、選択肢は `getAllProfiles({excludePlaceholders: false})` の結果から構築
   - `app/(main)/deals/new/_components/deal-new-form.tsx` の `assigned_sales` も同様に Combobox 化(default は `getCurrentProfile()` の id)
   - 「未割当(NULL)」の選択肢を含める
@@ -292,7 +292,7 @@
   - _Boundary: app/(main)/stores/new/_components/store-new-form.tsx, app/(main)/deals/new/_components/deal-new-form.tsx_
   - _Depends: 7.2_
 
-- [ ] 7.4 表示コンポーネントで profile 名 join を反映
+- [x] 7.4 表示コンポーネントで profile 名 join を反映
   - `app/(main)/stores/_components/stores-table.tsx`、`app/(main)/pipeline/_components/kanban-board.tsx` 等で `assigned_*_user_id` を profile 名に解決して表示
   - 解決ヘルパは `lib/queries/profiles.ts` の `getProfileById` または map 化した `getAllProfiles()` をローカルで使う
   - 完了状態: 一覧 / Kanban の担当者列に表示名が出る、未割当は空表示 or `—`
@@ -300,7 +300,7 @@
   - _Boundary: app/(main)/stores/_components, app/(main)/pipeline/_components_
   - _Depends: 7.3_
 
-- [ ] 7.5 `lib/domain/staff.ts` の整理と参照置換
+- [x] 7.5 `lib/domain/staff.ts` の整理と参照置換
   - `PLANNERS` / `SALES` / `CURRENT_USER` 定数を削除し、`@deprecated` コメントで `lib/queries/profiles.ts` への移行を案内
   - `OPS_MEMBERS` は handoff 関連が user 参照化される別 Issue まで暫定維持(コメントで保留理由を明示)
   - `grep -r "PLANNERS\|SALES\b\|CURRENT_USER" --include="*.ts" --include="*.tsx" .` の全件をリストし、各参照箇所を `getCurrentProfile()` / `getAllProfiles()` に置換、または用途消失で削除
@@ -313,7 +313,7 @@
 
 ## 8. Migration Phase 2
 
-- [ ] 8.1 旧 text カラム DROP マイグレーション
+- [x] 8.1 旧 text カラム DROP マイグレーション
   - `drizzle/0005_drop_legacy_assignee_text_columns.sql` を作成
   - `stores.assigned_planner` / `stores.assigned_sales` / `deals.assigned_sales` を DROP
   - `store_research_jobs.triggered_by`(text)を DROP し `triggered_by_user_id` を `triggered_by` にリネーム(該当時のみ)
@@ -322,7 +322,7 @@
   - _Boundary: drizzle/0005_*.sql_
   - _Depends: 7.5, 6.6_
 
-- [ ] 8.2 lib/db/schema.ts から旧カラム定義を除去
+- [x] 8.2 lib/db/schema.ts から旧カラム定義を除去
   - schema.ts の `assigned_planner` / `assigned_sales` 行を削除し、`triggered_by` を `uuid("triggered_by")` に維持(リネーム後の最終状態)
   - 完了状態: schema.ts と DB の実カラムが完全一致、`pnpm typecheck` 通過
   - _Requirements: 3.6_
@@ -333,7 +333,7 @@
 
 ## 9. リマインダー Cron
 
-- [ ] 9.1 deals-due-soon クエリ
+- [x] 9.1 deals-due-soon クエリ
   - `lib/queries/deals-due-soon.ts` に `getDealsDueSoon(mode: 'tomorrow'|'today'): Promise<ReminderBundle[]>` を実装
   - JST 基準で対象日を計算(`Asia/Tokyo` で当日 / 翌日の `YYYY-MM-DD` 文字列)、`assigned_sales_user_id IS NOT NULL` でフィルタ
   - 結果はユーザー単位に集約(`Map<userId, deals[]>`)、profile 情報を join して `ReminderBundle = { profile, deals }` の配列で返す
@@ -342,7 +342,7 @@
   - _Boundary: lib/queries/deals-due-soon.ts_
   - _Depends: 2.5, 7.1_
 
-- [ ] 9.2 Vercel Cron Route Handler
+- [x] 9.2 Vercel Cron Route Handler
   - `app/api/cron/deal-reminders/route.ts` で GET ハンドラを実装、`Authorization: Bearer ${CRON_SECRET}` 検証(不一致は 401)
   - クエリ `mode ∈ {tomorrow, today}` を検証(不一致は 400)
   - `getDealsDueSoon(mode)` 結果が 0 件なら早期 return + `{ sent: 0, skipped: 0 }` を返す
@@ -353,7 +353,7 @@
   - _Boundary: app/api/cron/deal-reminders/route.ts_
   - _Depends: 9.1, 5.4_
 
-- [ ] 9.3 Vercel Cron スケジュール設定
+- [x] 9.3 Vercel Cron スケジュール設定
   - `vercel.json` を新規作成、`crons` 配列に `{ path: "/api/cron/deal-reminders?mode=tomorrow", schedule: "0 22 * * *" }`(JST 7:00)と `{ path: ..., mode=today, schedule: "0 23 * * *" }`(JST 8:00)を登録
   - 完了状態: `vercel.json` がリポジトリにコミットされ、Vercel デプロイ時に Cron が登録される(本番運用時に手動確認)
   - _Requirements: 6.1, 6.2, 6.3_
@@ -364,7 +364,7 @@
 
 ## 10. #14 連携(通知 / ジョブフック)
 
-- [ ] 10.1 notifications.user_id 追加(本仕様の責務)
+- [x] 10.1 notifications.user_id 追加(本仕様の責務)
   - `#14` が `notifications` テーブルを未新設の場合: 6.2 の 0004 マイグレーションに `notifications.user_id uuid REFERENCES profiles(id)` 追加 + `CREATE INDEX idx_notifications_user_id ON notifications(user_id)` を含める
   - `#14` が新設済の場合: 別マイグレーション `drizzle/000X_add_user_id_to_notifications.sql` で `ALTER TABLE notifications ADD COLUMN user_id uuid REFERENCES profiles(id)` + index を追加
   - 完了状態: `notifications.user_id` カラムが DB 上に存在し、`repos.notification.findByUserId(uid)` が動作
@@ -372,7 +372,7 @@
   - _Boundary: drizzle/, lib/db/schema.ts_
   - _Depends: 6.2, 2.5_
 
-- [ ] 10.2 ジョブフック契約と研究ジョブメール送信
+- [x] 10.2 ジョブフック契約と研究ジョブメール送信
   - `lib/jobs/research-worker.ts`(#14 が所有)に対して、本仕様で「`status: 'completed' | 'failed'` 遷移時に email を呼ぶ」フックを挿入
   - フック関数 `sendResearchJobNotification(job, kind)` を `lib/email/index.ts` から提供:
     - `repos.profile.findById(job.triggered_by)` で受信者解決
@@ -388,7 +388,7 @@
 
 ## 11. Validation: テスト・整合確認
 
-- [ ] 11.1 (P) Email クライアントの Vitest ユニットテスト
+- [x] 11.1 (P) Email クライアントの Vitest ユニットテスト
   - `lib/email/__tests__/client.test.ts` を作成、4 ケースをテスト:
     - `RESEND_API_KEY` 未設定 → `kind: 'noop'`
     - `to` が `@local.invalid` → `kind: 'noop'`
@@ -400,6 +400,7 @@
   - _Depends: 5.1_
 
 - [ ] 11.2 (P) バックフィルスクリプトのユニットテスト
+  _Blocked: scripts/backfill-assignees.ts は Phase 8 で削除済のため obsolete。Phase 1→2 デプロイサイクルが完了した時点でスクリプト自体が役目を終えており、テスト対象が消失した。git 履歴 (commit 0ccee53) から復元可能だが、復元してまでテストを書く価値はない判断。_
   - `scripts/__tests__/backfill-assignees.test.ts` を作成、3 ケース:
     - 既存 profile マッチ優先(text 値が `display_name` と一致 → 既存 id を選択)
     - 不一致は placeholder 生成(`@local.invalid` / `role='placeholder'` を確認)
@@ -409,7 +410,7 @@
   - _Boundary: scripts/__tests__/backfill-assignees.test.ts_
   - _Depends: 6.6_
 
-- [ ] 11.3 (P) deals-due-soon クエリのユニットテスト
+- [x] 11.3 (P) deals-due-soon クエリのユニットテスト
   - `lib/queries/__tests__/deals-due-soon.test.ts` を作成、4 ケース:
     - `mode='tomorrow'` で翌日 JST のみ抽出
     - `mode='today'` で当日 JST のみ抽出
@@ -420,7 +421,7 @@
   - _Boundary: lib/queries/__tests__/deals-due-soon.test.ts_
   - _Depends: 9.1_
 
-- [ ] 11.4 (P) ProfileRepository のユニットテスト
+- [x] 11.4 (P) ProfileRepository のユニットテスト
   - `lib/db/__tests__/profile-repository.test.ts`、`lib/mock/__tests__/profile.test.ts` を作成
   - 3 ケース: `findByDisplayName` 完全一致 / `createPlaceholder` の email 形式 / `findManyByIds` で空配列入力時の挙動
   - 完了状態: 両ファイルで合計 6 件 pass
@@ -428,7 +429,7 @@
   - _Boundary: lib/db/__tests__/profile-repository.test.ts, lib/mock/__tests__/profile.test.ts_
   - _Depends: 2.2, 2.3_
 
-- [ ] 11.5 README に運用注意を追記
+- [x] 11.5 README に運用注意を追記
   - 自由登録のリスク(Google アカウント所有者なら誰でもサインイン可能、別 Issue で対応予定)
   - 環境変数 8 件の用途と未設定時の挙動
   - Cron 起動方法と CRON_SECRET の設定
@@ -437,7 +438,7 @@
   - _Requirements: 2.4, 8.1, 8.2, 8.3_
   - _Boundary: README.md_
 
-- [ ] 11.6 統合検証(手動 E2E チェックリスト)
+- [x] 11.6 統合検証(手動 E2E チェックリスト)
   - 以下を `docs/auth-and-notifications-e2e.md` または `.kiro/specs/auth-and-notifications/manual-e2e-checklist.md` として追記し、ステージングで通過確認:
     1. 未ログインで `/dashboard` → `/login` リダイレクト
     2. `/login` で「Google でサインイン」→ Google 同意 → `/dashboard` 復帰、ヘッダーにアバター表示
@@ -534,6 +535,25 @@
 - **Phase 6 (2026-05-11)**: Phase 7.1 でカラムを最終形(`assigned_*_user_id` を必須・旧 text を削除)に切替えるまで `types/store.ts` / `types/deal.ts` の `assigned_*_user_id` を **optional (`?: string | null`)** に保つ。これにより既存コード(旧 text フィールドを参照する serializer / Mock / 表示コンポーネント)を破壊せず段階移行できる。Phase 7.1 で `?` を外して必須化する手順を tasks.md に明記。
 - **Phase 6 (2026-05-11)**: タスク 6.4 / 6.5 は「Mock / DB リポジトリを新スキーマに追従」だが、`stores.findAll()` 等は `select(stores)` ベースの素通しで、追加カラムは自動的に row に乗る。Mock 側も `Map<string, Store>` を返すだけで filter / sort ロジックは旧 text を参照していなかったため、**コード変更は発生しなかった**(SEED 更新と型 optional 追加のみで担保)。Phase 7.x で UI 側 filter / Server Action 側 readNullableString を反映する際に初めて差分が出る想定。
 - **Phase 6 (2026-05-11)**: `scripts/backfill-assignees.ts` の `slugify()` は日本語表示名(漢字 / カナ)を `[^a-z0-9-]` で `-` 置換するため、純日本語表示名は空文字に縮退する。空 fallback として `unknown-${Date.now()}` を返し placeholder email 衝突を回避(同名 placeholder は profileCache で吸収)。dry-run は読取専用のため `dbProfileRepo.createPlaceholder` を呼ばず、別 `dryCache` 上で「(would create placeholder for ...)」のプレビュー文字列を表示する設計とした。
+- **Phase 7 (2026-05-16)**: `types/store.ts` / `types/deal.ts` の旧 `assigned_planner` / `assigned_sales` (text) は **@deprecated コメント付きで残置**(Phase 8 で削除)、`assigned_*_user_id` を **必須 (`string | null`)** に格上げ。Server Action 側 `buildStoreInput()` / `createDealAction()` で旧 text 列は空文字でハードコードして書込まない方式に切替えた。これにより `repos.store.update()` / `repos.deal.create()` の呼び出し側を破壊せず段階移行できる。
+- **Phase 7 (2026-05-16)**: 担当者 UI は **profile 名 Combobox** 化済(store/new・store/edit・store/[id] 基本情報カード・deal/new・research/[storeId]・pipeline-filters)。Parent RSC で `getAllProfiles({excludePlaceholders: false})` を呼び profiles を props 経由で Client Component に渡す方式。default 値は `getCurrentProfile()` の id を採用(deal は store の `assigned_sales_user_id` を最優先)。
+- **Phase 7 (2026-05-16)**: `StoreFilter.sales` は Phase 7 で **profile.id (uuid) 参照に切替**。`lib/db/store-repository.ts` の WHERE 句 / `lib/mock/store.ts` の `matches()` を `assigned_sales_user_id` 比較に置換。PR #24 (`feat/pipeline-sales-filter-5`) は旧 text 比較で実装されていたが、本 Phase で同セマンティクスを user_id に統一(URL クエリ `?sales=<uuid>` 仕様に変更、旧 `?sales=渡部` URL は失効)。
+- **Phase 7 (2026-05-16)**: `lib/actions/_helpers.ts` に `readNullableString()` を新設(`""` → `null` 化)、担当者 user_id の未割当を `null` で表現する規約に統一。`validateAssignedUserIds()` を `store-actions.ts` に追加し、`null` でない uuid が `profiles.id` に存在することを `repos.profile.findById()` で検証 → 不正値は `failure(...)` で早期返却(FK 違反の Server Action 層 ガード)。
+- **Phase 7 (2026-05-16)**: `lib/domain/staff.ts` から `PLANNERS` / `SALES` / `CURRENT_USER` を**完全撤廃**し OPS_MEMBERS のみ残置(handoff 関連 user 参照化は別 Issue)。`components/layout/sidebar.tsx` は `currentProfile?: Profile` props を `SidebarShell` (in `app/(main)/layout.tsx`) から受け取る形に変更し、`getCurrentProfile()` 経由で動的にユーザ情報を表示。
+- **Phase 8 (2026-05-16)**: `drizzle-kit generate --name=drop_legacy_assignee_text_columns` で 0005 マイグレーション SQL を生成、Phase 1 と異なり cross-schema FK や trigger は不要のため raw SQL 追記なし(コメントヘッダのみ追記)。Phase 1 ロールバックと異なり、本マイグレーションはデータ消失を伴うため backup からの個別 UPDATE が必要 → ステージング検証必須を SQL コメントで明示。
+- **Phase 8 (2026-05-16)**: `scripts/backfill-assignees.ts` を**完全削除**。理由: 本スクリプトは Phase 1 deploy → backfill apply → Phase 2 deploy の遷移時のみ機能し、Phase 8 で対象カラム DROP 後は機能不能。schema.ts 経由の型参照が残ると typecheck が破綻するため、git 履歴から復元前提で削除した(必要なら `git checkout 0ccee53 -- scripts/backfill-assignees.ts`)。
+- **Phase 8 (2026-05-16)**: 連鎖整理は app code 3 ファイル + Mock seed の計 4 ファイル。`app/(main)/deals/page.tsx` / `app/(main)/deals/[id]/page.tsx` は profile.display_name 解決(前者は Map、後者は `getProfileById`)を導入、`app/(main)/stores/[id]/_components/ai-analysis-detail-section.tsx` は parent RSC で事前解決した `assignedSalesName` props を受け取る形に変更。`lib/mock/seed.ts` の旧 text フィールド 12 行を `sed` で一括除去。
+- **Phase 9 (2026-05-16)**: `getDealsDueSoon(mode)` は `repos.deal.list()` 全件取得 + in-memory filter で実装(内部ツール規模のため専用 SQL 化せず)。将来 deal 件数が増えた場合は `DealRepository.findManyByDate` を追加して O(N) → indexed query に最適化。
+- **Phase 9 (2026-05-16)**: JST 暦日計算は `Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo' })` で `YYYY-MM-DD` 文字列を生成 → 文字列レベルで日数加減算する方式を採用。`Date.setDate()` ベースだと JST/UTC オフセット境界(深夜) で 1 日ズレるバグを避けるための明示的選択。
+- **Phase 9 (2026-05-16)**: Cron Route Handler は **常に 200 で返す** 方針 (送信失敗は error ログ + `failed` カウンタのみ)。Vercel Cron は失敗時に自動リトライしないため、個別失敗で全体を 500 にすると当日分が失われるリスクを回避(Req 4.1〜4.3 / 6.8)。Resend API 未設定環境では `emailClient.send()` 自体が `kind: 'noop'` を返すため、`skipped` として記録される。
+- **Phase 10 (2026-05-16)**: 0006 マイグレーション (`notifications.user_id` → `profiles.id` FK) を追加。`drizzle-kit generate` が自動生成し raw SQL 追記不要。適用前確認 SQL (孤児 user_id チェック) を SQL ヘッダコメントで明示。`ON DELETE no action` を採用 (CASCADE しない理由: profile 削除時に通知履歴を残す方が監査上安全)。
+- **Phase 10 (2026-05-16)**: `sendResearchJobNotification(job, kind)` は `lib/email/research-job-notification.ts` に新設、`lib/email/index.ts` から re-export。**throw しない**設計を徹底: 受信者 profile 不在 → error ログのみで return、`emailClient.send()` 失敗 → error ログのみ。これは #14 ジョブワーカー側で DB ステータス更新完了後に呼ぶ前提で、メール処理の失敗がジョブ全体の失敗を引き起こさないようにするため。
+- **Phase 10 (2026-05-16)**: `ResearchJobNotificationInput.triggered_by` は Phase 2 後の `store_research_jobs.triggered_by` (uuid) を前提に命名。Phase 1 期間中は #14 側で `triggered_by_user_id` を `triggered_by` にマップして渡す責務 (両仕様間の合意事項)。
+- **Phase 11 (2026-05-16)**: 11.2 (バックフィルスクリプトのユニットテスト) は **obsolete**(Phase 8 でスクリプト自体を削除済)。`_Blocked_` アノテーションで記録し再開しない判断。残 5 サブタスクは完了、合計 16 件の Vitest テスト追加(email client 5 / deals-due-soon 5 / profile DB 3 / profile Mock 3)。全体 160 件 pass。
+- **Phase 11 (2026-05-16)**: Resend SDK の vitest mock は `new Resend()` がクラス起動されるため、`vi.fn().mockImplementation()` ではなく `class FakeResend { emails = { send: sendMock } }` パターンが必要。`vi.fn` ベースで構築するとコンストラクタ呼出が「not a constructor」で失敗する。
+- **Phase 11 (2026-05-16)**: `lib/email/client.ts` には module-level singleton (`_resendInstance` / `_missingKeyWarned` / `_missingFromWarned`) があるため、テスト間で env を切替える場合は `vi.resetModules()` で client.ts を毎回 re-import する必要がある。
+- **Phase 11 (2026-05-16)**: `getDealsDueSoon` の JST 日付計算テストは `vi.setSystemTime(new Date("2026-05-16T03:00:00Z"))` で UTC 03:00 (= JST 12:00) に固定すると、JST/UTC 日付が同一になり test 期待値を `"2026-05-16"` / `"2026-05-17"` で安定化できる。
+- **Phase 12 (2026-05-16, build-fix)**: `kiro-validate-impl` の build smoke が Phase 5 (email templates) と Phase 9 (cron route) の統合点で Turbopack エラーを検出: "You're importing a component that imports react-dom/server"。App Route の transitive import に `react-dom/server` が含まれると Next.js 16 / Turbopack がビルドを失敗させる。fix: `lib/email/templates/_layout.tsx` の `renderToStaticMarkup` を **dynamic import** (`await import("react-dom/server")`) でラップし、App Route の static import graph から切り離した。`renderEmail` は async 化、3 つの builder (`buildDealReminderEmail` / `buildResearchJobCompletedEmail` / `buildResearchJobFailedEmail`) と 2 つの caller (`app/api/cron/deal-reminders/route.ts` / `lib/email/research-job-notification.ts`) を `await` 対応に連鎖修正。per-task review では検出不可能で、feature-level の build smoke 検証が責務を果たした事例。
 
 ---
 

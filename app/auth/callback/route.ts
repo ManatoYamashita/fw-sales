@@ -18,9 +18,9 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 
 function safeRedirect(value: string | null): string {
-  if (!value) return "/dashboard";
+  if (!value) return "/stores";
   if (value.startsWith("/") && !value.startsWith("//")) return value;
-  return "/dashboard";
+  return "/stores";
 }
 
 export async function GET(request: NextRequest) {

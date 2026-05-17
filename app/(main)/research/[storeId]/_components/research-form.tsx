@@ -11,17 +11,19 @@ import { Button } from "@/components/ui/button";
 import { saveResearchAction } from "@/lib/actions/research-actions";
 import { decideChannel, channelReasonFor } from "@/lib/domain/channel";
 import { CHANNELS } from "@/types/store";
-import { PLANNERS } from "@/lib/domain/staff";
 import { toast } from "@/components/ui/toast";
 import type { Research } from "@/types/research";
 import type { Store } from "@/types/store";
+import type { Profile } from "@/types/profile";
 
 interface ResearchFormProps {
   store: Store;
   research: Research | null;
+  /** 調査担当選択肢 (Phase 7: PLANNERS 定数を廃止し profile 名で表示) */
+  profiles: readonly Profile[];
 }
 
-export function ResearchForm({ store, research }: ResearchFormProps) {
+export function ResearchForm({ store, research, profiles }: ResearchFormProps) {
   const init = research ?? buildInitial(store);
   const [form, setForm] = useState(init);
   const [pending, startTransition] = useTransition();
@@ -213,9 +215,9 @@ export function ResearchForm({ store, research }: ResearchFormProps) {
               value={form.researcher}
               onChange={onText("researcher")}
             >
-              {PLANNERS.map((p) => (
-                <option key={p} value={p}>
-                  {p}
+              {profiles.map((p) => (
+                <option key={p.id} value={p.display_name}>
+                  {p.display_name}
                 </option>
               ))}
             </Select>

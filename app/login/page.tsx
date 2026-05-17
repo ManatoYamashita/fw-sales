@@ -11,14 +11,16 @@
  * 関連: design.md §「app/login」, requirements.md §1.2, §1.4, §1.7
  */
 
-import type { ReactNode } from "react";
+import { Suspense, type ReactNode } from "react";
 import { GoogleSignInButton } from "./_components/google-signin-button";
 
+type LoginSearchParams = Promise<{
+  readonly redirect?: string;
+  readonly error?: string;
+}>;
+
 interface LoginPageProps {
-  readonly searchParams: Promise<{
-    readonly redirect?: string;
-    readonly error?: string;
-  }>;
+  readonly searchParams: LoginSearchParams;
 }
 
 function deriveErrorMessage(code: string | undefined): string | null {
@@ -46,12 +48,32 @@ function ErrorBanner({ children }: { children: ReactNode }) {
   );
 }
 
-export default async function LoginPage({ searchParams }: LoginPageProps) {
+// searchParams 依存部分は <Suspense> 境界内の async 子コンポーネントに分離する
+// (Next.js 16 / cacheComponents: page 関数本体で Promise を await すると
+//  ページ全体がブロックされ、Suspense 境界の内側で動的データにアクセスする必要があるため)
+// Issue #26: 既定遷移先は /dashboard ではなく /stores (現時点で /dashboard は無効化済)
+async function LoginActions({ searchParams }: { searchParams: LoginSearchParams }) {
   const { redirect, error } = await searchParams;
   const errorMessage = deriveErrorMessage(error);
   const redirectTo =
-    redirect && redirect.startsWith("/") ? redirect : "/dashboard";
+    redirect && redirect.startsWith("/") ? redirect : "/stores";
+  return (
+    <>
+      {errorMessage ? <ErrorBanner>{errorMessage}</ErrorBanner> : null}
+      <GoogleSignInButton redirectTo={redirectTo} />
+    </>
+  );
+}
 
+function LoginActionsFallback() {
+  return (
+    <div className="space-y-2" aria-hidden>
+      <div className="h-11 w-full animate-pulse rounded-md bg-muted/40" />
+    </div>
+  );
+}
+
+export default function LoginPage({ searchParams }: LoginPageProps) {
   return (
     <main className="flex min-h-dvh items-center justify-center bg-background px-4 py-10 text-foreground">
       <div className="w-full max-w-sm space-y-6">
@@ -64,9 +86,9 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
           </p>
         </div>
 
-        {errorMessage ? <ErrorBanner>{errorMessage}</ErrorBanner> : null}
-
-        <GoogleSignInButton redirectTo={redirectTo} />
+        <Suspense fallback={<LoginActionsFallback />}>
+          <LoginActions searchParams={searchParams} />
+        </Suspense>
 
         <p className="text-center text-xs text-muted-foreground">
           サインインにより、利用規約と社内ポリシーに同意したものとみなされます。

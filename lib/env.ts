@@ -68,3 +68,16 @@ export function isApiKeyConfigured(): boolean {
 export function getGeminiModel(): string {
   return readEnv("GEMINI_MODEL", "gemini-2.5-flash") ?? "gemini-2.5-flash";
 }
+
+/**
+ * Google Places API キーが設定済みかを返す (boolean のみ、値そのものは返さない)。
+ *
+ * 用途: Server Component から取得した結果を Client Component に props で渡し、
+ * エリア検索ボタンの disabled 状態を制御する。
+ *
+ * 注意: API キーの実値は本関数では返さない。実値の取得は `lib/places/google.ts`
+ * (`import "server-only"` 隔離) の内部でのみ行うこと。
+ */
+export function isPlacesApiKeyConfigured(): boolean {
+  return readEnv("GOOGLE_PLACES_API_KEY") !== undefined;
+}

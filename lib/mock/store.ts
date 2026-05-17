@@ -9,7 +9,8 @@ function matches(store: Store, filter: StoreFilter): boolean {
   if (filter.stage && store.stage !== filter.stage) return false;
   if (filter.priority && store.priority !== filter.priority) return false;
   if (filter.channel && store.channel !== filter.channel) return false;
-  if (filter.sales && store.assigned_sales !== filter.sales) return false;
+  // Phase 7 で user_id 参照に切替。filter.sales は profiles.id (uuid) を想定。
+  if (filter.sales && store.assigned_sales_user_id !== filter.sales) return false;
   if (filter.q) {
     const q = filter.q.trim().toLowerCase();
     if (!q) return true;

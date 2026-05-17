@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { listDealsCached } from "@/lib/queries/deals";
 import { listStores } from "@/lib/queries/stores";
+import { getAllProfiles } from "@/lib/queries/profiles";
 import { formatDate } from "@/lib/utils/date";
 import { formatYen } from "@/lib/utils/format";
 import type { Deal, DealStatus } from "@/types/deal";
@@ -31,7 +32,15 @@ const statusTone: Record<
   失注: "destructive",
 };
 
-const columns: ColumnDef<Deal>[] = [
+function buildDealColumns(profileNameById: Map<string, string>): ColumnDef<Deal>[] {
+  // Phase 8: 旧 `assigned_sales` (text) DROP 済。`assigned_sales_user_id` から
+  // profile.display_name に解決し、未割当 / 解決失敗時は "—"。
+  const resolveAssignedSales = (d: Deal): string =>
+    d.assigned_sales_user_id
+      ? (profileNameById.get(d.assigned_sales_user_id) ?? "—")
+      : "—";
+
+  return [
   {
     key: "store",
     header: "店舗",
@@ -70,7 +79,7 @@ const columns: ColumnDef<Deal>[] = [
     header: "ステータス",
     cell: (d) => <Badge tone={statusTone[d.status]}>{d.status}</Badge>,
   },
-  { key: "sales", header: "担当", cell: (d) => d.assigned_sales || "—" },
+  { key: "sales", header: "担当", cell: resolveAssignedSales },
   {
     key: "actions",
     header: <span className="sr-only">操作</span>,
@@ -81,13 +90,15 @@ const columns: ColumnDef<Deal>[] = [
     ),
   },
 ];
+}
 
 export default async function DealsPage() {
   // build 時 prerender を skip (USE_CACHE_TIMEOUT 対策)。
   await connection();
-  const [deals, stores] = await Promise.all([
+  const [deals, stores, profiles] = await Promise.all([
     listDealsCached(),
     listStores({}),
+    getAllProfiles({ excludePlaceholders: false }),
   ]);
 
   const storeOptions: DealCreateStoreOption[] = stores.map((s) => ({
@@ -96,6 +107,9 @@ export default async function DealsPage() {
     prefecture: s.prefecture,
     city: s.city,
   }));
+
+  const profileNameById = new Map(profiles.map((p) => [p.id, p.display_name]));
+  const columns = buildDealColumns(profileNameById);
 
   return (
     <div className="space-y-4">

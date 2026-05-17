@@ -4,6 +4,8 @@ import { connection } from "next/server";
 import Link from "next/link";
 import { DealNewForm } from "./_components/deal-new-form";
 import { getStoreCached } from "@/lib/queries/stores";
+import { getAllProfiles } from "@/lib/queries/profiles";
+import { getCurrentProfile } from "@/lib/supabase/server";
 
 export const metadata: Metadata = { title: "商談を作成" };
 
@@ -18,7 +20,11 @@ export default async function NewDealPage({ searchParams }: PageProps) {
   if (!sp.store) {
     notFound();
   }
-  const store = await getStoreCached(sp.store);
+  const [store, profiles, currentProfile] = await Promise.all([
+    getStoreCached(sp.store),
+    getAllProfiles({ excludePlaceholders: false }),
+    getCurrentProfile(),
+  ]);
   if (!store) notFound();
 
   return (
@@ -34,7 +40,11 @@ export default async function NewDealPage({ searchParams }: PageProps) {
           新規商談
         </h2>
       </div>
-      <DealNewForm store={store} />
+      <DealNewForm
+        store={store}
+        profiles={profiles}
+        currentProfileId={currentProfile?.id ?? null}
+      />
     </div>
   );
 }
