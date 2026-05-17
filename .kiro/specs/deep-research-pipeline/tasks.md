@@ -72,7 +72,7 @@
   - _Depends: 2.1, 2.3_
 
 - [ ] 3. Core: Server Actions・Queries・通知ヘルパ
-- [ ] 3.1 (P) enqueueDeepResearchAction / retryDeepResearchAction
+- [x] 3.1 (P) enqueueDeepResearchAction / retryDeepResearchAction
   - 認証 → 必須項目 → 重複ジョブ → 日次上限 → 月次上限 の順にチェックし、失敗時は `ActionResult.failure(message)` を返す
   - 成功時 `repos.transaction` で `research_jobs` に `queued` 行を作成し `revalidateTag(CACHE_TAGS.deepResearchByStore(storeId))`
   - `retryDeepResearchAction` は `failed` 行を読んで新規 `queued` 行を作る（元行は touch しない）
@@ -81,7 +81,7 @@
   - _Boundary: lib/actions_
   - _Depends: 1.3, 1.4_
 
-- [ ] 3.2 (P) getDeepResearchReport / getDeepResearchJobByStore queries
+- [x] 3.2 (P) getDeepResearchReport / getDeepResearchJobByStore queries
   - `'use cache'` + `cacheTag(CACHE_TAGS.deepResearchByStore(storeId))`
   - レポート取得時に `getCurrentUser()` + 店舗閲覧権限チェック（未認可なら null）
   - 観測可能完了: 認可済ユーザーで最新レポート取得が成功、未認可ユーザーでは `null` 返却を Unit Test で確認
@@ -89,7 +89,7 @@
   - _Boundary: lib/queries_
   - _Depends: 1.3, 1.4_
 
-- [ ] 3.3 (P) createDeepResearchNotification ヘルパ（in-app 限定 + 管理者 fan-out）
+- [x] 3.3 (P) createDeepResearchNotification ヘルパ（in-app 限定 + 管理者 fan-out）
   - 3 種類の `kind` (`deep_research_done` / `deep_research_failed` / `deep_research_budget_warning`) を `notifications` テーブルに insert する関数
   - `deep_research_done` / `deep_research_failed` は対象店舗の登録ユーザー 1 名宛
   - `deep_research_budget_warning` は `profiles.role = 'admin'` を引いた全管理者ユーザーへ fan-out（副関数 `findAdminUsers()` を `profileRepository` 経由で呼出。新規メソッドが必要なら同タスク内で追加）
@@ -99,7 +99,7 @@
   - _Boundary: lib/db/notification-helpers, lib/repositories/profile-repository_
   - _Depends: 1.3_
 
-- [ ] 3.4 (P) getRecentNotifications query（NotificationBell 用）
+- [x] 3.4 (P) getRecentNotifications query（NotificationBell 用）
   - `lib/queries/notification.ts` 等に `'use cache'` 関数を新設し、ログインユーザーの最新通知 N 件（default 10、新しい順）を返す
   - `cacheTag(CACHE_TAGS.notifications)` を付与し、`createDeepResearchNotification` 呼出後の `revalidateTag` で SWR
   - 観測可能完了: 認可済ユーザー A に対し A 宛通知のみが新しい順で返り、他ユーザー宛 / null user_id（全員向け）も含めて 10 件に制限される
@@ -214,3 +214,7 @@
 - **Task 2.1 (json-schema-utils 抽出)**: 既存 `lib/ai/schema.ts:getAiAnalysisJsonSchema` の `stripUnsupportedKeys` をモジュール化したが、Gemini 非対応 key set (`$schema`/`maxLength` 等) は schema.ts と shared util の双方で値が一致することが必須。set 変更は shared util 側のみで完結させ、`schema.ts` は import のみで影響を受ける。
 - **Task 2.3 (51 項目)**: Issue #43 §2 のテーブルは合計 50 行 (Issue の "51 項目" は集計 18+18+15=51 の表記揺れ)。実装では `TOTAL_ITEM_COUNT` で実数を export し、テストでは `>= 50` で許容。将来 1 項目追加で 51 件にする運用も可能。
 - **Task 2.5 (Structurer テスト)**: SDK 呼出を含む関数はモック困難なので、`parseAndValidateStructurerText` を純関数として分離し、テストはそれに対して書く。SDK 呼出本体は Task 6.2 統合テストでカバーする方針。`StructuredReport` 型は `z.infer<typeof DeepResearchReportSchema>` でないと推論が `never` に落ちる (`ReturnType` + `extends` パターンは特殊フォームで動かない)。
+- **Task 3.1 (Server Actions)**: Next.js 16 では `revalidateTag(tag, "max")` の第 2 引数 (profile) が必須。`revalidateTag(tag)` 単独呼出は型エラー (TS2554)。既存 `lib/actions/research-actions.ts` のパターンを踏襲すること。
+- **Task 3.1 (テスト)**: `lib/env` を mock する際は `vi.mock(import("@/lib/env"), async (importOriginal) => { const actual = await importOriginal(); return { ...actual, ... }; })` で partial mock しないと `assertEnv` 等の他関数の export が消えて `lib/db/client.ts` 経由で実行時エラーになる。
+- **Task 3.3 (型拡張)**: `ProfileRole` に `'admin'` を追加。既存 `asProfileRole` フェイルセーフ関数の更新と、`lib/db/profile-repository.ts` の `findAll({ excludePlaceholders: true })` を `inArray(["member", "admin"])` に変更する必要あり (member だけだと admin が漏れる)。
+- **Task 3.3 (NotificationKind 拡張)**: `types/notification.ts` の `NotificationKind` に 3 値 (`deep_research_done` / `deep_research_failed` / `deep_research_budget_warning`) を追加。既存 2 値 (`research_job_completed` / `research_job_failed`) は #16 由来で現状未使用だが、型互換性のため残存させる。
