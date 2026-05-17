@@ -1,0 +1,42 @@
+# Drizzle マイグレーション整合性チェック CI。
+#
+# 並行ブランチが同一 idx の `drizzle/00NN_*.sql` を生成して merge され、
+# 後者が `_journal.json` に未登録の孤児になることを未然に防ぐためのワークフロー。
+# 過去事例: `0004_add_store_google_place_id.sql` (本番 /stores 500 事故)。
+#
+# 検査内容は `scripts/check-drizzle-migrations.sh` を参照。
+
+name: Check Migrations
+
+on:
+  pull_request:
+    paths:
+      - "drizzle/**"
+      - "scripts/check-drizzle-migrations.sh"
+      - ".github/workflows/check-migrations.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "drizzle/**"
+      - "scripts/check-drizzle-migrations.sh"
+      - ".github/workflows/check-migrations.yml"
+
+jobs:
+  check-drizzle-migrations:
+    name: Drizzle migration consistency
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Ensure jq is installed
+        run: |
+          if ! command -v jq >/dev/null 2>&1; then
+            sudo apt-get update && sudo apt-get install -y jq
+          fi
+          jq --version
+
+      - name: Run drizzle migration consistency check
+        # スクリプト直接実行で Node のインストール無し (pnpm db:check も同等)
+        run: bash scripts/check-drizzle-migrations.sh
