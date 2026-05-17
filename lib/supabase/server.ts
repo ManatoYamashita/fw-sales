@@ -8,7 +8,6 @@
  * - `import "server-only"` を必ず付け、Client バンドルへの混入を防ぐ
  * - Next.js 16 の async `cookies()` に追従 (await `cookies()`)
  * - 環境変数未設定時は warn ログ + サインイン経路は throw、`getCurrentSession()` は null 返却 (Req 8.2)
- * - `USE_MOCK_DB=true` の場合は Supabase を呼ばずに固定 mock profile を返す (design.md D-4)
  *
  * 関連: design.md §「lib/supabase/server.ts」, requirements.md §1.3, §1.5, §1.6, §8.2
  */
@@ -18,7 +17,6 @@ import { cookies } from "next/headers";
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { repos } from "@/lib/repositories";
-import { PLACEHOLDER_DEV_PROFILE_ID } from "@/lib/mock/seed";
 import type { Profile } from "@/types/profile";
 
 export interface CurrentSession {
@@ -43,10 +41,6 @@ function readSupabaseEnv(): { url: string; anonKey: string } | null {
   return { url, anonKey };
 }
 
-function isMockMode(): boolean {
-  return process.env.USE_MOCK_DB === "true";
-}
-
 /**
  * Server-side Supabase クライアントを生成する。
  *
@@ -54,16 +48,8 @@ function isMockMode(): boolean {
  * cookies adapter を構築する。RSC からの `setAll` 呼び出しは `set` が許可
  * されない局面で例外が出るため try/catch で握り潰し、Server Action /
  * Route Handler 側で更新される設計に倣う。
- *
- * Mock モードでは throw する (本関数は通常モードでのみ呼ばれる想定。
- * `getCurrentSession` / `getCurrentProfile` が Mock モード時は早期 return する)。
  */
 export async function getSupabaseServerClient(): Promise<SupabaseClient> {
-  if (isMockMode()) {
-    throw new Error(
-      "[auth] getSupabaseServerClient() should not be called in mock mode (USE_MOCK_DB=true). Use getCurrentSession()/getCurrentProfile() instead.",
-    );
-  }
   const env = readSupabaseEnv();
   if (!env) {
     throw new Error(
@@ -92,16 +78,8 @@ export async function getSupabaseServerClient(): Promise<SupabaseClient> {
 
 /**
  * 現在のセッション (認証済ユーザー) を取得する。未認証なら null。
- *
- * Mock モード時は固定 `PLACEHOLDER_DEV_PROFILE_ID` を持つ偽セッションを返す
- * (design.md D-4)。
  */
 export async function getCurrentSession(): Promise<CurrentSession | null> {
-  if (isMockMode()) {
-    const profile = await repos.profile.findById(PLACEHOLDER_DEV_PROFILE_ID);
-    if (!profile) return null;
-    return { userId: profile.id, email: profile.email };
-  }
   const env = readSupabaseEnv();
   if (!env) return null;
   try {

@@ -17,11 +17,40 @@ const notoSansJP = Noto_Sans_JP({
   display: "swap",
 });
 
-const APP_NAME = "Firstweb Lead OS";
+const APP_NAME = "FirstWeb - Reserch AI for Sales";
 const APP_DESCRIPTION =
   "飲食店向け WEB 集客の営業活動 (店舗調査・商談・引き継ぎ・KPI) を一元管理する社内向けリードマネジメントシステム。";
-// metadataBase は OGP の絶対 URL 解決に使われる。env 未設定時はローカルにフォールバック。
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+
+/**
+ * metadataBase 用の絶対 URL を解決する。OGP / Twitter Card の画像 URL や
+ * `og:url` の絶対化に使われるため、本番では必ず正しいスキーム付き URL が
+ * 返る必要がある。
+ *
+ * 解決優先度:
+ *   1. `NEXT_PUBLIC_APP_URL` (非空文字列のみ採用)
+ *   2. Vercel Production: `VERCEL_PROJECT_PRODUCTION_URL` (alias domain)
+ *   3. Vercel Preview / Dev: `VERCEL_URL` (deployment 固有 URL)
+ *   4. ローカルフォールバック (`http://localhost:3000`)
+ *
+ * 注意: `??` ではなく `||` 系の判定にしている理由は、Vercel に値が空文字列で
+ * 登録されている事故ケースを吸収するため (`new URL("")` は TypeError)。
+ */
+function resolveAppUrl(): string {
+  const explicit = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  if (explicit) return explicit;
+
+  const prodAlias = process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim();
+  if (process.env.VERCEL_ENV === "production" && prodAlias) {
+    return `https://${prodAlias}`;
+  }
+
+  const vercelUrl = process.env.VERCEL_URL?.trim();
+  if (vercelUrl) return `https://${vercelUrl}`;
+
+  return "http://localhost:3000";
+}
+
+const APP_URL = resolveAppUrl();
 
 export const metadata: Metadata = {
   metadataBase: new URL(APP_URL),
@@ -59,11 +88,21 @@ export const metadata: Metadata = {
     description: APP_DESCRIPTION,
     url: "/",
     locale: "ja_JP",
+    // 1200x630 (1.91:1) は Open Graph / Twitter Card 双方の推奨サイズ。
+    // PNG を先頭に置くのは LINE / 一部の Facebook 経路が WebP を未対応のため
+    // のフォールバック。クローラーは先頭から対応形式を採用する。
     images: [
       {
+        url: "/ogp.png",
+        width: 1200,
+        height: 630,
+        alt: `${APP_NAME} — 飲食店向け WEB 集客リード OS`,
+        type: "image/png",
+      },
+      {
         url: "/ogp.webp",
-        width: 1920,
-        height: 1080,
+        width: 1200,
+        height: 630,
         alt: `${APP_NAME} — 飲食店向け WEB 集客リード OS`,
         type: "image/webp",
       },
@@ -73,7 +112,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: APP_NAME,
     description: APP_DESCRIPTION,
-    images: ["/ogp.webp"],
+    images: ["/ogp.png"],
   },
   // 社内ツール: 検索エンジンのインデックスを完全拒否する。
   robots: {

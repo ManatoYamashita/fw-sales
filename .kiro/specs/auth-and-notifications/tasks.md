@@ -1,7 +1,9 @@
 # Implementation Plan — auth-and-notifications
 
+> **2026-05-17 更新**: 商談リマインダー Cron + Resend メール通知 + research job 通知 (dead code) を一括削除しました。以下のタスクのうち Resend / Cron / Email Template / `lib/email/*` / `lib/queries/deals-due-soon.*` / `vercel.json crons` / `CRON_SECRET` / `RESEND_API_KEY` / `RESEND_FROM_EMAIL` 関連は **すべて取り消し線扱いの履歴情報** として参照してください。Supabase Auth (Google OAuth) + Profile 移行関連のタスクは引き続き有効です。
+
 参照: `requirements.md` / `design.md` / `research.md`(2026-05-10 design-review 反映済)
-カバー要件: 1.1〜8.3(計 45 件)
+カバー要件: 1.1〜8.3(計 45 件) — うち §4 (Email) / §6 (Cron) / §8.3 は **削除済**
 
 ---
 

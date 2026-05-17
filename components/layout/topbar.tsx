@@ -31,7 +31,7 @@ function deriveBreadcrumb(pathname: string): BreadcrumbItem[] {
       ];
     }
   }
-  return [{ label: "Firstweb Lead OS" }];
+  return [{ label: "FirstWeb - Reserch AI for Sales" }];
 }
 
 export function Topbar() {

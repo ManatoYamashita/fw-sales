@@ -1,6 +1,6 @@
 # Product Overview
 
-**Firstweb Lead OS** — 飲食店向け WEB 集客サービス (MEO / HP / Instagram) を扱う社内営業チームのための、リード〜受注〜引き継ぎを一気通貫で管理する社内ツール。
+**FirstWeb - Reserch AI for Sales** — 飲食店向け WEB 集客サービス (MEO / HP / Instagram) を扱う社内営業チームのための、リード〜受注〜引き継ぎを一気通貫で管理する社内ツール。
 
 ## Core Capabilities
 
