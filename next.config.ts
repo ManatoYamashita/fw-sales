@@ -2,6 +2,11 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   cacheComponents: true,
+  // React の <ViewTransition> を `<Link>` ナビゲーションでも動かすためのフラグ。
+  // setState ベースの startTransition では不要だが、将来のページ遷移でも使えるように有効化。
+  experimental: {
+    viewTransition: true,
+  },
   // 社内ツール: meta robots に加えて HTTP ヘッダレベルでもインデックスを完全拒否する
   // (画像 / JSON など HTML をパースしないクローラ経路への保険)。
   async headers() {

@@ -397,3 +397,41 @@
     display: none;
   }
 }
+
+/* ------------------------------------------------------------------ */
+/*  View Transitions                                                   */
+/*  - React の <ViewTransition> から呼ばれる CSS 擬似要素               */
+/*  - 詳細: vercel-react-view-transitions skill                       */
+/* ------------------------------------------------------------------ */
+:root {
+  --vt-duration-exit: 150ms;
+  --vt-duration-enter: 210ms;
+}
+
+@keyframes vt-fade {
+  from {
+    filter: blur(2px);
+    opacity: 0;
+  }
+  to {
+    filter: blur(0);
+    opacity: 1;
+  }
+}
+
+::view-transition-old(.fade-out) {
+  animation: var(--vt-duration-exit) ease-in vt-fade reverse;
+}
+::view-transition-new(.fade-in) {
+  animation: var(--vt-duration-enter) ease-out var(--vt-duration-exit) both
+    vt-fade;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(*),
+  ::view-transition-new(*),
+  ::view-transition-group(*) {
+    animation-duration: 0s !important;
+    animation-delay: 0s !important;
+  }
+}

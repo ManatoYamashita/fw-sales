@@ -1,6 +1,12 @@
+/// <reference types="react/canary" />
 "use client";
 
-import { useCallback, useState, useTransition } from "react";
+import {
+  useCallback,
+  useState,
+  useTransition,
+  ViewTransition,
+} from "react";
 import { useRouter } from "next/navigation";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -39,6 +45,11 @@ export interface StoreRegistrationTabsProps {
  * - 各モードの「検索/読込/開始」ボタン押下後に `stepUnlocked` が true になり、
  *   カード下にコンテンツ(フォーム or 検索結果)が表示される。
  * - タブ切替時は `stepUnlocked` をリセットして「ファーストビュー=カードのみ」に戻す。
+ *
+ * アニメーション:
+ * - React の `<ViewTransition>` でカード内パネル切替・カード下展開を fade で繋ぐ。
+ * - state 更新を `startTransition` で囲むことで View Transition がアクティブになる。
+ * - 未サポートブラウザでは即時切替 (アニメ無し、機能影響なし)。
  */
 export function StoreRegistrationTabs({
   initialMode,
@@ -61,11 +72,11 @@ export function StoreRegistrationTabs({
       const normalized: RegistrationMode =
         next === "manual" || next === "area" || next === "url" ? next : "url";
       if (normalized === mode) return;
-      setMode(normalized);
-      setStepUnlocked(false);
-      setUrlImport(null);
-      setAreaResults(null);
       startTransition(() => {
+        setMode(normalized);
+        setStepUnlocked(false);
+        setUrlImport(null);
+        setAreaResults(null);
         router.replace(`/stores/new?mode=${normalized}`, { scroll: false });
       });
     },
@@ -73,14 +84,28 @@ export function StoreRegistrationTabs({
   );
 
   const handleUrlLoaded = (payload: UrlLoadPayload) => {
-    setUrlImport(payload);
-    setStepUnlocked(true);
+    startTransition(() => {
+      setUrlImport(payload);
+      setStepUnlocked(true);
+    });
   };
 
   const handleAreaSearched = (results: readonly PlaceWithMatch[]) => {
-    setAreaResults(results);
-    // 結果ゼロ件でもエラー表示は AreaSearchPanel 内で完結。step は開かない。
-    if (results.length > 0) setStepUnlocked(true);
+    if (results.length === 0) {
+      // 0 件はエラー扱い(子パネルで alert 表示)。step は開かない。
+      setAreaResults(results);
+      return;
+    }
+    startTransition(() => {
+      setAreaResults(results);
+      setStepUnlocked(true);
+    });
+  };
+
+  const handleManualStart = () => {
+    startTransition(() => {
+      setStepUnlocked(true);
+    });
   };
 
   return (
@@ -102,50 +127,56 @@ export function StoreRegistrationTabs({
             </div>
           </Tabs>
 
-          {mode === "manual" && (
-            <ManualStartPanel onStart={() => setStepUnlocked(true)} />
-          )}
-          {mode === "url" && <UrlSearchPanel onLoaded={handleUrlLoaded} />}
-          {mode === "area" && (
-            <AreaSearchPanel
-              onSearched={handleAreaSearched}
-              isPlacesApiConfigured={isPlacesApiConfigured}
-            />
-          )}
+          <ViewTransition default="none" enter="fade-in" exit="fade-out">
+            {mode === "manual" && (
+              <ManualStartPanel onStart={handleManualStart} />
+            )}
+            {mode === "url" && <UrlSearchPanel onLoaded={handleUrlLoaded} />}
+            {mode === "area" && (
+              <AreaSearchPanel
+                onSearched={handleAreaSearched}
+                isPlacesApiConfigured={isPlacesApiConfigured}
+              />
+            )}
+          </ViewTransition>
         </Card.Body>
       </Card>
 
-      {stepUnlocked && mode === "manual" && (
-        <StoreNewForm
-          isApiKeyConfigured={isApiKeyConfigured}
-          profiles={profiles}
-          currentProfileId={currentProfileId}
-        />
-      )}
-
-      {stepUnlocked && mode === "url" && urlImport && (
-        <div className="space-y-4">
-          <UrlImportSummary
-            sourceType={urlImport.sourceType}
-            applied={urlImport.applied}
-            chained={urlImport.chained}
-            ogpError={urlImport.ogpError}
-            storeName={urlImport.suggested.name}
-          />
-          <StoreNewForm
-            isApiKeyConfigured={isApiKeyConfigured}
-            profiles={profiles}
-            currentProfileId={currentProfileId}
-            initialImport={{
-              suggested: urlImport.suggested,
-              html: urlImport.html,
-            }}
-          />
-        </div>
-      )}
-
-      {stepUnlocked && mode === "area" && areaResults && (
-        <AreaSearchResults results={areaResults} />
+      {stepUnlocked && (
+        <ViewTransition default="none" enter="fade-in" exit="fade-out">
+          <div className="space-y-4">
+            {mode === "manual" && (
+              <StoreNewForm
+                isApiKeyConfigured={isApiKeyConfigured}
+                profiles={profiles}
+                currentProfileId={currentProfileId}
+              />
+            )}
+            {mode === "url" && urlImport && (
+              <>
+                <UrlImportSummary
+                  sourceType={urlImport.sourceType}
+                  applied={urlImport.applied}
+                  chained={urlImport.chained}
+                  ogpError={urlImport.ogpError}
+                  storeName={urlImport.suggested.name}
+                />
+                <StoreNewForm
+                  isApiKeyConfigured={isApiKeyConfigured}
+                  profiles={profiles}
+                  currentProfileId={currentProfileId}
+                  initialImport={{
+                    suggested: urlImport.suggested,
+                    html: urlImport.html,
+                  }}
+                />
+              </>
+            )}
+            {mode === "area" && areaResults && (
+              <AreaSearchResults results={areaResults} />
+            )}
+          </div>
+        </ViewTransition>
       )}
     </div>
   );
