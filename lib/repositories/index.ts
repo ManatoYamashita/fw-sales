@@ -35,6 +35,7 @@ import { mockResearchRepo } from "@/lib/mock/research";
 import { mockHandoffRepo } from "@/lib/mock/handoff";
 import { mockProfileRepo } from "@/lib/mock/profile";
 import { mockNotificationRepo } from "@/lib/mock/notification";
+import { mockDeepResearchRepo } from "@/lib/mock/deep-research";
 
 import type { DealRepository } from "./deal-repository";
 import type { StoreRepository } from "./store-repository";
@@ -42,6 +43,7 @@ import type { ResearchRepository } from "./research-repository";
 import type { HandoffRepository } from "./handoff-repository";
 import type { ProfileRepository } from "./profile-repository";
 import type { NotificationRepository } from "./notification-repository";
+import type { DeepResearchRepository } from "./deep-research-repository";
 
 export type {
   DealRepository,
@@ -50,6 +52,7 @@ export type {
   HandoffRepository,
   ProfileRepository,
   NotificationRepository,
+  DeepResearchRepository,
 };
 
 /**
@@ -68,6 +71,8 @@ export interface TxRepos {
   handoff: HandoffRepository;
   profile: ProfileRepository;
   notification: NotificationRepository;
+  /** deep-research-pipeline spec (Issue #43) で追加。 */
+  deepResearch: DeepResearchRepository;
 }
 
 /**
@@ -80,6 +85,8 @@ export interface Repos {
   handoff: HandoffRepository;
   profile: ProfileRepository;
   notification: NotificationRepository;
+  /** deep-research-pipeline spec (Issue #43) で追加。 */
+  deepResearch: DeepResearchRepository;
   /**
    * 複数リポジトリ書込みを 1 トランザクションで実行する。
    * - DB 経路: `db.transaction` で BEGIN/COMMIT/ROLLBACK を自動制御。
@@ -101,6 +108,7 @@ async function buildRepos(): Promise<Repos> {
       handoff: mockHandoffRepo,
       profile: mockProfileRepo,
       notification: mockNotificationRepo,
+      deepResearch: mockDeepResearchRepo,
       transaction: async <T>(fn: (tx: TxRepos) => Promise<T>): Promise<T> =>
         fn({
           deal: mockDealRepo,
@@ -109,6 +117,7 @@ async function buildRepos(): Promise<Repos> {
           handoff: mockHandoffRepo,
           profile: mockProfileRepo,
           notification: mockNotificationRepo,
+          deepResearch: mockDeepResearchRepo,
         }),
     }) satisfies Repos;
   }
@@ -125,12 +134,14 @@ async function buildRepos(): Promise<Repos> {
     dbHandoffRepo,
     dbProfileRepo,
     dbNotificationRepo,
+    dbDeepResearchRepo,
     makeDealRepo,
     makeStoreRepo,
     makeResearchRepo,
     makeHandoffRepo,
     makeProfileRepo,
     makeNotificationRepo,
+    makeDeepResearchRepo,
   } = dbModule;
 
   return Object.freeze({
@@ -140,6 +151,7 @@ async function buildRepos(): Promise<Repos> {
     handoff: dbHandoffRepo,
     profile: dbProfileRepo,
     notification: dbNotificationRepo,
+    deepResearch: dbDeepResearchRepo,
     transaction: <T>(fn: (tx: TxRepos) => Promise<T>): Promise<T> =>
       db.transaction(async (tx) =>
         fn({
@@ -149,6 +161,7 @@ async function buildRepos(): Promise<Repos> {
           handoff: makeHandoffRepo(tx),
           profile: makeProfileRepo(tx),
           notification: makeNotificationRepo(tx),
+          deepResearch: makeDeepResearchRepo(tx),
         }),
       ),
   }) satisfies Repos;

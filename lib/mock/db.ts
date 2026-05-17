@@ -5,6 +5,10 @@ import type { Deal } from "@/types/deal";
 import type { Handoff } from "@/types/handoff";
 import type { Profile } from "@/types/profile";
 import type { Notification } from "@/types/notification";
+import type {
+  DeepResearchJob,
+  DeepResearchReport,
+} from "@/types/deep-research";
 import {
   SEED_STORES,
   SEED_RESEARCH,
@@ -20,6 +24,10 @@ interface MockDb {
   handoffs: Map<string, Handoff>;
   profiles: Map<string, Profile>;
   notifications: Map<string, Notification>;
+  /** deep-research-pipeline spec (Issue #43) で追加。SEED は無く空 Map で起動。 */
+  deepResearchJobs: Map<string, DeepResearchJob>;
+  /** deep-research-pipeline spec (Issue #43) で追加。 */
+  deepResearchReports: Map<string, DeepResearchReport>;
 }
 
 const globalKey = Symbol.for("__FW_SALES_MOCK_DB__");
@@ -36,6 +44,8 @@ function buildInitialDb(): MockDb {
     handoffs: new Map(SEED_HANDOFFS.map((h) => [h.id, { ...h }])),
     profiles: new Map(SEED_PROFILES.map((p) => [p.id, { ...p }])),
     notifications: new Map(),
+    deepResearchJobs: new Map(),
+    deepResearchReports: new Map(),
   };
 }
 
@@ -50,6 +60,8 @@ export function resetMockDb(): void {
   mockDb.handoffs = fresh.handoffs;
   mockDb.profiles = fresh.profiles;
   mockDb.notifications = fresh.notifications;
+  mockDb.deepResearchJobs = fresh.deepResearchJobs;
+  mockDb.deepResearchReports = fresh.deepResearchReports;
 }
 
 export function clearMockDb(): void {
@@ -59,6 +71,8 @@ export function clearMockDb(): void {
   mockDb.handoffs.clear();
   mockDb.profiles.clear();
   mockDb.notifications.clear();
+  mockDb.deepResearchJobs.clear();
+  mockDb.deepResearchReports.clear();
 }
 
 export interface DbSnapshot {

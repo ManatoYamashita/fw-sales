@@ -32,3 +32,7 @@ export {
   makeNotificationRepo,
   dbNotificationRepo,
 } from "./notification-repository";
+export {
+  makeDeepResearchRepo,
+  dbDeepResearchRepo,
+} from "./deep-research-repository";
