@@ -1,0 +1,69 @@
+/**
+ * `buildDeepResearchPrompt` の単体テスト
+ * (deep-research-pipeline spec, Issue #43, Task 2.4)
+ *
+ * カバレッジ (3 ケース):
+ * 1. 決定性: 同じ入力に対して同じ文字列を返す
+ * 2. 51 項目キー名と A/B/C 凡例が prompt 内に必ず含まれる
+ * 3. Stage 2 prompt は Stage 1 の Markdown を埋め込む
+ *
+ * 関連: requirements.md §3.1, §3.2, §3.4
+ */
+
+import { describe, expect, it } from "vitest";
+import { buildDeepResearchPrompt } from "../prompt";
+import {
+  DEEP_RESEARCH_ITEMS_FLAT,
+  CATEGORY_LABELS,
+} from "../schema";
+
+const SAMPLE_STORE = {
+  name: "サンプル食堂",
+  prefecture: "東京都",
+  city: "新宿区",
+  address: "西新宿 1-1-1",
+  genre: "和食",
+  site_url: "https://example.com",
+} as const;
+
+describe("buildDeepResearchPrompt", () => {
+  it("決定性: 同じ入力で同じ文字列", () => {
+    const a = buildDeepResearchPrompt({ store: { ...SAMPLE_STORE } });
+    const b = buildDeepResearchPrompt({ store: { ...SAMPLE_STORE } });
+    expect(a.stage1.systemPrompt).toBe(b.stage1.systemPrompt);
+    expect(a.stage1.userPrompt).toBe(b.stage1.userPrompt);
+  });
+
+  it("Stage 1 prompt: 全 51 項目キーと A/B/C 凡例を含む", () => {
+    const { stage1 } = buildDeepResearchPrompt({
+      store: { ...SAMPLE_STORE },
+    });
+    // 区分凡例
+    expect(stage1.systemPrompt).toContain("A (高信頼)");
+    expect(stage1.systemPrompt).toContain("B (推定)");
+    expect(stage1.systemPrompt).toContain("C (店主ヒアリング必須)");
+
+    // 全項目キーが含まれること
+    for (const item of DEEP_RESEARCH_ITEMS_FLAT) {
+      expect(stage1.userPrompt).toContain(item.key);
+    }
+
+    // 全カテゴリ名が含まれること
+    for (const label of Object.values(CATEGORY_LABELS)) {
+      expect(stage1.userPrompt).toContain(label);
+    }
+
+    // 店舗情報が user prompt に埋め込まれる
+    expect(stage1.userPrompt).toContain(SAMPLE_STORE.name);
+    expect(stage1.userPrompt).toContain(SAMPLE_STORE.address);
+  });
+
+  it("Stage 2 prompt: Stage 1 Markdown を user prompt に埋め込む", () => {
+    const prompts = buildDeepResearchPrompt({ store: { ...SAMPLE_STORE } });
+    const reportMd = "## 店舗の基本情報\n- 屋号: サンプル食堂";
+    const stage2 = prompts.stage2(reportMd);
+    expect(stage2.userPrompt).toContain(reportMd);
+    expect(stage2.systemPrompt).toContain("category_1_basic");
+    expect(stage2.systemPrompt).toContain("hearing_questions");
+  });
+});
