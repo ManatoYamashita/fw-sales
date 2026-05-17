@@ -20,11 +20,18 @@ import type {
 export interface AiAnalysisDetailSectionProps {
   store: Store;
   isApiKeyConfigured: boolean;
+  /**
+   * 営業担当の表示名 (auth-and-notifications Phase 8 で旧 `store.assigned_sales` text 列が
+   * DROP されたため、parent RSC で `getProfileById` 経由で事前解決した display_name を渡す)。
+   * 未割当 / 解決失敗時は空文字。
+   */
+  assignedSalesName?: string;
 }
 
 export function AiAnalysisDetailSection({
   store,
   isApiKeyConfigured,
+  assignedSalesName,
 }: AiAnalysisDetailSectionProps) {
   const router = useRouter();
   const [aiResult, setAiResult] = useState<AiAnalysisResult | null>(
@@ -52,7 +59,7 @@ export function AiAnalysisDetailSection({
     operator_type: store.operator_type,
     operator_name: store.operator_name,
     htmlContent: null,
-    assignedSales: store.assigned_sales,
+    assignedSales: assignedSalesName ?? "",
   });
 
   const onAiResult = (result: AiAnalysisResult) => {

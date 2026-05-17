@@ -110,7 +110,7 @@ export default function RootLayout({
       className={`${inter.variable} ${notoSansJP.variable}`}
       suppressHydrationWarning
     >
-      <body className="min-h-full">
+      <body className="min-h-full overflow-x-clip">
         <ThemeProvider
           attribute="class"
           defaultTheme="system"

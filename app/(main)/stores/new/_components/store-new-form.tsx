@@ -27,7 +27,7 @@ import {
   OPERATOR_TYPES,
   PRIORITIES,
 } from "@/types/store";
-import { PLANNERS, SALES } from "@/lib/domain/staff";
+import type { Profile } from "@/types/profile";
 import { toast } from "@/components/ui/toast";
 import type { ApplyConfidence, ApplyResult } from "@/lib/url-parser/types";
 import { confidenceToBg } from "@/lib/url-parser/confidence-color";
@@ -55,8 +55,10 @@ type FormState = {
   review_count: string;
   review_avg: string;
   memo: string;
-  assigned_planner: string;
-  assigned_sales: string;
+  /** profile.id (空文字 = 未割当 → Server Action 側で null 化) */
+  assigned_planner_user_id: string;
+  /** profile.id (空文字 = 未割当 → Server Action 側で null 化) */
+  assigned_sales_user_id: string;
   operator_type: string;
   operator_name: string;
 };
@@ -78,8 +80,8 @@ const INITIAL: FormState = {
   review_count: "",
   review_avg: "",
   memo: "",
-  assigned_planner: "佐藤",
-  assigned_sales: "",
+  assigned_planner_user_id: "",
+  assigned_sales_user_id: "",
   operator_type: "未設定",
   operator_name: "",
 };
@@ -90,10 +92,23 @@ type ConfidenceKey = keyof ApplyConfidence;
 export interface StoreNewFormProps {
   /** SSR で取得した GEMINI_API_KEY 設定済み boolean(Req 2.7) */
   isApiKeyConfigured: boolean;
+  /** 担当者選択肢 (RSC で `getAllProfiles()` 経由で取得) */
+  profiles: readonly Profile[];
+  /** 現在ログイン中の profile.id (デフォルト担当者として使用) */
+  currentProfileId: string | null;
 }
 
-export function StoreNewForm({ isApiKeyConfigured }: StoreNewFormProps) {
-  const [form, setForm] = useState<FormState>(INITIAL);
+export function StoreNewForm({
+  isApiKeyConfigured,
+  profiles,
+  currentProfileId,
+}: StoreNewFormProps) {
+  const initial: FormState = {
+    ...INITIAL,
+    // 現在ログイン中のユーザを企画担当のデフォルトとして初期セット
+    assigned_planner_user_id: currentProfileId ?? "",
+  };
+  const [form, setForm] = useState<FormState>(initial);
   const [confidence, setConfidence] = useState<ApplyConfidence>({});
   const [aiResult, setAiResult] = useState<AiAnalysisResult | null>(null);
   const [aiConfidence, setAiConfidence] = useState<
@@ -208,7 +223,10 @@ export function StoreNewForm({ isApiKeyConfigured }: StoreNewFormProps) {
     operator_type: form.operator_type,
     operator_name: form.operator_name,
     htmlContent,
-    assignedSales: form.assigned_sales,
+    // AI 分析プロンプトには表示名(display_name)を渡す。user_id を引いて解決し、
+    // 未割当 / 解決失敗時は空文字。
+    assignedSales:
+      profiles.find((p) => p.id === form.assigned_sales_user_id)?.display_name ?? "",
   });
 
   const onAiResult = (result: AiAnalysisResult) => {
@@ -458,32 +476,32 @@ export function StoreNewForm({ isApiKeyConfigured }: StoreNewFormProps) {
             />
           </FormField>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <FormField label="プランナー" htmlFor="assigned_planner">
+            <FormField label="プランナー" htmlFor="assigned_planner_user_id">
               <Select
-                id="assigned_planner"
-                name="assigned_planner"
-                value={form.assigned_planner}
-                onChange={handlers.assigned_planner}
+                id="assigned_planner_user_id"
+                name="assigned_planner_user_id"
+                value={form.assigned_planner_user_id}
+                onChange={handlers.assigned_planner_user_id}
               >
                 <option value="">未割当</option>
-                {PLANNERS.map((p) => (
-                  <option key={p} value={p}>
-                    {p}
+                {profiles.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.display_name}
                   </option>
                 ))}
               </Select>
             </FormField>
-            <FormField label="営業担当" htmlFor="assigned_sales">
+            <FormField label="営業担当" htmlFor="assigned_sales_user_id">
               <Select
-                id="assigned_sales"
-                name="assigned_sales"
-                value={form.assigned_sales}
-                onChange={handlers.assigned_sales}
+                id="assigned_sales_user_id"
+                name="assigned_sales_user_id"
+                value={form.assigned_sales_user_id}
+                onChange={handlers.assigned_sales_user_id}
               >
                 <option value="">未割当</option>
-                {SALES.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
+                {profiles.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.display_name}
                   </option>
                 ))}
               </Select>

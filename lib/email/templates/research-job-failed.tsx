@@ -147,11 +147,11 @@ function ResearchJobFailedBody({
   );
 }
 
-export function buildResearchJobFailedEmail(
+export async function buildResearchJobFailedEmail(
   input: ResearchJobFailedInput,
-): EmailMessage {
+): Promise<EmailMessage> {
   const subject = `エリア調査ジョブが失敗しました (失敗 ${input.job.failed_count} 件)`;
-  const html = renderEmail(<ResearchJobFailedBody {...input} />);
+  const html = await renderEmail(<ResearchJobFailedBody {...input} />);
   const text = [
     `${input.profile.display_name} さん`,
     "",

@@ -8,11 +8,21 @@ import { PriorityBadge } from "@/components/feature/priority-badge";
 import { IndividualStoreBadge } from "@/components/feature/individual-store-badge";
 import { StarRating } from "@/components/ui/star-rating";
 import { listStores } from "@/lib/queries/stores";
+import { getAllProfiles } from "@/lib/queries/profiles";
 import { formatDate } from "@/lib/utils/date";
 import type { Store, StoreFilter, StoreSort } from "@/types/store";
+import type { Profile } from "@/types/profile";
 import { StoreRowActions } from "./store-row-actions";
 
-const columns: ColumnDef<Store>[] = [
+function buildColumns(profileMap: Map<string, string>): ColumnDef<Store>[] {
+  // Phase 7 で `assigned_sales` (text) → `assigned_sales_user_id` (uuid) に切替済。
+  // 表示は profileMap で id → display_name に解決し、未割当 / 解決失敗は "—"。
+  const resolveAssignedSales = (s: Store): string =>
+    s.assigned_sales_user_id
+      ? (profileMap.get(s.assigned_sales_user_id) ?? "—")
+      : "—";
+
+  return [
   {
     key: "name",
     header: "店舗名",
@@ -74,8 +84,11 @@ const columns: ColumnDef<Store>[] = [
     header: "営業担当",
     truncate: true,
     maxWidth: "140px",
-    title: (s) => s.assigned_sales || undefined,
-    cell: (s) => s.assigned_sales || "—",
+    title: (s) => {
+      const name = resolveAssignedSales(s);
+      return name === "—" ? undefined : name;
+    },
+    cell: (s) => resolveAssignedSales(s),
   },
   {
     key: "updated",
@@ -95,6 +108,11 @@ const columns: ColumnDef<Store>[] = [
     cell: (s) => <StoreRowActions storeId={s.id} storeName={s.name} />,
   },
 ];
+}
+
+function toProfileMap(profiles: readonly Profile[]): Map<string, string> {
+  return new Map(profiles.map((p) => [p.id, p.display_name]));
+}
 
 export async function StoresTable({
   filter,
@@ -103,7 +121,11 @@ export async function StoresTable({
   filter: StoreFilter;
   sort?: StoreSort;
 }) {
-  const stores = await listStores(filter, sort);
+  const [stores, profiles] = await Promise.all([
+    listStores(filter, sort),
+    getAllProfiles({ excludePlaceholders: false }),
+  ]);
+  const columns = buildColumns(toProfileMap(profiles));
   return (
     <Card>
       <Card.Header>

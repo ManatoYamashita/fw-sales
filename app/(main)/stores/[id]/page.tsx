@@ -18,6 +18,7 @@ import { StageChangeButton } from "./_components/stage-change-button";
 import { DeleteStoreButton } from "./_components/delete-store-button";
 import { getStoreCached } from "@/lib/queries/stores";
 import { listDealsByStoreCached } from "@/lib/queries/deals";
+import { getAllProfiles } from "@/lib/queries/profiles";
 import { isApiKeyConfigured } from "@/lib/env";
 
 type Params = Promise<{ id: string }>;
@@ -42,10 +43,18 @@ export default async function StoreDetailPage({
   // build 時 prerender を skip (USE_CACHE_TIMEOUT 対策)。
   await connection();
   const { id } = await params;
-  const store = await getStoreCached(id);
+  const [store, profiles] = await Promise.all([
+    getStoreCached(id),
+    getAllProfiles({ excludePlaceholders: false }),
+  ]);
   if (!store) notFound();
   const dealCount = (await listDealsByStoreCached(store.id)).length;
   const apiKeyConfigured = isApiKeyConfigured();
+  // Phase 8: 旧 `store.assigned_sales` (text) DROP 済。AI Panel に渡す display_name を事前解決。
+  const assignedSalesName = store.assigned_sales_user_id
+    ? (profiles.find((p) => p.id === store.assigned_sales_user_id)
+        ?.display_name ?? "")
+    : "";
 
   return (
     <div className="space-y-4">
@@ -97,10 +106,11 @@ export default async function StoreDetailPage({
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 space-y-4">
           <MapEmbedCard store={store} />
-          <BasicInfoCard store={store} />
+          <BasicInfoCard store={store} profiles={profiles} />
           <AiAnalysisDetailSection
             store={store}
             isApiKeyConfigured={apiKeyConfigured}
+            assignedSalesName={assignedSalesName}
           />
           <Suspense fallback={<SectionFallback label="調査" />}>
             <ResearchSummaryCard storeId={store.id} />

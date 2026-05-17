@@ -9,8 +9,11 @@ import { getCurrentProfile } from "@/lib/supabase/server";
 async function SidebarShell() {
   // build 時 prerender を skip (USE_CACHE_TIMEOUT 対策)。
   await connection();
-  const counts = await loadNavBadgeCounts();
-  return <Sidebar counts={counts} />;
+  const [counts, profile] = await Promise.all([
+    loadNavBadgeCounts(),
+    getCurrentProfile(),
+  ]);
+  return <Sidebar counts={counts} currentProfile={profile} />;
 }
 
 /**
@@ -26,7 +29,7 @@ async function TopbarShell() {
   if (!profile) {
     redirect("/login");
   }
-  return <Topbar currentProfile={profile} />;
+  return <Topbar />;
 }
 
 function SidebarFallback() {
@@ -55,7 +58,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
       <Suspense fallback={<SidebarFallback />}>
         <SidebarShell />
       </Suspense>
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 overflow-x-clip">
         <Suspense fallback={<TopbarFallback />}>
           <TopbarShell />
         </Suspense>

@@ -21,10 +21,10 @@ import {
   PRIORITIES,
   CHANNELS,
 } from "@/types/store";
-import { PLANNERS, SALES } from "@/lib/domain/staff";
 import { toast } from "@/components/ui/toast";
 import { useBeforeUnload } from "@/lib/hooks/use-before-unload";
 import type { Store } from "@/types/store";
+import type { Profile } from "@/types/profile";
 import type {
   AiAnalysisResult,
   AiAnalysisConfidence,
@@ -35,11 +35,14 @@ export interface StoreEditFormProps {
   store: Store;
   /** SSR で取得した GEMINI_API_KEY 設定済み boolean(Req 2.7) */
   isApiKeyConfigured: boolean;
+  /** 担当者選択肢 (Phase 7: profiles に基づく Select オプション) */
+  profiles: readonly Profile[];
 }
 
 export function StoreEditForm({
   store,
   isApiKeyConfigured,
+  profiles,
 }: StoreEditFormProps) {
   const [form, setForm] = useState({
     name: store.name,
@@ -58,8 +61,9 @@ export function StoreEditForm({
     review_count: String(store.review_count ?? ""),
     review_avg: String(store.review_avg ?? ""),
     memo: store.memo,
-    assigned_planner: store.assigned_planner,
-    assigned_sales: store.assigned_sales,
+    // Phase 7: text フィールドから user_id 参照へ移行
+    assigned_planner_user_id: store.assigned_planner_user_id ?? "",
+    assigned_sales_user_id: store.assigned_sales_user_id ?? "",
     operator_type: store.operator_type,
     operator_name: store.operator_name,
   });
@@ -115,7 +119,10 @@ export function StoreEditForm({
     operator_type: form.operator_type,
     operator_name: form.operator_name,
     htmlContent: null, // 編集画面では URL 再取得していないため null
-    assignedSales: form.assigned_sales,
+    // Phase 7: user_id → display_name に解決して AI プロンプトに渡す。
+    // 未割当 / 解決失敗時は空文字。
+    assignedSales:
+      profiles.find((p) => p.id === form.assigned_sales_user_id)?.display_name ?? "",
   });
 
   const onAiResult = (result: AiAnalysisResult) => {
@@ -356,32 +363,32 @@ export function StoreEditForm({
             />
           </FormField>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <FormField label="プランナー" htmlFor="assigned_planner">
+            <FormField label="プランナー" htmlFor="assigned_planner_user_id">
               <Select
-                id="assigned_planner"
-                name="assigned_planner"
-                value={form.assigned_planner}
-                onChange={onText("assigned_planner")}
+                id="assigned_planner_user_id"
+                name="assigned_planner_user_id"
+                value={form.assigned_planner_user_id}
+                onChange={onText("assigned_planner_user_id")}
               >
                 <option value="">未割当</option>
-                {PLANNERS.map((p) => (
-                  <option key={p} value={p}>
-                    {p}
+                {profiles.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.display_name}
                   </option>
                 ))}
               </Select>
             </FormField>
-            <FormField label="営業担当" htmlFor="assigned_sales">
+            <FormField label="営業担当" htmlFor="assigned_sales_user_id">
               <Select
-                id="assigned_sales"
-                name="assigned_sales"
-                value={form.assigned_sales}
-                onChange={onText("assigned_sales")}
+                id="assigned_sales_user_id"
+                name="assigned_sales_user_id"
+                value={form.assigned_sales_user_id}
+                onChange={onText("assigned_sales_user_id")}
               >
                 <option value="">未割当</option>
-                {SALES.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
+                {profiles.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.display_name}
                   </option>
                 ))}
               </Select>
