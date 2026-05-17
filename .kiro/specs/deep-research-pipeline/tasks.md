@@ -36,7 +36,7 @@
   - _Requirements: 3.1_
   - _Boundary: lib/ai_
 
-- [ ] 2.2 (P) DeepResearchClient 実装（Stage 1 SDK ラッパ）
+- [x] 2.2 (P) DeepResearchClient 実装（Stage 1 SDK ラッパ）
   - `startTask` / `getTask` / `cancelTask` の 3 メソッド、`DeepResearchClientError` / `DeepResearchCancelResult` discriminated union
   - SDK 生エラーから API キー文字列・request ID を除去する `normalizeSdkError` パターン継承
   - cancelTask は SDK 非対応時 `{ cancelled: false, reason: "unsupported" }` を返す best-effort
@@ -44,7 +44,7 @@
   - _Requirements: 3.1, 3.6, 5.4, 6.6_
   - _Boundary: lib/ai/deep-research_
   - _Depends: 1.1, 2.1_
-  - _Blocked: 1.1 (PoC) が GEMINI_API_KEY 未確保のため Blocked。SDK 実体シグネチャが未確定のため、PoC 完了後に再開する。研究ログとデザインに想定 SDK interface は記載済_
+  - _Note: 1.1 PoC 未実行のまま、SDK 型情報 (`node_modules/@google/genai/dist/genai.d.ts`) から直接 API シグネチャを抽出して実装。`client.interactions.create/get/cancel` の 3 メソッドが確定済 (line 874-930)。実機 PoC 完了時に挙動差分があれば本 client.ts のみで吸収可能_
 
 - [x] 2.3 (P) DeepResearch スキーマ・51 項目キー定数定義
   - 8 カテゴリ × 51 項目の Zod スキーマと項目キー（snake_case）→ラベル正規化マップ
@@ -221,3 +221,5 @@
 - **Task 5.4 (design 乖離)**: design.md は「store-detail-tabs.tsx に 4 タブ目を追加」を想定していたが、実態の `app/(main)/stores/[id]/page.tsx` は Tabs 構造ではなくカード集約レイアウトだった (基本情報/AI 分析/調査/商談履歴 が縦並びカード)。タスク 5.4 は「DeepResearchSection カードを page.tsx の AiAnalysisDetailSection の直後に挿入」する形で実装。design 当初の「タブ」概念は `DeepResearchReportView` の内部 8 カテゴリ Tabs に降格 (R7.2 視覚的区別は別カードとして担保)。
 - **Task 5 (UI テスト戦略)**: `@testing-library/react` が未導入のため、Task 5 各サブタスクは個別の vitest UI テストを書かず、typecheck + lint + `pnpm build` 成功 + Task 6.3 の E2E (Playwright/Cypress) で観測完了とする。`ResearchStatusBadge` は元々「ストーリーブック相当の確認 or 手動」が観測完了条件だったため整合。
 - **Task 5.5 (Topbar 通知)**: `Topbar` を Client 維持しつつ `notifications?: readonly Notification[]` props を追加。`(main)/layout.tsx` の `TopbarShell` (RSC) が `getRecentNotifications(profile.id, 10)` の結果を props 経由で渡す。既存 Bell スタブを `<NotificationBell>` に置換。
+- **Task 2.2 (SDK 型抽出)**: `@google/genai@1.52.0` の Deep Research API シグネチャは `node_modules/@google/genai/dist/genai.d.ts` の `BaseInteractions` クラス (L874-930) から直接抽出可能。PoC 実行なしで以下が確定: `client.interactions.create({ agent, input, system_instruction?, background?, ... })` / `get(id)` / `cancel(id)`、`Interaction.status` は 6 値 (`in_progress | requires_action | completed | failed | cancelled | incomplete`)、`Interaction.outputs?: Content[]`、`TextContent.annotations.url_citation` で引用 URL 抽出。型は `Interactions` namespace 配下 (`Interactions.Interaction` 等)、トップレベル export ではない点に注意。
+- **Task 2.2 (taskName → taskId 命名統一)**: design.md は `DeepResearchTaskHandle.taskName` を使ったが、SDK の `Interaction.id` および DB 列 `deep_research_task_id` と整合させるため実装では `taskId` に統一。design 章は実装に追従する形で整合を取る (リファレンス用)。
