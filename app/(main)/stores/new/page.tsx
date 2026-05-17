@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
-import { StoreNewForm } from "./_components/store-new-form";
-import { isApiKeyConfigured } from "@/lib/env";
+import { StoreRegistrationTabs } from "./_components/store-registration-tabs";
+import { isApiKeyConfigured, isPlacesApiKeyConfigured } from "@/lib/env";
 import { getAllProfiles } from "@/lib/queries/profiles";
 import { getCurrentProfile } from "@/lib/supabase/server";
 
@@ -8,15 +8,29 @@ export const metadata: Metadata = {
   title: "店舗登録",
 };
 
-export default async function NewStorePage() {
-  // GEMINI_API_KEY の有無を SSR で判定し、Client Component に boolean で渡す。
-  // 値そのものは渡さず、AI 分析ボタンの disabled 制御にのみ使う(Req 2.7)。
+type SearchParams = Promise<{ mode?: string | string[] }>;
+
+function normalizeMode(raw: string | string[] | undefined): "url" | "area" {
+  const v = Array.isArray(raw) ? raw[0] : raw;
+  return v === "area" ? "area" : "url";
+}
+
+export default async function NewStorePage({
+  searchParams,
+}: {
+  searchParams: SearchParams;
+}) {
+  // GEMINI_API_KEY / GOOGLE_PLACES_API_KEY の有無を SSR で判定し、Client へ boolean のみで渡す。
+  // 値そのものは渡さず、AI 分析ボタン / エリア検索ボタンの disabled 制御にのみ使う。
   const apiKeyConfigured = isApiKeyConfigured();
+  const placesApiConfigured = isPlacesApiKeyConfigured();
   // 担当者選択肢 + 現在ログイン中ユーザを SSR で取得し props 経由で渡す (Phase 7.3)。
-  const [profiles, currentProfile] = await Promise.all([
+  const [profiles, currentProfile, sp] = await Promise.all([
     getAllProfiles({ excludePlaceholders: false }),
     getCurrentProfile(),
+    searchParams,
   ]);
+  const initialMode = normalizeMode(sp.mode);
 
   return (
     <div className="space-y-4 max-w-4xl mx-auto">
@@ -25,12 +39,13 @@ export default async function NewStorePage() {
           店舗を登録
         </h2>
         <p className="text-sm text-muted-foreground mt-1">
-          食べログ・GoogleマップのURLから自動入力できます。
-          必須項目は店舗名のみです。
+          URL 貼付またはエリア検索で店舗を登録できます。タブで方法を切り替えてください。
         </p>
       </div>
-      <StoreNewForm
+      <StoreRegistrationTabs
+        initialMode={initialMode}
         isApiKeyConfigured={apiKeyConfigured}
+        isPlacesApiConfigured={placesApiConfigured}
         profiles={profiles}
         currentProfileId={currentProfile?.id ?? null}
       />
