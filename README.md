@@ -10,6 +10,9 @@
 - **Server Actions** によるミューテーション。`revalidateTag(tag, "max")` で stale-while-revalidate
 - **Supabase Postgres + Drizzle ORM** による永続化(`lib/db/*`)
 - **Repository インターフェース**(`lib/repositories/*-repository.ts`)で永続化層を抽象化
+- **Supabase Auth (Google OAuth)** によるサインイン + `middleware.ts` でセッション検証
+- **AI 店舗分析** (`lib/ai/` + `@google/genai`): Google Gemini で URL/HTML から店舗情報・架電スクリプトを構造化出力 (`responseMimeType: "application/json"` + Zod 再検証 + rate limiter + 60s timeout)
+- **Google Places API 連携** (`lib/places/`): エリア名から飲食店候補を一括取得し、店舗一括登録を支援
 - **Composition Pattern**: Card / Modal / Tabs は Compound Components、RSC ↔ Client は children で橋渡し
 - **cossUI 由来のデザインシステム**(MIT 範囲のトークンのみ採用、AGPL の `@coss/ui` ソースは未取り込み)
 - **ダークモード対応**(`next-themes`、Settings 画面でライト / ダーク / システム切替)
@@ -32,10 +35,14 @@ app/
 ├── layout.tsx                 # html/body, fonts (Inter + Noto Sans JP), <Toaster />
 ├── globals.css                # Tailwind v4 + @theme トークン
 ├── page.tsx                   # / → /dashboard へ redirect
+├── manifest.ts                # PWA manifest
+├── robots.ts                  # robots.txt
+├── login/                     # Google OAuth サインインページ (Supabase Auth)
+├── auth/callback/             # Supabase OAuth コールバック route
 ├── (main)/                    # 共通シェル(サイドバー + トップバー)
 │   ├── layout.tsx
 │   ├── dashboard/             # KPI / アクションキュー / パイプラインサマリー
-│   ├── stores/                # 一覧・登録・詳細・編集
+│   ├── stores/                # 一覧・登録 (URL Import + AI 分析)・詳細・編集
 │   ├── research/              # 調査キュー・記録
 │   ├── pipeline/              # Kanban
 │   ├── actions/               # DM/Tel スクリプト + 実行記録
@@ -53,15 +60,21 @@ components/
 
 lib/
 ├── domain/                    # STAGES, SERVICES, STAFF, channel 判定
-├── repositories/              # 抽象 interface (差し替え対象の入口)
-├── mock/                      # インメモリ実装 + シードデータ
+├── repositories/              # 抽象 interface + repos composition root (transaction API)
+├── db/                        # Drizzle ORM schema / client / *-repository.ts 実装 / seed-data
+├── supabase/                  # Supabase Auth client (browser / server / middleware)
+├── ai/                        # Gemini API client / prompt / schema / rate-limiter / validate
+├── places/                    # Google Places API client (エリア検索)
 ├── queries/                   # 集計 / 取得関数 ('use cache' で包む)
 ├── actions/                   # Server Actions ('use server')
 ├── url-parser/                # 食べログ / Googleマップ URL 解析 + OGP fetch
 ├── templates/                 # DM / テレアポ文面生成(純関数)
+├── hooks/                     # React hooks
 ├── utils/                     # date / format / id / cn(clsx)
+├── env.ts                     # 環境変数バリデーション (fail-fast)
 └── cache.ts                   # CACHE_TAGS 定数
 
+middleware.ts                  # Supabase Auth セッション検証 (Edge runtime)
 types/                         # Store / Research / Deal / Handoff / Stage
 ```
 
@@ -213,8 +226,11 @@ Supabase 側の Google OAuth プロバイダーで **誰でもサインイン可
 
 1. **依存インストール**: `pnpm install`
 2. **環境変数設定**: `.env.example` を参考に `.env.local` を作成し、以下を埋める
-   - `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` (Supabase Dashboard → Project Settings → API → Legacy anon/service_role)
-   - `DATABASE_URL` (Supabase Dashboard → Project Settings → Database → Connection string (Transaction pooler))
+   - **Supabase**: `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` (Supabase Dashboard → Project Settings → API → Legacy anon/service_role)
+   - **Database**: `DATABASE_URL` (Supabase Dashboard → Project Settings → Database → Connection string (Transaction pooler))
+   - **Google OAuth**: `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` (Google Cloud Console で OAuth 2.0 Client (Web) を作成)
+   - **Gemini API** (AI 店舗分析): `GEMINI_API_KEY` / `GEMINI_MODEL` (オプション、デフォルト `gemini-2.5-flash`) — [Google AI Studio](https://aistudio.google.com/) で取得
+   - **Google Places API** (エリア一括検索): `GOOGLE_PLACES_API_KEY` — Google Cloud Console で Places API (New) を有効化
 3. **Supabase Dashboard 設定** (初回のみ):
    - Authentication → URL Configuration → Site URL: `http://localhost:3000` / Redirect URLs: `http://localhost:3000/**`
    - Authentication → Providers → Google を Enable + Google Cloud Console で OAuth 2.0 Client (Web) を作成し Authorized redirect URIs に `https://<project-ref>.supabase.co/auth/v1/callback` を登録 → Client ID/Secret を Supabase の Google Provider 設定に貼り付け
