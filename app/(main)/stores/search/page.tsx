@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { isPlacesApiKeyConfigured } from "@/lib/env";
-import { AreaSearchForm } from "./_components/area-search-form";
+import { AreaSearchForm } from "../new/_components/area-search-form";
 
 export const metadata: Metadata = {
   title: "エリア検索",

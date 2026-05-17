@@ -4,6 +4,7 @@ import { useCallback, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Tabs, TabsList, TabsTrigger, TabsPanel } from "@/components/ui/tabs";
 import { StoreNewForm } from "./store-new-form";
+import { AreaSearchForm } from "./area-search-form";
 import type { Profile } from "@/types/profile";
 
 export type RegistrationMode = "url" | "area";
@@ -67,11 +68,7 @@ export function StoreRegistrationTabs({
         />
       </TabsPanel>
       <TabsPanel value="area">
-        {/* TODO(コミット2): AreaSearchForm を移動してマウントする */}
-        <div className="rounded-lg border border-dashed border-border bg-muted/30 p-6 text-sm text-muted-foreground">
-          エリア検索パネルは準備中です。
-          {!isPlacesApiConfigured ? "（GOOGLE_PLACES_API_KEY 未設定）" : null}
-        </div>
+        <AreaSearchForm isPlacesApiConfigured={isPlacesApiConfigured} />
       </TabsPanel>
     </Tabs>
   );
