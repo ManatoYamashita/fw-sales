@@ -6,7 +6,7 @@ export default function manifest(): MetadataRoute.Manifest {
     short_name: "Lead OS",
     description:
       "飲食店向け WEB 集客の営業活動を一元管理する社内向けリードマネジメントシステム。",
-    start_url: "/dashboard",
+    start_url: "/stores",
     scope: "/",
     display: "standalone",
     orientation: "portrait",

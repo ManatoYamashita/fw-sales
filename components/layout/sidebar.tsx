@@ -137,8 +137,27 @@ export function Sidebar({ counts, currentProfile }: SidebarProps) {
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon;
             const active =
-              pathname === item.href || pathname.startsWith(`${item.href}/`);
+              !item.disabled &&
+              (pathname === item.href || pathname.startsWith(`${item.href}/`));
             const count = item.badgeKey ? counts?.[item.badgeKey] : undefined;
+
+            if (item.disabled) {
+              return (
+                <span
+                  key={item.href}
+                  aria-disabled="true"
+                  title="現在この機能はご利用いただけません"
+                  className={cn(
+                    "group relative flex items-center gap-2.5 h-9 px-3 rounded-md text-sm",
+                    "text-sidebar-foreground/40 cursor-not-allowed select-none",
+                  )}
+                >
+                  <Icon className="h-4 w-4 shrink-0 text-muted-foreground/40" />
+                  <span className="flex-1 truncate">{item.label}</span>
+                </span>
+              );
+            }
+
             return (
               <Link
                 key={item.href}

@@ -5,6 +5,7 @@ import {
   NEGOTIATING_STAGES,
   ORDERED_STAGES,
 } from "@/lib/domain/stages";
+import { NAV_ITEMS } from "@/lib/domain/nav";
 
 export interface DashboardStats {
   total: number;
@@ -69,18 +70,40 @@ export interface NavBadgeCounts {
 }
 
 export async function getNavBadgeCounts(): Promise<NavBadgeCounts> {
+  // disabled な menu のバッジは表示されないため、対応する list クエリも発火させない。
+  // `NAV_ITEMS` を単一の真実として参照し、disable 解除時に自動的にバッジが復活する。
+  const enabledBadgeKeys = new Set(
+    NAV_ITEMS.filter((item) => !item.disabled && item.badgeKey).map(
+      (item) => item.badgeKey as keyof NavBadgeCounts,
+    ),
+  );
+
+  const needsStores =
+    enabledBadgeKeys.has("stores") ||
+    enabledBadgeKeys.has("research") ||
+    enabledBadgeKeys.has("pipeline");
+  const needsDeals = enabledBadgeKeys.has("deals");
+  const needsHandoffs = enabledBadgeKeys.has("handoffs");
+
   const [stores, deals, handoffs] = await Promise.all([
-    repos.store.list(),
-    repos.deal.list(),
-    repos.handoff.list(),
+    needsStores ? repos.store.list() : Promise.resolve([]),
+    needsDeals ? repos.deal.list() : Promise.resolve([]),
+    needsHandoffs ? repos.handoff.list() : Promise.resolve([]),
   ]);
 
   return {
-    stores: stores.length,
-    research: stores.filter((s) => s.stage === "調査待ち").length,
-    pipeline: stores.filter((s) => s.stage !== "引き継ぎ完了").length,
-    deals: deals.filter((d) => d.status !== "失注" && d.status !== "受注")
-      .length,
-    handoffs: handoffs.filter((h) => h.status === "運用確認待ち").length,
+    stores: enabledBadgeKeys.has("stores") ? stores.length : 0,
+    research: enabledBadgeKeys.has("research")
+      ? stores.filter((s) => s.stage === "調査待ち").length
+      : 0,
+    pipeline: enabledBadgeKeys.has("pipeline")
+      ? stores.filter((s) => s.stage !== "引き継ぎ完了").length
+      : 0,
+    deals: enabledBadgeKeys.has("deals")
+      ? deals.filter((d) => d.status !== "失注" && d.status !== "受注").length
+      : 0,
+    handoffs: enabledBadgeKeys.has("handoffs")
+      ? handoffs.filter((h) => h.status === "運用確認待ち").length
+      : 0,
   };
 }
