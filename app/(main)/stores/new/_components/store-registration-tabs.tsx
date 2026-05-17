@@ -3,11 +3,14 @@
 
 import {
   useCallback,
+  useEffect,
+  useMemo,
+  useRef,
   useState,
   useTransition,
   ViewTransition,
 } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { StoreNewForm } from "./store-new-form";
@@ -37,14 +40,23 @@ export interface StoreRegistrationTabsProps {
   currentProfileId: string | null;
 }
 
+function normalizeMode(raw: string | null | undefined): RegistrationMode {
+  return raw === "manual" || raw === "area" ? raw : "url";
+}
+
 /**
  * `/stores/new` 配下で 手動 / URL貼付 / エリア検索 を切り替えるタブラッパー。
  *
  * 状態管理:
- * - タブ選択は `searchParams (?mode=)` と同期 (URL 共有・リロード復元・ブラウザバック対応)。
+ * - タブ選択は `searchParams (?mode=)` を **唯一のソースオブトゥルース** として導出する。
+ *   ローカル useState を持たないため、Topbar や Sidebar からの同一ルート再ナビゲーション
+ *   (例: `/stores/new?mode=area` → `/stores/new`) でも UI が必ず URL に追従する。
+ * - 切替時は `router.push` で履歴に積み、ブラウザ戻る/進むでタブ復元できるようにする。
  * - 各モードの「検索/読込/開始」ボタン押下後に `stepUnlocked` が true になり、
  *   カード下にコンテンツ(フォーム or 検索結果)が表示される。
- * - タブ切替時は `stepUnlocked` をリセットして「ファーストビュー=カードのみ」に戻す。
+ * - mode が切替わると `stepUnlocked` / 下部表示用 state を **意図的にリセット** する。
+ *   3 モードはそれぞれ別の「起点」であり、前モードの入力中フォームや検索結果を残すと
+ *   UX が混乱するため、タブ=リセット仕様としている。
  *
  * アニメーション:
  * - React の `<ViewTransition>` でカード内パネル切替・カード下展開を fade で繋ぐ。
@@ -58,30 +70,45 @@ export function StoreRegistrationTabs({
   profiles,
   currentProfileId,
 }: StoreRegistrationTabsProps) {
-  const [mode, setMode] = useState<RegistrationMode>(initialMode);
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [, startTransition] = useTransition();
+
+  // mode は URL から derive (Copilot レビュー対応: state を URL に従属させる)。
+  // initialMode は SSR 初回レンダリング時の fallback として使用。
+  const mode: RegistrationMode = useMemo(() => {
+    const raw = searchParams.get("mode");
+    return raw !== null ? normalizeMode(raw) : initialMode;
+  }, [searchParams, initialMode]);
+
   const [stepUnlocked, setStepUnlocked] = useState(false);
   const [urlImport, setUrlImport] = useState<UrlLoadPayload | null>(null);
   const [areaResults, setAreaResults] = useState<
     readonly PlaceWithMatch[] | null
   >(null);
-  const [, startTransition] = useTransition();
-  const router = useRouter();
 
-  const handleModeChange = useCallback(
-    (next: string) => {
-      const normalized: RegistrationMode =
-        next === "manual" || next === "area" || next === "url" ? next : "url";
-      if (normalized === mode) return;
-      // 下部のリセットは startTransition の外で同期実行する。
-      // transition 内に入れると下部 ViewTransition の exit fade-out が走り、
-      // 前モードのコンテンツが一瞬残って「フラッシュ」して見える。
+  // mode 変化 (URL 変化) を検知して下部 state をリセットする。
+  // ブラウザ戻る/進むや別画面からの再進入でも同じ「ファーストビュー」に戻すため、
+  // handleModeChange ではなくここで一元化する。
+  const previousModeRef = useRef(mode);
+  useEffect(() => {
+    if (previousModeRef.current !== mode) {
       setStepUnlocked(false);
       setUrlImport(null);
       setAreaResults(null);
-      // mode 切替とルーター更新だけ View Transition の対象にする (上部パネルの fade)。
+      previousModeRef.current = mode;
+    }
+  }, [mode]);
+
+  const handleModeChange = useCallback(
+    (next: string) => {
+      const normalized = normalizeMode(next);
+      if (normalized === mode) return;
+      // push でブラウザバック対応 (?mode の遷移を履歴に残す)。
+      // ルーター更新だけ View Transition の対象にする (上部パネルの fade)。
+      // 下部 state リセットは上記 useEffect で URL 変化に追従する形で実行。
       startTransition(() => {
-        setMode(normalized);
-        router.replace(`/stores/new?mode=${normalized}`, { scroll: false });
+        router.push(`/stores/new?mode=${normalized}`, { scroll: false });
       });
     },
     [mode, router],
