@@ -10,10 +10,13 @@ import {
 } from "react";
 import { cn } from "@/lib/utils/cn";
 
+export type TabsVariant = "default" | "pill";
+
 interface TabsContextValue {
   value: string;
   setValue: (next: string) => void;
   tabsId: string;
+  variant: TabsVariant;
 }
 
 const TabsContext = createContext<TabsContextValue | null>(null);
@@ -30,6 +33,12 @@ interface TabsProps {
   onValueChange?: (next: string) => void;
   className?: string;
   children: ReactNode;
+  /**
+   * 見た目バリアント。
+   * - `default`: 角丸ボックス型(既存挙動、後方互換)
+   * - `pill`: ピル型。アクティブは `bg-foreground / text-background`、トラックは `rounded-full`
+   */
+  variant?: TabsVariant;
 }
 
 export function Tabs({
@@ -38,6 +47,7 @@ export function Tabs({
   onValueChange,
   className,
   children,
+  variant = "default",
 }: TabsProps) {
   const [internal, setInternal] = useState(defaultValue);
   const tabsId = useId();
@@ -48,7 +58,7 @@ export function Tabs({
     onValueChange?.(next);
   };
   return (
-    <TabsContext.Provider value={{ value: current, setValue, tabsId }}>
+    <TabsContext.Provider value={{ value: current, setValue, tabsId, variant }}>
       <div className={className}>{children}</div>
     </TabsContext.Provider>
   );
@@ -61,11 +71,15 @@ export function TabsList({
   className?: string;
   children: ReactNode;
 }) {
+  const { variant } = useTabsContext();
   return (
     <div
       role="tablist"
       className={cn(
-        "inline-flex items-center bg-muted/50 border border-border rounded-md p-1 gap-1",
+        "inline-flex items-center gap-1",
+        variant === "pill"
+          ? "rounded-full bg-muted/60 p-1"
+          : "bg-muted/50 border border-border rounded-md p-1",
         className,
       )}
     >
@@ -86,6 +100,7 @@ export function TabsTrigger({
 }: TabsTriggerProps) {
   const ctx = useTabsContext();
   const active = ctx.value === value;
+  const isPill = ctx.variant === "pill";
   return (
     <button
       type="button"
@@ -96,11 +111,16 @@ export function TabsTrigger({
       tabIndex={active ? 0 : -1}
       data-state={active ? "active" : "inactive"}
       className={cn(
-        "inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium",
+        "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium",
         "transition-[color,background-color,box-shadow] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        isPill ? "rounded-full px-4 py-1.5" : "rounded-sm px-3 py-1.5",
         active
-          ? "bg-background text-foreground shadow-xs"
-          : "text-muted-foreground hover:text-foreground",
+          ? isPill
+            ? "bg-foreground text-background shadow-sm"
+            : "bg-background text-foreground shadow-xs"
+          : isPill
+            ? "text-muted-foreground hover:text-foreground"
+            : "text-muted-foreground hover:text-foreground",
         className,
       )}
       onClick={() => ctx.setValue(value)}

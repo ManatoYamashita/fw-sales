@@ -10,7 +10,7 @@ import { AddStoreButton } from "./add-store-button";
 import type { PlaceWithMatch } from "@/lib/places/types";
 
 interface PlaceResultListProps {
-  results: PlaceWithMatch[];
+  results: readonly PlaceWithMatch[];
   addedIds: ReadonlySet<string>;
   selectedIds: ReadonlySet<string>;
   onAdded: (placeId: string) => void;
