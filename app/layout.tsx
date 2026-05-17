@@ -17,7 +17,7 @@ const notoSansJP = Noto_Sans_JP({
   display: "swap",
 });
 
-const APP_NAME = "Firstweb Lead OS";
+const APP_NAME = "FirstWeb - Reserch AI for Sales";
 const APP_DESCRIPTION =
   "飲食店向け WEB 集客の営業活動 (店舗調査・商談・引き継ぎ・KPI) を一元管理する社内向けリードマネジメントシステム。";
 

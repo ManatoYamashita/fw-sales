@@ -1,4 +1,6 @@
-# Firstweb Lead OS — Next.js 16
+# FirstWeb - Reserch AI for Sales（新卒グルメ）
+
+<img width="500" height="auto" alt="firstweb-loados" src="https://github.com/user-attachments/assets/c7dedfb1-607a-4675-a183-0f7332523b8c" />
 
 飲食店向け WEB 集客の営業管理システム(社内ツール)を **Next.js 16 (App Router) + React 19 + TypeScript strict + Tailwind CSS v4** で再構築したものです。
 
@@ -6,8 +8,8 @@
 
 - **App Router + Cache Components** (`'use cache'` / `cacheTag` / `cacheLife`)
 - **Server Actions** によるミューテーション。`revalidateTag(tag, "max")` で stale-while-revalidate
-- **mock データ層** (server-only インメモリ Map + globalThis 永続化)
-- 後で DB へ差し替えるための **Repository インターフェース**(`lib/repositories/*-repository.ts`)
+- **Supabase Postgres + Drizzle ORM** による永続化(`lib/db/*`)
+- **Repository インターフェース**(`lib/repositories/*-repository.ts`)で永続化層を抽象化
 - **Composition Pattern**: Card / Modal / Tabs は Compound Components、RSC ↔ Client は children で橋渡し
 - **cossUI 由来のデザインシステム**(MIT 範囲のトークンのみ採用、AGPL の `@coss/ui` ソースは未取り込み)
 - **ダークモード対応**(`next-themes`、Settings 画面でライト / ダーク / システム切替)
@@ -79,7 +81,7 @@ types/                         # Store / Research / Deal / Handoff / Stage
 
 ## DB セットアップ手順 (Supabase + Drizzle)
 
-店舗 (Store) / 商談 (Deal) / 調査 (Research) / 引き継ぎ (Handoff) の 4 entity を Supabase Postgres + Drizzle ORM で永続化する手順です。Mock のみで動作確認したい場合は最後の「Mock モード切替」を参照してください。
+店舗 (Store) / 商談 (Deal) / 調査 (Research) / 引き継ぎ (Handoff) の 4 entity を Supabase Postgres + Drizzle ORM で永続化する手順です。`DATABASE_URL` は起動必須(未設定だと `lib/db/client.ts` が fail-fast)。
 
 ### 1. Supabase プロジェクト作成
 
@@ -204,6 +206,36 @@ Supabase 側の Google OAuth プロバイダーで **誰でもサインイン可
 ~~`curl -H "Authorization: Bearer ${CRON_SECRET}" 'http://localhost:3000/api/cron/deal-reminders?mode=tomorrow'`~~
 
 ~~`CRON_SECRET` 未設定だと 401、`RESEND_API_KEY` 未設定だと送信は no-op (`skipped` カウントに記録) で 200 が返ります。~~
+
+## 初回ローカル開発セットアップ (TL;DR)
+
+新規メンバー / 別マシンでの開発再開向けチェックリスト。詳細は本 README の各章を参照。
+
+1. **依存インストール**: `pnpm install`
+2. **環境変数設定**: `.env.example` を参考に `.env.local` を作成し、以下を埋める
+   - `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` (Supabase Dashboard → Project Settings → API → Legacy anon/service_role)
+   - `DATABASE_URL` (Supabase Dashboard → Project Settings → Database → Connection string (Transaction pooler))
+3. **Supabase Dashboard 設定** (初回のみ):
+   - Authentication → URL Configuration → Site URL: `http://localhost:3000` / Redirect URLs: `http://localhost:3000/**`
+   - Authentication → Providers → Google を Enable + Google Cloud Console で OAuth 2.0 Client (Web) を作成し Authorized redirect URIs に `https://<project-ref>.supabase.co/auth/v1/callback` を登録 → Client ID/Secret を Supabase の Google Provider 設定に貼り付け
+4. **DB マイグレーション適用**: `pnpm db:migrate` (#27 で導入された short-cut、`.env.local` を自動読込)
+5. (任意) **シード投入**: `pnpm seed`
+6. **開発サーバ起動**: `pnpm dev`
+7. **動作確認**: http://localhost:3000/login → Google でサインイン → `/stores` に着地、ヘッダーにアバター + 表示名
+
+> #28 で `0007_backfill_existing_auth_users.sql` が追加され、ステップ 4 で既存 `auth.users` の profiles row が自動的に揃います(以前必要だった手動 SQL 実行は不要)。
+
+## トラブルシューティング
+
+| 症状 | 原因 | 対応 |
+|---|---|---|
+| `Supabase environment variables are not set. Sign-in is unavailable.` | `.env.local` の Supabase 3 変数が未設定 | 「初回セットアップ」ステップ 2 を確認 |
+| `/login` で blocking-route エラー (`Runtime data such as cookies()/searchParams was accessed outside of <Suspense>`) | Next.js 16 で page 関数本体が dynamic API を await している | 動的 access を Suspense 境界内の async 子 component に分離 (`app/login/page.tsx:65` 参照) |
+| `/dashboard` で `Failed query: select ... from "profiles" where id = $1` | `profiles` テーブル不在、または既存 `auth.users` user に対応する row 不在 | ステップ 4 (`pnpm db:migrate`) を実行 — #28 で 0007 が backfill 自動化済 |
+| Google サインイン後 `/login?error=oauth_failed` | Google Cloud Console の Authorized redirect URIs に Supabase callback (`https://<ref>.supabase.co/auth/v1/callback`) 未登録、または Google Provider に Client Secret 未設定 | ステップ 3 の Google Provider 設定を再確認 |
+| `pnpm typecheck` / `pnpm build` が `Cannot find module .next/types/.../route.js` で失敗 | 別ブランチで新規追加されたファイル参照が `.next/types/` キャッシュに残っている | `rm -rf .next` してから再実行 |
+
+> Next.js 16 はこのプロジェクトのトレーニングデータと異なる挙動が多い (`AGENTS.md` 冒頭参照)。実装前に `node_modules/next/dist/docs/` の該当ガイドを必ず確認すること。
 
 ## 既存資産の扱い
 

@@ -106,10 +106,10 @@ export function Sidebar({ counts, currentProfile }: SidebarProps) {
           </span>
           <div className="leading-tight min-w-0 flex-1">
             <p className="text-sm font-semibold tracking-tight text-sidebar-foreground truncate">
-              Firstweb
+              FirstWeb
             </p>
             <p className="text-[11px] text-muted-foreground -mt-0.5">
-              Lead OS
+              Reserch AI for Sales
             </p>
           </div>
           <button

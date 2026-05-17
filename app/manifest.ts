@@ -2,8 +2,8 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Firstweb Lead OS",
-    short_name: "Lead OS",
+    name: "FirstWeb - Reserch AI for Sales",
+    short_name: "Reserch AI",
     description:
       "飲食店向け WEB 集客の営業活動を一元管理する社内向けリードマネジメントシステム。",
     start_url: "/stores",

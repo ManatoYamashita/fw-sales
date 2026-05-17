@@ -1,0 +1,97 @@
+# 品質ゲート CI: TypeScript 型検査 / ESLint / Vitest を PR + main push で自動実行。
+#
+# 3 ジョブを並列実行することでフィードバック時間を最小化する。1 ジョブが失敗しても
+# 他のジョブは継続実行され、レビュアー / 作者は全エラーを 1 度に把握できる。
+#
+# ローカルと CI で完全に同一のコマンド (`pnpm <script>`) を使うことで、両者の
+# 挙動の乖離を排除する。
+#
+# 既存の `check-migrations.yml` (drizzle/ 限定の整合性チェック) とは別ファイル
+# 併存。本ワークフローは catch-all で全変更をゲートする。
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  typecheck:
+    name: TypeScript typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run typecheck
+        run: pnpm typecheck
+
+  lint:
+    name: ESLint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run lint
+        run: pnpm lint
+
+  test:
+    name: Vitest
+    runs-on: ubuntu-latest
+    env:
+      # `lib/mock/` 経由でテストを走らせる
+      USE_MOCK_DB: "true"
+      # `lib/db/client.ts` の `buildClient()` がモジュール評価時に `assertEnv("DATABASE_URL")`
+      # を呼ぶため、Mock 経路でも import 解決のタイミングで読まれる可能性に備えて dummy 値を入れる。
+      # 実 DB には接続されない (Mock 経由のため)
+      DATABASE_URL: "postgresql://test:test@localhost:5432/test"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run tests
+        run: pnpm test

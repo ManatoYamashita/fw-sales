@@ -15,7 +15,6 @@ import { Select } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { MemoInput, MemoTextarea } from "./memo-input";
 import { ServiceCheckboxGroup } from "./service-checkbox-group";
-import { UrlImportPanel } from "./url-import-panel";
 import {
   AiAnalysisPanel,
   type AiAnalysisFormSnapshot,
@@ -89,6 +88,15 @@ const INITIAL: FormState = {
 /** ApplyConfidence のキーと FormState のキーは大半が一致する。マッピング。 */
 type ConfidenceKey = keyof ApplyConfidence;
 
+/**
+ * URL モードで親から渡される読込結果(StoreRegistrationTabs の `UrlSearchPanel` の onLoaded payload)。
+ * 初期 state にマージして自動入力済みフォームを表示する。
+ */
+export interface StoreNewFormInitialImport {
+  suggested: ApplyResult;
+  html: string | null;
+}
+
 export interface StoreNewFormProps {
   /** SSR で取得した GEMINI_API_KEY 設定済み boolean(Req 2.7) */
   isApiKeyConfigured: boolean;
@@ -96,20 +104,50 @@ export interface StoreNewFormProps {
   profiles: readonly Profile[];
   /** 現在ログイン中の profile.id (デフォルト担当者として使用) */
   currentProfileId: string | null;
+  /** URL モードで親パネルから渡される読込結果。`null` のときは手動モード扱い。 */
+  initialImport?: StoreNewFormInitialImport | null;
 }
 
 export function StoreNewForm({
   isApiKeyConfigured,
   profiles,
   currentProfileId,
+  initialImport = null,
 }: StoreNewFormProps) {
   const initial: FormState = {
     ...INITIAL,
     // 現在ログイン中のユーザを企画担当のデフォルトとして初期セット
     assigned_planner_user_id: currentProfileId ?? "",
+    // URL 読込結果(initialImport)があれば上書き。priority / has_contact_form / channel /
+    // target_service / assigned_* / operator_type は URL からは取れないため INITIAL の値を保持。
+    ...(initialImport
+      ? {
+          name: initialImport.suggested.name,
+          prefecture: initialImport.suggested.prefecture,
+          city: initialImport.suggested.city,
+          address: initialImport.suggested.address,
+          genre: initialImport.suggested.genre,
+          map_url: initialImport.suggested.map_url,
+          site_url: initialImport.suggested.site_url,
+          instagram_url: initialImport.suggested.instagram_url,
+          phone: initialImport.suggested.phone,
+          review_count:
+            initialImport.suggested.review_count !== null
+              ? String(initialImport.suggested.review_count)
+              : "",
+          review_avg:
+            initialImport.suggested.review_avg !== null
+              ? String(initialImport.suggested.review_avg)
+              : "",
+          memo: initialImport.suggested.memo,
+          operator_name: initialImport.suggested.operator_name,
+        }
+      : {}),
   };
   const [form, setForm] = useState<FormState>(initial);
-  const [confidence, setConfidence] = useState<ApplyConfidence>({});
+  const [confidence, setConfidence] = useState<ApplyConfidence>(
+    initialImport?.suggested.confidence ?? {},
+  );
   const [aiResult, setAiResult] = useState<AiAnalysisResult | null>(null);
   const [aiConfidence, setAiConfidence] = useState<
     Partial<AiAnalysisConfidence>
@@ -117,7 +155,8 @@ export function StoreNewForm({
   // AI 結果が未保存かどうか。`useBeforeUnload` の連動に使う(Req 6.4)。
   const [aiPersisted, setAiPersisted] = useState<boolean>(true);
   // URL 解析時に取得した HTML 全文(AI 分析の入力として再利用)。
-  const [htmlContent, setHtmlContent] = useState<string | null>(null);
+  // 親パネルから渡される `initialImport.html` を初期値とし、AI 分析でのみ参照する。
+  const [htmlContent] = useState<string | null>(initialImport?.html ?? null);
   const [pending, startTransition] = useTransition();
   const router = useRouter();
 
@@ -167,35 +206,6 @@ export function StoreNewForm({
 
   // 背景色再計算をタイピングの 1 frame 後に遅延させ、入力中の INP を稼ぐ。
   const deferredConfidence = useDeferredValue(confidence);
-
-  const applyImport = (suggested: ApplyResult, html: string | null) => {
-    // URL 解析対象フィールドは前回値を保持せず、suggested の値で**強制上書き**する。
-    // (空文字なら空文字に戻す。別 URL を続けて読み込む際に前店舗情報が残る問題への対応。)
-    // priority / has_contact_form / channel / target_service / assigned_* / operator_type は
-    // URL からは取れないため prev の手入力値を保持する。
-    setForm((prev) => ({
-      ...prev,
-      name: suggested.name,
-      prefecture: suggested.prefecture,
-      city: suggested.city,
-      address: suggested.address,
-      genre: suggested.genre,
-      map_url: suggested.map_url,
-      site_url: suggested.site_url,
-      instagram_url: suggested.instagram_url,
-      phone: suggested.phone,
-      review_count:
-        suggested.review_count !== null ? String(suggested.review_count) : "",
-      review_avg:
-        suggested.review_avg !== null ? String(suggested.review_avg) : "",
-      memo: suggested.memo,
-      operator_name: suggested.operator_name,
-    }));
-    // confidence も前回マーカーを完全に捨てて新規 import 結果のみで置き換える
-    setConfidence(suggested.confidence);
-    // AI 分析の入力として再利用するため HTML 全文を保持
-    setHtmlContent(html);
-  };
 
   /** 信頼度スコアから入力欄の背景色(プリミティブ string)を生成。
    * MemoInput / MemoTextarea に渡して shallow compare を成立させるため、
@@ -274,8 +284,6 @@ export function StoreNewForm({
 
   return (
     <form action={submit} className="space-y-4">
-      <UrlImportPanel onApply={applyImport} />
-
       <Card>
         <Card.Header>
           <Card.Title>基本情報</Card.Title>

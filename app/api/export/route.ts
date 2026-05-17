@@ -30,7 +30,7 @@ export async function GET() {
     status: 200,
     headers: {
       "Content-Type": "application/json; charset=utf-8",
-      "Content-Disposition": `attachment; filename="firstweb_lead_os_${today()}.json"`,
+      "Content-Disposition": `attachment; filename="firstweb_reserch_ai_${today()}.json"`,
       "Cache-Control": "no-store",
     },
   });
