@@ -63,8 +63,11 @@ export const config = {
    * - `/api/*` (API 経路、Cron は CRON_SECRET ヘッダで別途守る)
    * - `/_next/*` (Next.js 内部アセット)
    * - 拡張子付き静的アセット (favicon / public/ 配下)
+   * - `manifest.webmanifest` / `robots.txt` / `sitemap.xml` / `.well-known/*`
+   *   など、未認証でもアクセスされうるメタ系ルート
+   *   (PWA install / SNS リンクプレビュー / クローラー)
    */
   matcher: [
-    "/((?!login|auth|api|_next/static|_next/image|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|css|js|woff|woff2|ttf|otf|map)$).*)",
+    "/((?!login|auth|api|_next/static|_next/image|favicon\\.ico|manifest\\.webmanifest|robots\\.txt|sitemap\\.xml|\\.well-known/|.*\\.(?:svg|png|jpg|jpeg|gif|webp|avif|ico|css|js|mjs|woff|woff2|ttf|otf|map|txt|xml|webmanifest)$).*)",
   ],
 };
