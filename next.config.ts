@@ -17,6 +17,17 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  // 店舗登録ページ統合に伴う旧ルートのリダイレクト (308 永続)。
+  // /stores/search は /stores/new?mode=area にタブ統合されたため転送する。
+  async redirects() {
+    return [
+      {
+        source: "/stores/search",
+        destination: "/stores/new?mode=area",
+        permanent: true,
+      },
+    ];
+  },
 };
 
 export default nextConfig;
