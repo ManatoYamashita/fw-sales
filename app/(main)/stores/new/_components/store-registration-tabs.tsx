@@ -72,11 +72,15 @@ export function StoreRegistrationTabs({
       const normalized: RegistrationMode =
         next === "manual" || next === "area" || next === "url" ? next : "url";
       if (normalized === mode) return;
+      // 下部のリセットは startTransition の外で同期実行する。
+      // transition 内に入れると下部 ViewTransition の exit fade-out が走り、
+      // 前モードのコンテンツが一瞬残って「フラッシュ」して見える。
+      setStepUnlocked(false);
+      setUrlImport(null);
+      setAreaResults(null);
+      // mode 切替とルーター更新だけ View Transition の対象にする (上部パネルの fade)。
       startTransition(() => {
         setMode(normalized);
-        setStepUnlocked(false);
-        setUrlImport(null);
-        setAreaResults(null);
         router.replace(`/stores/new?mode=${normalized}`, { scroll: false });
       });
     },
