@@ -106,6 +106,8 @@ export interface StoreNewFormProps {
   currentProfileId: string | null;
   /** URL モードで親パネルから渡される読込結果。`null` のときは手動モード扱い。 */
   initialImport?: StoreNewFormInitialImport | null;
+  /** 手動モードで親パネルから渡される店舗名。`initialImport` がある場合はそちらが優先される。 */
+  initialName?: string;
 }
 
 export function StoreNewForm({
@@ -113,11 +115,14 @@ export function StoreNewForm({
   profiles,
   currentProfileId,
   initialImport = null,
+  initialName = "",
 }: StoreNewFormProps) {
   const initial: FormState = {
     ...INITIAL,
     // 現在ログイン中のユーザを企画担当のデフォルトとして初期セット
     assigned_planner_user_id: currentProfileId ?? "",
+    // 手動モードで先行入力された店舗名(URL 読込結果がある場合は後段で上書きされる)
+    ...(initialName ? { name: initialName } : {}),
     // URL 読込結果(initialImport)があれば上書き。priority / has_contact_form / channel /
     // target_service / assigned_* / operator_type は URL からは取れないため INITIAL の値を保持。
     ...(initialImport

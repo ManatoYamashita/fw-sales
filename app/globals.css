@@ -404,18 +404,18 @@
 /*  - 詳細: vercel-react-view-transitions skill                       */
 /* ------------------------------------------------------------------ */
 :root {
-  --vt-duration-exit: 150ms;
-  --vt-duration-enter: 210ms;
+  --vt-duration-exit: 140ms;
+  --vt-duration-enter: 220ms;
 }
 
 @keyframes vt-fade {
   from {
-    filter: blur(2px);
     opacity: 0;
+    transform: translateY(6px);
   }
   to {
-    filter: blur(0);
     opacity: 1;
+    transform: translateY(0);
   }
 }
 
@@ -423,8 +423,8 @@
   animation: var(--vt-duration-exit) ease-in vt-fade reverse;
 }
 ::view-transition-new(.fade-in) {
-  animation: var(--vt-duration-enter) ease-out var(--vt-duration-exit) both
-    vt-fade;
+  animation: var(--vt-duration-enter) cubic-bezier(0.22, 1, 0.36, 1)
+    var(--vt-duration-exit) both vt-fade;
 }
 
 @media (prefers-reduced-motion: reduce) {
