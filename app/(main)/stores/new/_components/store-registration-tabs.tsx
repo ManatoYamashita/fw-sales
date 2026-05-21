@@ -181,6 +181,7 @@ export function StoreRegistrationTabs({
           <div className="space-y-4">
             {mode === "manual" && (
               <StoreNewForm
+                key={manualStoreName}
                 isApiKeyConfigured={isApiKeyConfigured}
                 profiles={profiles}
                 currentProfileId={currentProfileId}
