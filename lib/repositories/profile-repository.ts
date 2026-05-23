@@ -26,6 +26,11 @@ export interface ProfileRepository {
     readonly excludePlaceholders?: boolean;
   }): Promise<readonly Profile[]>;
   /**
+   * 管理者ロールのプロフィール一覧を返す (deep-research-pipeline spec #43)。
+   * 月次予算警告通知の fan-out 先解決で使用する。
+   */
+  findAdmins(): Promise<readonly Profile[]>;
+  /**
    * バックフィル用途のみ。member プロフィールは `auth.users` への INSERT を
    * フックする Postgres trigger 経由で生成される。
    *

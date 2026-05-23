@@ -12,11 +12,13 @@
 /**
  * プロフィールロール。
  *
- * - `member`      : Google OAuth でサインインした実ユーザー (本仕様での既定値)
+ * - `member`      : Google OAuth でサインインした実ユーザー (既定値)
  * - `placeholder` : バックフィル時に旧 text 担当者値から自動生成された暫定プロフィール。
  *                   メール送信時は `@local.invalid` ガードで no-op となる。
+ * - `admin`       : 管理者ユーザー (deep-research-pipeline spec #43 で追加)。
+ *                   月次予算警告通知 (`deep_research_budget_warning`) の fan-out 先。
  */
-export type ProfileRole = "member" | "placeholder";
+export type ProfileRole = "member" | "placeholder" | "admin";
 
 export interface Profile {
   readonly id: string;

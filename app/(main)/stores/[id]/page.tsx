@@ -1,9 +1,11 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import type { Metadata } from "next";
 import { StoreTitleSection } from "./_components/store-title-section";
 import { StoreDetailTabs } from "./_components/store-detail-tabs";
+import { DeepResearchSection } from "./_components/deep-research-section";
 import { getStoreCached } from "@/lib/queries/stores";
 import { listDealsByStoreCached } from "@/lib/queries/deals";
 import { getAllProfiles } from "@/lib/queries/profiles";
@@ -21,6 +23,14 @@ export async function generateMetadata({
   return {
     title: store ? store.name : "店舗詳細",
   };
+}
+
+function DeepResearchFallback() {
+  return (
+    <div className="rounded-md border border-border bg-card p-4 text-sm text-muted-foreground">
+      Deep Research を読み込み中…
+    </div>
+  );
 }
 
 export default async function StoreDetailPage({
@@ -62,6 +72,11 @@ export default async function StoreDetailPage({
         isApiKeyConfigured={apiKeyConfigured}
         assignedSalesName={assignedSalesName}
         dealCount={dealCount}
+        deepResearchSlot={
+          <Suspense fallback={<DeepResearchFallback />}>
+            <DeepResearchSection storeId={store.id} />
+          </Suspense>
+        }
       />
     </div>
   );

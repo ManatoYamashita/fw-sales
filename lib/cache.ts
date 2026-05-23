@@ -24,4 +24,7 @@ export const CACHE_TAGS = {
   profile: (id: string) => `profile:${id}`,
   notifications: "notifications",
   notification: (id: string) => `notification:${id}`,
+  // deep-research-pipeline spec (Issue #43)
+  deepResearchByStore: (storeId: string) => `deep-research:store:${storeId}`,
+  deepResearchJob: (jobId: string) => `deep-research:job:${jobId}`,
 } as const;

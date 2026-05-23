@@ -22,6 +22,14 @@ interface StoreDetailTabsProps {
   isApiKeyConfigured: boolean;
   assignedSalesName: string;
   dealCount: number;
+  /**
+   * AI 分析タブ末尾に差し込む Deep Research セクション (RSC スロット)。
+   * 親 RSC (`page.tsx`) で `<Suspense><DeepResearchSection storeId={...}/></Suspense>`
+   * を生成して渡す。client component である本タブから async server component を
+   * 直接 import できないため、ReactNode prop として注入する。
+   * deep-research-pipeline spec #43 で追加。
+   */
+  deepResearchSlot?: ReactNode;
 }
 
 export function StoreDetailTabs({
@@ -30,6 +38,7 @@ export function StoreDetailTabs({
   isApiKeyConfigured,
   assignedSalesName,
   dealCount,
+  deepResearchSlot,
 }: StoreDetailTabsProps) {
   const editHref = `/stores/${store.id}/edit`;
 
@@ -90,12 +99,13 @@ export function StoreDetailTabs({
         <MemoCard store={store} />
       </TabsPanel>
 
-      <TabsPanel value="ai">
+      <TabsPanel value="ai" className="space-y-4">
         <AiAnalysisDetailSection
           store={store}
           isApiKeyConfigured={isApiKeyConfigured}
           assignedSalesName={assignedSalesName}
         />
+        {deepResearchSlot}
       </TabsPanel>
     </Tabs>
   );

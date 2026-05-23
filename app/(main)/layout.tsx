@@ -5,6 +5,7 @@ import { Sidebar } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
 import { loadNavBadgeCounts } from "@/components/layout/nav-badges";
 import { getCurrentProfile } from "@/lib/supabase/server";
+import { getRecentNotifications } from "@/lib/queries/notification";
 
 async function SidebarShell() {
   // build 時 prerender を skip (USE_CACHE_TIMEOUT 対策)。
@@ -29,7 +30,8 @@ async function TopbarShell() {
   if (!profile) {
     redirect("/login");
   }
-  return <Topbar />;
+  const notifications = await getRecentNotifications(profile.id, 10);
+  return <Topbar notifications={notifications} />;
 }
 
 function SidebarFallback() {
