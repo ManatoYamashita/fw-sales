@@ -1,6 +1,27 @@
 import { describe, expect, it } from "vitest";
-import { applyParsedData, pickName } from "../apply";
-import type { OgpResult, ParsedUrl } from "../types";
+import { applyParsedData, needsPlacesFallback, pickName } from "../apply";
+import type { ApplyResult, OgpResult, ParsedUrl } from "../types";
+
+function makeApplied(overrides: Partial<ApplyResult> = {}): ApplyResult {
+  return {
+    name: "",
+    prefecture: "",
+    city: "",
+    phone: "",
+    site_url: "",
+    map_url: "",
+    instagram_url: "",
+    genre: "",
+    address: "",
+    review_avg: null,
+    review_count: null,
+    memo: "",
+    operator_type: "未設定",
+    operator_name: "",
+    confidence: {},
+    ...overrides,
+  };
+}
 
 describe("pickName", () => {
   describe("Google Maps URL のとき URL 由来の name を優先 (P0 リグレッション防止)", () => {
@@ -211,5 +232,78 @@ describe("applyParsedData (P0 統合シナリオ)", () => {
       expect(result.operator_type).toBe("未設定");
       expect(result.confidence.operator_name).toBeUndefined();
     });
+  });
+});
+
+describe("needsPlacesFallback", () => {
+  it("name が空のとき missing_name + query.keyword は parsed.name にフォールバック", () => {
+    const parsed: ParsedUrl = {
+      type: "google_maps",
+      source_url: "https://www.google.com/maps/place/未取得",
+      name: "未取得店舗",
+      station_area: "渋谷",
+      confidence: {},
+    };
+    const applied = makeApplied({ prefecture: "東京都" });
+    const trigger = needsPlacesFallback(parsed, applied);
+    expect(trigger.reason).toBe("missing_name");
+    expect(trigger.query?.keyword).toBe("未取得店舗");
+    expect(trigger.query?.area).toBe("東京都 渋谷");
+  });
+
+  it("name 信頼度 50 (GMAPS_QUERY) のとき low_name + クエリ構築", () => {
+    const applied = makeApplied({
+      name: "あいまい店",
+      prefecture: "大阪府",
+      city: "大阪市",
+      confidence: { name: 50, prefecture: 95, city: 95 },
+    });
+    const trigger = needsPlacesFallback(null, applied);
+    expect(trigger.reason).toBe("low_name");
+    expect(trigger.query?.keyword).toBe("あいまい店");
+    expect(trigger.query?.area).toBe("大阪府 大阪市");
+  });
+
+  it("prefecture=70 / city=70 のとき low_region", () => {
+    const applied = makeApplied({
+      name: "店舗A",
+      prefecture: "?",
+      city: "?",
+      address: "?",
+      confidence: { name: 90, prefecture: 70, city: 70 },
+    });
+    const trigger = needsPlacesFallback(null, applied);
+    expect(trigger.reason).toBe("low_region");
+  });
+
+  it("address 空 + station_area あり のとき no_address (low_name より下位の優先順)", () => {
+    const parsed: ParsedUrl = {
+      type: "tabelog",
+      source_url: "https://tabelog.com/x/y/z/1/",
+      station_area: "新丸子",
+      confidence: {},
+    };
+    const applied = makeApplied({
+      name: "店舗A",
+      prefecture: "神奈川県",
+      address: "",
+      confidence: { name: 90, prefecture: 95 },
+    });
+    const trigger = needsPlacesFallback(parsed, applied);
+    expect(trigger.reason).toBe("no_address");
+    expect(trigger.query?.area).toContain("新丸子");
+  });
+
+  it("全フィールド高信頼度 + address ありで none", () => {
+    const applied = makeApplied({
+      name: "店舗A",
+      prefecture: "東京都",
+      city: "渋谷区",
+      address: "渋谷区道玄坂1-1-1",
+      confidence: { name: 90, prefecture: 95, city: 95, address: 90 },
+    });
+    const trigger = needsPlacesFallback(null, applied);
+    expect(trigger.reason).toBe("none");
+    expect(trigger.query).toBeUndefined();
   });
 });
