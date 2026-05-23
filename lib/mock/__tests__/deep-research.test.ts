@@ -1,14 +1,17 @@
 /**
- * `mockDeepResearchRepo` の単体テスト (deep-research-pipeline spec, Issue #43)
+ * `mockDeepResearchRepo` の単体テスト (deep-research-pipeline spec, Issue #43,
+ * Tasks 1.3 + 6.1 で網羅)
  *
- * カバレッジ (5 ケース):
+ * カバレッジ (7 ケース):
  * 1. insertJob → findActiveByStore で進行中ジョブを引ける
  * 2. 状態遷移 (queued → researching → done) を updateJobStatus で行える
  * 3. claimOldestQueued は最古の queued を 1 件返す (FIFO)
  * 4. countInFlight は researching + structuring の合計
  * 5. findStuckJobs は research_started_at が閾値より古い in-flight を返す
+ * 6. countByUserSinceDay は閾値以降の当該ユーザージョブのみ集計 (Task 6.1)
+ * 7. countByMonth は yearMonthJST 接頭辞一致で集計 (Task 6.1)
  *
- * 関連: requirements.md §1.1, §1.2, §2.3, §5.4, §5.5, §8.3
+ * 関連: requirements.md §1.2, §2.3, §5.4, §5.5, §6.1, §6.2, §8.3
  */
 
 import { describe, expect, it, beforeEach } from "vitest";
@@ -113,6 +116,44 @@ describe("mockDeepResearchRepo", () => {
 
     const count = await mockDeepResearchRepo.countInFlight();
     expect(count).toBe(3);
+  });
+
+  it("countByUserSinceDay: 閾値以降の対象ユーザージョブのみ集計 (Task 6.1)", async () => {
+    seedJob({
+      user_id: USER_A,
+      enqueued_at: "2026-05-17T10:00:00.000Z",
+    });
+    seedJob({
+      user_id: USER_A,
+      enqueued_at: "2026-05-17T15:00:00.000Z",
+    });
+    seedJob({
+      user_id: USER_A,
+      enqueued_at: "2026-05-16T20:00:00.000Z", // 閾値より前
+    });
+    seedJob({
+      user_id: "00000000-0000-0000-0000-0000000000bb", // 別ユーザー
+      enqueued_at: "2026-05-17T11:00:00.000Z",
+    });
+
+    const threshold = new Date("2026-05-17T00:00:00.000Z");
+    const count = await mockDeepResearchRepo.countByUserSinceDay(
+      USER_A,
+      threshold,
+    );
+    expect(count).toBe(2);
+  });
+
+  it("countByMonth: yearMonthJST 接頭辞一致 (Task 6.1)", async () => {
+    seedJob({ enqueued_at: "2026-05-17T10:00:00.000Z" });
+    seedJob({ enqueued_at: "2026-05-31T23:00:00.000Z" });
+    seedJob({ enqueued_at: "2026-04-30T15:00:00.000Z" });
+    seedJob({ enqueued_at: "2026-06-01T00:00:00.000Z" });
+
+    const may = await mockDeepResearchRepo.countByMonth("2026-05");
+    const apr = await mockDeepResearchRepo.countByMonth("2026-04");
+    expect(may).toBe(2);
+    expect(apr).toBe(1);
   });
 
   it("findStuckJobs: research_started_at が閾値より古い in-flight のみ返す", async () => {

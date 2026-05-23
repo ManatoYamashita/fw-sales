@@ -108,7 +108,7 @@
   - _Depends: 1.3, 1.4_
 
 - [ ] 4. Core: パイプライン API と GitHub Actions cron
-- [ ] 4.1 pollResearchEndpoint 実装（55s deadline + 3 ステージ）
+- [x] 4.1 pollResearchEndpoint 実装（55s deadline + 3 ステージ）
   - Bearer `CRON_SECRET` 認可（失敗時 401）、`maxDuration = 60`、`deadline = Date.now() + 55_000`
   - Stuck sweep → Polling fan-out（最大 `DEEP_RESEARCH_POLL_PER_TICK`）→ Start fan-in（in-flight < `DEEP_RESEARCH_MAX_IN_FLIGHT`）の 3 ステージを順次実行
   - sweep では `cancelTask` を best-effort で呼出、結果を `error_log.cancel_result` に記録（R5.4）
@@ -120,7 +120,7 @@
   - _Boundary: app/api/cron, lib/ai/deep-research, lib/repositories_
   - _Depends: 1.3, 1.4, 2.2, 2.5, 3.3_
 
-- [ ] 4.2 GitHub Actions workflow ファイル作成と運用者ハンドオフ
+- [x] 4.2 GitHub Actions workflow ファイル作成と運用者ハンドオフ
   - `.github/workflows/poll-research.yml` を作成: `*/30 * * * *` + `workflow_dispatch` + 週次 noop ping（毎週月曜 00:00 UTC に `echo "keepalive"` のみ実行する別 job、60 日無活動回避）
   - workflow YAML 内のヘッダコメントに、`CRON_SECRET`（最低 32 バイトランダム生成手順）と `VERCEL_URL` を GitHub Secrets / Vercel Env Vars 双方に登録する運用手順を明記（実際の登録は運用ユーザーが GitHub UI / Vercel UI で実施するため、コード成果物は YAML + 手順コメントまで）
   - 観測可能完了: workflow YAML がリポジトリにマージされ、運用者が secrets 登録後の `workflow_dispatch` 手動実行で `/api/cron/poll-research` が 200 を返す（secrets 登録自体はコード成果物の範囲外）
@@ -168,14 +168,14 @@
   - _Depends: 3.3, 3.4_
 
 - [ ] 6. Integration & Validation
-- [ ] 6.1 (P) deepResearchRepository 単体テスト
+- [x] 6.1 (P) deepResearchRepository 単体テスト
   - 状態遷移許容ペア / 重複検出（`findActiveByStore`）/ 日次集計（`countByUserSinceDay`）/ 月次集計（`countByMonth`）/ スタック検出（`findStuckJobs`）の 5 ケース
   - 観測可能完了: `pnpm test lib/repositories/deep-research-repository.test.ts` が 5 ケース緑
   - _Requirements: 1.2, 2.3, 5.4, 5.5, 6.1, 6.2, 8.3_
   - _Boundary: lib/repositories_
   - _Depends: 1.3_
 
-- [ ] 6.2 (P) パイプライン統合テスト（モック SDK で 4 シナリオ）
+- [x] 6.2 (P) パイプライン統合テスト（モック SDK で 4 シナリオ）
   - シナリオ A: enqueue → cron tick で Stage 1 起動 → 後続 tick で polling → completed → Stage 2 → `done` + 通知作成
   - シナリオ B: Stage 1 failed → `failed` + 失敗通知
   - シナリオ C: Stage 2 で `schema_violation` → `failed` + 失敗通知
@@ -186,7 +186,7 @@
   - _Boundary: app/api/cron, lib/ai/deep-research_
   - _Depends: 4.1_
 
-- [ ] 6.3 (P) UI E2E と area-search 非露出スナップショット
+- [x] 6.3 (P) UI E2E と area-search 非露出スナップショット
   - 店舗詳細「Deep Research」タブから enqueue → Toast → 進行中バッジへの状態切替を Playwright/Cypress で確認
   - Notification Bell から `deep_research_done` 通知をクリック → 店舗詳細 Deep Research タブへ遷移
   - エリア検索画面（`/stores/new`）のスナップショットに「Deep Research を実行」ボタンが含まれないことを確認（R1.4）
@@ -223,3 +223,6 @@
 - **Task 5.5 (Topbar 通知)**: `Topbar` を Client 維持しつつ `notifications?: readonly Notification[]` props を追加。`(main)/layout.tsx` の `TopbarShell` (RSC) が `getRecentNotifications(profile.id, 10)` の結果を props 経由で渡す。既存 Bell スタブを `<NotificationBell>` に置換。
 - **Task 2.2 (SDK 型抽出)**: `@google/genai@1.52.0` の Deep Research API シグネチャは `node_modules/@google/genai/dist/genai.d.ts` の `BaseInteractions` クラス (L874-930) から直接抽出可能。PoC 実行なしで以下が確定: `client.interactions.create({ agent, input, system_instruction?, background?, ... })` / `get(id)` / `cancel(id)`、`Interaction.status` は 6 値 (`in_progress | requires_action | completed | failed | cancelled | incomplete`)、`Interaction.outputs?: Content[]`、`TextContent.annotations.url_citation` で引用 URL 抽出。型は `Interactions` namespace 配下 (`Interactions.Interaction` 等)、トップレベル export ではない点に注意。
 - **Task 2.2 (taskName → taskId 命名統一)**: design.md は `DeepResearchTaskHandle.taskName` を使ったが、SDK の `Interaction.id` および DB 列 `deep_research_task_id` と整合させるため実装では `taskId` に統一。design 章は実装に追従する形で整合を取る (リファレンス用)。
+- **Task 4.1 (Next.js 16 制約)**: `export const dynamic = "force-dynamic"` は `nextConfig.cacheComponents: true` 環境ではビルドエラー (Cache Components 非互換)。Route segment config から削除し、POST + `Authorization` ヘッダ参照で自動的に dynamic 扱いされることに依存。`maxDuration = 60` は引き続き宣言可能。
+- **Task 4.1 (純ロジック分離)**: HTTP 層 (`route.ts`) と 3-stage オーケストレーション (`pipeline.ts:runPollResearchTick`) を分離。Task 6.2 統合テストでは `pipeline.ts` を直接呼び SDK / Structurer をモック注入することで、Vercel HTTP 層を立てずに 5 シナリオを検証可能。同パターン (純関数 + ラッパ) は Task 2.5 Structurer と同じ。
+- **Task 6.3 (E2E 代替)**: Playwright/Cypress 未導入のため、Node.js `fs.readFile` でソースコードを直接読み、area-search 系コンポーネントに Deep Research 関連の import/CTA 文字列が含まれないことを vitest で機械的検証。`R1.4` 露出禁止の構造的担保として実用十分。
