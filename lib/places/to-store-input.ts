@@ -4,11 +4,11 @@ import type { StoreInput } from "@/types/store";
 const PREFECTURE_RE = /^(東京都|北海道|大阪府|京都府|.+?[都道府県])/;
 const CITY_RE = /^(.+?[市区町村郡])/;
 
-function extractPrefecture(address: string): string {
+export function extractPrefecture(address: string): string {
   return PREFECTURE_RE.exec(address)?.[1] ?? "";
 }
 
-function extractCity(address: string): string {
+export function extractCity(address: string): string {
   const pref = extractPrefecture(address);
   const rest = address.slice(pref.length);
   return CITY_RE.exec(rest)?.[1] ?? "";
@@ -29,7 +29,7 @@ const GENRE_MAP: ReadonlyArray<readonly [string, string]> = [
   ["food", "その他"],
 ] as const;
 
-function mapGenre(types: string[]): string {
+export function mapGenre(types: string[]): string {
   for (const [key, label] of GENRE_MAP) {
     if (types.includes(key)) return label;
   }

@@ -15,6 +15,44 @@ import type {
   ParsedSource,
 } from "@/lib/url-parser/types";
 import type { PlaceWithMatch } from "@/lib/places/types";
+import {
+  ManualFallbackModal,
+  type ManualFallbackReason,
+} from "./manual-fallback-modal";
+
+/**
+ * Places フォールバックが「補完できなかった」状態かどうか判定する。
+ * none / no_api_key は失敗ではなく不発として扱い (モーダルは出さない)、
+ * places_not_found / no_keyword / api_error は手入力モーダル誘導の対象。
+ */
+function placesFallbackFailed(reason: string | undefined): boolean {
+  return (
+    reason === "places_not_found" ||
+    reason === "no_keyword" ||
+    reason === "api_error"
+  );
+}
+
+/** Partial<ApplyResult> を完全な ApplyResult に補完する (モーダル確定値を親へ渡すため) */
+function ensureFullApplyResult(partial: Partial<ApplyResult>): ApplyResult {
+  return {
+    name: partial.name ?? "",
+    prefecture: partial.prefecture ?? "",
+    city: partial.city ?? "",
+    phone: partial.phone ?? "",
+    site_url: partial.site_url ?? "",
+    map_url: partial.map_url ?? "",
+    instagram_url: partial.instagram_url ?? "",
+    genre: partial.genre ?? "",
+    address: partial.address ?? "",
+    review_avg: partial.review_avg ?? null,
+    review_count: partial.review_count ?? null,
+    memo: partial.memo ?? "",
+    operator_type: partial.operator_type ?? "未設定",
+    operator_name: partial.operator_name ?? "",
+    confidence: partial.confidence ?? {},
+  };
+}
 
 /** URL モードの読込結果(親に渡す payload) */
 export interface UrlLoadPayload {
@@ -60,6 +98,14 @@ export interface UrlSearchPanelProps {
 export function UrlSearchPanel({ onLoaded }: UrlSearchPanelProps) {
   const [url, setUrl] = useState("");
   const [pending, startTransition] = useTransition();
+  const [modalState, setModalState] = useState<
+    | { open: false }
+    | {
+        open: true;
+        reason: ManualFallbackReason;
+        partial?: Partial<ApplyResult>;
+      }
+  >({ open: false });
 
   const importNow = () => {
     if (!url.trim()) {
@@ -72,21 +118,46 @@ export function UrlSearchPanel({ onLoaded }: UrlSearchPanelProps) {
           fetchOgp: true,
           recursive: true,
         });
+
+        // URL パース完全失敗 → モーダル誘導 (取得済データ無し)
         if (!result.parsed) {
-          toast.error("認識できる形式の URL ではありません");
+          setModalState({ open: true, reason: "parse_failed" });
           return;
         }
+
         const html =
           result.ogp && result.ogp.ok ? (result.ogp.html ?? null) : null;
         const hits = result.applied.filter(
           (f) => f.value !== "" && typeof f.confidence === "number",
         );
         const summary = `${result.applied.length} 項目中 ${hits.length} 項目を取得`;
-        toast.success(
-          result.suggested.name
-            ? `「${result.suggested.name}」: ${summary}`
-            : summary,
-        );
+
+        // Places フォールバックの結果に応じた toast 出し分け
+        if (result.placesFallback?.used) {
+          toast.info(
+            `Google Maps から不足項目を補完しました${
+              result.suggested.name ? ` (${result.suggested.name})` : ""
+            }`,
+          );
+        } else if (placesFallbackFailed(result.placesFallback?.reason)) {
+          // 取得済データを引き継いだままモーダル誘導 (places_not_found 等)
+          toast.warn(
+            "Google Maps で店舗を特定できませんでした。手入力で補ってください",
+          );
+          setModalState({
+            open: true,
+            reason: "places_not_found",
+            partial: result.suggested,
+          });
+          return;
+        } else {
+          toast.success(
+            result.suggested.name
+              ? `「${result.suggested.name}」: ${summary}`
+              : summary,
+          );
+        }
+
         onLoaded({
           suggested: result.suggested,
           html,
@@ -99,6 +170,18 @@ export function UrlSearchPanel({ onLoaded }: UrlSearchPanelProps) {
       } catch (e) {
         toast.error(e instanceof Error ? e.message : "URL の取得に失敗しました");
       }
+    });
+  };
+
+  const handleFallbackConfirm = (partial: Partial<ApplyResult>) => {
+    const suggested = ensureFullApplyResult(partial);
+    // モーダル経由の確定は OGP / Places のソースが特定できないので unknown 扱い
+    onLoaded({
+      suggested,
+      html: null,
+      applied: [],
+      sourceType: "unknown",
+      chained: false,
     });
   };
 
@@ -143,6 +226,15 @@ export function UrlSearchPanel({ onLoaded }: UrlSearchPanelProps) {
           )}
         </Button>
       </div>
+      <ManualFallbackModal
+        open={modalState.open}
+        onOpenChange={(next) => {
+          if (!next) setModalState({ open: false });
+        }}
+        reason={modalState.open ? modalState.reason : "parse_failed"}
+        partial={modalState.open ? modalState.partial : undefined}
+        onConfirm={handleFallbackConfirm}
+      />
     </div>
   );
 }
