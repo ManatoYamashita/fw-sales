@@ -5,7 +5,7 @@ import type { OgpResult } from "./types";
 
 const FETCH_TIMEOUT_MS = 8000;
 const USER_AGENT =
-  "Mozilla/5.0 (compatible; FirstwebLeadOS/1.0; +https://firstweb.example.com)";
+  "Mozilla/5.0 (compatible; FirstWebReserchAI/1.0; +https://firstweb.example.com)";
 
 /**
  * 食べログ等から OGP / JSON-LD / 構造化データを直接取得する Server-only 関数。

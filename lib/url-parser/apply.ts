@@ -15,12 +15,15 @@ const PREFECTURE_PATTERN =
 const SCORE = {
   TABELOG_DICT: 95, // 食べログ辞書: prefecture / city
   JSON_LD: 90, // JSON-LD Restaurant schema 由来
+  PLACES_API: 88, // Google Places Text Search v1 由来 (JSON_LD と TABELOG_HTML の間)
   TABELOG_HTML: 85, // 食べログ HTML 構造化セレクタ
   URL_DIRECT: 80, // URL 直接抽出 (station_area, name)
   OGP_TITLE: 75, // OGP og:title / canonical / Google Maps URL の name
   GENRE_GUESS: 60, // OGP description 由来の genre 推定
   GMAPS_QUERY: 50, // Google Maps URL の ?q= 由来
 } as const;
+
+export const PLACES_API_SCORE = SCORE.PLACES_API;
 
 /**
  * OGP の name 値が「ジェネリックなサイトタイトル」(店舗名ではない)である場合の判定。
@@ -208,4 +211,66 @@ export function applyParsedData(
   }
 
   return fields;
+}
+
+/**
+ * Places API フォールバック発火判定の結果。
+ * - `reason: "none"` は呼び出し不要、それ以外は欠損 / 低信頼度フィールドの種類。
+ * - `query` は `reason !== "none"` のときのみ設定され、`searchPlaces(keyword, area)` にそのまま渡せる形。
+ */
+export interface PlacesFallbackTrigger {
+  reason:
+    | "none"
+    | "missing_name"
+    | "low_name"
+    | "no_address"
+    | "low_region";
+  query?: {
+    keyword: string;
+    area: string;
+  };
+}
+
+/**
+ * `ApplyResult` を見て、Places API での補完が必要かどうかを判定する純粋関数。
+ *
+ * 判定優先順位(上から順に評価し、最初に該当した reason を返す):
+ *   1. `applied.name` が空 → `missing_name`
+ *   2. `applied.confidence.name < 75` → `low_name`
+ *   3. `applied.address` が空、かつ `parsed.station_area` または `applied.prefecture` がある → `no_address`
+ *   4. `applied.confidence.prefecture < 80` かつ `applied.confidence.city < 80` → `low_region`
+ *   5. 上記いずれにも該当しない → `none`
+ *
+ * `query` は keyword (= name) と area (= prefecture / city / station_area の連結) を組み立てる。
+ * keyword が空のままになる場合は caller 側でフォールバックを諦める必要がある。
+ */
+export function needsPlacesFallback(
+  parsed: ParsedUrl | null,
+  applied: ApplyResult,
+): PlacesFallbackTrigger {
+  const nameScore = applied.confidence.name ?? 0;
+  const prefScore = applied.confidence.prefecture ?? 0;
+  const cityScore = applied.confidence.city ?? 0;
+
+  let reason: PlacesFallbackTrigger["reason"] = "none";
+  if (!applied.name) {
+    reason = "missing_name";
+  } else if (nameScore < 75) {
+    reason = "low_name";
+  } else if (!applied.address && (parsed?.station_area || applied.prefecture)) {
+    reason = "no_address";
+  } else if (prefScore < 80 && cityScore < 80) {
+    reason = "low_region";
+  }
+
+  if (reason === "none") {
+    return { reason };
+  }
+
+  const keyword = applied.name || parsed?.name || "";
+  const area = [applied.prefecture, applied.city, parsed?.station_area]
+    .filter((v): v is string => Boolean(v))
+    .join(" ");
+
+  return { reason, query: { keyword, area } };
 }

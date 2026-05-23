@@ -8,8 +8,6 @@
  * 制約:
  * - Edge Runtime で動作する (postgres 直接接続不可)
  * - `import "server-only"` を必ず付ける
- * - `USE_MOCK_DB=true` の場合は Supabase を呼ばずに固定 mock profile を返す
- *   バイパスを実装し、ローカル開発で Supabase 不要の動作を保つ (design.md D-4)
  * - 認証関連の環境変数未設定時は warn ログ + `isAuthenticated: false` を返却
  *
  * 関連: design.md §「lib/supabase/middleware.ts」, requirements.md §1.1, §8.2
@@ -18,7 +16,6 @@
 import "server-only";
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
-import { PLACEHOLDER_DEV_PROFILE_ID } from "@/lib/mock/seed";
 
 export interface UpdateSessionResult {
   readonly response: NextResponse;
@@ -43,15 +40,10 @@ function readSupabaseEnv(): { url: string; anonKey: string } | null {
   return { url, anonKey };
 }
 
-function isMockMode(): boolean {
-  return process.env.USE_MOCK_DB === "true";
-}
-
 /**
  * Edge Runtime 上で実行されるセッション更新ヘルパ。
  *
- * - Mock モード時は Supabase を呼ばず、固定 `PLACEHOLDER_DEV_PROFILE_ID` を返す
- * - 通常モード時は cookies の `getAll` / `setAll` で Supabase 側に refresh を任せ、
+ * - cookies の `getAll` / `setAll` で Supabase 側に refresh を任せ、
  *   `auth.getUser()` でセッション検証する
  * - 認証未設定 / 失敗時は `isAuthenticated: false` を返し、呼び出し側 (middleware.ts)
  *   で `/login` リダイレクトを発火させる
@@ -59,14 +51,6 @@ function isMockMode(): boolean {
 export async function updateSession(
   request: NextRequest,
 ): Promise<UpdateSessionResult> {
-  if (isMockMode()) {
-    return {
-      response: NextResponse.next({ request }),
-      isAuthenticated: true,
-      userId: PLACEHOLDER_DEV_PROFILE_ID,
-    };
-  }
-
   const env = readSupabaseEnv();
   if (!env) {
     return {

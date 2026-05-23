@@ -79,7 +79,7 @@ export default function LoginPage({ searchParams }: LoginPageProps) {
       <div className="w-full max-w-sm space-y-6">
         <div className="space-y-2 text-center">
           <h1 className="text-2xl font-semibold tracking-tight">
-            Firstweb Lead OS
+            FirstWeb - Reserch AI for Sales
           </h1>
           <p className="text-sm text-muted-foreground">
             営業チーム専用ツールです。Google アカウントでサインインしてください。

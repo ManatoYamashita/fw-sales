@@ -102,7 +102,13 @@ export function UrlImportSummary({
                 <li
                   key={f.key}
                   className="flex items-center gap-2 px-2 py-1 rounded text-[11px]"
-                  style={bg ? { backgroundColor: bg } : undefined}
+                  // confidenceToBg は lightness 92% の薄背景。ダークモード下でも
+                  // 濃い文字色 (slate-900 相当) を強制してコントラストを確保。
+                  style={
+                    bg
+                      ? { backgroundColor: bg, color: "hsl(222 47% 11%)" }
+                      : undefined
+                  }
                 >
                   {icon === "high" || icon === "medium" || icon === "low" ? (
                     <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-green-700" />

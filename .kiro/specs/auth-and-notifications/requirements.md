@@ -1,5 +1,7 @@
 # Requirements Document
 
+> **2026-05-17 更新**: §4 (商談リマインダー / Email 通知) / §6 (Vercel Cron) / §8.3 (`CRON_SECRET`) は削除されました。本文中の該当要件記述は **取り消し線扱いの履歴** として参照してください。Supabase Auth (Google OAuth) + Profile 移行関連 (§1, §2, §3, §5, §7, §8.1, §8.2) は引き続き有効です。
+
 ## Project Description (Input)
 
 参照元: GitHub Issue #16 — `feat(auth): Supabase Auth (Google OAuth) + メール通知基盤 + assigned カラム移行`

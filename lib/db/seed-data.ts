@@ -2,85 +2,24 @@ import type { Store } from "@/types/store";
 import type { Research } from "@/types/research";
 import type { Deal } from "@/types/deal";
 import type { Handoff } from "@/types/handoff";
-import type { Profile } from "@/types/profile";
 import { daysAgo } from "@/lib/utils/date";
 
 /**
- * Mock 経路 / dev 環境で固定 mock profile として注入される uuid。
+ * DB seed 用の冪等データ。
  *
- * design.md §Decision D-4 (Mock バイパス) で middleware / `getCurrentSession()` /
- * `getCurrentProfile()` が `USE_MOCK_DB=true` 時にこの ID を返すバイパスを実装する。
- * Phase 3.1 / 3.3 でこの定数を import して固定セッション化している。
- */
-export const PLACEHOLDER_DEV_PROFILE_ID =
-  "00000000-0000-0000-0000-000000000001";
-
-/**
- * 既存の `assigned_*` text 値 (担当者名) と対応する mock プロフィール uuid。
- * Phase 6.3 で SEED_STORES / SEED_DEALS / SEED_HANDOFFS の担当者参照を埋める際に使用。
+ * `scripts/seed.ts` および `lib/actions/data-actions.ts` (Reset / Import) が
+ * 参照する SoT。Mock 経路廃止 (Issue #39) に伴い `lib/mock/seed.ts` から
+ * 移植した。
  *
- * 旧 `lib/domain/staff.ts` の PLANNERS / SALES / OPS_MEMBERS を仮想的にマップ:
- *   - 佐藤 (PLANNERS / SALES) ← PLACEHOLDER_DEV_PROFILE_ID (dev 用兼任)
- *   - 渡部 (SALES) ← MOCK_WATABE_PROFILE_ID
- *   - 田中 (PLANNERS) ← MOCK_TANAKA_PROFILE_ID
+ * 設計判断:
+ * - `assigned_planner_user_id` / `assigned_sales_user_id` は **全て null** とする。
+ *   profiles テーブルへの seed は別運用 (Supabase Auth + handle_new_user trigger)
+ *   で行うため、ここで固定 UUID を埋めると FK 違反のリスクがある。
+ *   実運用で担当者を紐付けたい場合は別途 UPDATE する運用となる。
+ * - 依存は `@/types/*` と `@/lib/utils/date` のみ。`@/lib/db/client.ts` や
+ *   `@/lib/db/schema.ts` には依存しないことで、`data-actions.ts` の動的 import
+ *   制約 (Issue 2) を壊さない。
  */
-export const MOCK_WATABE_PROFILE_ID = "00000000-0000-0000-0000-000000000002";
-export const MOCK_TANAKA_PROFILE_ID = "00000000-0000-0000-0000-000000000003";
-
-/**
- * バックフィルで生成される placeholder プロフィールの動作確認用サンプル。
- * 実バックフィル時は `scripts/backfill-assignees.ts` が同形式で動的生成する。
- */
-export const MOCK_PLACEHOLDER_EXAMPLE_ID =
-  "00000000-0000-0000-0000-000000000099";
-
-/**
- * Mock 経路の初期プロフィール。
- *
- * - 3 件の member プロフィール (佐藤 = dev 兼任 / 渡部 / 田中)
- * - 1 件の placeholder (バックフィル動作確認用)
- *
- * email が `@local.invalid` で終わるため `EmailClient.send()` の placeholder 保護
- * (no-op フォールバック) の対象となり、dev 環境で誤って実メールが送られない。
- */
-export const SEED_PROFILES: readonly Profile[] = [
-  {
-    id: PLACEHOLDER_DEV_PROFILE_ID,
-    email: "dev@local.invalid",
-    display_name: "佐藤",
-    avatar_url: null,
-    role: "member",
-    created_at: daysAgo(30),
-    updated_at: daysAgo(30),
-  },
-  {
-    id: MOCK_WATABE_PROFILE_ID,
-    email: "watabe-dev@local.invalid",
-    display_name: "渡部",
-    avatar_url: null,
-    role: "member",
-    created_at: daysAgo(28),
-    updated_at: daysAgo(28),
-  },
-  {
-    id: MOCK_TANAKA_PROFILE_ID,
-    email: "tanaka-dev@local.invalid",
-    display_name: "田中",
-    avatar_url: null,
-    role: "member",
-    created_at: daysAgo(25),
-    updated_at: daysAgo(25),
-  },
-  {
-    id: MOCK_PLACEHOLDER_EXAMPLE_ID,
-    email: "placeholder-yamada@local.invalid",
-    display_name: "山田",
-    avatar_url: null,
-    role: "placeholder",
-    created_at: daysAgo(7),
-    updated_at: daysAgo(7),
-  },
-];
 
 export const SEED_STORES: readonly Store[] = [
   {
@@ -101,8 +40,8 @@ export const SEED_STORES: readonly Store[] = [
     target_service: "MEO,HP",
     memo:
       "食べログURL: https://tabelog.com/kanagawa/A1405/A140504/14096697/\nお刺身評価高いが情報発信弱い。公式サイト・Instagram確認できず。",
-    assigned_planner_user_id: PLACEHOLDER_DEV_PROFILE_ID,
-    assigned_sales_user_id: MOCK_WATABE_PROFILE_ID,
+    assigned_planner_user_id: null,
+    assigned_sales_user_id: null,
     review_count: 12,
     review_avg: 3.4,
     operator_type: "未設定",
@@ -133,8 +72,8 @@ export const SEED_STORES: readonly Store[] = [
     target_service: "MEO,インスタ",
     memo:
       "公式サイトに問い合わせフォームあり。Instagram開設済みだが更新3ヶ月停止。",
-    assigned_planner_user_id: PLACEHOLDER_DEV_PROFILE_ID,
-    assigned_sales_user_id: MOCK_WATABE_PROFILE_ID,
+    assigned_planner_user_id: null,
+    assigned_sales_user_id: null,
     review_count: 28,
     review_avg: 3.8,
     operator_type: "未設定",
@@ -165,8 +104,8 @@ export const SEED_STORES: readonly Store[] = [
     target_service: "MEO,HP,動画",
     memo:
       "電話のみ。Googleマップの写真が古い。口コミ返信ゼロ。オーナーは集客に困っていると推測。",
-    assigned_planner_user_id: PLACEHOLDER_DEV_PROFILE_ID,
-    assigned_sales_user_id: MOCK_WATABE_PROFILE_ID,
+    assigned_planner_user_id: null,
+    assigned_sales_user_id: null,
     review_count: 45,
     review_avg: 4.1,
     operator_type: "未設定",
@@ -228,8 +167,8 @@ export const SEED_STORES: readonly Store[] = [
     target_service: "HP,MEO,インスタ",
     memo:
       "受注済み。HP制作+MEO+Instagram指南 セット。初期費用398,000円+月額22,000円。",
-    assigned_planner_user_id: PLACEHOLDER_DEV_PROFILE_ID,
-    assigned_sales_user_id: PLACEHOLDER_DEV_PROFILE_ID,
+    assigned_planner_user_id: null,
+    assigned_sales_user_id: null,
     review_count: 63,
     review_avg: 4.3,
     operator_type: "未設定",
@@ -326,7 +265,7 @@ export const SEED_DEALS: readonly Deal[] = [
     order_amount: null,
     lost_reason: "",
     status: "見積提出",
-    assigned_sales_user_id: MOCK_WATABE_PROFILE_ID,
+    assigned_sales_user_id: null,
     created_at: daysAgo(2),
     updated_at: daysAgo(1),
   },
@@ -343,7 +282,7 @@ export const SEED_DEALS: readonly Deal[] = [
     order_amount: 453000,
     lost_reason: "",
     status: "受注",
-    assigned_sales_user_id: PLACEHOLDER_DEV_PROFILE_ID,
+    assigned_sales_user_id: null,
     created_at: daysAgo(10),
     updated_at: daysAgo(0),
   },

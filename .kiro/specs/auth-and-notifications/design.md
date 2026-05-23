@@ -1,6 +1,8 @@
 # Design Document — auth-and-notifications
 
-**Status**: Draft
+> **2026-05-17 更新**: 「Email Notification」「Vercel Cron Route」「Resend Client」「lib/email/* 全モジュール」「lib/queries/deals-due-soon.ts」関連の設計記述は **削除済機能の履歴** として残しています。Supabase Auth / Profile 移行関連は引き続き有効。
+
+**Status**: Partially Removed (2026-05-17)
 **Language**: ja
 **Source Issue**: [#16](https://github.com/ManatoYamashita/fw-sales/issues/16)
 **Discovery type**: Light Discovery(既存基盤拡張 + 新規外部統合の混在)

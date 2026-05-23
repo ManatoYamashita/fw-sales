@@ -1,13 +1,3 @@
 {
-  "$schema": "https://openapi.vercel.sh/vercel.json",
-  "crons": [
-    {
-      "path": "/api/cron/deal-reminders?mode=tomorrow",
-      "schedule": "0 22 * * *"
-    },
-    {
-      "path": "/api/cron/deal-reminders?mode=today",
-      "schedule": "0 23 * * *"
-    }
-  ]
+  "$schema": "https://openapi.vercel.sh/vercel.json"
 }

@@ -33,7 +33,7 @@ function deriveBreadcrumb(pathname: string): BreadcrumbItem[] {
       ];
     }
   }
-  return [{ label: "Firstweb Lead OS" }];
+  return [{ label: "FirstWeb - Reserch AI for Sales" }];
 }
 
 export interface TopbarProps {
@@ -47,6 +47,7 @@ export interface TopbarProps {
 export function Topbar({ notifications = [] }: TopbarProps) {
   const pathname = usePathname();
   const items = deriveBreadcrumb(pathname);
+  const isOnStoreNew = pathname === "/stores/new";
 
   return (
     <header className="sticky top-0 z-20 h-15 bg-background/80 backdrop-blur-md border-b border-border flex items-center justify-between px-4 md:px-6 gap-4">
@@ -56,13 +57,25 @@ export function Topbar({ notifications = [] }: TopbarProps) {
       <div className="flex items-center gap-1.5">
         <ThemeToggle />
         <NotificationBell notifications={notifications} />
-        <Link
-          href="/stores/new"
-          className={cn(buttonVariants({ variant: "default", size: "md" }))}
-        >
-          <Plus className="h-4 w-4" />
-          <span className="hidden sm:inline">店舗登録</span>
-        </Link>
+        {isOnStoreNew ? (
+          <button
+            type="button"
+            disabled
+            aria-current="page"
+            className={cn(buttonVariants({ variant: "default", size: "md" }))}
+          >
+            <Plus className="h-4 w-4" />
+            <span className="hidden sm:inline">店舗登録</span>
+          </button>
+        ) : (
+          <Link
+            href="/stores/new"
+            className={cn(buttonVariants({ variant: "default", size: "md" }))}
+          >
+            <Plus className="h-4 w-4" />
+            <span className="hidden sm:inline">店舗登録</span>
+          </Link>
+        )}
       </div>
     </header>
   );

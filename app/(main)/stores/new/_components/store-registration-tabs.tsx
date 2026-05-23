@@ -86,6 +86,7 @@ export function StoreRegistrationTabs({
   const [areaResults, setAreaResults] = useState<
     readonly PlaceWithMatch[] | null
   >(null);
+  const [manualStoreName, setManualStoreName] = useState("");
 
   // mode 変化 (URL 変化) を検知して下部 state をリセットする。
   // ブラウザ戻る/進むや別画面からの再進入でも同じ「ファーストビュー」に戻すため、
@@ -96,6 +97,7 @@ export function StoreRegistrationTabs({
       setStepUnlocked(false);
       setUrlImport(null);
       setAreaResults(null);
+      setManualStoreName("");
       previousModeRef.current = mode;
     }
   }, [mode]);
@@ -133,8 +135,9 @@ export function StoreRegistrationTabs({
     });
   };
 
-  const handleManualStart = () => {
+  const handleManualStart = (name: string) => {
     startTransition(() => {
+      setManualStoreName(name);
       setStepUnlocked(true);
     });
   };
@@ -178,9 +181,11 @@ export function StoreRegistrationTabs({
           <div className="space-y-4">
             {mode === "manual" && (
               <StoreNewForm
+                key={manualStoreName}
                 isApiKeyConfigured={isApiKeyConfigured}
                 profiles={profiles}
                 currentProfileId={currentProfileId}
+                initialName={manualStoreName}
               />
             )}
             {mode === "url" && urlImport && (
