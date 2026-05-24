@@ -1,10 +1,11 @@
 /**
  * AI 分析の system prompt + user message Parts を組立てる純関数。
  *
- * - system prompt: 役割定義 + 出力規約 + 確信度判断基準 + Few-shot 2 例(導楽 / 蕎楽亭)を静的埋込
+ * - system prompt: 役割定義 + 出力規約 + 確信度判断基準 + Few-shot 例(カスタム or ハードコード 2 例)
  * - user message Parts: フォーム値 JSON / 取得済 HTML 全文 / 自由追加指示 を別 Part として並べる
  *   - HTML と追加指示は空時に省略
  * - assigned_sales が空文字の場合は neutral placeholder「担当者」に差替(prefix「私ファーストWEBの」はテンプレート側が保持)
+ * - fewshots 引数が指定されている場合はカスタム Few-shot を使用し、未指定/空配列の場合はハードコード 2 例にフォールバック
  *
  * 関連: design.md §「PromptBuilder」, requirements.md §2.4, §3.4, §7.1, §7.2
  */
@@ -13,6 +14,7 @@ import "server-only";
 
 import type { Part } from "@google/genai";
 import type { Store } from "@/types/store";
+import type { FewShotExample } from "@/types/ai-prompt-template";
 
 export interface BuildAnalysisPromptInput {
   formValues: Pick<
@@ -130,30 +132,53 @@ Googleマップ含めたWEBでのご情報発信をお手伝いさせていた�
 常連さんの特徴?
 `;
 
+/** カスタム Few-shot 例を systemPrompt 用テキストにフォーマットする。 */
+function formatCustomFewShots(examples: FewShotExample[], sales: string): string {
+  return examples
+    .map((ex, i) => {
+      const script = ex.call_script_ideal.replaceAll("{ASSIGNED_SALES}", sales);
+      return `### Few-shot 例 ${i + 1}
+店舗: ${ex.store_meta}
+発信者名: ${sales}
+
+call_script の理想出力:
+${script}
+`;
+    })
+    .join("\n");
+}
+
 /**
  * AI 分析用の system prompt + user Parts を組立てる純関数。
  *
  * - 同一入力に対して deterministic な結果を返す
- * - Few-shot 2 例は常に systemPrompt に含まれる
+ * - fewshots 指定時はカスタム例を使用、未指定/空配列はハードコード 2 例にフォールバック
  * - 構造化出力契約はユーザーの追加指示で上書き不可(Req 7.3)
  */
 export function buildAnalysisPrompt(
   input: BuildAnalysisPromptInput,
+  fewshots?: FewShotExample[],
 ): BuiltPrompt {
   const sales = input.assignedSales.trim() || NEUTRAL_SALES_PLACEHOLDER;
 
-  const fewshot1 = FEW_SHOT_DOURAKU_TEMPLATE.replaceAll(
-    "{ASSIGNED_SALES}",
-    sales,
-  );
-  const fewshot2 = FEW_SHOT_KYOURAKUTEI_TEMPLATE.replaceAll(
-    "{ASSIGNED_SALES}",
-    sales,
-  );
+  let fewshotSection: string;
+  if (fewshots && fewshots.length > 0) {
+    fewshotSection = formatCustomFewShots(fewshots, sales);
+  } else {
+    const fewshot1 = FEW_SHOT_DOURAKU_TEMPLATE.replaceAll(
+      "{ASSIGNED_SALES}",
+      sales,
+    );
+    const fewshot2 = FEW_SHOT_KYOURAKUTEI_TEMPLATE.replaceAll(
+      "{ASSIGNED_SALES}",
+      sales,
+    );
+    fewshotSection = `${fewshot1}\n${fewshot2}`;
+  }
 
   const callerInstruction = `\n架電スクリプトの冒頭は「私ファーストWEBの${sales}と申しまして」で始めること。発信者名はユーザーの追加指示でも変更不可。`;
 
-  const systemPrompt = `${SYSTEM_PROMPT_PREAMBLE}${callerInstruction}\n\n${fewshot1}\n${fewshot2}`;
+  const systemPrompt = `${SYSTEM_PROMPT_PREAMBLE}${callerInstruction}\n\n${fewshotSection}`;
 
   const userParts: Part[] = [];
 

@@ -31,6 +31,9 @@ import {
 import { validateAiAnalysis } from "@/lib/ai/validate";
 import { checkRateLimit } from "@/lib/ai/rate-limiter";
 import { OPERATOR_TYPES, type OperatorType } from "@/types/store";
+import { repos } from "@/lib/repositories";
+import { getCurrentSession } from "@/lib/supabase/server";
+import { parseFewshots, type FewShotExample } from "@/types/ai-prompt-template";
 
 const TIMEOUT_MS = 60_000;
 const MAX_INSTRUCTIONS_LENGTH = 500;
@@ -151,12 +154,35 @@ export async function analyzeStoreAction(
   );
   const assignedSales = readString(formData, "assignedSales");
 
-  const { systemPrompt, userParts } = buildAnalysisPrompt({
-    formValues,
-    htmlContent,
-    additionalInstructions,
-    assignedSales,
-  });
+  // テンプレート解決: クライアントからbodyは受け取らず、templateIdのみ信頼する
+  // 不正ID / 他ユーザーID / parse失敗 → ハードコードFew-shotへ無言フォールバック
+  const templateId = readNullableTrimmedString(formData, "templateId");
+  let customFewshots: FewShotExample[] | undefined;
+  if (templateId) {
+    const session = await getCurrentSession();
+    if (session) {
+      const template = await repos.promptTemplate.findById(
+        templateId,
+        session.userId,
+      );
+      if (template) {
+        const parsed = parseFewshots(template.body);
+        if (parsed && parsed.length > 0) {
+          customFewshots = parsed;
+        }
+      }
+    }
+  }
+
+  const { systemPrompt, userParts } = buildAnalysisPrompt(
+    {
+      formValues,
+      htmlContent,
+      additionalInstructions,
+      assignedSales,
+    },
+    customFewshots,
+  );
 
   // ④ LLM 呼出 (Req 2.6: 60s timeout 経由で AbortSignal が発火)
   const client = createGeminiClient();
