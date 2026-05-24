@@ -296,9 +296,10 @@ describe("analyzeStoreAction - templateId 連携 (Issue #42 Phase 3)", () => {
   });
 
   it("templateId 指定・有効テンプレート: findById が呼ばれ成功する", async () => {
+    const VALID_TPL_ID = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11";
     mockGetCurrentSession.mockResolvedValue({ userId: "user-123" });
     mockFindById.mockResolvedValue({
-      id: "tpl-1",
+      id: VALID_TPL_ID,
       user_id: "user-123",
       name: "テスト",
       is_default: true,
@@ -308,22 +309,23 @@ describe("analyzeStoreAction - templateId 連携 (Issue #42 Phase 3)", () => {
     });
 
     const result = await analyzeStoreAction(
-      makeFormData({ templateId: "tpl-1" }),
+      makeFormData({ templateId: VALID_TPL_ID }),
     );
     expect(result.ok).toBe(true);
     expect(mockGetCurrentSession).toHaveBeenCalledTimes(1);
-    expect(mockFindById).toHaveBeenCalledWith("tpl-1", "user-123");
+    expect(mockFindById).toHaveBeenCalledWith(VALID_TPL_ID, "user-123");
   });
 
   it("templateId 指定・findById が null (他ユーザー or 存在しない): ハードコードFew-shotへフォールバックし成功", async () => {
     mockGetCurrentSession.mockResolvedValue({ userId: "user-123" });
     mockFindById.mockResolvedValue(null);
 
+    const NON_EXISTENT_UUID = "f47ac10b-58cc-4372-a567-0e02b2c3d479";
     const result = await analyzeStoreAction(
-      makeFormData({ templateId: "non-existent" }),
+      makeFormData({ templateId: NON_EXISTENT_UUID }),
     );
     expect(result.ok).toBe(true);
-    expect(mockFindById).toHaveBeenCalledWith("non-existent", "user-123");
+    expect(mockFindById).toHaveBeenCalledWith(NON_EXISTENT_UUID, "user-123");
   });
 
   it("templateId 指定・body が不正JSON: ハードコードFew-shotへフォールバックし成功", async () => {
@@ -352,5 +354,29 @@ describe("analyzeStoreAction - templateId 連携 (Issue #42 Phase 3)", () => {
     );
     expect(result.ok).toBe(true);
     expect(mockFindById).not.toHaveBeenCalled();
+  });
+
+  it("templateId が不正UUID: findById を呼ばずハードコードFew-shotへフォールバックし成功", async () => {
+    mockGetCurrentSession.mockResolvedValue({ userId: "user-123" });
+
+    const result = await analyzeStoreAction(
+      makeFormData({ templateId: "not-a-valid-uuid" }),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(mockFindById).not.toHaveBeenCalled();
+  });
+
+  it("findById が例外を投げてもハードコードFew-shotへフォールバックし成功", async () => {
+    mockGetCurrentSession.mockResolvedValue({ userId: "user-123" });
+    mockFindById.mockRejectedValueOnce(new Error("DB error"));
+
+    const VALID_UUID = "f47ac10b-58cc-4372-a567-0e02b2c3d479";
+    const result = await analyzeStoreAction(
+      makeFormData({ templateId: VALID_UUID }),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(mockFindById).toHaveBeenCalledTimes(1);
   });
 });

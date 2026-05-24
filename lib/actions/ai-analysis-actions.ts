@@ -16,6 +16,7 @@
 
 import "server-only";
 
+import { z } from "zod";
 import {
   failure,
   readString,
@@ -155,21 +156,28 @@ export async function analyzeStoreAction(
   const assignedSales = readString(formData, "assignedSales");
 
   // テンプレート解決: クライアントからbodyは受け取らず、templateIdのみ信頼する
-  // 不正ID / 他ユーザーID / parse失敗 → ハードコードFew-shotへ無言フォールバック
+  // 不正UUID / 他ユーザーID / parse失敗 / DB例外 → ハードコードFew-shotへ無言フォールバック
   const templateId = readNullableTrimmedString(formData, "templateId");
   let customFewshots: FewShotExample[] | undefined;
   if (templateId) {
-    const session = await getCurrentSession();
-    if (session) {
-      const template = await repos.promptTemplate.findById(
-        templateId,
-        session.userId,
-      );
-      if (template) {
-        const parsed = parseFewshots(template.body);
-        if (parsed && parsed.length > 0) {
-          customFewshots = parsed;
+    const idResult = z.string().uuid().safeParse(templateId);
+    if (idResult.success) {
+      try {
+        const session = await getCurrentSession();
+        if (session) {
+          const template = await repos.promptTemplate.findById(
+            idResult.data,
+            session.userId,
+          );
+          if (template) {
+            const parsed = parseFewshots(template.body);
+            if (parsed && parsed.length > 0) {
+              customFewshots = parsed;
+            }
+          }
         }
+      } catch {
+        customFewshots = undefined;
       }
     }
   }

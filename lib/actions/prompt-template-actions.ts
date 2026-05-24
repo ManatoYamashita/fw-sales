@@ -71,6 +71,13 @@ const fewshotsSchema = z
     { message: "各 Few-shot 例の合計文字数は 4000 字以内にしてください" },
   );
 
+const templateIdSchema = z.string().uuid();
+
+function parseTemplateId(id: string): string | null {
+  const result = templateIdSchema.safeParse(id);
+  return result.success ? result.data : null;
+}
+
 /**
  * body 文字列を解析・検証し、正規化済み JSON 文字列を返す。
  * parseFewshots で構造チェックし、fewshotsSchema で詳細制約を検証する。
@@ -154,6 +161,9 @@ export async function updatePromptTemplateAction(
   const id = readString(formData, "id");
   if (!id) return failure("テンプレート ID が指定されていません");
 
+  const validId = parseTemplateId(id);
+  if (!validId) return failure("テンプレートが見つかりません");
+
   const rawName = readString(formData, "name");
   const nameResult = nameSchema.safeParse(rawName);
   if (!nameResult.success) {
@@ -164,7 +174,7 @@ export async function updatePromptTemplateAction(
   const bodyResult = validateBody(rawBody);
   if (!bodyResult.ok) return failure(bodyResult.error);
 
-  const updated = await repos.promptTemplate.update(id, session.userId, {
+  const updated = await repos.promptTemplate.update(validId, session.userId, {
     name: nameResult.data,
     body: bodyResult.normalized,
   });
@@ -185,13 +195,16 @@ export async function deletePromptTemplateAction(
   const session = await getCurrentSession();
   if (!session) return failure("ログインが必要です");
 
-  const template = await repos.promptTemplate.findById(id, session.userId);
+  const validId = parseTemplateId(id);
+  if (!validId) return failure("テンプレートが見つかりません");
+
+  const template = await repos.promptTemplate.findById(validId, session.userId);
   if (!template) return failure("テンプレートが見つかりません");
   if (template.is_default) {
     return failure("デフォルトテンプレートは削除できません");
   }
 
-  const deleted = await repos.promptTemplate.delete(id, session.userId);
+  const deleted = await repos.promptTemplate.delete(validId, session.userId);
   if (!deleted) return failure("テンプレートが見つかりません");
 
   revalidateTag(CACHE_TAGS.promptTemplates, "max");
@@ -208,12 +221,15 @@ export async function setDefaultPromptTemplateAction(
   const session = await getCurrentSession();
   if (!session) return failure("ログインが必要です");
 
-  const template = await repos.promptTemplate.findById(id, session.userId);
+  const validId = parseTemplateId(id);
+  if (!validId) return failure("テンプレートが見つかりません");
+
+  const template = await repos.promptTemplate.findById(validId, session.userId);
   if (!template) return failure("テンプレートが見つかりません");
 
   try {
     const updated = await repos.transaction((tx) =>
-      tx.promptTemplate.setDefault(id, session.userId),
+      tx.promptTemplate.setDefault(validId, session.userId),
     );
     if (!updated) return failure("デフォルトテンプレートを変更できませんでした");
 

@@ -59,7 +59,7 @@ import { serializeFewshots } from "@/types/ai-prompt-template";
 
 const USER_A = "user-uuid-a";
 const USER_B = "user-uuid-b";
-const TEMPLATE_ID = "template-uuid-1";
+const TEMPLATE_ID = "f47ac10b-58cc-4372-a567-0e02b2c3d479";
 
 const SESSION_A = { userId: USER_A, email: "a@test.com" };
 
@@ -366,6 +366,18 @@ describe("updatePromptTemplateAction", () => {
     expect(mockRepo.update).not.toHaveBeenCalled();
   });
 
+  it("id が不正UUID なら failure を返し、repo.update を呼ばない", async () => {
+    mockGetCurrentSession.mockResolvedValue(SESSION_A);
+
+    const result = await updatePromptTemplateAction(
+      makeUpdateFormData({ id: "not-a-uuid" }),
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/見つかりません/);
+    expect(mockRepo.update).not.toHaveBeenCalled();
+  });
+
   it("前後空白つき name は trim されて update される", async () => {
     const updated = makeTemplateRow({ name: "更新後" });
     mockGetCurrentSession.mockResolvedValue(SESSION_A);
@@ -420,6 +432,17 @@ describe("deletePromptTemplateAction", () => {
     if (!result.ok) expect(result.error).toMatch(/見つかりません/);
     expect(mockRepo.delete).not.toHaveBeenCalled();
   });
+
+  it("id が不正UUID なら failure を返し、repo.findById / repo.delete を呼ばない", async () => {
+    mockGetCurrentSession.mockResolvedValue(SESSION_A);
+
+    const result = await deletePromptTemplateAction("not-a-uuid");
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/見つかりません/);
+    expect(mockRepo.findById).not.toHaveBeenCalled();
+    expect(mockRepo.delete).not.toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -470,6 +493,17 @@ describe("setDefaultPromptTemplateAction", () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toMatch(/見つかりません/);
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
+
+  it("id が不正UUID なら failure を返し、repo.findById / repos.transaction を呼ばない", async () => {
+    mockGetCurrentSession.mockResolvedValue(SESSION_A);
+
+    const result = await setDefaultPromptTemplateAction("not-a-uuid");
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/見つかりません/);
+    expect(mockRepo.findById).not.toHaveBeenCalled();
     expect(mockTransaction).not.toHaveBeenCalled();
   });
 
