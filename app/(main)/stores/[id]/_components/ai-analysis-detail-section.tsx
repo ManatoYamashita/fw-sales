@@ -8,6 +8,7 @@ import { toast } from "@/components/ui/toast";
 import {
   AiAnalysisPanel,
   type AiAnalysisFormSnapshot,
+  type PromptTemplateOption,
 } from "@/app/(main)/stores/new/_components/ai-analysis-panel";
 import { updateStorePatchAction } from "@/lib/actions/store-actions";
 import type { Store } from "@/types/store";
@@ -26,12 +27,15 @@ export interface AiAnalysisDetailSectionProps {
    * 未割当 / 解決失敗時は空文字。
    */
   assignedSalesName?: string;
+  /** SSR で取得したプロンプトテンプレート一覧(Issue #42 Phase 4-D) */
+  promptTemplates: readonly PromptTemplateOption[];
 }
 
 export function AiAnalysisDetailSection({
   store,
   isApiKeyConfigured,
   assignedSalesName,
+  promptTemplates,
 }: AiAnalysisDetailSectionProps) {
   const router = useRouter();
   const [aiResult, setAiResult] = useState<AiAnalysisResult | null>(
@@ -115,6 +119,7 @@ export function AiAnalysisDetailSection({
         confidence={aiConfidence}
         onResultFieldChange={onAiResultFieldChange}
         storeId={store.id}
+        promptTemplates={promptTemplates}
       />
       {aiResult !== null && (
         <div className="flex items-center justify-end gap-2">

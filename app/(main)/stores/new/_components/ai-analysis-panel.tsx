@@ -24,6 +24,7 @@ import {
 } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { FormField } from "@/components/ui/form-field";
 import { toast } from "@/components/ui/toast";
@@ -38,6 +39,12 @@ import type {
 
 const MAX_INSTRUCTIONS_LENGTH = 500;
 const WARNING_THRESHOLD = 50;
+
+export interface PromptTemplateOption {
+  id: string;
+  name: string;
+  is_default: boolean;
+}
 
 /**
  * 親 form の現在値スナップショット。`AiAnalysisPanel` は押下時にこれを取得して
@@ -85,6 +92,8 @@ export interface AiAnalysisPanelProps {
   ) => void;
   /** storeId(編集モード) — レート制限のキー */
   storeId: string | null;
+  /** SSR で取得したプロンプトテンプレート一覧(Issue #42 Phase 4-D) */
+  promptTemplates: readonly PromptTemplateOption[];
 }
 
 const FIELD_DEFS: Array<{
@@ -137,6 +146,7 @@ function buildFormDataFromSnapshot(
   snap: AiAnalysisFormSnapshot,
   additionalInstructions: string,
   storeId: string | null,
+  templateId: string,
 ): FormData {
   const fd = new FormData();
   fd.set("name", snap.name);
@@ -157,6 +167,9 @@ function buildFormDataFromSnapshot(
   fd.set("additionalInstructions", additionalInstructions);
   fd.set("assignedSales", snap.assignedSales);
   fd.set("storeId", storeId ?? "");
+  if (templateId) {
+    fd.set("templateId", templateId);
+  }
   return fd;
 }
 
@@ -170,9 +183,15 @@ export function AiAnalysisPanel({
   confidence,
   onResultFieldChange,
   storeId,
+  promptTemplates,
 }: AiAnalysisPanelProps) {
   // 自由追加指示 (再実行間で保持、Req 2.8)
   const [additionalInstructions, setAdditionalInstructions] = useState("");
+  // デフォルトテンプレートがあれば初期選択、なければ標準テンプレート (Issue #42 Phase 4-D)
+  const [templateId, setTemplateId] = useState<string>(() => {
+    const def = promptTemplates.find((t) => t.is_default);
+    return def ? def.id : "";
+  });
   const [pending, startTransition] = useTransition();
 
   // 表示用フォールバック: currentResult が無いがマウント時に initialResult があれば
@@ -187,7 +206,7 @@ export function AiAnalysisPanel({
       toast.error("店舗名を入力してください");
       return;
     }
-    const fd = buildFormDataFromSnapshot(snap, additionalInstructions, storeId);
+    const fd = buildFormDataFromSnapshot(snap, additionalInstructions, storeId, templateId);
     startTransition(async () => {
       const result = await analyzeStoreAction(fd);
       if (result.ok) {
@@ -247,6 +266,29 @@ export function AiAnalysisPanel({
         <Card.Title>AI 分析</Card.Title>
       </Card.Header>
       <Card.Body className="space-y-4">
+        {/* プロンプトテンプレート選択 (Issue #42 Phase 4-D) */}
+        {promptTemplates.length > 0 && (
+          <FormField
+            label="使用するプロンプトテンプレート"
+            htmlFor="promptTemplate"
+            hint="未選択の場合は標準テンプレートを使用します。"
+          >
+            <Select
+              id="promptTemplate"
+              value={templateId}
+              onChange={(e) => setTemplateId(e.target.value)}
+            >
+              <option value="">標準テンプレート（既定）</option>
+              {promptTemplates.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                  {t.is_default ? "（デフォルト）" : ""}
+                </option>
+              ))}
+            </Select>
+          </FormField>
+        )}
+
         {/* CTA + 自由追加指示 */}
         <FormField
           label="追加指示 (任意・最大 500 字)"

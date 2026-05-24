@@ -3,6 +3,8 @@ import { StoreRegistrationTabs } from "./_components/store-registration-tabs";
 import { isApiKeyConfigured, isPlacesApiKeyConfigured } from "@/lib/env";
 import { getAllProfiles } from "@/lib/queries/profiles";
 import { getCurrentProfile } from "@/lib/supabase/server";
+import { repos } from "@/lib/repositories";
+import type { PromptTemplateOption } from "./_components/ai-analysis-panel";
 
 export const metadata: Metadata = {
   title: "店舗登録",
@@ -34,6 +36,12 @@ export default async function NewStorePage({
     searchParams,
   ]);
   const initialMode = normalizeMode(sp.mode);
+  // プロンプトテンプレート一覧: id/name/is_default のみに絞ってクライアントへ渡す (Issue #42 Phase 4-D)
+  const promptTemplates: PromptTemplateOption[] = currentProfile
+    ? (await repos.promptTemplate.list(currentProfile.id)).map(
+        ({ id, name, is_default }) => ({ id, name, is_default }),
+      )
+    : [];
 
   return (
     <div className="space-y-4 max-w-4xl mx-auto">
@@ -51,6 +59,7 @@ export default async function NewStorePage({
         isPlacesApiConfigured={placesApiConfigured}
         profiles={profiles}
         currentProfileId={currentProfile?.id ?? null}
+        promptTemplates={promptTemplates}
       />
     </div>
   );
