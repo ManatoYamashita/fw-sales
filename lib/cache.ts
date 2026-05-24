@@ -27,4 +27,6 @@ export const CACHE_TAGS = {
   // deep-research-pipeline spec (Issue #43)
   deepResearchByStore: (storeId: string) => `deep-research:store:${storeId}`,
   deepResearchJob: (jobId: string) => `deep-research:job:${jobId}`,
+  // AI プロンプトテンプレート (Issue #42)
+  promptTemplates: "prompt-templates",
 } as const;
