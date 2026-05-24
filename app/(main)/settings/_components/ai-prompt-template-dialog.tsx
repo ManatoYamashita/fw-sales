@@ -24,6 +24,8 @@ import { cn } from "@/lib/utils/cn";
 import {
   createPromptTemplateAction,
   updatePromptTemplateAction,
+  deletePromptTemplateAction,
+  setDefaultPromptTemplateAction,
 } from "@/lib/actions/prompt-template-actions";
 import {
   parseFewshots,
@@ -44,7 +46,25 @@ import {
 const MAX_TEMPLATES = 5;
 const MAX_NAME_LENGTH = 50;
 
-type DialogMode =
+type EditableFewShot = FewShotExample & { localId: string };
+
+function toEditable(ex: FewShotExample): EditableFewShot {
+  return { ...ex, localId: crypto.randomUUID() };
+}
+
+function toEditableNew(): EditableFewShot {
+  return { ...createEmptyFewshot(), localId: crypto.randomUUID() };
+}
+
+function toFewShotExamples(items: EditableFewShot[]): FewShotExample[] {
+  return items.map(({ title, store_meta, call_script_ideal }) => ({
+    title,
+    store_meta,
+    call_script_ideal,
+  }));
+}
+
+type EditDialogMode =
   | { mode: "create" }
   | { mode: "edit"; template: AiPromptTemplate };
 
@@ -59,11 +79,35 @@ interface ShellProps {
 
 export function AiPromptTemplatesShell({ templates, isLoggedIn }: ShellProps) {
   const router = useRouter();
-  const [dialog, setDialog] = useState<DialogMode | null>(null);
+  const [editDialog, setEditDialog] = useState<EditDialogMode | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<AiPromptTemplate | null>(null);
+  const [changingDefaultId, setChangingDefaultId] = useState<string | null>(null);
 
-  const handleSuccess = () => {
-    setDialog(null);
+  const handleEditSuccess = () => {
+    setEditDialog(null);
     router.refresh();
+  };
+
+  const handleDeleteSuccess = () => {
+    setDeleteTarget(null);
+    router.refresh();
+  };
+
+  const handleSetDefault = (id: string) => {
+    if (changingDefaultId !== null) return;
+    setChangingDefaultId(id);
+    setDefaultPromptTemplateAction(id)
+      .then((result) => {
+        if (result.ok) {
+          toast.success("デフォルトテンプレートを変更しました");
+          router.refresh();
+        } else {
+          toast.error(result.error);
+        }
+      })
+      .finally(() => {
+        setChangingDefaultId(null);
+      });
   };
 
   return (
@@ -78,7 +122,7 @@ export function AiPromptTemplatesShell({ templates, isLoggedIn }: ShellProps) {
         <Button
           size="sm"
           variant="outline"
-          onClick={() => setDialog({ mode: "create" })}
+          onClick={() => setEditDialog({ mode: "create" })}
           disabled={!isLoggedIn || templates.length >= MAX_TEMPLATES}
           title={
             templates.length >= MAX_TEMPLATES
@@ -115,18 +159,29 @@ export function AiPromptTemplatesShell({ templates, isLoggedIn }: ShellProps) {
               <TemplateRow
                 key={t.id}
                 template={t}
-                onEdit={() => setDialog({ mode: "edit", template: t })}
+                onEdit={() => setEditDialog({ mode: "edit", template: t })}
+                onDelete={() => setDeleteTarget(t)}
+                onSetDefault={handleSetDefault}
+                changingDefaultId={changingDefaultId}
               />
             ))}
           </ul>
         )}
       </Card.Body>
 
-      {dialog !== null && (
+      {editDialog !== null && (
         <TemplateDialog
-          dialogMode={dialog}
-          onSuccess={handleSuccess}
-          onClose={() => setDialog(null)}
+          dialogMode={editDialog}
+          onSuccess={handleEditSuccess}
+          onClose={() => setEditDialog(null)}
+        />
+      )}
+
+      {deleteTarget !== null && (
+        <DeleteConfirmDialog
+          template={deleteTarget}
+          onSuccess={handleDeleteSuccess}
+          onClose={() => setDeleteTarget(null)}
         />
       )}
     </Card>
@@ -140,10 +195,19 @@ export function AiPromptTemplatesShell({ templates, isLoggedIn }: ShellProps) {
 function TemplateRow({
   template: t,
   onEdit,
+  onDelete,
+  onSetDefault,
+  changingDefaultId,
 }: {
   template: AiPromptTemplate;
   onEdit: () => void;
+  onDelete: () => void;
+  onSetDefault: (id: string) => void;
+  changingDefaultId: string | null;
 }) {
+  const isChangingThis = changingDefaultId === t.id;
+  const isAnyChanging = changingDefaultId !== null;
+
   return (
     <li className="flex items-center gap-3 px-4 py-3 bg-card">
       <div className="flex-1 min-w-0">
@@ -161,38 +225,106 @@ function TemplateRow({
           <Button
             size="sm"
             variant="ghost"
-            disabled
-            title="次フェーズで実装予定"
+            onClick={() => onSetDefault(t.id)}
+            disabled={isAnyChanging}
           >
             <Star className="h-3.5 w-3.5" />
-            デフォルトにする
+            {isChangingThis ? "変更中…" : "デフォルトにする"}
           </Button>
         )}
         <Button size="sm" variant="ghost" onClick={onEdit}>
           <Pencil className="h-3.5 w-3.5" />
           編集
         </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          disabled
-          title="次フェーズで実装予定"
-          className="text-destructive"
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-          削除
-        </Button>
+        {t.is_default ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled
+            title="デフォルトテンプレートは削除できません"
+            className="text-destructive"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            削除
+          </Button>
+        ) : (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={onDelete}
+            className="text-destructive hover:text-destructive hover:bg-destructive/10"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            削除
+          </Button>
+        )}
       </div>
     </li>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Dialog (create / edit)
+// Delete confirmation dialog
+// ---------------------------------------------------------------------------
+
+interface DeleteConfirmDialogProps {
+  template: AiPromptTemplate;
+  onSuccess: () => void;
+  onClose: () => void;
+}
+
+function DeleteConfirmDialog({
+  template,
+  onSuccess,
+  onClose,
+}: DeleteConfirmDialogProps) {
+  const [error, setError] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+
+  const handleDelete = () => {
+    setError(null);
+    startTransition(async () => {
+      const result = await deletePromptTemplateAction(template.id);
+      if (result.ok) {
+        toast.success("テンプレートを削除しました");
+        onSuccess();
+      } else {
+        setError(result.error);
+      }
+    });
+  };
+
+  return (
+    <Modal open onOpenChange={(v) => { if (!v && !isPending) onClose(); }}>
+      <ModalContent title="テンプレートを削除" size="sm">
+        <p className="text-sm text-foreground">
+          <span className="font-medium">「{template.name}」</span>{" "}
+          を削除します。この操作は元に戻せません。
+        </p>
+        {error && (
+          <p className="text-sm text-destructive mt-3" role="alert">
+            {error}
+          </p>
+        )}
+        <ModalFooter>
+          <Button variant="ghost" onClick={onClose} disabled={isPending}>
+            キャンセル
+          </Button>
+          <Button variant="danger" onClick={handleDelete} disabled={isPending}>
+            {isPending ? "削除中…" : "削除する"}
+          </Button>
+        </ModalFooter>
+      </ModalContent>
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Edit / create dialog
 // ---------------------------------------------------------------------------
 
 interface TemplateDialogProps {
-  dialogMode: DialogMode;
+  dialogMode: EditDialogMode;
   onSuccess: () => void;
   onClose: () => void;
 }
@@ -202,29 +334,34 @@ function TemplateDialog({ dialogMode, onSuccess, onClose }: TemplateDialogProps)
   const existing = isEdit ? dialogMode.template : null;
 
   const [name, setName] = useState(() => (existing ? existing.name : ""));
-  const [fewshots, setFewshots] = useState<FewShotExample[]>(() => {
-    if (!existing) return [createEmptyFewshot()];
+  const [fewshots, setFewshots] = useState<EditableFewShot[]>(() => {
+    if (!existing) return [toEditableNew()];
     const parsed = parseFewshots(existing.body);
-    return parsed && parsed.length > 0 ? parsed : [createEmptyFewshot()];
+    return parsed && parsed.length > 0 ? parsed.map(toEditable) : [toEditableNew()];
+  });
+  const [parseWarn] = useState<boolean>(() => {
+    if (!existing) return false;
+    const parsed = parseFewshots(existing.body);
+    return parsed === null || parsed.length === 0;
   });
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  const updateFewshot = (index: number, patch: Partial<FewShotExample>) => {
+  const updateFewshot = (localId: string, patch: Partial<FewShotExample>) => {
     setFewshots((prev) =>
-      prev.map((ex, i) => (i === index ? { ...ex, ...patch } : ex)),
+      prev.map((ex) => (ex.localId === localId ? { ...ex, ...patch } : ex)),
     );
   };
 
   const addFewshot = () => {
     if (canAddFewshot(fewshots)) {
-      setFewshots((prev) => [...prev, createEmptyFewshot()]);
+      setFewshots((prev) => [...prev, toEditableNew()]);
     }
   };
 
-  const removeFewshot = (index: number) => {
+  const removeFewshot = (localId: string) => {
     if (canRemoveFewshot(fewshots)) {
-      setFewshots((prev) => prev.filter((_, i) => i !== index));
+      setFewshots((prev) => prev.filter((ex) => ex.localId !== localId));
     }
   };
 
@@ -232,7 +369,7 @@ function TemplateDialog({ dialogMode, onSuccess, onClose }: TemplateDialogProps)
     setError(null);
     const fd = new FormData();
     fd.set("name", name);
-    fd.set("body", serializeFewshots(fewshots));
+    fd.set("body", serializeFewshots(toFewShotExamples(fewshots)));
     if (isEdit && existing) {
       fd.set("id", existing.id);
     }
@@ -254,14 +391,19 @@ function TemplateDialog({ dialogMode, onSuccess, onClose }: TemplateDialogProps)
   };
 
   return (
-    <Modal open onOpenChange={(v) => { if (!v) onClose(); }}>
+    <Modal open onOpenChange={(v) => { if (!v && !isPending) onClose(); }}>
       <ModalContent
         title={isEdit ? "テンプレートを編集" : "テンプレートを新規作成"}
         description="Few-shot 例を設定することで AI 分析結果をカスタマイズできます。"
         size="lg"
       >
         <div className="max-h-[60vh] overflow-y-auto space-y-6 pr-1">
-          {/* テンプレート名 */}
+          {parseWarn && (
+            <p className="text-sm text-warning bg-warning/10 rounded p-2" role="alert">
+              テンプレートの内容を読み込めませんでした。内容を確認してから保存してください。
+            </p>
+          )}
+
           <FormField label="テンプレート名" required htmlFor="tpl-name">
             <Input
               id="tpl-name"
@@ -276,7 +418,6 @@ function TemplateDialog({ dialogMode, onSuccess, onClose }: TemplateDialogProps)
             </span>
           </FormField>
 
-          {/* Few-shot 例リスト */}
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold text-foreground">
@@ -295,13 +436,13 @@ function TemplateDialog({ dialogMode, onSuccess, onClose }: TemplateDialogProps)
 
             {fewshots.map((ex, i) => (
               <FewShotEditor
-                key={i}
+                key={ex.localId}
                 index={i}
                 example={ex}
                 canRemove={canRemoveFewshot(fewshots)}
                 isPending={isPending}
-                onChange={(patch) => updateFewshot(i, patch)}
-                onRemove={() => removeFewshot(i)}
+                onChange={(patch) => updateFewshot(ex.localId, patch)}
+                onRemove={() => removeFewshot(ex.localId)}
               />
             ))}
           </div>
@@ -336,7 +477,7 @@ function TemplateDialog({ dialogMode, onSuccess, onClose }: TemplateDialogProps)
 
 interface FewShotEditorProps {
   index: number;
-  example: FewShotExample;
+  example: EditableFewShot;
   canRemove: boolean;
   isPending: boolean;
   onChange: (patch: Partial<FewShotExample>) => void;
@@ -390,11 +531,12 @@ function FewShotEditor({
 
       <FormField
         label="タイトル"
-        htmlFor={`fewshot-title-${index}`}
+        required
+        htmlFor={`fewshot-title-${example.localId}`}
         hint="例: 居酒屋・海鮮"
       >
         <Input
-          id={`fewshot-title-${index}`}
+          id={`fewshot-title-${example.localId}`}
           value={example.title}
           onChange={(e) => onChange({ title: e.target.value })}
           placeholder="居酒屋・海鮮"
@@ -408,11 +550,12 @@ function FewShotEditor({
 
       <FormField
         label="店舗情報"
-        htmlFor={`fewshot-meta-${index}`}
+        required
+        htmlFor={`fewshot-meta-${example.localId}`}
         hint="例: 居酒屋・神奈川県川崎市・刺身/日本酒"
       >
         <Input
-          id={`fewshot-meta-${index}`}
+          id={`fewshot-meta-${example.localId}`}
           value={example.store_meta}
           onChange={(e) => onChange({ store_meta: e.target.value })}
           placeholder="居酒屋・神奈川県川崎市・刺身/日本酒"
@@ -426,11 +569,12 @@ function FewShotEditor({
 
       <FormField
         label="架電スクリプト例"
-        htmlFor={`fewshot-script-${index}`}
+        required
+        htmlFor={`fewshot-script-${example.localId}`}
         hint="{ASSIGNED_SALES} は担当者名のプレースホルダーです（必須）"
       >
         <Textarea
-          id={`fewshot-script-${index}`}
+          id={`fewshot-script-${example.localId}`}
           value={example.call_script_ideal}
           onChange={(e) => onChange({ call_script_ideal: e.target.value })}
           placeholder={
