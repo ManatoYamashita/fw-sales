@@ -6,6 +6,7 @@ import { Stat } from "@/components/ui/stat";
 import { Heading, Text } from "@/components/ui/typography";
 import { DataActions } from "./_components/data-actions";
 import { ThemeToggleCard } from "./_components/theme-toggle-card";
+import { AiPromptTemplatesCard } from "./_components/ai-prompt-templates-card";
 import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
 import {
@@ -66,6 +67,8 @@ export default async function SettingsPage() {
       <ThemeToggleCard />
 
       <DataActions />
+
+      <AiPromptTemplatesCard />
 
       <Card>
         <Card.Header>
