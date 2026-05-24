@@ -3,12 +3,20 @@
 import { parseStoreUrl } from "@/lib/url-parser";
 import { fetchOgp } from "@/lib/url-parser/ogp";
 import { applyParsedData } from "@/lib/url-parser/apply";
+import {
+  enrichWithPlacesFallback,
+  type PlacesFallbackInfo,
+} from "@/lib/url-parser/places-fallback";
 import type {
   AppliedField,
   ApplyResult,
   OgpResult,
   ParsedUrl,
 } from "@/lib/url-parser/types";
+
+// 型は `@/lib/url-parser/places-fallback` から直接 import すること。
+// `"use server"` ファイルから型を re-export すると Next.js 16 + Turbopack が
+// 値参照として解釈し、本番ランタイムで ReferenceError を投げる (#11 hotfix)。
 
 export interface UrlImportResult {
   parsed: ParsedUrl | null;
@@ -18,6 +26,8 @@ export interface UrlImportResult {
   applied: AppliedField[];
   /** 連鎖補完で 2 段目 fetch が走ったかどうか */
   chained: boolean;
+  /** Places API フォールバックの実行結果 (未呼出時は undefined、呼び出したが補完できなかった場合も info あり) */
+  placesFallback?: PlacesFallbackInfo;
 }
 
 interface ImportOptions {
@@ -193,6 +203,12 @@ export async function importFromUrlAction(
     chained = enriched.chained;
   }
 
+  // Places API フォールバック: 低信頼度フィールドが残っている場合に Text Search 1 回で補完。
+  // API キー未設定 / ネットワーク例外時は silently skip し、UI には toast を出さない。
+  const placesResult = await enrichWithPlacesFallback(parsed, suggested);
+  suggested = placesResult.updated;
+  const placesFallback = placesResult.info;
+
   const applied = buildAppliedFields(suggested);
-  return { parsed, ogp, suggested, applied, chained };
+  return { parsed, ogp, suggested, applied, chained, placesFallback };
 }

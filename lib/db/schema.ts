@@ -1,4 +1,15 @@
-import { pgTable, text, integer, real, index, uuid } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  text,
+  integer,
+  real,
+  index,
+  uuid,
+  uniqueIndex,
+  timestamp,
+  jsonb,
+  numeric,
+} from "drizzle-orm/pg-core";
 
 /**
  * profiles テーブル (auth-and-notifications spec, Issue #16)
@@ -207,6 +218,123 @@ export const research = pgTable("research", {
  * - `payment_confirmed` のみ nullable text。未確認状態を `null` で表現可能 (Req 10.3)
  * - その他のカラムは NOT NULL を基本とし、列挙型 (`HandoffStatus`) は text として保持します
  */
+/**
+ * research_jobs テーブル (deep-research-pipeline spec, Issue #43)
+ *
+ * Deep Research ジョブのライフサイクル (`queued` / `researching` / `structuring`
+ * / `done` / `failed`) を保持する単一の真実。本 spec の同期/非同期処理の
+ * Single Source of Truth (design.md §Physical Data Model)。
+ *
+ * - `id` は `<entity>_<id>` 形式の text PK (`job_<nanoid>`)
+ * - `status` は text + アプリ層 `JobStatus` 型ガードで担保 (既存規約踏襲)
+ * - 時刻列は秒精度が必要なため `timestamptz` を採用 (既存 text date 列とは別系統)
+ * - `error_log` は `{ stage, kind, message, occurredAt, cancel_result? }` の配列を jsonb で
+ * - 失敗ジョブからの再投入は元行を touch せず新規行を作る方針 (R5.6, design.md §State Machine)
+ *
+ * 関連: design.md §Physical Data Model / research_jobs, requirements.md
+ *       §1.1, §1.2, §2.3, §5.3, §5.4, §8.1, §8.3, §8.4
+ */
+export const researchJobs = pgTable(
+  "research_jobs",
+  {
+    id: text("id").primaryKey(),
+    store_id: text("store_id")
+      .notNull()
+      .references(() => stores.id),
+    user_id: uuid("user_id")
+      .notNull()
+      .references(() => profiles.id),
+    /**
+     * 列挙値: `queued` / `researching` / `structuring` / `done` / `failed`
+     * (`types/deep-research.ts` の `JobStatus` 型で担保)。
+     */
+    status: text("status").notNull().default("queued"),
+    /** Stage 1 (Deep Research) のタスク識別子 (`interactions/...`)。Stage 1 起動時に書込。 */
+    deep_research_task_id: text("deep_research_task_id"),
+    /** Stage 1 起動回数 (sweep / cancel 後の手動再投入は新規行のため、ここでは増えない)。 */
+    attempts: integer("attempts").notNull().default(0),
+    /**
+     * 失敗・スタック理由のジョブログ。配列要素 shape:
+     * `{ stage: "stage1"|"stage2"|"sweep", kind: string, message: string,
+     *    occurred_at: ISO 8601 文字列, cancel_result?: object }`
+     */
+    error_log: jsonb("error_log"),
+    enqueued_at: timestamp("enqueued_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    research_started_at: timestamp("research_started_at", {
+      withTimezone: true,
+    }),
+    research_completed_at: timestamp("research_completed_at", {
+      withTimezone: true,
+    }),
+    completed_at: timestamp("completed_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("research_jobs_status_enqueued_idx").on(
+      table.status,
+      table.enqueued_at,
+    ),
+    index("research_jobs_store_idx").on(table.store_id),
+    index("research_jobs_user_enqueued_idx").on(table.user_id, table.enqueued_at),
+    index("research_jobs_enqueued_idx").on(table.enqueued_at),
+  ],
+);
+
+/**
+ * research_reports テーブル (deep-research-pipeline spec, Issue #43)
+ *
+ * Deep Research の最終成果物。1 成功ジョブにつき 1 行 (`UNIQUE (job_id)`)。
+ *
+ * - `id` は `report_<nanoid>` text PK
+ * - 8 カテゴリは個別 jsonb 列、各内部は `DeepResearchItem` の配列 (`types/deep-research.ts`)
+ * - `total_cost_yen` は SDK が token usage を出さない場合 NULL 許容 (Phase 0 PoC で確定)
+ * - `total_duration_sec` は `completed_at - research_started_at` の秒数
+ *
+ * 関連: design.md §Physical Data Model / research_reports, requirements.md
+ *       §3.1, §3.2, §3.3, §3.4, §3.5, §3.6, §8.1
+ */
+export const researchReports = pgTable(
+  "research_reports",
+  {
+    id: text("id").primaryKey(),
+    job_id: text("job_id")
+      .notNull()
+      .references(() => researchJobs.id),
+    store_id: text("store_id")
+      .notNull()
+      .references(() => stores.id),
+    category_1_basic: jsonb("category_1_basic").notNull().default([]),
+    category_2_owner: jsonb("category_2_owner").notNull().default([]),
+    category_3_menu: jsonb("category_3_menu").notNull().default([]),
+    category_4_customer: jsonb("category_4_customer").notNull().default([]),
+    category_5_marketing: jsonb("category_5_marketing").notNull().default([]),
+    category_6_competitor: jsonb("category_6_competitor").notNull().default([]),
+    category_7_owned_media: jsonb("category_7_owned_media")
+      .notNull()
+      .default([]),
+    category_8_other: jsonb("category_8_other").notNull().default([]),
+    /** C 区分項目から抽出したヒアリング質問の配列: `{ category, question }[]` */
+    hearing_questions: jsonb("hearing_questions").notNull().default([]),
+    /** Stage 1 が返した生 Markdown 全文 (原典として保持、再構造化のソースにも) */
+    full_markdown: text("full_markdown").notNull(),
+    /** Stage 1 が引用した URL の重複排除済配列 */
+    all_source_urls: jsonb("all_source_urls").notNull().default([]),
+    total_cost_yen: numeric("total_cost_yen", { precision: 10, scale: 2 }),
+    total_duration_sec: integer("total_duration_sec").notNull().default(0),
+    created_at: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("research_reports_job_idx").on(table.job_id),
+    index("research_reports_store_created_idx").on(
+      table.store_id,
+      table.created_at,
+    ),
+  ],
+);
+
 export const handoffs = pgTable("handoffs", {
   id: text("id").primaryKey(),
   store_id: text("store_id")

@@ -2,12 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bell, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
 import { NAV_ITEMS } from "@/lib/domain/nav";
 import { Breadcrumb, type BreadcrumbItem } from "@/components/ui/breadcrumb";
 import { buttonVariants } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
+import { NotificationBell } from "@/components/layout/notification-bell";
 import { cn } from "@/lib/utils/cn";
+import type { Notification } from "@/types/notification";
 
 function deriveBreadcrumb(pathname: string): BreadcrumbItem[] {
   if (pathname === "/" || pathname === "/dashboard") {
@@ -34,7 +36,15 @@ function deriveBreadcrumb(pathname: string): BreadcrumbItem[] {
   return [{ label: "FirstWeb - Reserch AI for Sales" }];
 }
 
-export function Topbar() {
+export interface TopbarProps {
+  /**
+   * 親 RSC (`(main)/layout.tsx` の `TopbarShell`) が `getRecentNotifications`
+   * で解決した最新通知配列。deep-research-pipeline spec #43 で追加。
+   */
+  notifications?: readonly Notification[];
+}
+
+export function Topbar({ notifications = [] }: TopbarProps) {
   const pathname = usePathname();
   const items = deriveBreadcrumb(pathname);
   const isOnStoreNew = pathname === "/stores/new";
@@ -46,13 +56,7 @@ export function Topbar() {
       </div>
       <div className="flex items-center gap-1.5">
         <ThemeToggle />
-        <button
-          type="button"
-          aria-label="通知"
-          className="relative inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <Bell className="h-4 w-4" />
-        </button>
+        <NotificationBell notifications={notifications} />
         {isOnStoreNew ? (
           <button
             type="button"

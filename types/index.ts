@@ -5,3 +5,4 @@ export * from "./deal";
 export * from "./handoff";
 export * from "./profile";
 export * from "./notification";
+export * from "./deep-research";
