@@ -115,6 +115,20 @@ export interface DeepResearchJobStatusPatch {
 }
 
 /**
+ * Deep Research キューページ (`/research`) の一覧 1 行を表す DTO。
+ *
+ * `lib/db/deep-research-repository.ts` が `stores` / `profiles` を LEFT JOIN して
+ * 組み立てる。 join 失敗 (店舗削除済 / placeholder profile) は null で表現する。
+ */
+export interface DeepResearchQueueRow {
+  job: DeepResearchJob;
+  /** store.name。 join 失敗時は null (UI 側で "(削除済み)" 表示) */
+  store_name: string | null;
+  /** profile.display_name。 join 失敗時は null (UI 側で "—" 表示) */
+  researcher_display_name: string | null;
+}
+
+/**
  * 51 項目の取得難易度区分。design.md §Each Category jsonb 内の項目スキーマ。
  *
  * - A: Web で高信頼に取得可能 (value 必須、source は任意)

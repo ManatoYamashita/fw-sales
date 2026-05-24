@@ -24,7 +24,6 @@ import { updateSession } from "@/lib/supabase/middleware";
  */
 const DISABLED_ROUTE_PREFIXES: readonly string[] = [
   "/dashboard",
-  "/research",
   "/pipeline",
   "/actions",
   "/deals",
