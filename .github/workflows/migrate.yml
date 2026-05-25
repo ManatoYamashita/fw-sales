@@ -1,0 +1,48 @@
+# Drizzle マイグレーション自動適用。
+#
+# main への push で `drizzle/**` に変更があった場合のみ起動し、
+# `pnpm db:migrate` (drizzle-kit migrate) を本番 DB に対して実行する。
+#
+# 安全策:
+# - paths 限定: drizzle ファイル変更なしでは workflow 自体が起動しない
+# - 冪等性: drizzle-kit は `__drizzle_migrations` テーブルで適用済みを管理し skip
+# - timeout: 5 分 (通常 10 秒以内で完了)
+# - 失敗時: workflow が赤くなるだけ、 partial 適用リスクは低い (各 SQL = 単一 DDL)
+#
+# 前提: GitHub Secret `DATABASE_URL` に本番 Supabase Postgres connection string を登録。
+#       `check-migrations.yml` が PR 段階で整合性チェック済み。
+
+name: Apply Migrations
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "drizzle/**"
+
+jobs:
+  migrate:
+    name: Apply pending migrations
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".node-version"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply pending migrations
+        run: pnpm db:migrate
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
