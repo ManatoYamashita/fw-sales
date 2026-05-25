@@ -155,8 +155,6 @@ export async function analyzeStoreAction(
   );
   const assignedSales = readString(formData, "assignedSales");
 
-  // テンプレート解決: クライアントからbodyは受け取らず、templateIdのみ信頼する
-  // 不正UUID / 他ユーザーID / parse失敗 / DB例外 → ハードコードFew-shotへ無言フォールバック
   const templateId = readNullableTrimmedString(formData, "templateId");
   let customFewshots: FewShotExample[] | undefined;
   if (templateId) {
@@ -216,7 +214,11 @@ export async function analyzeStoreAction(
       );
     }
 
-    return success(validated.value);
+    const fallbackWarning =
+      templateId && !customFewshots
+        ? "指定テンプレートの読み込みに失敗したため、標準テンプレートで分析しました"
+        : undefined;
+    return success(validated.value, fallbackWarning);
   } catch (err) {
     // AiClientError 型は client.ts で正規化済(API キー漏洩防止)
     if (isAiClientError(err)) {

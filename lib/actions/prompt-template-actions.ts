@@ -52,6 +52,7 @@ const fewShotExampleSchema = z.object({
   call_script_ideal: z
     .string()
     .min(1, "架電スクリプト例を入力してください")
+    .max(2000, "架電スクリプト例は 2000 文字以内にしてください")
     .refine((v) => v.includes("{ASSIGNED_SALES}"), {
       message: "call_script_ideal に {ASSIGNED_SALES} を含めてください",
     }),
@@ -134,18 +135,26 @@ export async function createPromptTemplateAction(
   const bodyResult = validateBody(rawBody);
   if (!bodyResult.ok) return failure(bodyResult.error);
 
-  const count = await repos.promptTemplate.countByUser(session.userId);
-  if (count >= 5) return failure("上限 5 件を超えました");
+  try {
+    const template = await repos.transaction(async (tx) => {
+      const count = await tx.promptTemplate.countByUser(session.userId);
+      if (count >= 5) throw new Error("LIMIT_EXCEEDED");
+      return tx.promptTemplate.insert({
+        user_id: session.userId,
+        name: nameResult.data,
+        is_default: count === 0,
+        body: bodyResult.normalized,
+      });
+    });
 
-  const template = await repos.promptTemplate.insert({
-    user_id: session.userId,
-    name: nameResult.data,
-    is_default: count === 0,
-    body: bodyResult.normalized,
-  });
-
-  revalidateTag(CACHE_TAGS.promptTemplates, "max");
-  return success(template);
+    revalidateTag(CACHE_TAGS.promptTemplates, "max");
+    return success(template);
+  } catch (e) {
+    if (e instanceof Error && e.message === "LIMIT_EXCEEDED") {
+      return failure("上限 5 件を超えました");
+    }
+    return failure("テンプレートの作成に失敗しました");
+  }
 }
 
 /**

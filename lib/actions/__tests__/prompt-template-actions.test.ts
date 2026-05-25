@@ -153,14 +153,16 @@ describe("createPromptTemplateAction", () => {
   it("正常に作成できる", async () => {
     const created = makeTemplateRow({ name: "新規テンプレート" });
     mockGetCurrentSession.mockResolvedValue(SESSION_A);
-    mockRepo.countByUser.mockResolvedValue(2);
-    mockRepo.insert.mockResolvedValue(created);
+    mockTransaction.mockImplementationOnce(
+      (fn: (tx: { promptTemplate: typeof mockRepo }) => Promise<AiPromptTemplate>) =>
+        fn({ promptTemplate: { ...mockRepo, countByUser: vi.fn().mockResolvedValue(2), insert: vi.fn().mockResolvedValue(created) } }),
+    );
 
     const result = await createPromptTemplateAction(makeCreateFormData());
 
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.data.name).toBe("新規テンプレート");
-    expect(mockRepo.insert).toHaveBeenCalledTimes(1);
+    expect(mockTransaction).toHaveBeenCalledTimes(1);
   });
 
   it("未ログインならfailure", async () => {
@@ -173,13 +175,15 @@ describe("createPromptTemplateAction", () => {
 
   it("6件目作成は failure(上限 5 件を超えました)", async () => {
     mockGetCurrentSession.mockResolvedValue(SESSION_A);
-    mockRepo.countByUser.mockResolvedValue(5);
+    mockTransaction.mockImplementationOnce(
+      (fn: (tx: { promptTemplate: typeof mockRepo }) => Promise<AiPromptTemplate>) =>
+        fn({ promptTemplate: { ...mockRepo, countByUser: vi.fn().mockResolvedValue(5) } }),
+    );
 
     const result = await createPromptTemplateAction(makeCreateFormData());
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toMatch(/上限.*5/);
-    expect(mockRepo.insert).not.toHaveBeenCalled();
   });
 
   it("name が空文字なら failure", async () => {
@@ -205,15 +209,18 @@ describe("createPromptTemplateAction", () => {
   it("前後空白つき name は trim されて insert される", async () => {
     const created = makeTemplateRow({ name: "テスト" });
     mockGetCurrentSession.mockResolvedValue(SESSION_A);
-    mockRepo.countByUser.mockResolvedValue(1);
-    mockRepo.insert.mockResolvedValue(created);
+    const txInsert = vi.fn().mockResolvedValue(created);
+    mockTransaction.mockImplementationOnce(
+      (fn: (tx: { promptTemplate: typeof mockRepo }) => Promise<AiPromptTemplate>) =>
+        fn({ promptTemplate: { ...mockRepo, countByUser: vi.fn().mockResolvedValue(1), insert: txInsert } }),
+    );
 
     const result = await createPromptTemplateAction(
       makeCreateFormData({ name: "  テスト  " }),
     );
 
     expect(result.ok).toBe(true);
-    const [insertInput] = mockRepo.insert.mock.calls[0] as [{ name: string }];
+    const [insertInput] = txInsert.mock.calls[0] as [{ name: string }];
     expect(insertInput.name).toBe("テスト");
   });
 
@@ -247,21 +254,21 @@ describe("createPromptTemplateAction", () => {
     expect(mockRepo.insert).not.toHaveBeenCalled();
   });
 
-  it("1 例の合計 4000 字超過なら failure", async () => {
+  it("call_script_ideal が 2000 字超過なら failure", async () => {
     mockGetCurrentSession.mockResolvedValue(SESSION_A);
     const body = serializeFewshots([
       {
         title: "タイトル",
         store_meta: "店舗情報",
-        call_script_ideal: "{ASSIGNED_SALES}" + "あ".repeat(4000),
+        call_script_ideal: "{ASSIGNED_SALES}" + "あ".repeat(2000),
       },
     ]);
     const result = await createPromptTemplateAction(
       makeCreateFormData({ body }),
     );
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toMatch(/4000/);
-    expect(mockRepo.insert).not.toHaveBeenCalled();
+    if (!result.ok) expect(result.error).toMatch(/2000/);
+    expect(mockTransaction).not.toHaveBeenCalled();
   });
 
   it("{ASSIGNED_SALES} がない場合は failure", async () => {
@@ -280,13 +287,16 @@ describe("createPromptTemplateAction", () => {
   it("1 件目作成時は is_default: true で insert される", async () => {
     const created = makeTemplateRow({ is_default: true });
     mockGetCurrentSession.mockResolvedValue(SESSION_A);
-    mockRepo.countByUser.mockResolvedValue(0);
-    mockRepo.insert.mockResolvedValue(created);
+    const txInsert = vi.fn().mockResolvedValue(created);
+    mockTransaction.mockImplementationOnce(
+      (fn: (tx: { promptTemplate: typeof mockRepo }) => Promise<AiPromptTemplate>) =>
+        fn({ promptTemplate: { ...mockRepo, countByUser: vi.fn().mockResolvedValue(0), insert: txInsert } }),
+    );
 
     const result = await createPromptTemplateAction(makeCreateFormData());
 
     expect(result.ok).toBe(true);
-    const [insertInput] = mockRepo.insert.mock.calls[0] as [
+    const [insertInput] = txInsert.mock.calls[0] as [
       { is_default: boolean },
     ];
     expect(insertInput.is_default).toBe(true);
@@ -295,13 +305,16 @@ describe("createPromptTemplateAction", () => {
   it("2 件目以降は is_default: false で insert される", async () => {
     const created = makeTemplateRow({ is_default: false });
     mockGetCurrentSession.mockResolvedValue(SESSION_A);
-    mockRepo.countByUser.mockResolvedValue(1);
-    mockRepo.insert.mockResolvedValue(created);
+    const txInsert = vi.fn().mockResolvedValue(created);
+    mockTransaction.mockImplementationOnce(
+      (fn: (tx: { promptTemplate: typeof mockRepo }) => Promise<AiPromptTemplate>) =>
+        fn({ promptTemplate: { ...mockRepo, countByUser: vi.fn().mockResolvedValue(1), insert: txInsert } }),
+    );
 
     const result = await createPromptTemplateAction(makeCreateFormData());
 
     expect(result.ok).toBe(true);
-    const [insertInput] = mockRepo.insert.mock.calls[0] as [
+    const [insertInput] = txInsert.mock.calls[0] as [
       { is_default: boolean },
     ];
     expect(insertInput.is_default).toBe(false);

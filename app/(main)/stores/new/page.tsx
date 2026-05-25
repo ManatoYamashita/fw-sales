@@ -3,7 +3,7 @@ import { StoreRegistrationTabs } from "./_components/store-registration-tabs";
 import { isApiKeyConfigured, isPlacesApiKeyConfigured } from "@/lib/env";
 import { getAllProfiles } from "@/lib/queries/profiles";
 import { getCurrentProfile } from "@/lib/supabase/server";
-import { repos } from "@/lib/repositories";
+import { listPromptTemplatesCached } from "@/lib/queries/prompt-templates";
 import type { PromptTemplateOption } from "./_components/ai-analysis-panel";
 
 export const metadata: Metadata = {
@@ -38,7 +38,7 @@ export default async function NewStorePage({
   const initialMode = normalizeMode(sp.mode);
   // プロンプトテンプレート一覧: id/name/is_default のみに絞ってクライアントへ渡す (Issue #42 Phase 4-D)
   const promptTemplates: PromptTemplateOption[] = currentProfile
-    ? (await repos.promptTemplate.list(currentProfile.id)).map(
+    ? (await listPromptTemplatesCached(currentProfile.id)).map(
         ({ id, name, is_default }) => ({ id, name, is_default }),
       )
     : [];

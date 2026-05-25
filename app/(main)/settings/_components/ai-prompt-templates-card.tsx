@@ -1,12 +1,12 @@
 import { getCurrentSession } from "@/lib/supabase/server";
-import { repos } from "@/lib/repositories";
+import { listPromptTemplatesCached } from "@/lib/queries/prompt-templates";
 import { AiPromptTemplatesShell } from "./ai-prompt-template-dialog";
 import type { AiPromptTemplate } from "@/types/ai-prompt-template";
 
 export async function AiPromptTemplatesCard() {
   const session = await getCurrentSession();
   const templates: AiPromptTemplate[] = session
-    ? await repos.promptTemplate.list(session.userId)
+    ? await listPromptTemplatesCached(session.userId)
     : [];
 
   return (

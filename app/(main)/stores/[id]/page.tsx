@@ -11,7 +11,7 @@ import { listDealsByStoreCached } from "@/lib/queries/deals";
 import { getAllProfiles } from "@/lib/queries/profiles";
 import { isApiKeyConfigured } from "@/lib/env";
 import { getCurrentSession } from "@/lib/supabase/server";
-import { repos } from "@/lib/repositories";
+import { listPromptTemplatesCached } from "@/lib/queries/prompt-templates";
 import type { PromptTemplateOption } from "@/app/(main)/stores/new/_components/ai-analysis-panel";
 
 type Params = Promise<{ id: string }>;
@@ -59,7 +59,7 @@ export default async function StoreDetailPage({
     : "";
   // プロンプトテンプレート一覧: id/name/is_default のみに絞ってクライアントへ渡す (Issue #42 Phase 4-D)
   const promptTemplates: PromptTemplateOption[] = session
-    ? (await repos.promptTemplate.list(session.userId)).map(
+    ? (await listPromptTemplatesCached(session.userId)).map(
         ({ id, name, is_default }) => ({ id, name, is_default }),
       )
     : [];

@@ -10,8 +10,8 @@
  * - `setDefault` は clearDefaultForUser → update の 2 ステップで構成。
  *   原子性が必要な場合は呼び出し側が `repos.transaction()` で包み、
  *   Tx executor を渡すこと。
- * - デフォルトテンプレートの削除は DB trigger (migration 0009) で拒否される。
- *   Server Action 側でも Phase 2 で二重ガードを実装する予定。
+ * - デフォルトテンプレートの削除は DB trigger (migration 0010) で拒否される。
+ *   Server Action 側でも二重ガードを実装済み。
  *
  * 関連: design §「PromptTemplateRepository」, Issue #42
  */

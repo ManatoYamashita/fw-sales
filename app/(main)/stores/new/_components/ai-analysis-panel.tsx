@@ -211,7 +211,11 @@ export function AiAnalysisPanel({
       const result = await analyzeStoreAction(fd);
       if (result.ok) {
         onResult(result.data);
-        toast.success("AI 分析が完了しました");
+        if (result.message) {
+          toast.warn(result.message);
+        } else {
+          toast.success("AI 分析が完了しました");
+        }
       } else {
         toast.error(result.error);
       }
