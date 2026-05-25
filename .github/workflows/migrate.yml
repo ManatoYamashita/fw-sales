@@ -46,6 +46,6 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Apply pending migrations
-        run: pnpm db:migrate
+        run: pnpm db:migrate 2>&1 | cat
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
