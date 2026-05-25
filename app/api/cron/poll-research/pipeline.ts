@@ -337,6 +337,7 @@ async function runStage2AndFinalize(args: {
   });
 
   revalidateTag(CACHE_TAGS.deepResearchByStore(job.store_id), "max");
+  revalidateTag(CACHE_TAGS.deepResearchQueue, "max");
 
   await createDeepResearchNotification({
     kind: "deep_research_done",
@@ -395,6 +396,7 @@ async function startOneQueued(args: {
       research_started_at: startedAt,
     });
     revalidateTag(CACHE_TAGS.deepResearchByStore(job.store_id), "max");
+    revalidateTag(CACHE_TAGS.deepResearchQueue, "max");
   } catch (err) {
     const kind = inferErrorKind(err);
     await markFailed(job, "stage1", `stage1_${kind}`, summarizeError(err));
@@ -427,6 +429,7 @@ async function markFailed(
     completed_at: occurredAt,
   });
   revalidateTag(CACHE_TAGS.deepResearchByStore(job.store_id), "max");
+  revalidateTag(CACHE_TAGS.deepResearchQueue, "max");
   await fireFailureNotification(job, message);
 }
 

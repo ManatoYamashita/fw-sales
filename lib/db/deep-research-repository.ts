@@ -21,13 +21,14 @@ import "server-only";
 import { and, asc, desc, eq, gte, inArray, lt, sql } from "drizzle-orm";
 
 import { db, type DbClient, type Tx } from "./client";
-import { researchJobs, researchReports } from "./schema";
+import { profiles, researchJobs, researchReports, stores } from "./schema";
 import type { DeepResearchRepository } from "@/lib/repositories/deep-research-repository";
 import type {
   DeepResearchJob,
   DeepResearchJobErrorEntry,
   DeepResearchJobInsert,
   DeepResearchJobStatusPatch,
+  DeepResearchQueueRow,
   DeepResearchReport,
   DeepResearchReportCategories,
   DeepResearchReportInsert,
@@ -51,6 +52,22 @@ function asJobStatus(raw: string): JobStatus {
   if (isJobStatus(raw)) return raw;
   // 想定外の状態値は failed 扱いにフェイルセーフ (DB 直叩きで不正値が入った場合)
   return "failed";
+}
+
+/**
+ * `listInFlight` / `listRecentDone` / `listRecentFailed` の SELECT で
+ * 受け取る LEFT JOIN 結果を `DeepResearchQueueRow` に変換する。
+ */
+function fromQueueJoinRow(row: {
+  job: JobRow;
+  store_name: string | null;
+  researcher_display_name: string | null;
+}): DeepResearchQueueRow {
+  return {
+    job: fromJobRow(row.job),
+    store_name: row.store_name,
+    researcher_display_name: row.researcher_display_name,
+  };
 }
 
 function fromJobRow(row: JobRow): DeepResearchJob {
@@ -144,6 +161,56 @@ export function makeDeepResearchRepo(
         .from(researchJobs)
         .where(inArray(researchJobs.status, IN_FLIGHT_STATUSES));
       return rows[0]?.count ?? 0;
+    },
+
+    async listInFlight() {
+      const rows = await executor
+        .select({
+          job: researchJobs,
+          store_name: stores.name,
+          researcher_display_name: profiles.display_name,
+        })
+        .from(researchJobs)
+        .leftJoin(stores, eq(researchJobs.store_id, stores.id))
+        .leftJoin(profiles, eq(researchJobs.user_id, profiles.id))
+        .where(inArray(researchJobs.status, PENDING_STATUSES))
+        .orderBy(asc(researchJobs.enqueued_at))
+        .limit(200);
+      return rows.map(fromQueueJoinRow);
+    },
+
+    async listRecentDone(limit) {
+      const safeLimit = Math.max(1, Math.min(limit, 100));
+      const rows = await executor
+        .select({
+          job: researchJobs,
+          store_name: stores.name,
+          researcher_display_name: profiles.display_name,
+        })
+        .from(researchJobs)
+        .leftJoin(stores, eq(researchJobs.store_id, stores.id))
+        .leftJoin(profiles, eq(researchJobs.user_id, profiles.id))
+        .where(eq(researchJobs.status, "done"))
+        .orderBy(desc(researchJobs.completed_at))
+        .limit(safeLimit);
+      return rows.map(fromQueueJoinRow);
+    },
+
+    async listRecentFailed(limit) {
+      const safeLimit = Math.max(1, Math.min(limit, 100));
+      const rows = await executor
+        .select({
+          job: researchJobs,
+          store_name: stores.name,
+          researcher_display_name: profiles.display_name,
+        })
+        .from(researchJobs)
+        .leftJoin(stores, eq(researchJobs.store_id, stores.id))
+        .leftJoin(profiles, eq(researchJobs.user_id, profiles.id))
+        .where(eq(researchJobs.status, "failed"))
+        .orderBy(desc(researchJobs.completed_at))
+        .limit(safeLimit);
+      return rows.map(fromQueueJoinRow);
     },
 
     async findStuckJobs(thresholdAt) {

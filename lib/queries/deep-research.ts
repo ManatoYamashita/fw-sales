@@ -23,6 +23,7 @@ import { CACHE_TAGS } from "@/lib/cache";
 import { getCurrentSession } from "@/lib/supabase/server";
 import type {
   DeepResearchJob,
+  DeepResearchQueueRow,
   DeepResearchReport,
 } from "@/types/deep-research";
 
@@ -55,4 +56,46 @@ export async function getDeepResearchJobByStore(
   cacheTag(CACHE_TAGS.deepResearchByStore(storeId));
 
   return repos.deepResearch.findActiveByStore(storeId);
+}
+
+/**
+ * 調査キューページ用: in-flight (queued / researching / structuring) の全ジョブ。
+ *
+ * - スコープ: チーム全員横断 (担当者列に display_name を表示するため LEFT JOIN 済)
+ * - 並び順: 最古優先 (`enqueued_at ASC`)
+ * - キャッシュタグ: `CACHE_TAGS.deepResearchQueue` で enqueue / status 遷移 / retry /
+ *   sweep の各所から revalidate される
+ */
+export async function listInFlightDeepResearchJobs(): Promise<
+  DeepResearchQueueRow[]
+> {
+  "use cache";
+  cacheTag(CACHE_TAGS.deepResearchQueue);
+
+  return repos.deepResearch.listInFlight();
+}
+
+/**
+ * 調査キューページ用: 完了 (`done`) の最新 `limit` 件。
+ * デフォルト 30 件、 ハードキャップ 100 件 (repository 層でクランプ)。
+ */
+export async function listRecentDoneDeepResearchJobs(
+  limit = 30,
+): Promise<DeepResearchQueueRow[]> {
+  "use cache";
+  cacheTag(CACHE_TAGS.deepResearchQueue);
+
+  return repos.deepResearch.listRecentDone(limit);
+}
+
+/**
+ * 調査キューページ用: 失敗 (`failed`) の最新 `limit` 件。
+ */
+export async function listRecentFailedDeepResearchJobs(
+  limit = 30,
+): Promise<DeepResearchQueueRow[]> {
+  "use cache";
+  cacheTag(CACHE_TAGS.deepResearchQueue);
+
+  return repos.deepResearch.listRecentFailed(limit);
 }

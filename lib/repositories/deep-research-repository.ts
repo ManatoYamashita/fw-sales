@@ -22,6 +22,7 @@ import type {
   DeepResearchJobInsert,
   DeepResearchJobStatusPatch,
   DeepResearchJobErrorEntry,
+  DeepResearchQueueRow,
   DeepResearchReport,
   DeepResearchReportInsert,
 } from "@/types/deep-research";
@@ -51,6 +52,26 @@ export interface DeepResearchRepository {
    * Stage 1 新規起動可否の判定に使用 (`DEEP_RESEARCH_MAX_IN_FLIGHT` との比較)。
    */
   countInFlight(): Promise<number>;
+
+  /**
+   * Deep Research キューページ (`/research`) の「実行中」タブ用。
+   * `queued` / `researching` / `structuring` の全件を `enqueued_at ASC` で返す。
+   * `stores` / `profiles` を LEFT JOIN して `DeepResearchQueueRow` を返却する。
+   * 暴走防止のためハードキャップ 200 件。
+   */
+  listInFlight(): Promise<DeepResearchQueueRow[]>;
+
+  /**
+   * 「完了」タブ用。 `done` の直近 `limit` 件を `completed_at DESC` で返す。
+   * `limit` は 1..100 にクランプする。
+   */
+  listRecentDone(limit: number): Promise<DeepResearchQueueRow[]>;
+
+  /**
+   * 「失敗」タブ用。 `failed` の直近 `limit` 件を `completed_at DESC` で返す。
+   * `limit` は 1..100 にクランプする。
+   */
+  listRecentFailed(limit: number): Promise<DeepResearchQueueRow[]>;
 
   /**
    * `researching` または `structuring` 状態のまま閾値時刻より古いジョブを返す。
