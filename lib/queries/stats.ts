@@ -92,7 +92,7 @@ export async function getNavBadgeCounts(): Promise<NavBadgeCounts> {
     needsDeals ? repos.deal.list() : Promise.resolve([]),
     needsHandoffs ? repos.handoff.list() : Promise.resolve([]),
     needsResearchInFlight
-      ? repos.deepResearch.countInFlight()
+      ? repos.deepResearch.countPending()
       : Promise.resolve(0),
   ]);
 
