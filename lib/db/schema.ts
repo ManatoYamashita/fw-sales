@@ -9,6 +9,7 @@ import {
   timestamp,
   jsonb,
   numeric,
+  boolean,
 } from "drizzle-orm/pg-core";
 
 /**
@@ -363,3 +364,39 @@ export const handoffs = pgTable("handoffs", {
   created_at: text("created_at").notNull(),
   updated_at: text("updated_at").notNull(),
 });
+
+/**
+ * ai_prompt_templates テーブル (Issue #42)
+ *
+ * 各ユーザーが保持する Gemini プロンプトの Few-shot テンプレート。
+ *
+ * - `id` は uuid PK、`gen_random_uuid()` で自動生成 (`.defaultRandom()`)
+ * - `user_id` は `profiles.id` への FK (ON DELETE CASCADE)
+ * - `body` は `{ fewshots: FewShotExample[] }` を JSON 文字列として格納 (既存 ai_analysis_result 規約に揃える)
+ * - `is_default` = true の partial unique index は migration 0009 で raw SQL として追加
+ *   (Drizzle ORM が partial unique index の WHERE 句を直接サポートしないため)
+ * - デフォルトテンプレート削除拒否は migration 0009 の DB trigger で保証
+ * - `created_at` / `updated_at` は `YYYY-MM-DD` 形式 text (既存規約に揃える)
+ * - RLS は Supabase 側で別途管理 (既存プロジェクトの規約に従う)
+ *
+ * 関連: Issue #42, drizzle/0009_add_ai_prompt_templates.sql
+ */
+export const aiPromptTemplates = pgTable(
+  "ai_prompt_templates",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    user_id: uuid("user_id")
+      .notNull()
+      .references(() => profiles.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    is_default: boolean("is_default").notNull().default(false),
+    /** JSON 文字列: `{ fewshots: FewShotExample[] }` */
+    body: text("body").notNull(),
+    created_at: text("created_at").notNull(),
+    updated_at: text("updated_at").notNull(),
+  },
+  (table) => [
+    index("ai_prompt_templates_user_idx").on(table.user_id),
+    // partial unique index (WHERE is_default = true) は migration 0009 に raw SQL で追加
+  ],
+);

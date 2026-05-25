@@ -12,6 +12,7 @@ import { ServiceCheckboxGroup } from "@/app/(main)/stores/new/_components/servic
 import {
   AiAnalysisPanel,
   type AiAnalysisFormSnapshot,
+  type PromptTemplateOption,
 } from "@/app/(main)/stores/new/_components/ai-analysis-panel";
 import { updateStoreAction } from "@/lib/actions/store-actions";
 import { decideChannel } from "@/lib/domain/channel";
@@ -37,12 +38,15 @@ export interface StoreEditFormProps {
   isApiKeyConfigured: boolean;
   /** 担当者選択肢 (Phase 7: profiles に基づく Select オプション) */
   profiles: readonly Profile[];
+  /** SSR で取得したプロンプトテンプレート一覧(Issue #42 Phase 4-D) */
+  promptTemplates: readonly PromptTemplateOption[];
 }
 
 export function StoreEditForm({
   store,
   isApiKeyConfigured,
   profiles,
+  promptTemplates,
 }: StoreEditFormProps) {
   const [form, setForm] = useState({
     name: store.name,
@@ -449,6 +453,7 @@ export function StoreEditForm({
         confidence={aiConfidence}
         onResultFieldChange={onAiResultFieldChange}
         storeId={store.id}
+        promptTemplates={promptTemplates}
       />
 
       {/* Submit footer: AI Panel の下に独立配置 */}

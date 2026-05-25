@@ -6,6 +6,9 @@ import { StoreEditForm } from "./_components/store-edit-form";
 import { getStoreCached } from "@/lib/queries/stores";
 import { getAllProfiles } from "@/lib/queries/profiles";
 import { isApiKeyConfigured } from "@/lib/env";
+import { getCurrentSession } from "@/lib/supabase/server";
+import { listPromptTemplatesCached } from "@/lib/queries/prompt-templates";
+import type { PromptTemplateOption } from "@/app/(main)/stores/new/_components/ai-analysis-panel";
 
 type Params = Promise<{ id: string }>;
 
@@ -27,13 +30,20 @@ export default async function StoreEditPage({
   // build 時 prerender を skip (USE_CACHE_TIMEOUT 対策)。
   await connection();
   const { id } = await params;
-  const [store, profiles] = await Promise.all([
+  const [store, profiles, session] = await Promise.all([
     getStoreCached(id),
     getAllProfiles({ excludePlaceholders: false }),
+    getCurrentSession(),
   ]);
   if (!store) notFound();
   // GEMINI_API_KEY の有無を SSR で判定して props で渡す(Req 2.7)
   const apiKeyConfigured = isApiKeyConfigured();
+  // プロンプトテンプレート一覧: id/name/is_default のみに絞ってクライアントへ渡す (Issue #42 Phase 4-D)
+  const promptTemplates: PromptTemplateOption[] = session
+    ? (await listPromptTemplatesCached(session.userId)).map(
+        ({ id, name, is_default }) => ({ id, name, is_default }),
+      )
+    : [];
   return (
     <div className="space-y-4 max-w-4xl mx-auto">
       <div>
@@ -51,6 +61,7 @@ export default async function StoreEditPage({
         store={store}
         isApiKeyConfigured={apiKeyConfigured}
         profiles={profiles}
+        promptTemplates={promptTemplates}
       />
     </div>
   );

@@ -18,6 +18,7 @@ import { ServiceCheckboxGroup } from "./service-checkbox-group";
 import {
   AiAnalysisPanel,
   type AiAnalysisFormSnapshot,
+  type PromptTemplateOption,
 } from "./ai-analysis-panel";
 import { createStoreAction } from "@/lib/actions/store-actions";
 import { decideChannel } from "@/lib/domain/channel";
@@ -108,6 +109,8 @@ export interface StoreNewFormProps {
   initialImport?: StoreNewFormInitialImport | null;
   /** 手動モードで親パネルから渡される店舗名。`initialImport` がある場合はそちらが優先される。 */
   initialName?: string;
+  /** SSR で取得したプロンプトテンプレート一覧(Issue #42 Phase 4-D) */
+  promptTemplates: readonly PromptTemplateOption[];
 }
 
 export function StoreNewForm({
@@ -116,6 +119,7 @@ export function StoreNewForm({
   currentProfileId,
   initialImport = null,
   initialName = "",
+  promptTemplates,
 }: StoreNewFormProps) {
   const initial: FormState = {
     ...INITIAL,
@@ -568,6 +572,7 @@ export function StoreNewForm({
         confidence={aiConfidence}
         onResultFieldChange={onAiResultFieldChange}
         storeId={null}
+        promptTemplates={promptTemplates}
       />
 
       {/* Submit footer: 既存の Card.Footer 構造から切り出して AI Panel の下に配置。 */}

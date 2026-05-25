@@ -8,6 +8,7 @@ import {
   buildAnalysisPrompt,
   type BuildAnalysisPromptInput,
 } from "../prompt";
+import type { FewShotExample } from "@/types/ai-prompt-template";
 
 const baseFormValues: BuildAnalysisPromptInput["formValues"] = {
   name: "導楽",
@@ -135,5 +136,52 @@ describe("buildAnalysisPrompt", () => {
   it("call_script の冒頭発信者名指示が systemPrompt に含まれる (Req 3.4)", () => {
     const { systemPrompt } = buildAnalysisPrompt(baseInput);
     expect(systemPrompt).toMatch(/私ファーストWEBの渡部と申しまして.*で始めること/);
+  });
+});
+
+describe("buildAnalysisPrompt - カスタム fewshots (Issue #42 Phase 3)", () => {
+  const customExamples: FewShotExample[] = [
+    {
+      title: "テスト店舗1",
+      store_meta: "東京都渋谷区・イタリアン・パスタ専門",
+      call_script_ideal:
+        "ランチ中すみません\n私ファーストWEBの{ASSIGNED_SALES}と申しまして\nパスタが美味しいとお聞きしてご連絡しました",
+    },
+    {
+      title: "テスト店舗2",
+      store_meta: "大阪府難波・焼肉・黒毛和牛",
+      call_script_ideal:
+        "ご準備中すみません\n私ファーストWEBの{ASSIGNED_SALES}と申します\n黒毛和牛の焼肉が有名とお聞きしてご連絡しました",
+    },
+  ];
+
+  it("fewshots 指定時: カスタム店舗情報が systemPrompt に含まれる", () => {
+    const { systemPrompt } = buildAnalysisPrompt(baseInput, customExamples);
+    expect(systemPrompt).toMatch(/東京都渋谷区・イタリアン・パスタ専門/);
+    expect(systemPrompt).toMatch(/大阪府難波・焼肉・黒毛和牛/);
+  });
+
+  it("fewshots 指定時: ハードコード URL(導楽 / 蕎楽亭)が含まれない", () => {
+    const { systemPrompt } = buildAnalysisPrompt(baseInput, customExamples);
+    expect(systemPrompt).not.toMatch(/A1405\/A140504\/14096697/);
+    expect(systemPrompt).not.toMatch(/A1309\/A130905\/13000479/);
+  });
+
+  it("fewshots 指定時: {ASSIGNED_SALES} プレースホルダーが発信者名に置換される", () => {
+    const { systemPrompt } = buildAnalysisPrompt(baseInput, customExamples);
+    expect(systemPrompt).toMatch(/私ファーストWEBの渡部と申しまして/);
+    expect(systemPrompt).not.toMatch(/\{ASSIGNED_SALES\}/);
+  });
+
+  it("fewshots undefined → ハードコード 2 例(導楽 / 蕎楽亭)にフォールバック", () => {
+    const { systemPrompt } = buildAnalysisPrompt(baseInput, undefined);
+    expect(systemPrompt).toMatch(/A1405\/A140504\/14096697/);
+    expect(systemPrompt).toMatch(/A1309\/A130905\/13000479/);
+  });
+
+  it("fewshots 空配列 → ハードコード 2 例(導楽 / 蕎楽亭)にフォールバック", () => {
+    const { systemPrompt } = buildAnalysisPrompt(baseInput, []);
+    expect(systemPrompt).toMatch(/A1405\/A140504\/14096697/);
+    expect(systemPrompt).toMatch(/A1309\/A130905\/13000479/);
   });
 });

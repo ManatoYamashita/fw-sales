@@ -32,4 +32,6 @@ export const CACHE_TAGS = {
    * enqueue / status 遷移 / retry / sweep の各所で revalidate される。
    */
   deepResearchQueue: "deep-research:queue",
+  // AI プロンプトテンプレート (Issue #42)
+  promptTemplates: "prompt-templates",
 } as const;
