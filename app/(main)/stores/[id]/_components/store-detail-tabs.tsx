@@ -43,7 +43,7 @@ export function StoreDetailTabs({
   const editHref = `/stores/${store.id}/edit`;
 
   return (
-    <Tabs defaultValue="basic">
+    <Tabs defaultValue="basic" variant="pill">
       <div className="flex items-center gap-2">
         <StageInlineSelect storeId={store.id} current={store.stage} />
         <TabsList>

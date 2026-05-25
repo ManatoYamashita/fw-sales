@@ -14,7 +14,6 @@ import {
   listInFlightDeepResearchJobs,
   listRecentDoneDeepResearchJobs,
   listRecentFailedDeepResearchJobs,
-  getAverageResearchDuration,
 } from "@/lib/queries/deep-research";
 import { DeepResearchQueueTable } from "./_components/deep-research-queue-table";
 
@@ -26,11 +25,10 @@ export default async function ResearchPage() {
   // build 時 prerender を skip (USE_CACHE_TIMEOUT 対策)。
   await connection();
 
-  const [inFlight, done, failed, avgDuration] = await Promise.all([
+  const [inFlight, done, failed] = await Promise.all([
     listInFlightDeepResearchJobs(),
     listRecentDoneDeepResearchJobs(),
     listRecentFailedDeepResearchJobs(),
-    getAverageResearchDuration(),
   ]);
 
   return (
@@ -44,7 +42,7 @@ export default async function ResearchPage() {
         </p>
       </div>
 
-      <Tabs defaultValue="in_flight">
+      <Tabs defaultValue="in_flight" variant="pill">
         <TabsList>
           <TabsTrigger value="in_flight">
             実行中 ({inFlight.length})
@@ -53,11 +51,7 @@ export default async function ResearchPage() {
           <TabsTrigger value="failed">失敗 ({failed.length})</TabsTrigger>
         </TabsList>
         <TabsPanel value="in_flight">
-          <DeepResearchQueueTable
-            rows={inFlight}
-            variant="in_flight"
-            averageDurationSec={avgDuration}
-          />
+          <DeepResearchQueueTable rows={inFlight} variant="in_flight" />
         </TabsPanel>
         <TabsPanel value="done">
           <DeepResearchQueueTable rows={done} variant="done" />

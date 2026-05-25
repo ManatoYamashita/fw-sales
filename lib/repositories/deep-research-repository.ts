@@ -119,4 +119,7 @@ export interface DeepResearchRepository {
 
   /** 完了済みレポートの平均所要時間 (秒)。データ 0 件なら null。 */
   getAverageDurationSec(): Promise<number | null>;
+
+  /** pending ジョブが存在する store_id の一覧。状態表示の自動判定に使用。 */
+  listActiveStoreIds(): Promise<string[]>;
 }

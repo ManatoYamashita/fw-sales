@@ -463,10 +463,8 @@ function Chip({ label, onClear, children, tone = "default" }: ChipProps) {
 interface FilterPanelProps {
   stage: StageId | "";
   channel: Channel | "";
-  priority: Priority | "";
   onChangeStage: (v: string) => void;
   onChangeChannel: (v: string) => void;
-  onChangePriority: (v: string) => void;
   onClear: () => void;
   activeCount: number;
 }
@@ -474,10 +472,8 @@ interface FilterPanelProps {
 function FilterPanel({
   stage,
   channel,
-  priority,
   onChangeStage,
   onChangeChannel,
-  onChangePriority,
   onClear,
   activeCount,
 }: FilterPanelProps) {
@@ -497,7 +493,7 @@ function FilterPanel({
       </div>
 
       <div className="px-4 py-3 space-y-4 max-h-[60vh] overflow-y-auto">
-        <PanelGroup label="ステージ">
+        <PanelGroup label="状態">
           <ChipGroup
             value={stage}
             onChange={onChangeStage}
@@ -513,9 +509,6 @@ function FilterPanel({
             options={CHANNELS.map((c) => ({ value: c, label: c }))}
           />
         </PanelGroup>
-
-        <PanelGroup label="優先度">
-          <ChipGroup
             value={priority}
             onChange={onChangePriority}
             options={PRIORITIES.map((p) => ({ value: p, label: p }))}

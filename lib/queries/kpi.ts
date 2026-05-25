@@ -33,7 +33,7 @@ export async function getKpiSnapshot(): Promise<KpiSnapshot> {
     repos.handoff.list(),
   ]);
   const total = stores.length || 1;
-  const surveyed = stores.filter((s) => s.stage !== "調査待ち").length;
+  const surveyed = stores.filter((s) => s.stage !== "未調査").length;
   const contacted = stores.filter((s) =>
     CONTACTED_STAGES.includes(s.stage),
   ).length;

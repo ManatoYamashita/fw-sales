@@ -71,7 +71,7 @@ export async function saveResearchAction(
 
       // 店舗ステージ・チャネル同期。stage は「調査待ち」のときのみ「調査完了」へ遷移。
       await storeTx.update(storeId, {
-        stage: store.stage === "調査待ち" ? "調査完了" : store.stage,
+        stage: store.stage === "未調査" ? "調査済み" : store.stage,
         channel: input.channel,
       });
 

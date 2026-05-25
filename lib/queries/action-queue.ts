@@ -18,7 +18,7 @@ export async function getActionQueue(): Promise<ActionQueue> {
 
   return {
     needsResearch: stores
-      .filter((s) => s.stage === "調査待ち")
+      .filter((s) => s.stage === "未調査")
       .slice(0, 5),
     needsAction: stores
       .filter((s) => ACTION_READY_STAGES.includes(s.stage))

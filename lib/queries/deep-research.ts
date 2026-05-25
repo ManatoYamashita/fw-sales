@@ -36,11 +36,17 @@ import type {
 export async function getDeepResearchReport(
   storeId: string,
 ): Promise<DeepResearchReport | null> {
-  "use cache";
-  cacheTag(CACHE_TAGS.deepResearchByStore(storeId));
-
   const session = await getCurrentSession();
   if (!session) return null;
+
+  return getDeepResearchReportCached(storeId);
+}
+
+async function getDeepResearchReportCached(
+  storeId: string,
+): Promise<DeepResearchReport | null> {
+  "use cache";
+  cacheTag(CACHE_TAGS.deepResearchByStore(storeId));
 
   return repos.deepResearch.getReportByStore(storeId);
 }
@@ -110,4 +116,16 @@ export async function getAverageResearchDuration(): Promise<number | null> {
   cacheTag(CACHE_TAGS.deepResearchQueue);
 
   return repos.deepResearch.getAverageDurationSec();
+}
+
+/**
+ * pending ジョブが存在する store_id の Set。
+ * 店舗一覧で「DeepResearching...」表示状態を計算するために使用。
+ */
+export async function listActiveDeepResearchStoreIds(): Promise<Set<string>> {
+  "use cache";
+  cacheTag(CACHE_TAGS.deepResearchQueue);
+
+  const ids = await repos.deepResearch.listActiveStoreIds();
+  return new Set(ids);
 }

@@ -146,8 +146,8 @@ describe("placeResultToStoreInput", () => {
   });
 
   describe("固定値", () => {
-    it("stage が 調査待ち になる", () => {
-      expect(placeResultToStoreInput(makePlace()).stage).toBe("調査待ち");
+    it("stage が 未調査 になる", () => {
+      expect(placeResultToStoreInput(makePlace()).stage).toBe("未調査");
     });
 
     it("google_place_id が placeId になる", () => {

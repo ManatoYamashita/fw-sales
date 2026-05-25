@@ -4,19 +4,21 @@ import { DataTable, type ColumnDef } from "@/components/ui/data-table";
 import { EmptyState } from "@/components/ui/empty-state";
 import { StageBadge } from "@/components/feature/stage-badge";
 import { ChannelBadge } from "@/components/feature/channel-badge";
-import { PriorityBadge } from "@/components/feature/priority-badge";
 import { IndividualStoreBadge } from "@/components/feature/individual-store-badge";
 import { StarRating } from "@/components/ui/star-rating";
 import { listStores } from "@/lib/queries/stores";
 import { getAllProfiles } from "@/lib/queries/profiles";
+import { listActiveDeepResearchStoreIds } from "@/lib/queries/deep-research";
+import { resolveDisplayState } from "@/types/stage";
 import { formatDate } from "@/lib/utils/date";
 import type { Store, StoreFilter, StoreSort } from "@/types/store";
 import type { Profile } from "@/types/profile";
 import { StoreRowActions } from "./store-row-actions";
 
-function buildColumns(profileMap: Map<string, string>): ColumnDef<Store>[] {
-  // Phase 7 で `assigned_sales` (text) → `assigned_sales_user_id` (uuid) に切替済。
-  // 表示は profileMap で id → display_name に解決し、未割当 / 解決失敗は "—"。
+function buildColumns(
+  profileMap: Map<string, string>,
+  activeDrStoreIds: Set<string>,
+): ColumnDef<Store>[] {
   const resolveAssignedSales = (s: Store): string =>
     s.assigned_sales_user_id
       ? (profileMap.get(s.assigned_sales_user_id) ?? "—")
@@ -65,14 +67,15 @@ function buildColumns(profileMap: Map<string, string>): ColumnDef<Store>[] {
       ),
   },
   {
-    key: "priority",
-    header: "優先度",
-    cell: (s) => <PriorityBadge priority={s.priority} />,
-  },
-  {
     key: "stage",
-    header: "ステージ",
-    cell: (s) => <StageBadge stage={s.stage} />,
+    header: "状態",
+    cell: (s) => {
+      const displayState = resolveDisplayState(
+        s.stage,
+        activeDrStoreIds.has(s.id),
+      );
+      return <StageBadge stage={displayState} />;
+    },
   },
   {
     key: "channel",
@@ -121,11 +124,12 @@ export async function StoresTable({
   filter: StoreFilter;
   sort?: StoreSort;
 }) {
-  const [stores, profiles] = await Promise.all([
+  const [stores, profiles, activeDrStoreIds] = await Promise.all([
     listStores(filter, sort),
     getAllProfiles({ excludePlaceholders: false }),
+    listActiveDeepResearchStoreIds(),
   ]);
-  const columns = buildColumns(toProfileMap(profiles));
+  const columns = buildColumns(toProfileMap(profiles), activeDrStoreIds);
   return (
     <Card>
       <Card.Header>

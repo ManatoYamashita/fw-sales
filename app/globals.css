@@ -271,34 +271,19 @@
 }
 
 /* ------------------------------------------------------------------ */
-/*  ステージ別配色 (12 stages)                                          */
-/*  色数最小化: 失注=destructive / 受注=success のみ色付き              */
-/*  他はすべて slate ベース (枠線 or 弱い背景)                          */
+/*  状態別配色 (5 states)                                               */
 /* ------------------------------------------------------------------ */
-[data-stage="調査待ち"]      { --stage: #f1f5f9; --stage-foreground: #64748b; }  /* slate-100/500 */
-[data-stage="調査完了"]      { --stage: #e2e8f0; --stage-foreground: #334155; }  /* slate-200/700 */
-[data-stage="一次接触準備"]  { --stage: #e2e8f0; --stage-foreground: #334155; }
-[data-stage="DM送信済み"]    { --stage: #e2e8f0; --stage-foreground: #334155; }
-[data-stage="テレアポ済み"]  { --stage: #e2e8f0; --stage-foreground: #334155; }
-[data-stage="反応あり"]      { --stage: #cbd5e1; --stage-foreground: #1e293b; }  /* slate-300/800 */
-[data-stage="商談化"]        { --stage: #cbd5e1; --stage-foreground: #1e293b; }
-[data-stage="見積提出"]      { --stage: #cbd5e1; --stage-foreground: #1e293b; }
-[data-stage="失注"]          { --stage: var(--destructive-soft); --stage-foreground: var(--destructive); }
-[data-stage="受注"]          { --stage: var(--success-soft);     --stage-foreground: oklch(0.4 0.16 145); }
-[data-stage="引き継ぎ待ち"]  { --stage: #e2e8f0; --stage-foreground: #334155; }
-[data-stage="引き継ぎ完了"]  { --stage: #f1f5f9; --stage-foreground: #64748b; }
+[data-stage="未調査"]              { --stage: #f1f5f9; --stage-foreground: #64748b; }
+[data-stage="調査済み"]            { --stage: #ede9fe; --stage-foreground: #6d28d9; }
+[data-stage="DeepResearching..."]  { --stage: #fef3c7; --stage-foreground: #b45309; }
+[data-stage="DeepResearch済み"]    { --stage: #dbeafe; --stage-foreground: #1d4ed8; }
+[data-stage="架電済み"]            { --stage: #cffafe; --stage-foreground: #0e7490; }
 
-.dark [data-stage="調査待ち"]      { --stage: #1e293b; --stage-foreground: #94a3b8; }
-.dark [data-stage="調査完了"]      { --stage: #334155; --stage-foreground: #cbd5e1; }
-.dark [data-stage="一次接触準備"]  { --stage: #334155; --stage-foreground: #cbd5e1; }
-.dark [data-stage="DM送信済み"]    { --stage: #334155; --stage-foreground: #cbd5e1; }
-.dark [data-stage="テレアポ済み"]  { --stage: #334155; --stage-foreground: #cbd5e1; }
-.dark [data-stage="反応あり"]      { --stage: #475569; --stage-foreground: #f1f5f9; }
-.dark [data-stage="商談化"]        { --stage: #475569; --stage-foreground: #f1f5f9; }
-.dark [data-stage="見積提出"]      { --stage: #475569; --stage-foreground: #f1f5f9; }
-.dark [data-stage="受注"]          { --stage: oklch(0.3 0.06 145);  --stage-foreground: oklch(0.82 0.16 145); }
-.dark [data-stage="引き継ぎ待ち"]  { --stage: #334155; --stage-foreground: #cbd5e1; }
-.dark [data-stage="引き継ぎ完了"]  { --stage: #1e293b; --stage-foreground: #94a3b8; }
+.dark [data-stage="未調査"]              { --stage: #1e293b; --stage-foreground: #94a3b8; }
+.dark [data-stage="調査済み"]            { --stage: #2e1065; --stage-foreground: #c4b5fd; }
+.dark [data-stage="DeepResearching..."]  { --stage: #451a03; --stage-foreground: #fcd34d; }
+.dark [data-stage="DeepResearch済み"]    { --stage: #1e3a5f; --stage-foreground: #93c5fd; }
+.dark [data-stage="架電済み"]            { --stage: #164e63; --stage-foreground: #67e8f9; }
 
 /* ------------------------------------------------------------------ */
 /*  Keyframes                                                          */

@@ -27,8 +27,8 @@ export async function getDashboardStats(): Promise<DashboardStats> {
   ]);
 
   const total = stores.length;
-  const surveyed = stores.filter((s) => s.stage !== "調査待ち").length;
-  const waitResearch = stores.filter((s) => s.stage === "調査待ち").length;
+  const surveyed = stores.filter((s) => s.stage !== "未調査").length;
+  const waitResearch = stores.filter((s) => s.stage === "未調査").length;
   const dm = stores.filter((s) => s.channel === "DM推奨").length;
   const tel = stores.filter((s) => s.channel === "テレアポ推奨").length;
   const contacted = stores.filter((s) =>
@@ -100,7 +100,7 @@ export async function getNavBadgeCounts(): Promise<NavBadgeCounts> {
     stores: enabledBadgeKeys.has("stores") ? stores.length : 0,
     research: researchInFlight,
     pipeline: enabledBadgeKeys.has("pipeline")
-      ? stores.filter((s) => s.stage !== "引き継ぎ完了").length
+      ? stores.filter((s) => s.stage !== "架電済み").length
       : 0,
     deals: enabledBadgeKeys.has("deals")
       ? deals.filter((d) => d.status !== "失注" && d.status !== "受注").length
