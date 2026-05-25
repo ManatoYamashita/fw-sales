@@ -218,7 +218,15 @@ async function pollOneResearching(args: {
     return "failed";
   }
 
-  if (state.state === "in_progress") return "still_running";
+  if (state.state === "in_progress") {
+    if (state.apiUpdatedAt) {
+      await repos.deepResearch.updateJobStatus(job.id, {
+        status: "researching",
+        api_updated_at: state.apiUpdatedAt,
+      });
+    }
+    return "still_running";
+  }
 
   if (state.state === "failed") {
     await markFailed(job, "stage1", "stage1_failed", state.reason);
@@ -254,6 +262,7 @@ async function runStage2AndFinalize(args: {
   await repos.deepResearch.updateJobStatus(job.id, {
     status: "structuring",
     research_completed_at: now,
+    api_updated_at: completedState.apiUpdatedAt ?? null,
   });
 
   const store = await repos.store.get(job.store_id);

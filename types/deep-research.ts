@@ -87,6 +87,8 @@ export interface DeepResearchJob {
   research_started_at: string | null;
   research_completed_at: string | null;
   completed_at: string | null;
+  /** Google API の Interaction.updated。cron poll 時に更新される。 */
+  api_updated_at: string | null;
 }
 
 /**
@@ -112,6 +114,7 @@ export interface DeepResearchJobStatusPatch {
   research_started_at?: string | null;
   research_completed_at?: string | null;
   completed_at?: string | null;
+  api_updated_at?: string | null;
 }
 
 /**

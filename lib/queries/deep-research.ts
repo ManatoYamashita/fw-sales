@@ -99,3 +99,15 @@ export async function listRecentFailedDeepResearchJobs(
 
   return repos.deepResearch.listRecentFailed(limit);
 }
+
+/**
+ * 完了済み Deep Research レポートの平均所要時間 (秒)。
+ *
+ * null = 完了データなし (初回利用時)。 UI 側で「通常 30分〜2時間」のデフォルト文言を表示。
+ */
+export async function getAverageResearchDuration(): Promise<number | null> {
+  "use cache";
+  cacheTag(CACHE_TAGS.deepResearchQueue);
+
+  return repos.deepResearch.getAverageDurationSec();
+}

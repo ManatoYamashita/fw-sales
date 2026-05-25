@@ -116,4 +116,7 @@ export interface DeepResearchRepository {
 
   /** Stage 2 構造化完了後にレポートを挿入する。`id` / `created_at` は実装側で生成。 */
   insertReport(input: DeepResearchReportInsert): Promise<DeepResearchReport>;
+
+  /** 完了済みレポートの平均所要時間 (秒)。データ 0 件なら null。 */
+  getAverageDurationSec(): Promise<number | null>;
 }

@@ -83,6 +83,7 @@ function fromJobRow(row: JobRow): DeepResearchJob {
     research_started_at: toIsoString(row.research_started_at),
     research_completed_at: toIsoString(row.research_completed_at),
     completed_at: toIsoString(row.completed_at),
+    api_updated_at: toIsoString(row.api_updated_at),
   };
 }
 
@@ -323,6 +324,10 @@ export function makeDeepResearchRepo(
         setClause.completed_at =
           patch.completed_at === null ? null : new Date(patch.completed_at);
       }
+      if (patch.api_updated_at !== undefined) {
+        setClause.api_updated_at =
+          patch.api_updated_at === null ? null : new Date(patch.api_updated_at);
+      }
       const updated = await executor
         .update(researchJobs)
         .set(setClause)
@@ -379,6 +384,16 @@ export function makeDeepResearchRepo(
         throw new Error("DeepResearchReport insert returned no row");
       }
       return fromReportRow(row);
+    },
+
+    async getAverageDurationSec() {
+      const rows = await executor
+        .select({
+          avg: sql<number | null>`avg(${researchReports.total_duration_sec})::int`,
+        })
+        .from(researchReports)
+        .where(sql`${researchReports.total_duration_sec} > 0`);
+      return rows[0]?.avg ?? null;
     },
   };
 }
