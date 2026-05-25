@@ -43,11 +43,20 @@
 - 1 ドメイン = 1 ファイル(`store-repository.ts` 等)
 - `index.ts` で `repos` オブジェクトに集約 ← **DB 切替時の唯一の差し替え点**
 
-### Mock Implementation (`lib/mock/`)
-**Purpose**: Repository interface の Mock 実装(インメモリ Map + globalThis 永続化 + SEED)
-- `db.ts` が共有ストア、各 `*.ts` が個別 Repository 実装
-- `seed.ts` に初期データ(SEED_STORES / SEED_DEALS 等)
-- DB 化後も E2E / フォールバック用に維持する想定
+### DB Implementation (`lib/db/`)
+**Purpose**: Repository interface の Drizzle ORM 実装 (Supabase Postgres)
+- `client.ts` で `postgres.js` + `drizzle-orm` の DB クライアントを初期化 (`prepare: false` for Transaction Pooler)
+- `schema.ts` に全テーブル定義 (stores / deals / research / handoffs / profiles / notifications / research_jobs / research_reports)
+- 各 `*-repository.ts` が個別 Repository 実装 (DB JOIN + 型変換)
+- `seed-data.ts` に初期データ (旧 `lib/mock/seed.ts` からリネーム)
+
+### AI Integration (`lib/ai/`)
+**Purpose**: 外部 AI API との統合
+- `deep-research/client.ts` — Google Deep Research API (`@google/genai` SDK) ラッパ
+- `deep-research/prompt.ts` — Stage 1 調査用プロンプト生成
+- `deep-research/structurer.ts` — Stage 2 構造化 (Gemini Flash Lite)
+- `deep-research/schema.ts` — 8 カテゴリ・51 項目の Zod スキーマ
+- `_shared/` — JSON Schema ユーティリティ
 
 ### Queries (`lib/queries/`)
 **Purpose**: 取得系の `'use cache'` 関数群
