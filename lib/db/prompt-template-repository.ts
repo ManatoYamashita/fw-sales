@@ -126,7 +126,12 @@ export function makePromptTemplateRepo(
       await executor
         .update(aiPromptTemplates)
         .set({ is_default: false, updated_at: today() })
-        .where(eq(aiPromptTemplates.user_id, userId));
+        .where(
+          and(
+            eq(aiPromptTemplates.user_id, userId),
+            eq(aiPromptTemplates.is_default, true),
+          ),
+        );
     },
 
     async setDefault(id, userId) {
@@ -144,11 +149,19 @@ export function makePromptTemplateRepo(
         .limit(1);
       if (!existing[0]) return null;
 
-      // Step 2: 指定ユーザーの既存デフォルトを解除
+      // Step 1.5: 既にデフォルトなら clearDefault/update は不要
+      if (existing[0].is_default === true) return fromDbRow(existing[0]);
+
+      // Step 2: 指定ユーザーの既存デフォルトを解除 (default=true の行のみ)
       await executor
         .update(aiPromptTemplates)
         .set({ is_default: false, updated_at: today() })
-        .where(eq(aiPromptTemplates.user_id, userId));
+        .where(
+          and(
+            eq(aiPromptTemplates.user_id, userId),
+            eq(aiPromptTemplates.is_default, true),
+          ),
+        );
 
       // Step 3: 指定テンプレートをデフォルトに設定
       const rows = await executor

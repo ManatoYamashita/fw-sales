@@ -310,7 +310,7 @@ describe("makePromptTemplateRepo", () => {
   // clearDefaultForUser
   // -------------------------------------------------------------------------
   describe("clearDefaultForUser(userId)", () => {
-    it("指定ユーザーの全テンプレートの is_default を false にして void を返す", async () => {
+    it("default=true の行だけを対象にして void を返す", async () => {
       executor.update.mockReturnValue(makeQueryProxy([]));
       const repo = makePromptTemplateRepo(executor as unknown as DbClient);
 
@@ -325,13 +325,13 @@ describe("makePromptTemplateRepo", () => {
   // setDefault
   // -------------------------------------------------------------------------
   describe("setDefault(id, userId)", () => {
-    it("指定テンプレートをデフォルトに設定して返す", async () => {
-      const existingRow = makeTemplateRow();
+    it("指定テンプレートをデフォルトに設定して返す (非デフォルト→デフォルト)", async () => {
+      const existingRow = makeTemplateRow({ is_default: false });
       const defaultRow = makeTemplateRow({ is_default: true });
-      // Step 1: 存在確認 select → 行あり
+      // Step 1: 存在確認 select → 行あり (is_default: false)
       executor.select.mockReturnValueOnce(makeQueryProxy([existingRow]));
       executor.update
-        // Step 2: clearDefaultForUser → 更新行なし (void 扱い)
+        // Step 2: clearDefaultForUser (default=true の行のみ対象) → void
         .mockReturnValueOnce(makeQueryProxy([]))
         // Step 3: is_default: true に更新 → 更新済み行を返す
         .mockReturnValueOnce(makeQueryProxy([defaultRow]));
@@ -344,6 +344,21 @@ describe("makePromptTemplateRepo", () => {
       expect(result?.id).toBe(TEMPLATE_ID);
       // clearDefault + setDefault の update が 2 回呼ばれること
       expect(executor.update).toHaveBeenCalledTimes(2);
+    });
+
+    it("既にデフォルトのテンプレートに setDefault すると update を呼ばずにそのまま返す", async () => {
+      const alreadyDefaultRow = makeTemplateRow({ is_default: true });
+      // Step 1: 存在確認 select → is_default: true の行が返る
+      executor.select.mockReturnValueOnce(makeQueryProxy([alreadyDefaultRow]));
+      const repo = makePromptTemplateRepo(executor as unknown as DbClient);
+
+      const result = await repo.setDefault(TEMPLATE_ID, USER_A);
+
+      expect(result).not.toBeNull();
+      expect(result?.is_default).toBe(true);
+      expect(result?.id).toBe(TEMPLATE_ID);
+      // clearDefault も setDefault も呼ばれないこと
+      expect(executor.update).not.toHaveBeenCalled();
     });
 
     it("対象テンプレートが存在しない (他ユーザー) 場合は null を返す (旧挙動との互換検証)", async () => {
