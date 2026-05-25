@@ -54,6 +54,12 @@ export interface DeepResearchRepository {
   countInFlight(): Promise<number>;
 
   /**
+   * pending (queued + researching + structuring) 全件数。
+   * サイドバーバッジ表示に使用。 `countInFlight()` と異なり `queued` を含む。
+   */
+  countPending(): Promise<number>;
+
+  /**
    * Deep Research キューページ (`/research`) の「実行中」タブ用。
    * `queued` / `researching` / `structuring` の全件を `enqueued_at ASC` で返す。
    * `stores` / `profiles` を LEFT JOIN して `DeepResearchQueueRow` を返却する。

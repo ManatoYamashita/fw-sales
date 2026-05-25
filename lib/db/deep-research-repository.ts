@@ -163,6 +163,14 @@ export function makeDeepResearchRepo(
       return rows[0]?.count ?? 0;
     },
 
+    async countPending() {
+      const rows = await executor
+        .select({ count: sql<number>`count(*)::int` })
+        .from(researchJobs)
+        .where(inArray(researchJobs.status, PENDING_STATUSES));
+      return rows[0]?.count ?? 0;
+    },
+
     async listInFlight() {
       const rows = await executor
         .select({
