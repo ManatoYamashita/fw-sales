@@ -27,6 +27,11 @@ export const CACHE_TAGS = {
   // deep-research-pipeline spec (Issue #43)
   deepResearchByStore: (storeId: string) => `deep-research:store:${storeId}`,
   deepResearchJob: (jobId: string) => `deep-research:job:${jobId}`,
+  /**
+   * Deep Research キューページ (`/research`) の一覧用集合タグ。
+   * enqueue / status 遷移 / retry / sweep の各所で revalidate される。
+   */
+  deepResearchQueue: "deep-research:queue",
   // AI プロンプトテンプレート (Issue #42)
   promptTemplates: "prompt-templates",
 } as const;

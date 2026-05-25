@@ -21,13 +21,14 @@ import "server-only";
 import { and, asc, desc, eq, gte, inArray, lt, sql } from "drizzle-orm";
 
 import { db, type DbClient, type Tx } from "./client";
-import { researchJobs, researchReports } from "./schema";
+import { profiles, researchJobs, researchReports, stores } from "./schema";
 import type { DeepResearchRepository } from "@/lib/repositories/deep-research-repository";
 import type {
   DeepResearchJob,
   DeepResearchJobErrorEntry,
   DeepResearchJobInsert,
   DeepResearchJobStatusPatch,
+  DeepResearchQueueRow,
   DeepResearchReport,
   DeepResearchReportCategories,
   DeepResearchReportInsert,
@@ -53,6 +54,22 @@ function asJobStatus(raw: string): JobStatus {
   return "failed";
 }
 
+/**
+ * `listInFlight` / `listRecentDone` / `listRecentFailed` の SELECT で
+ * 受け取る LEFT JOIN 結果を `DeepResearchQueueRow` に変換する。
+ */
+function fromQueueJoinRow(row: {
+  job: JobRow;
+  store_name: string | null;
+  researcher_display_name: string | null;
+}): DeepResearchQueueRow {
+  return {
+    job: fromJobRow(row.job),
+    store_name: row.store_name,
+    researcher_display_name: row.researcher_display_name,
+  };
+}
+
 function fromJobRow(row: JobRow): DeepResearchJob {
   return {
     id: row.id,
@@ -66,6 +83,7 @@ function fromJobRow(row: JobRow): DeepResearchJob {
     research_started_at: toIsoString(row.research_started_at),
     research_completed_at: toIsoString(row.research_completed_at),
     completed_at: toIsoString(row.completed_at),
+    api_updated_at: toIsoString(row.api_updated_at),
   };
 }
 
@@ -144,6 +162,64 @@ export function makeDeepResearchRepo(
         .from(researchJobs)
         .where(inArray(researchJobs.status, IN_FLIGHT_STATUSES));
       return rows[0]?.count ?? 0;
+    },
+
+    async countPending() {
+      const rows = await executor
+        .select({ count: sql<number>`count(*)::int` })
+        .from(researchJobs)
+        .where(inArray(researchJobs.status, PENDING_STATUSES));
+      return rows[0]?.count ?? 0;
+    },
+
+    async listInFlight() {
+      const rows = await executor
+        .select({
+          job: researchJobs,
+          store_name: stores.name,
+          researcher_display_name: profiles.display_name,
+        })
+        .from(researchJobs)
+        .leftJoin(stores, eq(researchJobs.store_id, stores.id))
+        .leftJoin(profiles, eq(researchJobs.user_id, profiles.id))
+        .where(inArray(researchJobs.status, PENDING_STATUSES))
+        .orderBy(asc(researchJobs.enqueued_at))
+        .limit(200);
+      return rows.map(fromQueueJoinRow);
+    },
+
+    async listRecentDone(limit) {
+      const safeLimit = Math.max(1, Math.min(limit, 100));
+      const rows = await executor
+        .select({
+          job: researchJobs,
+          store_name: stores.name,
+          researcher_display_name: profiles.display_name,
+        })
+        .from(researchJobs)
+        .leftJoin(stores, eq(researchJobs.store_id, stores.id))
+        .leftJoin(profiles, eq(researchJobs.user_id, profiles.id))
+        .where(eq(researchJobs.status, "done"))
+        .orderBy(desc(researchJobs.completed_at))
+        .limit(safeLimit);
+      return rows.map(fromQueueJoinRow);
+    },
+
+    async listRecentFailed(limit) {
+      const safeLimit = Math.max(1, Math.min(limit, 100));
+      const rows = await executor
+        .select({
+          job: researchJobs,
+          store_name: stores.name,
+          researcher_display_name: profiles.display_name,
+        })
+        .from(researchJobs)
+        .leftJoin(stores, eq(researchJobs.store_id, stores.id))
+        .leftJoin(profiles, eq(researchJobs.user_id, profiles.id))
+        .where(eq(researchJobs.status, "failed"))
+        .orderBy(desc(researchJobs.completed_at))
+        .limit(safeLimit);
+      return rows.map(fromQueueJoinRow);
     },
 
     async findStuckJobs(thresholdAt) {
@@ -248,6 +324,10 @@ export function makeDeepResearchRepo(
         setClause.completed_at =
           patch.completed_at === null ? null : new Date(patch.completed_at);
       }
+      if (patch.api_updated_at !== undefined) {
+        setClause.api_updated_at =
+          patch.api_updated_at === null ? null : new Date(patch.api_updated_at);
+      }
       const updated = await executor
         .update(researchJobs)
         .set(setClause)
@@ -304,6 +384,16 @@ export function makeDeepResearchRepo(
         throw new Error("DeepResearchReport insert returned no row");
       }
       return fromReportRow(row);
+    },
+
+    async getAverageDurationSec() {
+      const rows = await executor
+        .select({
+          avg: sql<number | null>`avg(${researchReports.total_duration_sec})::int`,
+        })
+        .from(researchReports)
+        .where(sql`${researchReports.total_duration_sec} > 0`);
+      return rows[0]?.avg ?? null;
     },
   };
 }

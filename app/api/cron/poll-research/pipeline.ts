@@ -218,7 +218,15 @@ async function pollOneResearching(args: {
     return "failed";
   }
 
-  if (state.state === "in_progress") return "still_running";
+  if (state.state === "in_progress") {
+    if (state.apiUpdatedAt) {
+      await repos.deepResearch.updateJobStatus(job.id, {
+        status: "researching",
+        api_updated_at: state.apiUpdatedAt,
+      });
+    }
+    return "still_running";
+  }
 
   if (state.state === "failed") {
     await markFailed(job, "stage1", "stage1_failed", state.reason);
@@ -254,6 +262,7 @@ async function runStage2AndFinalize(args: {
   await repos.deepResearch.updateJobStatus(job.id, {
     status: "structuring",
     research_completed_at: now,
+    api_updated_at: completedState.apiUpdatedAt ?? null,
   });
 
   const store = await repos.store.get(job.store_id);
@@ -337,6 +346,7 @@ async function runStage2AndFinalize(args: {
   });
 
   revalidateTag(CACHE_TAGS.deepResearchByStore(job.store_id), "max");
+  revalidateTag(CACHE_TAGS.deepResearchQueue, "max");
 
   await createDeepResearchNotification({
     kind: "deep_research_done",
@@ -395,6 +405,7 @@ async function startOneQueued(args: {
       research_started_at: startedAt,
     });
     revalidateTag(CACHE_TAGS.deepResearchByStore(job.store_id), "max");
+    revalidateTag(CACHE_TAGS.deepResearchQueue, "max");
   } catch (err) {
     const kind = inferErrorKind(err);
     await markFailed(job, "stage1", `stage1_${kind}`, summarizeError(err));
@@ -427,6 +438,7 @@ async function markFailed(
     completed_at: occurredAt,
   });
   revalidateTag(CACHE_TAGS.deepResearchByStore(job.store_id), "max");
+  revalidateTag(CACHE_TAGS.deepResearchQueue, "max");
   await fireFailureNotification(job, message);
 }
 

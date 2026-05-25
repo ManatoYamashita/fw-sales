@@ -68,8 +68,15 @@
     {
       "idx": 9,
       "version": "7",
-      "when": 1779268525209,
-      "tag": "0009_add_ai_prompt_templates",
+      "when": 1779868800000,
+      "tag": "0009_add_api_updated_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1779868800001,
+      "tag": "0010_add_ai_prompt_templates",
       "breakpoints": true
     }
   ]

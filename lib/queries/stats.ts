@@ -78,24 +78,27 @@ export async function getNavBadgeCounts(): Promise<NavBadgeCounts> {
     ),
   );
 
+  // `research` バッジは deep-research-pipeline (Issue #43) で意味変更:
+  // 旧: stages == "調査待ち" の store 数
+  // 新: in-flight (queued + researching + structuring) の DeepResearchJob 数
   const needsStores =
-    enabledBadgeKeys.has("stores") ||
-    enabledBadgeKeys.has("research") ||
-    enabledBadgeKeys.has("pipeline");
+    enabledBadgeKeys.has("stores") || enabledBadgeKeys.has("pipeline");
   const needsDeals = enabledBadgeKeys.has("deals");
   const needsHandoffs = enabledBadgeKeys.has("handoffs");
+  const needsResearchInFlight = enabledBadgeKeys.has("research");
 
-  const [stores, deals, handoffs] = await Promise.all([
+  const [stores, deals, handoffs, researchInFlight] = await Promise.all([
     needsStores ? repos.store.list() : Promise.resolve([]),
     needsDeals ? repos.deal.list() : Promise.resolve([]),
     needsHandoffs ? repos.handoff.list() : Promise.resolve([]),
+    needsResearchInFlight
+      ? repos.deepResearch.countPending()
+      : Promise.resolve(0),
   ]);
 
   return {
     stores: enabledBadgeKeys.has("stores") ? stores.length : 0,
-    research: enabledBadgeKeys.has("research")
-      ? stores.filter((s) => s.stage === "調査待ち").length
-      : 0,
+    research: researchInFlight,
     pipeline: enabledBadgeKeys.has("pipeline")
       ? stores.filter((s) => s.stage !== "引き継ぎ完了").length
       : 0,

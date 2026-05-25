@@ -14,7 +14,9 @@ import type {
   ParsedUrl,
 } from "@/lib/url-parser/types";
 
-export type { PlacesFallbackInfo };
+// 型は `@/lib/url-parser/places-fallback` から直接 import すること。
+// `"use server"` ファイルから型を re-export すると Next.js 16 + Turbopack が
+// 値参照として解釈し、本番ランタイムで ReferenceError を投げる (#11 hotfix)。
 
 export interface UrlImportResult {
   parsed: ParsedUrl | null;
