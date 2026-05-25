@@ -121,6 +121,7 @@ export async function enqueueDeepResearchAction(
   });
   revalidateTag(CACHE_TAGS.deepResearchByStore(storeId), "max");
   revalidateTag(CACHE_TAGS.deepResearchJob(job.id), "max");
+  revalidateTag(CACHE_TAGS.deepResearchQueue, "max");
   return success({ jobId: job.id, status: job.status });
 }
 
@@ -184,6 +185,7 @@ export async function retryDeepResearchAction(
   });
   revalidateTag(CACHE_TAGS.deepResearchByStore(original.store_id), "max");
   revalidateTag(CACHE_TAGS.deepResearchJob(newJob.id), "max");
+  revalidateTag(CACHE_TAGS.deepResearchQueue, "max");
   return success({ newJobId: newJob.id, previousJobId: failedJobId });
 }
 
