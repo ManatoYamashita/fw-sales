@@ -83,6 +83,28 @@ export function formatElapsed(
   return formatDurationMs(diffMs);
 }
 
+/**
+ * 実行中ジョブの推定残り時間を算出する。
+ *
+ * @param researchStartedAt - Stage 1 開始時刻 (ISO)。null ならまだ queued。
+ * @param avgDurationSec - 完了ジョブの平均所要時間 (秒)。null ならデータなし。
+ * @param now - 現在時刻 (テスト時に固定可能)
+ */
+export function formatEstimatedRemaining(
+  researchStartedAt: string | null | undefined,
+  avgDurationSec: number | null | undefined,
+  now: Date = new Date(),
+): string {
+  if (!researchStartedAt) return "キュー待ち";
+  if (!avgDurationSec) return "通常 30分〜2時間";
+  const start = Date.parse(researchStartedAt);
+  if (Number.isNaN(start)) return "通常 30分〜2時間";
+  const elapsedMs = now.getTime() - start;
+  const remainingMs = avgDurationSec * MILLIS_PER_SECOND - elapsedMs;
+  if (remainingMs <= 0) return "まもなく完了";
+  return `約 ${formatDurationMs(remainingMs)}`;
+}
+
 function formatDurationMs(diffMs: number): string {
   if (diffMs < MILLIS_PER_MINUTE) {
     return `${Math.floor(diffMs / MILLIS_PER_SECOND)}s`;

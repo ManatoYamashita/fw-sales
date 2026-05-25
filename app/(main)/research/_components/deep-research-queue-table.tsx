@@ -16,15 +16,17 @@ import Link from "next/link";
 import { DataTable, type ColumnDef } from "@/components/ui/data-table";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ResearchStatusBadge } from "@/components/feature/research-status-badge";
-import { formatRelativeTime, formatDuration, formatElapsed } from "@/lib/utils/relative-time";
+import { formatRelativeTime, formatDuration, formatElapsed, formatEstimatedRemaining } from "@/lib/utils/relative-time";
 import type { DeepResearchQueueRow } from "@/types/deep-research";
 import { RetryJobButton } from "./retry-job-button";
+import { ResearchProgressIndicator } from "./research-progress-indicator";
 
 export type QueueTabVariant = "in_flight" | "done" | "failed";
 
 interface DeepResearchQueueTableProps {
   rows: readonly DeepResearchQueueRow[];
   variant: QueueTabVariant;
+  averageDurationSec?: number | null;
 }
 
 const EMPTY_TITLE: Record<QueueTabVariant, string> = {
@@ -43,6 +45,7 @@ const EMPTY_DESCRIPTION: Record<QueueTabVariant, string> = {
 export function DeepResearchQueueTable({
   rows,
   variant,
+  averageDurationSec,
 }: DeepResearchQueueTableProps) {
   const columns: ColumnDef<DeepResearchQueueRow>[] = [
     {
@@ -66,6 +69,18 @@ export function DeepResearchQueueTable({
       width: "120px",
       cell: (row) => <ResearchStatusBadge status={row.job.status} />,
     },
+  ];
+
+  if (variant === "in_flight") {
+    columns.push({
+      key: "progress",
+      header: "進捗",
+      width: "180px",
+      cell: (row) => <ResearchProgressIndicator status={row.job.status} />,
+    });
+  }
+
+  columns.push(
     {
       key: "researcher",
       header: "担当者",
@@ -92,7 +107,35 @@ export function DeepResearchQueueTable({
           ? formatElapsed(row.job.enqueued_at)
           : formatDuration(row.job.enqueued_at, row.job.completed_at),
     },
-  ];
+  );
+
+  if (variant === "in_flight") {
+    columns.push(
+      {
+        key: "estimate",
+        header: "推定残り",
+        width: "140px",
+        cell: (row) => (
+          <span className="text-muted-foreground text-xs">
+            {formatEstimatedRemaining(
+              row.job.research_started_at,
+              averageDurationSec,
+            )}
+          </span>
+        ),
+      },
+      {
+        key: "last_update",
+        header: "最終更新",
+        width: "100px",
+        cell: (row) => (
+          <span className="text-muted-foreground text-xs">
+            {formatRelativeTime(row.job.api_updated_at)}
+          </span>
+        ),
+      },
+    );
+  }
 
   if (variant === "failed") {
     columns.push({

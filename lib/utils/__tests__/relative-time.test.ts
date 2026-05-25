@@ -3,6 +3,7 @@ import {
   formatRelativeTime,
   formatDuration,
   formatElapsed,
+  formatEstimatedRemaining,
 } from "@/lib/utils/relative-time";
 
 const NOW = new Date("2026-05-24T12:00:00Z");
@@ -88,5 +89,38 @@ describe("formatElapsed", () => {
   it("now - start を formatDuration と同形式で返す", () => {
     expect(formatElapsed("2026-05-24T11:45:00Z", NOW)).toBe("15m");
     expect(formatElapsed("2026-05-24T08:47:00Z", NOW)).toBe("3h 13m");
+  });
+});
+
+describe("formatEstimatedRemaining", () => {
+  it("researchStartedAt = null → 'キュー待ち'", () => {
+    expect(formatEstimatedRemaining(null, 3600, NOW)).toBe("キュー待ち");
+  });
+
+  it("avgDurationSec = null → '通常 30分〜2時間'", () => {
+    expect(
+      formatEstimatedRemaining("2026-05-24T11:00:00Z", null, NOW),
+    ).toBe("通常 30分〜2時間");
+  });
+
+  it("残り時間が正の場合 → '約 Xm' 形式", () => {
+    // avg=3600s (1h), elapsed=30m → remaining=30m
+    expect(
+      formatEstimatedRemaining("2026-05-24T11:30:00Z", 3600, NOW),
+    ).toBe("約 30m");
+  });
+
+  it("残り時間が長い場合 → '約 Xh Ym' 形式", () => {
+    // avg=7200s (2h), elapsed=30m → remaining=1h30m
+    expect(
+      formatEstimatedRemaining("2026-05-24T11:30:00Z", 7200, NOW),
+    ).toBe("約 1h 30m");
+  });
+
+  it("推定超過 → 'まもなく完了'", () => {
+    // avg=1800s (30m), elapsed=1h → remaining=-30m
+    expect(
+      formatEstimatedRemaining("2026-05-24T11:00:00Z", 1800, NOW),
+    ).toBe("まもなく完了");
   });
 });

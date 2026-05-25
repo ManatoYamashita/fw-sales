@@ -269,6 +269,8 @@ export const researchJobs = pgTable(
       withTimezone: true,
     }),
     completed_at: timestamp("completed_at", { withTimezone: true }),
+    /** Google API の Interaction.updated 値。cron poll 時に毎回上書き。 */
+    api_updated_at: timestamp("api_updated_at", { withTimezone: true }),
   },
   (table) => [
     index("research_jobs_status_enqueued_idx").on(
