@@ -50,12 +50,13 @@ export interface DeepResearchTaskHandle {
 }
 
 export type DeepResearchTaskState =
-  | { state: "in_progress" }
+  | { state: "in_progress"; apiUpdatedAt?: string }
   | {
       state: "completed";
       reportMarkdown: string;
       sourceUrls: string[];
       tokenUsage?: { promptTokens: number; outputTokens: number };
+      apiUpdatedAt?: string;
     }
   | { state: "failed"; reason: string };
 
@@ -158,10 +159,15 @@ export function createDeepResearchClient(): DeepResearchClient {
 export function mapInteractionToState(
   interaction: Interaction,
 ): DeepResearchTaskState {
+  const apiUpdatedAt =
+    (interaction as unknown as Record<string, unknown>).updated as
+      | string
+      | undefined;
+
   switch (interaction.status) {
     case "in_progress":
     case "requires_action":
-      return { state: "in_progress" };
+      return { state: "in_progress", apiUpdatedAt };
     case "completed": {
       const { reportMarkdown, sourceUrls } = extractMarkdownAndUrls(
         interaction.outputs,
@@ -171,6 +177,7 @@ export function mapInteractionToState(
         state: "completed",
         reportMarkdown,
         sourceUrls,
+        apiUpdatedAt,
       };
       if (tokenUsage) {
         result.tokenUsage = tokenUsage;
