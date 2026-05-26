@@ -398,6 +398,14 @@ export function makeDeepResearchRepo(
       return fromReportRow(row);
     },
 
+    async deleteJob(jobId) {
+      const deleted = await executor
+        .delete(researchJobs)
+        .where(and(eq(researchJobs.id, jobId), eq(researchJobs.status, "failed")))
+        .returning();
+      return deleted.length > 0;
+    },
+
     async getAverageDurationSec() {
       const rows = await executor
         .select({

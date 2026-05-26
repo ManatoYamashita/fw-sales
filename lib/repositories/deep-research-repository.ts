@@ -114,6 +114,9 @@ export interface DeepResearchRepository {
     error: DeepResearchJobErrorEntry,
   ): Promise<DeepResearchJob>;
 
+  /** failed ジョブを物理削除する。failed 以外の status では何もしない。 */
+  deleteJob(jobId: string): Promise<boolean>;
+
   /** Stage 2 構造化完了後にレポートを挿入する。`id` / `created_at` は実装側で生成。 */
   insertReport(input: DeepResearchReportInsert): Promise<DeepResearchReport>;
 

@@ -500,14 +500,16 @@ function inferErrorKind(err: unknown): string {
 
 function summarizeError(err: unknown): string {
   if (typeof err === "object" && err !== null) {
-    if ("message" in err && typeof (err as { message?: unknown }).message === "string") {
-      return String((err as { message: string }).message);
+    const obj = err as Record<string, unknown>;
+    if (typeof obj.message === "string") {
+      return String(obj.message);
     }
-    if ("kind" in err) {
-      return `error kind=${String((err as { kind: unknown }).kind)}`;
+    if (typeof obj.kind === "string") {
+      const status = typeof obj.status === "number" ? ` (HTTP ${obj.status})` : "";
+      return `${obj.kind}${status}`;
     }
   }
-  return "Deep Research API 呼出で正規化済エラーが発生";
+  return "Deep Research API 呼出で不明なエラーが発生";
 }
 
 // テスト用 export (kiro-impl の Implementation Notes 参照)

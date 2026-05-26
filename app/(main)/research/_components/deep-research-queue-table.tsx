@@ -138,13 +138,34 @@ export function DeepResearchQueueTable({
   }
 
   if (variant === "failed") {
-    columns.push({
-      key: "actions",
-      header: "操作",
-      width: "120px",
-      preventRowClick: true,
-      cell: (row) => <RetryJobButton jobId={row.job.id} />,
-    });
+    columns.push(
+      {
+        key: "error",
+        header: "エラー",
+        truncate: true,
+        maxWidth: "220px",
+        title: (row) => {
+          const last = row.job.error_log?.[row.job.error_log.length - 1];
+          return last ? `${last.kind}: ${last.message}` : undefined;
+        },
+        cell: (row) => {
+          const last = row.job.error_log?.[row.job.error_log.length - 1];
+          if (!last) return "—";
+          return (
+            <span className="text-destructive text-xs">
+              {last.kind}: {last.message}
+            </span>
+          );
+        },
+      },
+      {
+        key: "actions",
+        header: "操作",
+        width: "120px",
+        preventRowClick: true,
+        cell: (row) => <RetryJobButton jobId={row.job.id} />,
+      },
+    );
   }
 
   return (
@@ -152,6 +173,7 @@ export function DeepResearchQueueTable({
       columns={columns}
       rows={[...rows]}
       rowKey={(row) => row.job.id}
+      rowHref={(row) => `/research/${row.job.id}`}
       density="compact"
       emptyState={
         <EmptyState
