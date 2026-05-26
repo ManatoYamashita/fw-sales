@@ -24,7 +24,6 @@ import { decideChannel } from "@/lib/domain/channel";
 import {
   CONTACT_FORMS,
   OPERATOR_TYPES,
-  PRIORITIES,
 } from "@/types/store";
 import type { Profile } from "@/types/profile";
 import { toast } from "@/components/ui/toast";
@@ -345,20 +344,7 @@ export function StoreNewForm({
               bg={bgFor("genre")}
             />
           </FormField>
-          <FormField label="優先度" htmlFor="priority">
-            <Select
-              id="priority"
-              name="priority"
-              value={form.priority}
-              onChange={handlers.priority}
-            >
-              {PRIORITIES.map((p) => (
-                <option key={p} value={p}>
-                  {p}
-                </option>
-              ))}
-            </Select>
-          </FormField>
+          <input type="hidden" name="priority" value="中" />
           <FormField
             label="運営者種別"
             htmlFor="operator_type"

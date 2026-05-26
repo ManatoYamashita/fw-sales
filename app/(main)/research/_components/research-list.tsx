@@ -2,7 +2,6 @@ import Link from "next/link";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ChannelBadge } from "@/components/feature/channel-badge";
-import { PriorityBadge } from "@/components/feature/priority-badge";
 import { Search, CheckCircle2 } from "lucide-react";
 import { formatDate } from "@/lib/utils/date";
 import type { Store } from "@/types/store";
@@ -35,7 +34,6 @@ export function WaitingList({ stores }: { stores: Store[] }) {
                   {[s.prefecture, s.city, s.genre].filter(Boolean).join(" / ")}
                 </p>
               </div>
-              <PriorityBadge priority={s.priority} />
               <span className="inline-flex h-9 items-center gap-1 px-3 rounded-md text-xs font-medium bg-primary text-primary-foreground">
                 <Search className="h-3.5 w-3.5" />
                 調査開始

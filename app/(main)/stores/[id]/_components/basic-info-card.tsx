@@ -10,7 +10,6 @@ import { Select } from "@/components/ui/select";
 import { FormField } from "@/components/ui/form-field";
 import { StarRating } from "@/components/ui/star-rating";
 import { ChannelBadge } from "@/components/feature/channel-badge";
-import { PriorityBadge } from "@/components/feature/priority-badge";
 import { ServiceTagList } from "@/components/feature/service-tag-list";
 import { ServiceCheckboxGroup } from "@/app/(main)/stores/new/_components/service-checkbox-group";
 import { toast } from "@/components/ui/toast";
@@ -21,7 +20,6 @@ import {
   CONTACT_FORMS,
   CHANNELS,
   OPERATOR_TYPES,
-  PRIORITIES,
   type Store,
   type StorePatch,
 } from "@/types/store";
@@ -51,7 +49,6 @@ export function BasicInfoCard({ store, profiles }: BasicInfoCardProps) {
     city: store.city,
     address: store.address,
     genre: store.genre,
-    priority: store.priority,
     channel: store.channel,
     has_contact_form: store.has_contact_form,
     target_service: store.target_service,
@@ -89,7 +86,6 @@ export function BasicInfoCard({ store, profiles }: BasicInfoCardProps) {
       city: store.city,
       address: store.address,
       genre: store.genre,
-      priority: store.priority,
       channel: store.channel,
       has_contact_form: store.has_contact_form,
       target_service: store.target_service,
@@ -192,19 +188,6 @@ export function BasicInfoCard({ store, profiles }: BasicInfoCardProps) {
                 placeholder="例: 11:00-22:00 / 月休"
               />
             </FormField>
-            <FormField label="優先度" htmlFor="priority">
-              <Select
-                id="priority"
-                value={form.priority}
-                onChange={onText("priority")}
-              >
-                {PRIORITIES.map((p) => (
-                  <option key={p} value={p}>
-                    {p}
-                  </option>
-                ))}
-              </Select>
-            </FormField>
             <FormField label="問い合わせフォーム" htmlFor="has_contact_form">
               <Select
                 id="has_contact_form"
@@ -295,9 +278,6 @@ export function BasicInfoCard({ store, profiles }: BasicInfoCardProps) {
             <Row label="住所・最寄り">{store.address || "—"}</Row>
             <Row label="業態">{store.genre || "—"}</Row>
             <Row label="営業時間">{store.business_hours || "—"}</Row>
-            <Row label="優先度">
-              <PriorityBadge priority={store.priority} />
-            </Row>
             <Row label="想定チャネル">
               <ChannelBadge channel={store.channel} />
             </Row>

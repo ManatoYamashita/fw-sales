@@ -6,7 +6,6 @@ import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ChannelBadge } from "@/components/feature/channel-badge";
 import { StageBadge } from "@/components/feature/stage-badge";
-import { PriorityBadge } from "@/components/feature/priority-badge";
 import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
 
@@ -65,7 +64,6 @@ export async function ActionsList() {
                       .join(" / ")}
                   </p>
                 </div>
-                <PriorityBadge priority={s.priority} />
                 <StageBadge stage={s.stage} />
                 <ChannelBadge channel={s.channel} />
                 <span className="inline-flex h-9 items-center px-3 rounded-md text-xs font-medium bg-primary text-primary-foreground">
