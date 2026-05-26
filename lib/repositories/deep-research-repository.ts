@@ -122,4 +122,7 @@ export interface DeepResearchRepository {
 
   /** 完了済みレポートの平均所要時間 (秒)。データ 0 件なら null。 */
   getAverageDurationSec(): Promise<number | null>;
+
+  /** 全ジョブを `enqueued_at DESC` で最大 `limit` 件返す。status フィルタなし。 */
+  listAll(limit: number): Promise<DeepResearchQueueRow[]>;
 }

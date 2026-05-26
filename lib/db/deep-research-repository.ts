@@ -415,6 +415,22 @@ export function makeDeepResearchRepo(
         .where(sql`${researchReports.total_duration_sec} > 0`);
       return rows[0]?.avg ?? null;
     },
+
+    async listAll(limit) {
+      const safeLimit = Math.max(1, Math.min(limit, 200));
+      const rows = await executor
+        .select({
+          job: researchJobs,
+          store_name: stores.name,
+          researcher_display_name: profiles.display_name,
+        })
+        .from(researchJobs)
+        .leftJoin(stores, eq(researchJobs.store_id, stores.id))
+        .leftJoin(profiles, eq(researchJobs.user_id, profiles.id))
+        .orderBy(desc(researchJobs.enqueued_at))
+        .limit(safeLimit);
+      return rows.map(fromQueueJoinRow);
+    },
   };
 }
 

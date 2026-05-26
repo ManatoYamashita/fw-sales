@@ -138,3 +138,15 @@ export async function getAverageResearchDuration(): Promise<number | null> {
 
   return repos.deepResearch.getAverageDurationSec();
 }
+
+/**
+ * 調査キューページ用: 全ジョブを `enqueued_at DESC` で返す。
+ */
+export async function listAllDeepResearchJobs(): Promise<
+  DeepResearchQueueRow[]
+> {
+  "use cache";
+  cacheTag(CACHE_TAGS.deepResearchQueue);
+
+  return repos.deepResearch.listAll(200);
+}
