@@ -44,8 +44,20 @@ type ReportRow = typeof researchReports.$inferSelect;
 const IN_FLIGHT_STATUSES: JobStatus[] = ["researching", "structuring"];
 const PENDING_STATUSES: JobStatus[] = ["queued", "researching", "structuring"];
 
-function toIsoString(d: Date | null): string | null {
-  return d === null ? null : d.toISOString();
+/**
+ * timestamp 列を ISO 文字列に変換する。
+ *
+ * Drizzle `.select()` は `Date` を返すが、 raw SQL (`executor.execute`) 経由や
+ * Supabase Pooler の挙動によっては string が返されるケースがあるため、 defensive に処理。
+ */
+function toIsoString(d: Date | string | null | undefined): string | null {
+  if (d == null) return null;
+  if (typeof d === "string") return d;
+  return d.toISOString();
+}
+
+function toRequiredIsoString(d: Date | string): string {
+  return typeof d === "string" ? d : d.toISOString();
 }
 
 function asJobStatus(raw: string): JobStatus {
@@ -79,7 +91,7 @@ function fromJobRow(row: JobRow): DeepResearchJob {
     deep_research_task_id: row.deep_research_task_id,
     attempts: row.attempts,
     error_log: (row.error_log as DeepResearchJobErrorEntry[] | null) ?? null,
-    enqueued_at: row.enqueued_at.toISOString(),
+    enqueued_at: toRequiredIsoString(row.enqueued_at),
     research_started_at: toIsoString(row.research_started_at),
     research_completed_at: toIsoString(row.research_completed_at),
     completed_at: toIsoString(row.completed_at),
@@ -105,7 +117,7 @@ function fromReportRow(row: ReportRow): DeepResearchReport {
     all_source_urls: (row.all_source_urls as string[]) ?? [],
     total_cost_yen: row.total_cost_yen,
     total_duration_sec: row.total_duration_sec,
-    created_at: row.created_at.toISOString(),
+    created_at: toRequiredIsoString(row.created_at),
   };
 }
 
