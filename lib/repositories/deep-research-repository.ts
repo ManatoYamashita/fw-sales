@@ -128,4 +128,7 @@ export interface DeepResearchRepository {
 
   /** 全ジョブを `enqueued_at DESC` で最大 `limit` 件返す。status フィルタなし。 */
   listAll(limit: number): Promise<DeepResearchQueueRow[]>;
+
+  /** pending ジョブが存在する store_id の一覧。状態表示の自動判定に使用。 */
+  listActiveStoreIds(): Promise<string[]>;
 }

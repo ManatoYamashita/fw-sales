@@ -209,7 +209,7 @@ function TemplateRow({
   const isAnyChanging = changingDefaultId !== null;
 
   return (
-    <li className="flex items-center gap-3 px-4 py-3 bg-card">
+    <li className="flex flex-wrap items-center gap-3 px-4 py-3 bg-card">
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-sm font-medium truncate">{t.name}</span>
@@ -220,16 +220,20 @@ function TemplateRow({
         </span>
       </div>
 
-      <div className="flex items-center gap-1 shrink-0">
+      <div className="flex items-center gap-1 shrink-0 flex-wrap justify-end">
         {!t.is_default && (
           <Button
             size="sm"
             variant="ghost"
             onClick={() => onSetDefault(t.id)}
             disabled={isAnyChanging}
+            title={isChangingThis ? "変更中…" : "デフォルトにする"}
+            aria-label={isChangingThis ? "変更中…" : "デフォルトにする"}
           >
             <Star className="h-3.5 w-3.5" />
-            {isChangingThis ? "変更中…" : "デフォルトにする"}
+            <span className="hidden sm:inline">
+              {isChangingThis ? "変更中…" : "デフォルトにする"}
+            </span>
           </Button>
         )}
         <Button size="sm" variant="ghost" onClick={onEdit}>

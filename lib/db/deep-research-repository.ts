@@ -447,6 +447,14 @@ export function makeDeepResearchRepo(
         .limit(safeLimit);
       return rows.map(fromQueueJoinRow);
     },
+
+    async listActiveStoreIds() {
+      const rows = await executor
+        .selectDistinct({ store_id: researchJobs.store_id })
+        .from(researchJobs)
+        .where(inArray(researchJobs.status, PENDING_STATUSES));
+      return rows.map((r) => r.store_id);
+    },
   };
 }
 
