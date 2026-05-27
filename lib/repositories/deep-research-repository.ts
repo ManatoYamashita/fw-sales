@@ -87,6 +87,9 @@ export interface DeepResearchRepository {
 
   getById(jobId: string): Promise<DeepResearchJob | null>;
 
+  /** ID で 1 件取得 (stores + profiles LEFT JOIN 済み DTO)。 詳細ページ用。 */
+  getByIdWithDetails(jobId: string): Promise<DeepResearchQueueRow | null>;
+
   /** 対象店舗の最新レポート (`created_at` DESC 1 件) を返す。 */
   getReportByStore(storeId: string): Promise<DeepResearchReport | null>;
 
@@ -114,11 +117,17 @@ export interface DeepResearchRepository {
     error: DeepResearchJobErrorEntry,
   ): Promise<DeepResearchJob>;
 
+  /** failed ジョブを物理削除する。failed 以外の status では何もしない。 */
+  deleteJob(jobId: string): Promise<boolean>;
+
   /** Stage 2 構造化完了後にレポートを挿入する。`id` / `created_at` は実装側で生成。 */
   insertReport(input: DeepResearchReportInsert): Promise<DeepResearchReport>;
 
   /** 完了済みレポートの平均所要時間 (秒)。データ 0 件なら null。 */
   getAverageDurationSec(): Promise<number | null>;
+
+  /** 全ジョブを `enqueued_at DESC` で最大 `limit` 件返す。status フィルタなし。 */
+  listAll(limit: number): Promise<DeepResearchQueueRow[]>;
 
   /** pending ジョブが存在する store_id の一覧。状態表示の自動判定に使用。 */
   listActiveStoreIds(): Promise<string[]>;

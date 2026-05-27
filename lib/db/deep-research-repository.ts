@@ -257,6 +257,22 @@ export function makeDeepResearchRepo(
       return row ? fromJobRow(row) : null;
     },
 
+    async getByIdWithDetails(jobId) {
+      const rows = await executor
+        .select({
+          job: researchJobs,
+          store_name: stores.name,
+          researcher_display_name: profiles.display_name,
+        })
+        .from(researchJobs)
+        .leftJoin(stores, eq(researchJobs.store_id, stores.id))
+        .leftJoin(profiles, eq(researchJobs.user_id, profiles.id))
+        .where(eq(researchJobs.id, jobId))
+        .limit(1);
+      const row = rows[0];
+      return row ? fromQueueJoinRow(row) : null;
+    },
+
     async getReportByStore(storeId) {
       const rows = await executor
         .select()
@@ -398,6 +414,14 @@ export function makeDeepResearchRepo(
       return fromReportRow(row);
     },
 
+    async deleteJob(jobId) {
+      const deleted = await executor
+        .delete(researchJobs)
+        .where(and(eq(researchJobs.id, jobId), eq(researchJobs.status, "failed")))
+        .returning();
+      return deleted.length > 0;
+    },
+
     async getAverageDurationSec() {
       const rows = await executor
         .select({
@@ -406,6 +430,22 @@ export function makeDeepResearchRepo(
         .from(researchReports)
         .where(sql`${researchReports.total_duration_sec} > 0`);
       return rows[0]?.avg ?? null;
+    },
+
+    async listAll(limit) {
+      const safeLimit = Math.max(1, Math.min(limit, 200));
+      const rows = await executor
+        .select({
+          job: researchJobs,
+          store_name: stores.name,
+          researcher_display_name: profiles.display_name,
+        })
+        .from(researchJobs)
+        .leftJoin(stores, eq(researchJobs.store_id, stores.id))
+        .leftJoin(profiles, eq(researchJobs.user_id, profiles.id))
+        .orderBy(desc(researchJobs.enqueued_at))
+        .limit(safeLimit);
+      return rows.map(fromQueueJoinRow);
     },
 
     async listActiveStoreIds() {

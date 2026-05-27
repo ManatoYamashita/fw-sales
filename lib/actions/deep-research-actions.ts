@@ -190,6 +190,89 @@ export async function retryDeepResearchAction(
 }
 
 // ---------------------------------------------------------------------------
+// キャンセル / 削除
+// ---------------------------------------------------------------------------
+
+/**
+ * queued / researching のジョブをキャンセルする。
+ * researching の場合は Google API の cancelTask も呼ぶ (best-effort)。
+ */
+export async function cancelDeepResearchJobAction(
+  jobId: string,
+): Promise<ActionResult<void>> {
+  "use server";
+
+  const session = await getCurrentSession();
+  if (!session) return failure("ログインが必要です");
+
+  const job = await repos.deepResearch.getById(jobId);
+  if (!job) return failure("ジョブが見つかりません");
+  if (job.status !== "queued" && job.status !== "researching") {
+    return failure(`キャンセルできるのは queued / researching のみです (現在: ${job.status})`);
+  }
+
+  if (job.status === "researching" && job.deep_research_task_id) {
+    const { createDeepResearchClient } = await import(
+      "@/lib/ai/deep-research/client"
+    );
+    const client = createDeepResearchClient();
+    const cancelResult = await client.cancelTask(
+      { taskId: job.deep_research_task_id },
+      AbortSignal.timeout(10_000),
+    );
+    await repos.deepResearch.appendJobError(jobId, {
+      stage: "stage1",
+      kind: "manual_cancel",
+      message: `ユーザー (${session.userId}) がキャンセル`,
+      occurred_at: new Date().toISOString(),
+      cancel_result: cancelResult,
+    });
+  } else {
+    await repos.deepResearch.appendJobError(jobId, {
+      stage: "stage1",
+      kind: "manual_cancel",
+      message: `ユーザー (${session.userId}) がキャンセル`,
+      occurred_at: new Date().toISOString(),
+    });
+  }
+
+  await repos.deepResearch.updateJobStatus(jobId, {
+    status: "failed",
+    completed_at: new Date().toISOString(),
+  });
+  revalidateTag(CACHE_TAGS.deepResearchByStore(job.store_id), "max");
+  revalidateTag(CACHE_TAGS.deepResearchJob(jobId), "max");
+  revalidateTag(CACHE_TAGS.deepResearchQueue, "max");
+  return success(undefined);
+}
+
+/**
+ * failed ジョブを物理削除する。
+ */
+export async function deleteDeepResearchJobAction(
+  jobId: string,
+): Promise<ActionResult<void>> {
+  "use server";
+
+  const session = await getCurrentSession();
+  if (!session) return failure("ログインが必要です");
+
+  const job = await repos.deepResearch.getById(jobId);
+  if (!job) return failure("ジョブが見つかりません");
+  if (job.status !== "failed") {
+    return failure("削除できるのは failed ジョブのみです");
+  }
+
+  const deleted = await repos.deepResearch.deleteJob(jobId);
+  if (!deleted) return failure("削除に失敗しました");
+
+  revalidateTag(CACHE_TAGS.deepResearchByStore(job.store_id), "max");
+  revalidateTag(CACHE_TAGS.deepResearchJob(jobId), "max");
+  revalidateTag(CACHE_TAGS.deepResearchQueue, "max");
+  return success(undefined);
+}
+
+// ---------------------------------------------------------------------------
 // 時刻ヘルパ (JST 日次/月次集計)
 // ---------------------------------------------------------------------------
 

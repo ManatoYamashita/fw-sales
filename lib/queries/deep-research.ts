@@ -107,6 +107,20 @@ export async function listRecentFailedDeepResearchJobs(
 }
 
 /**
+ * ジョブ ID で 1 件取得 (詳細ページ用)。 店舗名・担当者名も JOIN。
+ */
+export async function getDeepResearchJobById(
+  jobId: string,
+): Promise<DeepResearchQueueRow | null> {
+  "use cache";
+  cacheTag(CACHE_TAGS.deepResearchJob(jobId));
+  cacheTag(CACHE_TAGS.stores);
+  cacheTag(CACHE_TAGS.profiles);
+
+  return repos.deepResearch.getByIdWithDetails(jobId);
+}
+
+/**
  * 完了済み Deep Research レポートの平均所要時間 (秒)。
  *
  * null = 完了データなし (初回利用時)。 UI 側で「通常 30分〜2時間」のデフォルト文言を表示。
@@ -116,6 +130,18 @@ export async function getAverageResearchDuration(): Promise<number | null> {
   cacheTag(CACHE_TAGS.deepResearchQueue);
 
   return repos.deepResearch.getAverageDurationSec();
+}
+
+/**
+ * 調査キューページ用: 全ジョブを `enqueued_at DESC` で返す。
+ */
+export async function listAllDeepResearchJobs(): Promise<
+  DeepResearchQueueRow[]
+> {
+  "use cache";
+  cacheTag(CACHE_TAGS.deepResearchQueue);
+
+  return repos.deepResearch.listAll(200);
 }
 
 /**
