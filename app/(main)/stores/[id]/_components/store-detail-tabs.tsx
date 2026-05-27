@@ -11,6 +11,7 @@ import { MapEmbedCard } from "./map-embed-card";
 import { WebAssetCard } from "./web-asset-card";
 import { MemoCard } from "./memo-card";
 import { AiAnalysisDetailSection } from "./ai-analysis-detail-section";
+import type { PromptTemplateOption } from "@/app/(main)/stores/new/_components/ai-analysis-panel";
 import { StageInlineSelect } from "./stage-inline-select";
 import { DeleteStoreButton } from "./delete-store-button";
 import type { Store } from "@/types/store";
@@ -30,6 +31,8 @@ interface StoreDetailTabsProps {
    * deep-research-pipeline spec #43 で追加。
    */
   deepResearchSlot?: ReactNode;
+  /** SSR で取得したプロンプトテンプレート一覧(Issue #42 Phase 4-D) */
+  promptTemplates: readonly PromptTemplateOption[];
 }
 
 export function StoreDetailTabs({
@@ -39,6 +42,7 @@ export function StoreDetailTabs({
   assignedSalesName,
   dealCount,
   deepResearchSlot,
+  promptTemplates,
 }: StoreDetailTabsProps) {
   const editHref = `/stores/${store.id}/edit`;
 
@@ -104,6 +108,7 @@ export function StoreDetailTabs({
           store={store}
           isApiKeyConfigured={isApiKeyConfigured}
           assignedSalesName={assignedSalesName}
+          promptTemplates={promptTemplates}
         />
         {deepResearchSlot}
       </TabsPanel>

@@ -29,6 +29,7 @@ import type { HandoffRepository } from "./handoff-repository";
 import type { ProfileRepository } from "./profile-repository";
 import type { NotificationRepository } from "./notification-repository";
 import type { DeepResearchRepository } from "./deep-research-repository";
+import type { PromptTemplateRepository } from "./prompt-template-repository";
 
 export type {
   DealRepository,
@@ -38,6 +39,7 @@ export type {
   ProfileRepository,
   NotificationRepository,
   DeepResearchRepository,
+  PromptTemplateRepository,
 };
 
 /**
@@ -58,6 +60,8 @@ export interface TxRepos {
   notification: NotificationRepository;
   /** deep-research-pipeline spec (Issue #43) で追加。 */
   deepResearch: DeepResearchRepository;
+  /** AI プロンプトテンプレート (Issue #42) で追加。 */
+  promptTemplate: PromptTemplateRepository;
 }
 
 /**
@@ -72,6 +76,8 @@ export interface Repos {
   notification: NotificationRepository;
   /** deep-research-pipeline spec (Issue #43) で追加。 */
   deepResearch: DeepResearchRepository;
+  /** AI プロンプトテンプレート (Issue #42) で追加。 */
+  promptTemplate: PromptTemplateRepository;
   /**
    * 複数リポジトリ書込みを 1 トランザクションで実行する。
    * `db.transaction` で BEGIN/COMMIT/ROLLBACK を自動制御。
@@ -91,6 +97,7 @@ async function buildRepos(): Promise<Repos> {
     dbProfileRepo,
     dbNotificationRepo,
     dbDeepResearchRepo,
+    dbPromptTemplateRepo,
     makeDealRepo,
     makeStoreRepo,
     makeResearchRepo,
@@ -98,6 +105,7 @@ async function buildRepos(): Promise<Repos> {
     makeProfileRepo,
     makeNotificationRepo,
     makeDeepResearchRepo,
+    makePromptTemplateRepo,
   } = dbModule;
 
   return Object.freeze({
@@ -108,6 +116,7 @@ async function buildRepos(): Promise<Repos> {
     profile: dbProfileRepo,
     notification: dbNotificationRepo,
     deepResearch: dbDeepResearchRepo,
+    promptTemplate: dbPromptTemplateRepo,
     transaction: <T>(fn: (tx: TxRepos) => Promise<T>): Promise<T> =>
       db.transaction(async (tx) =>
         fn({
@@ -118,6 +127,7 @@ async function buildRepos(): Promise<Repos> {
           profile: makeProfileRepo(tx),
           notification: makeNotificationRepo(tx),
           deepResearch: makeDeepResearchRepo(tx),
+          promptTemplate: makePromptTemplateRepo(tx),
         }),
       ),
   }) satisfies Repos;

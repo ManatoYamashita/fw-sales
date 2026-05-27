@@ -10,9 +10,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // vi.hoisted で mock の参照を提供(vi.mock factory が import より前に評価されるため)
-const { mockGenerateContent } = vi.hoisted(() => ({
-  mockGenerateContent: vi.fn(),
-}));
+const { mockGenerateContent, mockFindById, mockGetCurrentSession } = vi.hoisted(
+  () => ({
+    mockGenerateContent: vi.fn(),
+    mockFindById: vi.fn(),
+    mockGetCurrentSession: vi.fn(),
+  }),
+);
 
 // class として mock することで `new GoogleGenAI({apiKey})` の instance 化が
 // 確実に正しい shape (.models.generateContent) を持つ
@@ -23,6 +27,16 @@ vi.mock("@google/genai", () => ({
       void _opts;
     }
   },
+}));
+
+vi.mock("@/lib/repositories", () => ({
+  repos: {
+    promptTemplate: { findById: mockFindById },
+  },
+}));
+
+vi.mock("@/lib/supabase/server", () => ({
+  getCurrentSession: mockGetCurrentSession,
 }));
 
 import { analyzeStoreAction } from "../ai-analysis-actions";
@@ -76,6 +90,10 @@ describe("analyzeStoreAction (Gemini SDK mocked)", () => {
   beforeEach(() => {
     _resetRateLimitForTest();
     mockGenerateContent.mockReset();
+    mockFindById.mockReset();
+    mockGetCurrentSession.mockReset();
+    // デフォルト: 未ログイン
+    mockGetCurrentSession.mockResolvedValue(null);
     vi.stubEnv("GEMINI_API_KEY", "test-api-key");
   });
 
@@ -225,5 +243,140 @@ describe("analyzeStoreAction (Gemini SDK mocked)", () => {
       expect(result.error).not.toMatch(/AIzaSy_secret_value/);
       expect(result.error).not.toMatch(/request_id/);
     }
+  });
+});
+
+describe("analyzeStoreAction - templateId 連携 (Issue #42 Phase 3)", () => {
+  const VALID_TEMPLATE_BODY = JSON.stringify({
+    fewshots: [
+      {
+        title: "カスタム例",
+        store_meta: "東京都渋谷区・カスタムジャンル",
+        call_script_ideal:
+          "私ファーストWEBの{ASSIGNED_SALES}と申します\nカスタムスクリプト",
+      },
+    ],
+  });
+
+  beforeEach(() => {
+    _resetRateLimitForTest();
+    mockGenerateContent.mockReset();
+    mockFindById.mockReset();
+    mockGetCurrentSession.mockReset();
+    mockGetCurrentSession.mockResolvedValue(null);
+    vi.stubEnv("GEMINI_API_KEY", "test-api-key");
+    mockGenerateContent.mockResolvedValue({
+      text: JSON.stringify({
+        strengths_markdown: "## 強み\n- テスト",
+        weaknesses_markdown: "## 弱み\n- テスト",
+        gourmet_paid_status: "無料",
+        gbp_completeness: "説明欄あり",
+        call_script: "私ファーストWEBの渡部と申します",
+        confidence: {
+          strengths: 80,
+          weaknesses: 70,
+          gourmet_paid_status: 60,
+          gbp_completeness: 75,
+          call_script: 85,
+        },
+      }),
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    _resetRateLimitForTest();
+  });
+
+  it("templateId 未指定: ログイン不要でそのまま成功 (既存挙動維持)", async () => {
+    const result = await analyzeStoreAction(makeFormData());
+    expect(result.ok).toBe(true);
+    expect(mockFindById).not.toHaveBeenCalled();
+    expect(mockGetCurrentSession).not.toHaveBeenCalled();
+  });
+
+  it("templateId 指定・有効テンプレート: findById が呼ばれ成功する", async () => {
+    const VALID_TPL_ID = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11";
+    mockGetCurrentSession.mockResolvedValue({ userId: "user-123" });
+    mockFindById.mockResolvedValue({
+      id: VALID_TPL_ID,
+      user_id: "user-123",
+      name: "テスト",
+      is_default: true,
+      body: VALID_TEMPLATE_BODY,
+      created_at: "2026-01-01",
+      updated_at: "2026-01-01",
+    });
+
+    const result = await analyzeStoreAction(
+      makeFormData({ templateId: VALID_TPL_ID }),
+    );
+    expect(result.ok).toBe(true);
+    expect(mockGetCurrentSession).toHaveBeenCalledTimes(1);
+    expect(mockFindById).toHaveBeenCalledWith(VALID_TPL_ID, "user-123");
+  });
+
+  it("templateId 指定・findById が null (他ユーザー or 存在しない): ハードコードFew-shotへフォールバックし成功", async () => {
+    mockGetCurrentSession.mockResolvedValue({ userId: "user-123" });
+    mockFindById.mockResolvedValue(null);
+
+    const NON_EXISTENT_UUID = "f47ac10b-58cc-4372-a567-0e02b2c3d479";
+    const result = await analyzeStoreAction(
+      makeFormData({ templateId: NON_EXISTENT_UUID }),
+    );
+    expect(result.ok).toBe(true);
+    expect(mockFindById).toHaveBeenCalledWith(NON_EXISTENT_UUID, "user-123");
+  });
+
+  it("templateId 指定・body が不正JSON: ハードコードFew-shotへフォールバックし成功", async () => {
+    mockGetCurrentSession.mockResolvedValue({ userId: "user-123" });
+    mockFindById.mockResolvedValue({
+      id: "tpl-bad",
+      user_id: "user-123",
+      name: "壊れたテンプレ",
+      is_default: false,
+      body: "invalid-json",
+      created_at: "2026-01-01",
+      updated_at: "2026-01-01",
+    });
+
+    const result = await analyzeStoreAction(
+      makeFormData({ templateId: "tpl-bad" }),
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it("templateId 指定・未ログイン: findById を呼ばずハードコードFew-shotへフォールバックし成功", async () => {
+    mockGetCurrentSession.mockResolvedValue(null);
+
+    const result = await analyzeStoreAction(
+      makeFormData({ templateId: "tpl-1" }),
+    );
+    expect(result.ok).toBe(true);
+    expect(mockFindById).not.toHaveBeenCalled();
+  });
+
+  it("templateId が不正UUID: findById を呼ばずハードコードFew-shotへフォールバックし成功", async () => {
+    mockGetCurrentSession.mockResolvedValue({ userId: "user-123" });
+
+    const result = await analyzeStoreAction(
+      makeFormData({ templateId: "not-a-valid-uuid" }),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(mockFindById).not.toHaveBeenCalled();
+  });
+
+  it("findById が例外を投げてもハードコードFew-shotへフォールバックし成功", async () => {
+    mockGetCurrentSession.mockResolvedValue({ userId: "user-123" });
+    mockFindById.mockRejectedValueOnce(new Error("DB error"));
+
+    const VALID_UUID = "f47ac10b-58cc-4372-a567-0e02b2c3d479";
+    const result = await analyzeStoreAction(
+      makeFormData({ templateId: VALID_UUID }),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(mockFindById).toHaveBeenCalledTimes(1);
   });
 });

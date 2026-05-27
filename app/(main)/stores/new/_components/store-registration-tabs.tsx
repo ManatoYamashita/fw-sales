@@ -14,6 +14,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { StoreNewForm } from "./store-new-form";
+import type { PromptTemplateOption } from "./ai-analysis-panel";
 import {
   AreaSearchPanel,
   ManualStartPanel,
@@ -38,6 +39,8 @@ export interface StoreRegistrationTabsProps {
   profiles: readonly Profile[];
   /** 現在ログイン中の profile.id (デフォルト担当者として使用) */
   currentProfileId: string | null;
+  /** SSR で取得したプロンプトテンプレート一覧(Issue #42 Phase 4-D) */
+  promptTemplates: readonly PromptTemplateOption[];
 }
 
 function normalizeMode(raw: string | null | undefined): RegistrationMode {
@@ -69,6 +72,7 @@ export function StoreRegistrationTabs({
   isPlacesApiConfigured,
   profiles,
   currentProfileId,
+  promptTemplates,
 }: StoreRegistrationTabsProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -192,6 +196,7 @@ export function StoreRegistrationTabs({
                 profiles={profiles}
                 currentProfileId={currentProfileId}
                 initialName={manualStoreName}
+                promptTemplates={promptTemplates}
               />
             )}
             {mode === "url" && urlImport && (
@@ -211,6 +216,7 @@ export function StoreRegistrationTabs({
                     suggested: urlImport.suggested,
                     html: urlImport.html,
                   }}
+                  promptTemplates={promptTemplates}
                 />
               </>
             )}

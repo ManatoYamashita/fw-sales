@@ -8,6 +8,7 @@
 - **調査 (Research) → 商談 (Deal) → 引き継ぎ (Handoff) のライフサイクル管理**: 12 ステージのパイプラインに沿って状態遷移
 - **アクション支援**: URL 解析(食べログ・Google マップ)、DM / テレアポ文面の自動生成、実行記録
 - **KPI / ダッシュボード / Kanban パイプライン**: ファネル変換率・チャネル内訳・アクションキューを可視化
+- **Deep Research パイプライン**: Google Deep Research API を活用した 8 カテゴリ・51 項目の自動店舗調査。cron 30 分間隔で queued → researching → structuring → done を自動遷移。`/research` キューページで進捗確認 (プログレスバー + 推定残り時間)
 - **データ移送**: JSON Export / Import / Reset(SEED 復元)
 
 ## Target Use Cases

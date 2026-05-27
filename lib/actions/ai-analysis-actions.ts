@@ -16,6 +16,7 @@
 
 import "server-only";
 
+import { z } from "zod";
 import {
   failure,
   readString,
@@ -31,6 +32,9 @@ import {
 import { validateAiAnalysis } from "@/lib/ai/validate";
 import { checkRateLimit } from "@/lib/ai/rate-limiter";
 import { OPERATOR_TYPES, type OperatorType } from "@/types/store";
+import { repos } from "@/lib/repositories";
+import { getCurrentSession } from "@/lib/supabase/server";
+import { parseFewshots, type FewShotExample } from "@/types/ai-prompt-template";
 
 const TIMEOUT_MS = 60_000;
 const MAX_INSTRUCTIONS_LENGTH = 500;
@@ -151,12 +155,40 @@ export async function analyzeStoreAction(
   );
   const assignedSales = readString(formData, "assignedSales");
 
-  const { systemPrompt, userParts } = buildAnalysisPrompt({
-    formValues,
-    htmlContent,
-    additionalInstructions,
-    assignedSales,
-  });
+  const templateId = readNullableTrimmedString(formData, "templateId");
+  let customFewshots: FewShotExample[] | undefined;
+  if (templateId) {
+    const idResult = z.string().uuid().safeParse(templateId);
+    if (idResult.success) {
+      try {
+        const session = await getCurrentSession();
+        if (session) {
+          const template = await repos.promptTemplate.findById(
+            idResult.data,
+            session.userId,
+          );
+          if (template) {
+            const parsed = parseFewshots(template.body);
+            if (parsed && parsed.length > 0) {
+              customFewshots = parsed;
+            }
+          }
+        }
+      } catch {
+        customFewshots = undefined;
+      }
+    }
+  }
+
+  const { systemPrompt, userParts } = buildAnalysisPrompt(
+    {
+      formValues,
+      htmlContent,
+      additionalInstructions,
+      assignedSales,
+    },
+    customFewshots,
+  );
 
   // ④ LLM 呼出 (Req 2.6: 60s timeout 経由で AbortSignal が発火)
   const client = createGeminiClient();
@@ -182,7 +214,11 @@ export async function analyzeStoreAction(
       );
     }
 
-    return success(validated.value);
+    const fallbackWarning =
+      templateId && !customFewshots
+        ? "指定テンプレートの読み込みに失敗したため、標準テンプレートで分析しました"
+        : undefined;
+    return success(validated.value, fallbackWarning);
   } catch (err) {
     // AiClientError 型は client.ts で正規化済(API キー漏洩防止)
     if (isAiClientError(err)) {

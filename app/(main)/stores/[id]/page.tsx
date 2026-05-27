@@ -10,6 +10,9 @@ import { getStoreCached } from "@/lib/queries/stores";
 import { listDealsByStoreCached } from "@/lib/queries/deals";
 import { getAllProfiles } from "@/lib/queries/profiles";
 import { isApiKeyConfigured } from "@/lib/env";
+import { getCurrentSession } from "@/lib/supabase/server";
+import { listPromptTemplatesCached } from "@/lib/queries/prompt-templates";
+import type { PromptTemplateOption } from "@/app/(main)/stores/new/_components/ai-analysis-panel";
 
 type Params = Promise<{ id: string }>;
 
@@ -41,9 +44,10 @@ export default async function StoreDetailPage({
   // build 時 prerender を skip (USE_CACHE_TIMEOUT 対策)。
   await connection();
   const { id } = await params;
-  const [store, profiles] = await Promise.all([
+  const [store, profiles, session] = await Promise.all([
     getStoreCached(id),
     getAllProfiles({ excludePlaceholders: false }),
+    getCurrentSession(),
   ]);
   if (!store) notFound();
   const dealCount = (await listDealsByStoreCached(store.id)).length;
@@ -53,6 +57,12 @@ export default async function StoreDetailPage({
     ? (profiles.find((p) => p.id === store.assigned_sales_user_id)
         ?.display_name ?? "")
     : "";
+  // プロンプトテンプレート一覧: id/name/is_default のみに絞ってクライアントへ渡す (Issue #42 Phase 4-D)
+  const promptTemplates: PromptTemplateOption[] = session
+    ? (await listPromptTemplatesCached(session.userId)).map(
+        ({ id, name, is_default }) => ({ id, name, is_default }),
+      )
+    : [];
 
   return (
     <div className="space-y-4">
@@ -72,6 +82,7 @@ export default async function StoreDetailPage({
         isApiKeyConfigured={apiKeyConfigured}
         assignedSalesName={assignedSalesName}
         dealCount={dealCount}
+        promptTemplates={promptTemplates}
         deepResearchSlot={
           <Suspense fallback={<DeepResearchFallback />}>
             <DeepResearchSection storeId={store.id} />
