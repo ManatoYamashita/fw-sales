@@ -29,11 +29,9 @@ import { STAGES, type StageId } from "@/types/stage";
 import {
   CHANNELS,
   DEFAULT_STORE_SORT,
-  PRIORITIES,
   SORT_KEYS,
   SORT_OPTIONS,
   type Channel,
-  type Priority,
   type SortDirection,
   type StoreSortKey,
 } from "@/types/store";
@@ -100,7 +98,7 @@ function Popover({
 /*  Filter Bar 本体                                                     */
 /* ------------------------------------------------------------------ */
 
-const ALL_FILTER_KEYS = ["q", "stage", "channel", "priority"] as const;
+const ALL_FILTER_KEYS = ["q", "stage", "channel"] as const;
 type FilterKey = (typeof ALL_FILTER_KEYS)[number];
 
 export function StoresFilterBar() {
@@ -112,7 +110,6 @@ export function StoresFilterBar() {
   const q = params.get("q") ?? "";
   const stage = (params.get("stage") ?? "") as StageId | "";
   const channel = (params.get("channel") ?? "") as Channel | "";
-  const priority = (params.get("priority") ?? "") as Priority | "";
   const sortKey: StoreSortKey =
     (SORT_KEYS as readonly string[]).includes(params.get("sort") ?? "")
       ? (params.get("sort") as StoreSortKey)
@@ -122,8 +119,8 @@ export function StoresFilterBar() {
 
   const filterCount = useMemo(
     () =>
-      [stage, channel, priority].filter(Boolean).length, // 検索語(q) は別カウント
-    [stage, channel, priority],
+      [stage, channel].filter(Boolean).length, // 検索語(q) は別カウント
+    [stage, channel],
   );
   const sortDefault = sortKey === DEFAULT_STORE_SORT.key && sortDir === DEFAULT_STORE_SORT.dir;
 
@@ -245,10 +242,8 @@ export function StoresFilterBar() {
             <FilterPanel
               stage={stage}
               channel={channel}
-              priority={priority}
               onChangeStage={(v) => setKey("stage", v)}
               onChangeChannel={(v) => setKey("channel", v)}
-              onChangePriority={(v) => setKey("priority", v)}
               onClear={clearFilters}
               activeCount={filterCount}
             />
@@ -323,11 +318,6 @@ export function StoresFilterBar() {
           {channel ? (
             <Chip onClear={() => setKey("channel", "")} label="チャネル">
               {channel}
-            </Chip>
-          ) : null}
-          {priority ? (
-            <Chip onClear={() => setKey("priority", "")} label="優先度">
-              {priority}
             </Chip>
           ) : null}
           {!sortDefault ? (
@@ -463,10 +453,8 @@ function Chip({ label, onClear, children, tone = "default" }: ChipProps) {
 interface FilterPanelProps {
   stage: StageId | "";
   channel: Channel | "";
-  priority: Priority | "";
   onChangeStage: (v: string) => void;
   onChangeChannel: (v: string) => void;
-  onChangePriority: (v: string) => void;
   onClear: () => void;
   activeCount: number;
 }
@@ -474,10 +462,8 @@ interface FilterPanelProps {
 function FilterPanel({
   stage,
   channel,
-  priority,
   onChangeStage,
   onChangeChannel,
-  onChangePriority,
   onClear,
   activeCount,
 }: FilterPanelProps) {
@@ -497,7 +483,7 @@ function FilterPanel({
       </div>
 
       <div className="px-4 py-3 space-y-4 max-h-[60vh] overflow-y-auto">
-        <PanelGroup label="ステージ">
+        <PanelGroup label="状態">
           <ChipGroup
             value={stage}
             onChange={onChangeStage}
@@ -511,14 +497,6 @@ function FilterPanel({
             value={channel}
             onChange={onChangeChannel}
             options={CHANNELS.map((c) => ({ value: c, label: c }))}
-          />
-        </PanelGroup>
-
-        <PanelGroup label="優先度">
-          <ChipGroup
-            value={priority}
-            onChange={onChangePriority}
-            options={PRIORITIES.map((p) => ({ value: p, label: p }))}
           />
         </PanelGroup>
       </div>

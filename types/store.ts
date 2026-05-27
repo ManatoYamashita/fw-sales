@@ -73,7 +73,6 @@ export interface StoreFilter {
   q?: string;
   stage?: StageId;
   channel?: Channel;
-  priority?: Priority;
   /**
    * 営業担当者の絞り込み。`Store.assigned_sales_user_id` (profile.id) と完全一致で比較する。
    * Phase 7 で旧 `assigned_sales` (text) 参照から user_id 参照へ切替済。
@@ -89,8 +88,7 @@ export type StoreSortKey =
   | "updated"
   | "name"
   | "review_avg"
-  | "review_count"
-  | "priority";
+  | "review_count";
 
 export type SortDirection = "asc" | "desc";
 
@@ -134,13 +132,6 @@ export const SORT_OPTIONS: ReadonlyArray<{
     defaultDir: "desc",
     ascLabel: "少ない順",
     descLabel: "多い順",
-  },
-  {
-    key: "priority",
-    label: "優先度",
-    defaultDir: "desc",
-    ascLabel: "低→高",
-    descLabel: "高→低",
   },
 ];
 

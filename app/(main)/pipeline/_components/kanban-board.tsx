@@ -2,7 +2,6 @@ import Link from "next/link";
 import { cacheTag } from "next/cache";
 import { connection } from "next/server";
 import { ChannelBadge } from "@/components/feature/channel-badge";
-import { PriorityBadge } from "@/components/feature/priority-badge";
 import { getPipelineColumns } from "@/lib/queries/pipeline";
 import { getAllProfiles } from "@/lib/queries/profiles";
 import { CACHE_TAGS } from "@/lib/cache";
@@ -98,12 +97,9 @@ function KanbanCard({
       href={`/stores/${store.id}`}
       className="block bg-card text-card-foreground rounded-md border border-border p-2.5 shadow-xs hover:shadow-card hover:border-ring/40 hover:-translate-y-px transition-[box-shadow,border-color,transform]"
     >
-      <div className="flex items-start justify-between gap-2">
-        <p className="text-sm font-semibold text-foreground line-clamp-2 leading-snug">
-          {store.name}
-        </p>
-        <PriorityBadge priority={store.priority} />
-      </div>
+      <p className="text-sm font-semibold text-foreground line-clamp-2 leading-snug">
+        {store.name}
+      </p>
       <p className="text-xs text-muted-foreground mt-1 truncate">
         {[store.prefecture, store.city].filter(Boolean).join(" / ")}
       </p>

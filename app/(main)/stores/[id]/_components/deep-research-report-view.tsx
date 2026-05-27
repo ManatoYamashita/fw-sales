@@ -54,7 +54,7 @@ export function DeepResearchReportView({
     <div className="space-y-3">
       <LegendStrip generatedAt={generatedAt} />
 
-      <Tabs defaultValue="category_1_basic">
+      <Tabs defaultValue="category_1_basic" variant="pill">
         <TabsList>
           {CATEGORY_KEYS.map((key) => (
             <TabsTrigger key={key} value={key}>

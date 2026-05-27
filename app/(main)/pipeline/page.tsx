@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { KanbanBoard } from "./_components/kanban-board";
 import { PipelineFilters } from "./_components/pipeline-filters";
 import { Spinner } from "@/components/ui/spinner";
-import { PRIORITIES, type Priority, type StoreFilter } from "@/types/store";
+import type { StoreFilter } from "@/types/store";
 import { getAllProfiles } from "@/lib/queries/profiles";
 
 export const metadata: Metadata = {
@@ -13,7 +13,6 @@ export const metadata: Metadata = {
 interface PageProps {
   searchParams: Promise<{
     q?: string;
-    priority?: string;
     sales?: string;
   }>;
 }
@@ -25,9 +24,6 @@ export default async function PipelinePage({ searchParams }: PageProps) {
   ]);
   const filter: StoreFilter = {};
   if (sp.q) filter.q = sp.q;
-  if (sp.priority && (PRIORITIES as readonly string[]).includes(sp.priority)) {
-    filter.priority = sp.priority as Priority;
-  }
   // Phase 7 で `filter.sales` は profile.id を保持する仕様に切替。
   if (sp.sales) filter.sales = sp.sales;
 

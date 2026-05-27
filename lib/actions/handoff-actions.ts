@@ -70,7 +70,7 @@ export async function createHandoffAction(
     // (research-handoff-db-migration §4.3, §4.4, §4.5)。
     const created = await repos.transaction(async ({ handoff, store }) => {
       const c = await handoff.create(input);
-      await store.update(deal.store_id, { stage: "引き継ぎ待ち" });
+      await store.update(deal.store_id, { stage: "架電済み" });
       return c;
     });
 
@@ -122,7 +122,7 @@ export async function completeHandoffAction(
     // (research-handoff-db-migration §4.4, §4.5)。
     await repos.transaction(async ({ handoff, store }) => {
       await handoff.update(handoffId, { status: "完了" });
-      await store.update(current.store_id, { stage: "引き継ぎ完了" });
+      await store.update(current.store_id, { stage: "架電済み" });
     });
 
     // tx 成功後にのみキャッシュ失効を実行。

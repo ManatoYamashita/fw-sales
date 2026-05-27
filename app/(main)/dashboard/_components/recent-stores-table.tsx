@@ -6,7 +6,6 @@ import { DataTable, type ColumnDef } from "@/components/ui/data-table";
 import { EmptyState } from "@/components/ui/empty-state";
 import { StageBadge } from "@/components/feature/stage-badge";
 import { ChannelBadge } from "@/components/feature/channel-badge";
-import { PriorityBadge } from "@/components/feature/priority-badge";
 import { repos } from "@/lib/repositories";
 import { formatDate } from "@/lib/utils/date";
 import { CACHE_TAGS } from "@/lib/cache";
@@ -44,13 +43,8 @@ const columns: ColumnDef<Store>[] = [
   },
   { key: "genre", header: "業態", cell: (s) => s.genre || "—" },
   {
-    key: "priority",
-    header: "優先度",
-    cell: (s) => <PriorityBadge priority={s.priority} />,
-  },
-  {
     key: "stage",
-    header: "ステージ",
+    header: "状態",
     cell: (s) => <StageBadge stage={s.stage} />,
   },
   {

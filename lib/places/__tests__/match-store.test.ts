@@ -12,7 +12,7 @@ function makeStore(overrides: Partial<Store> = {}): Store {
     address: "渋谷1-1-1",
     genre: "居酒屋",
     priority: "中",
-    stage: "調査待ち",
+    stage: "未調査",
     channel: "未判定",
     has_contact_form: "未確認",
     map_url: "",

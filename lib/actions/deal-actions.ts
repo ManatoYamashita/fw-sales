@@ -36,10 +36,10 @@ function asDealStatus(v: string): DealStatus {
 }
 
 const STAGE_BY_DEAL_STATUS: Record<DealStatus, StageId> = {
-  継続追客: "商談化",
-  見積提出: "見積提出",
-  受注: "受注",
-  失注: "失注",
+  継続追客: "架電済み",
+  見積提出: "架電済み",
+  受注: "架電済み",
+  失注: "架電済み",
 };
 
 function invalidateDealScopes(dealId?: string, storeId?: string) {

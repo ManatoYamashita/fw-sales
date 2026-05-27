@@ -59,6 +59,37 @@ const RESERVE_POLL_ONE_MS = 2_000; // getTask 1 件に必要な目安
 const RESERVE_SWEEP_ONE_MS = 3_000; // cancelTask + DB write に必要な目安
 const STUCK_THRESHOLD_MS = 6 * 60 * 60 * 1000; // 6 時間
 
+/**
+ * 適応型ポーリング間隔。
+ * 初回 45 分待ち → 以降 1/2 ずつ短縮 → 最短 5 分でクランプ。
+ */
+const INITIAL_POLL_DELAY_MS = 45 * 60 * 1000;
+const MIN_POLL_INTERVAL_MS = 5 * 60 * 1000;
+
+function shouldPollJob(job: DeepResearchJob, now: number): boolean {
+  const startedAt = job.research_started_at
+    ? new Date(job.research_started_at).getTime()
+    : new Date(job.enqueued_at).getTime();
+
+  const elapsed = now - startedAt;
+  if (elapsed < INITIAL_POLL_DELAY_MS) return false;
+
+  const lastPolled = job.api_updated_at
+    ? new Date(job.api_updated_at).getTime()
+    : 0;
+
+  if (lastPolled <= startedAt) return true;
+
+  const sinceStart = lastPolled - startedAt;
+  let interval = INITIAL_POLL_DELAY_MS;
+  let cursor = interval;
+  while (cursor <= sinceStart) {
+    interval = Math.max(Math.floor(interval / 2), MIN_POLL_INTERVAL_MS);
+    cursor += interval;
+  }
+  return now >= lastPolled + interval;
+}
+
 export interface RunPollResearchTickInput {
   deadline: number;
   /** テスト用に SDK クライアントを差替え可能。本番では `createDeepResearchClient()` */
@@ -99,15 +130,17 @@ export async function runPollResearchTick(
     result.swept += 1;
   }
 
-  // ---- Stage B: Polling fan-out --------------------------------------------
+  // ---- Stage B: Polling fan-out (適応型間隔: 45→22→11→5 分) ----------------
   if (!result.deadline_reached) {
     const pollLimit = getPollPerTick();
     const researching = await repos.deepResearch.findOldestResearching(pollLimit);
+    const now = Date.now();
     for (const job of researching) {
       if (!hasTimeLeft(deadline, RESERVE_POLL_ONE_MS)) {
         result.deadline_reached = true;
         break;
       }
+      if (!shouldPollJob(job, now)) continue;
       const outcome = await pollOneResearching({
         job,
         drClient,
@@ -513,6 +546,7 @@ function summarizeError(err: unknown): string {
 // テスト用 export (kiro-impl の Implementation Notes 参照)
 export const __internal = {
   hasTimeLeft,
+  shouldPollJob,
   sweepStuckJob,
   pollOneResearching,
   startOneQueued,

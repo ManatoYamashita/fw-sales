@@ -48,7 +48,7 @@ export function placeResultToStoreInput(place: PlaceResult): StoreInput {
     address: place.formattedAddress,
     genre: mapGenre(place.types),
     priority: "中",
-    stage: "調査待ち",
+    stage: "未調査",
     channel: "未判定",
     has_contact_form: "未確認",
     map_url,

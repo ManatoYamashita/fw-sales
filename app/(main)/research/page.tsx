@@ -44,7 +44,7 @@ export default async function ResearchPage() {
         </p>
       </div>
 
-      <Tabs defaultValue="in_flight">
+      <Tabs defaultValue="in_flight" variant="pill">
         <TabsList>
           <TabsTrigger value="in_flight">
             実行中 ({inFlight.length})
