@@ -29,7 +29,11 @@ export function ResearchFilterChips({
   const params = useSearchParams();
   const [pending, startTransition] = useTransition();
 
-  const current = (params.get("status") ?? "all") as StatusFilter;
+  const VALID_FILTERS: StatusFilter[] = ["all", "pending", "done", "failed"];
+  const raw = params.get("status") ?? "all";
+  const current: StatusFilter = VALID_FILTERS.includes(raw as StatusFilter)
+    ? (raw as StatusFilter)
+    : "all";
 
   const options: FilterOption[] = [
     { value: "all", label: "全て", count: totalCount },

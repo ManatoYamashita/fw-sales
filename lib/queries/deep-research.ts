@@ -108,23 +108,10 @@ export async function getDeepResearchJobById(
 ): Promise<DeepResearchQueueRow | null> {
   "use cache";
   cacheTag(CACHE_TAGS.deepResearchJob(jobId));
+  cacheTag(CACHE_TAGS.stores);
+  cacheTag(CACHE_TAGS.profiles);
 
-  const job = await repos.deepResearch.getById(jobId);
-  if (!job) return null;
-
-  const [store, profiles] = await Promise.all([
-    repos.store.get(job.store_id),
-    import("@/lib/queries/profiles").then((m) =>
-      m.getAllProfiles({ excludePlaceholders: false }),
-    ),
-  ]);
-
-  return {
-    job,
-    store_name: store?.name ?? null,
-    researcher_display_name:
-      profiles.find((p) => p.id === job.user_id)?.display_name ?? null,
-  };
+  return repos.deepResearch.getByIdWithDetails(jobId);
 }
 
 /**

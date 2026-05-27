@@ -27,7 +27,7 @@ export function JobActionButtons({ jobId, status }: JobActionButtonsProps) {
   const canDelete = status === "failed";
 
   const handle = (
-    action: (id: string) => Promise<{ ok: boolean; error?: string }>,
+    action: (id: string) => Promise<{ ok: boolean; error?: string; [key: string]: unknown }>,
     successMessage: string,
     redirectTo?: string,
   ) => {
@@ -63,7 +63,7 @@ export function JobActionButtons({ jobId, status }: JobActionButtonsProps) {
         <Button
           variant="default"
           size="sm"
-          onClick={() => handle(retryDeepResearchAction as (id: string) => Promise<{ ok: boolean; error?: string }>, "再投入しました")}
+          onClick={() => handle(retryDeepResearchAction, "再投入しました")}
           disabled={pending}
         >
           {pending ? <Spinner /> : <RefreshCw className="h-3.5 w-3.5" />}

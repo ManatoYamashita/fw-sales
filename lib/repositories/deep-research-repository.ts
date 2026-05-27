@@ -87,6 +87,9 @@ export interface DeepResearchRepository {
 
   getById(jobId: string): Promise<DeepResearchJob | null>;
 
+  /** ID で 1 件取得 (stores + profiles LEFT JOIN 済み DTO)。 詳細ページ用。 */
+  getByIdWithDetails(jobId: string): Promise<DeepResearchQueueRow | null>;
+
   /** 対象店舗の最新レポート (`created_at` DESC 1 件) を返す。 */
   getReportByStore(storeId: string): Promise<DeepResearchReport | null>;
 

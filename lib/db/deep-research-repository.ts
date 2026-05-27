@@ -257,6 +257,22 @@ export function makeDeepResearchRepo(
       return row ? fromJobRow(row) : null;
     },
 
+    async getByIdWithDetails(jobId) {
+      const rows = await executor
+        .select({
+          job: researchJobs,
+          store_name: stores.name,
+          researcher_display_name: profiles.display_name,
+        })
+        .from(researchJobs)
+        .leftJoin(stores, eq(researchJobs.store_id, stores.id))
+        .leftJoin(profiles, eq(researchJobs.user_id, profiles.id))
+        .where(eq(researchJobs.id, jobId))
+        .limit(1);
+      const row = rows[0];
+      return row ? fromQueueJoinRow(row) : null;
+    },
+
     async getReportByStore(storeId) {
       const rows = await executor
         .select()

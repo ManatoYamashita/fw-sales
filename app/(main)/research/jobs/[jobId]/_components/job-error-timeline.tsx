@@ -1,4 +1,4 @@
-import { AlertTriangle, XCircle, Clock } from "lucide-react";
+import { AlertTriangle, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import type { DeepResearchJobErrorEntry } from "@/types/deep-research";
 
@@ -50,7 +50,7 @@ export function JobErrorTimeline({ errors }: JobErrorTimelineProps) {
               {entry.cancel_result && (
                 <div className="text-xs text-muted-foreground flex items-center gap-1">
                   <XCircle className="h-3 w-3" />
-                  cancel: {entry.cancel_result.cancelled ? "成功" : `失敗 (${entry.cancel_result.reason})`}
+                  cancel: {entry.cancel_result.cancelled ? "成功" : `失敗 (${entry.cancel_result.reason ?? "不明"})`}
                 </div>
               )}
             </div>
