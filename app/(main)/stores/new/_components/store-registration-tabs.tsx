@@ -166,7 +166,13 @@ export function StoreRegistrationTabs({
           </Tabs>
 
           <ViewTransition default="none" enter="fade-in" exit="fade-out">
-            {mode === "manual" && (
+            {/* 手動モードでフォーム展開後は ManualStartPanel を隠す。
+                StoreNewForm の `initialName` は `useState` 初期値にしか使われないため、
+                上部入力欄を変更しても下部フォームの店舗名と sync しない問題を
+                「上部 UI を消す」ことで物理的に防ぐ。店舗名を変えたい場合は
+                フォーム内の「店舗名」フィールドで直接編集する。やり直したい場合は
+                タブを再選択することで mode 変化検知でリセットされる。 */}
+            {mode === "manual" && !stepUnlocked && (
               <ManualStartPanel onStart={handleManualStart} />
             )}
             {mode === "url" && <UrlSearchPanel onLoaded={handleUrlLoaded} />}

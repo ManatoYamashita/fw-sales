@@ -17,15 +17,21 @@ export default function manifest(): MetadataRoute.Manifest {
     icons: [
       { src: "/favicon.ico", sizes: "any", type: "image/x-icon" },
       {
-        src: "/icon.webp",
-        sizes: "500x500",
-        type: "image/webp",
+        src: "/icon-192.png",
+        sizes: "192x192",
+        type: "image/png",
         purpose: "any",
       },
       {
-        src: "/icon.png",
-        sizes: "500x500",
+        src: "/icon-512.png",
+        sizes: "512x512",
         type: "image/png",
+        purpose: "any",
+      },
+      {
+        src: "/icon.webp",
+        sizes: "500x500",
+        type: "image/webp",
         purpose: "any",
       },
       {

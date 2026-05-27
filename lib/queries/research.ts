@@ -20,7 +20,7 @@ export async function getResearchQueue(): Promise<ResearchQueue> {
   const researchByStore = new Map(research.map((r) => [r.store_id, r]));
 
   return {
-    waiting: stores.filter((s) => s.stage === "調査待ち"),
+    waiting: stores.filter((s) => s.stage === "未調査"),
     done: stores
       .filter((s) => researchByStore.has(s.id))
       .map((s) => ({ store: s, research: researchByStore.get(s.id)! })),

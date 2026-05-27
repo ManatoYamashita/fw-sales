@@ -1,10 +1,6 @@
 import "server-only";
 import { repos } from "@/lib/repositories";
-import {
-  CONTACTED_STAGES,
-  NEGOTIATING_STAGES,
-  ORDERED_STAGES,
-} from "@/lib/domain/stages";
+import { CONTACTED_STAGES } from "@/lib/domain/stages";
 import { NAV_ITEMS } from "@/lib/domain/nav";
 
 export interface DashboardStats {
@@ -14,8 +10,6 @@ export interface DashboardStats {
   dm: number;
   tel: number;
   contacted: number;
-  dealsStage: number;
-  orders: number;
   totalRevenue: number;
   monthlyRev: number;
 }
@@ -27,17 +21,13 @@ export async function getDashboardStats(): Promise<DashboardStats> {
   ]);
 
   const total = stores.length;
-  const surveyed = stores.filter((s) => s.stage !== "調査待ち").length;
-  const waitResearch = stores.filter((s) => s.stage === "調査待ち").length;
+  const surveyed = stores.filter((s) => s.stage !== "未調査").length;
+  const waitResearch = stores.filter((s) => s.stage === "未調査").length;
   const dm = stores.filter((s) => s.channel === "DM推奨").length;
   const tel = stores.filter((s) => s.channel === "テレアポ推奨").length;
   const contacted = stores.filter((s) =>
     CONTACTED_STAGES.includes(s.stage),
   ).length;
-  const dealsStage = stores.filter((s) =>
-    NEGOTIATING_STAGES.includes(s.stage),
-  ).length;
-  const orders = stores.filter((s) => ORDERED_STAGES.includes(s.stage)).length;
 
   const totalRevenue = handoffs.reduce(
     (sum, h) => sum + (h.initial_fee || 0),
@@ -54,8 +44,6 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     dm,
     tel,
     contacted,
-    dealsStage,
-    orders,
     totalRevenue,
     monthlyRev,
   };
@@ -100,7 +88,7 @@ export async function getNavBadgeCounts(): Promise<NavBadgeCounts> {
     stores: enabledBadgeKeys.has("stores") ? stores.length : 0,
     research: researchInFlight,
     pipeline: enabledBadgeKeys.has("pipeline")
-      ? stores.filter((s) => s.stage !== "引き継ぎ完了").length
+      ? stores.filter((s) => s.stage !== "架電済み").length
       : 0,
     deals: enabledBadgeKeys.has("deals")
       ? deals.filter((d) => d.status !== "失注" && d.status !== "受注").length

@@ -51,7 +51,7 @@ function asChannel(value: string): Channel | undefined {
 function asStage(value: string): StageId {
   return (STAGE_IDS as readonly string[]).includes(value)
     ? (value as StageId)
-    : "調査待ち";
+    : "未調査";
 }
 
 function asOperatorType(value: string): OperatorType {
@@ -96,7 +96,7 @@ function buildStoreInput(formData: FormData): Omit<StoreInput, "google_place_id"
     address: readString(formData, "address"),
     genre: readString(formData, "genre"),
     priority: asPriority(readString(formData, "priority")),
-    stage: asStage(readString(formData, "stage") || "調査待ち"),
+    stage: asStage(readString(formData, "stage") || "未調査"),
     has_contact_form,
     channel: channelInput ?? decideChannel(has_contact_form),
     map_url: readString(formData, "map_url"),
@@ -202,7 +202,7 @@ export async function updateStoreStageAction(
   const updated = await repos.store.update(id, { stage });
   if (!updated) return failure("店舗が見つかりませんでした");
   invalidateAllStoreScopes(id);
-  return success(undefined, `ステージを「${stage}」に変更しました`);
+  return success(undefined, `状態を「${stage}」に変更しました`);
 }
 
 /**

@@ -9,10 +9,8 @@ import { STAGE_IDS, type StageId } from "@/types/stage";
 import {
   CHANNELS,
   DEFAULT_STORE_SORT,
-  PRIORITIES,
   SORT_KEYS,
   type Channel,
-  type Priority,
   type SortDirection,
   type StoreFilter,
   type StoreSort,
@@ -45,12 +43,6 @@ function parseFilter(params: Awaited<PageProps["searchParams"]>): StoreFilter {
     (CHANNELS as readonly string[]).includes(params.channel)
   ) {
     filter.channel = params.channel as Channel;
-  }
-  if (
-    params.priority &&
-    (PRIORITIES as readonly string[]).includes(params.priority)
-  ) {
-    filter.priority = params.priority as Priority;
   }
   return filter;
 }

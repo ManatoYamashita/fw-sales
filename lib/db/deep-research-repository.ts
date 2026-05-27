@@ -407,6 +407,14 @@ export function makeDeepResearchRepo(
         .where(sql`${researchReports.total_duration_sec} > 0`);
       return rows[0]?.avg ?? null;
     },
+
+    async listActiveStoreIds() {
+      const rows = await executor
+        .selectDistinct({ store_id: researchJobs.store_id })
+        .from(researchJobs)
+        .where(inArray(researchJobs.status, PENDING_STATUSES));
+      return rows.map((r) => r.store_id);
+    },
   };
 }
 

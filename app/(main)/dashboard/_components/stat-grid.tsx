@@ -6,8 +6,6 @@ import {
   Mail,
   Phone,
   MessageSquare,
-  Briefcase,
-  Trophy,
   JapaneseYen,
 } from "lucide-react";
 import { Stat } from "@/components/ui/stat";
@@ -58,18 +56,6 @@ export async function StatGrid() {
         icon={<MessageSquare />}
       />
       <Stat
-        label="商談中"
-        value={stats.dealsStage}
-        icon={<Briefcase />}
-        tone="warning"
-      />
-      <Stat
-        label="受注"
-        value={stats.orders}
-        icon={<Trophy />}
-        tone="success"
-      />
-      <Stat
         label="累計初期売上"
         value={formatYen(stats.totalRevenue)}
         icon={<JapaneseYen />}
@@ -83,7 +69,7 @@ export async function StatGrid() {
 export function StatGridSkeleton() {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-      {Array.from({ length: 8 }).map((_, i) => (
+      {Array.from({ length: 6 }).map((_, i) => (
         <div
           key={i}
           className="h-[112px] rounded-lg bg-card border border-border animate-pulse"

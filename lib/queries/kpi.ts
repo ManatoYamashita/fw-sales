@@ -2,11 +2,7 @@ import "server-only";
 import { cacheTag } from "next/cache";
 import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
-import {
-  CONTACTED_STAGES,
-  NEGOTIATING_STAGES,
-  ORDERED_STAGES,
-} from "@/lib/domain/stages";
+import { CONTACTED_STAGES } from "@/lib/domain/stages";
 import { csvToList } from "@/lib/utils/format";
 import { SERVICE_OPTIONS } from "@/lib/domain/services";
 
@@ -33,14 +29,10 @@ export async function getKpiSnapshot(): Promise<KpiSnapshot> {
     repos.handoff.list(),
   ]);
   const total = stores.length || 1;
-  const surveyed = stores.filter((s) => s.stage !== "調査待ち").length;
+  const surveyed = stores.filter((s) => s.stage !== "未調査").length;
   const contacted = stores.filter((s) =>
     CONTACTED_STAGES.includes(s.stage),
   ).length;
-  const negotiating = stores.filter((s) =>
-    NEGOTIATING_STAGES.includes(s.stage),
-  ).length;
-  const orders = stores.filter((s) => ORDERED_STAGES.includes(s.stage)).length;
 
   const funnel: FunnelStep[] = [
     { label: "登録", count: stores.length, rate: 100 },
@@ -50,16 +42,6 @@ export async function getKpiSnapshot(): Promise<KpiSnapshot> {
       rate: pct(surveyed, stores.length),
     },
     { label: "接触", count: contacted, rate: pct(contacted, surveyed) },
-    {
-      label: "商談化",
-      count: negotiating + orders,
-      rate: pct(negotiating + orders, contacted),
-    },
-    {
-      label: "受注",
-      count: orders,
-      rate: pct(orders, negotiating + orders),
-    },
   ];
 
   const dmCount = stores.filter((s) => s.channel === "DM推奨").length;

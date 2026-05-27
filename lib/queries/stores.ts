@@ -4,7 +4,6 @@ import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
 import {
   DEFAULT_STORE_SORT,
-  type Priority,
   type Store,
   type StoreFilter,
   type StoreSort,
@@ -24,7 +23,6 @@ export function applyStoreFilter(
   const q = filter.q?.trim().toLowerCase();
   return stores.filter((s) => {
     if (filter.stage && s.stage !== filter.stage) return false;
-    if (filter.priority && s.priority !== filter.priority) return false;
     if (filter.channel && s.channel !== filter.channel) return false;
     if (q) {
       const haystack = [
@@ -43,8 +41,6 @@ export function applyStoreFilter(
   });
 }
 
-const PRIORITY_RANK: Record<Priority, number> = { 高: 3, 中: 2, 低: 1 };
-
 export function applyStoreSort(
   stores: readonly Store[],
   sort: StoreSort = DEFAULT_STORE_SORT,
@@ -62,9 +58,6 @@ export function applyStoreSort(
         break;
       case "review_count":
         diff = (a.review_count ?? 0) - (b.review_count ?? 0);
-        break;
-      case "priority":
-        diff = PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority];
         break;
       case "updated":
       default:
