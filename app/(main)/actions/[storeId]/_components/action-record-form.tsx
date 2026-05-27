@@ -43,7 +43,7 @@ export function ActionRecordForm({ storeId }: { storeId: string }) {
       if (result.ok) {
         toast.success(result.message ?? "記録しました");
         router.refresh();
-        if (result.data.nextStage === "架電済み") {
+        if (form.result === "商談化") {
           router.push(`/deals/new?store=${storeId}`);
         }
       } else {

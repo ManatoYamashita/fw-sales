@@ -13,7 +13,6 @@ export const metadata: Metadata = {
 interface PageProps {
   searchParams: Promise<{
     q?: string;
-    priority?: string;
     sales?: string;
   }>;
 }

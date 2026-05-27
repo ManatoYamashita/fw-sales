@@ -8,21 +8,14 @@ import { ChannelBadge } from "@/components/feature/channel-badge";
 import { StageBadge } from "@/components/feature/stage-badge";
 import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
-
-const ACTION_STAGES = [
-  "調査完了",
-  "一次接触準備",
-  "DM送信済み",
-  "テレアポ済み",
-  "反応あり",
-] as const;
+import { ACTION_READY_STAGES } from "@/lib/domain/stages";
 
 async function loadActionableStores() {
   "use cache";
   cacheTag(CACHE_TAGS.stores, CACHE_TAGS.actionQueue);
   const all = await repos.store.list();
   return all.filter((s) =>
-    (ACTION_STAGES as readonly string[]).includes(s.stage),
+    (ACTION_READY_STAGES as readonly string[]).includes(s.stage),
   );
 }
 

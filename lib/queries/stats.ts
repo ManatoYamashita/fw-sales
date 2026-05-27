@@ -1,10 +1,6 @@
 import "server-only";
 import { repos } from "@/lib/repositories";
-import {
-  CONTACTED_STAGES,
-  NEGOTIATING_STAGES,
-  ORDERED_STAGES,
-} from "@/lib/domain/stages";
+import { CONTACTED_STAGES } from "@/lib/domain/stages";
 import { NAV_ITEMS } from "@/lib/domain/nav";
 
 export interface DashboardStats {
@@ -14,8 +10,6 @@ export interface DashboardStats {
   dm: number;
   tel: number;
   contacted: number;
-  dealsStage: number;
-  orders: number;
   totalRevenue: number;
   monthlyRev: number;
 }
@@ -34,10 +28,6 @@ export async function getDashboardStats(): Promise<DashboardStats> {
   const contacted = stores.filter((s) =>
     CONTACTED_STAGES.includes(s.stage),
   ).length;
-  const dealsStage = stores.filter((s) =>
-    NEGOTIATING_STAGES.includes(s.stage),
-  ).length;
-  const orders = stores.filter((s) => ORDERED_STAGES.includes(s.stage)).length;
 
   const totalRevenue = handoffs.reduce(
     (sum, h) => sum + (h.initial_fee || 0),
@@ -54,8 +44,6 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     dm,
     tel,
     contacted,
-    dealsStage,
-    orders,
     totalRevenue,
     monthlyRev,
   };

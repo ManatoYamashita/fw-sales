@@ -18,10 +18,6 @@ export const CONTACTED_STAGES: readonly StageId[] = [
   "架電済み",
 ];
 
-export const NEGOTIATING_STAGES: readonly StageId[] = [];
-
-export const ORDERED_STAGES: readonly StageId[] = [];
-
 export const ACTION_READY_STAGES: readonly StageId[] = [
   "調査済み",
   "DeepResearch済み",
