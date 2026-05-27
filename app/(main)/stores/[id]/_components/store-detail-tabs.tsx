@@ -48,7 +48,7 @@ export function StoreDetailTabs({
 
   return (
     <Tabs defaultValue="basic" variant="pill">
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
         <StageInlineSelect storeId={store.id} current={store.stage} />
         <TabsList>
           <TabsTrigger value="basic">基本情報</TabsTrigger>
