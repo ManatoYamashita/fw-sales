@@ -15,8 +15,11 @@
  * 関連: requirements.md §3.1, §3.2, §3.3, §3.4, §3.5
  */
 
-import { describe, expect, it } from "vitest";
-import { parseAndValidateStructurerText } from "../structurer";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+  normalizeStructurerError,
+  parseAndValidateStructurerText,
+} from "../structurer";
 
 interface PayloadItem {
   key: string;
@@ -133,5 +136,70 @@ describe("parseAndValidateStructurerText", () => {
         "https://another.example.com",
       ]);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// normalizeStructurerError — SDK 生エラーの正規化 + メッセージ保持
+// (PR #71 の Stage 1 改修と同型ロジック)
+// ---------------------------------------------------------------------------
+
+describe("normalizeStructurerError", () => {
+  beforeEach(() => {
+    process.env.GEMINI_API_KEY = "test-key-xxxyyy";
+  });
+
+  afterEach(() => {
+    delete process.env.GEMINI_API_KEY;
+  });
+
+  it("ApiError(status=500) → kind=api_error + status + message に HTTP body を保持", () => {
+    class FakeApiError extends Error {
+      status: number;
+      constructor(message: string, status: number) {
+        super(message);
+        this.name = "ApiError";
+        this.status = status;
+      }
+    }
+    const body =
+      '{"error":{"code":500,"message":"Internal server error","status":"INTERNAL"}}';
+    const result = normalizeStructurerError(new FakeApiError(body, 500));
+    expect(result.kind).toBe("api_error");
+    if (result.kind === "api_error") {
+      expect(result.status).toBe(500);
+      expect(result.message).toContain("Internal server error");
+    }
+  });
+
+  it("ApiError(status=401) → kind=auth_error + message 保持", () => {
+    class FakeApiError extends Error {
+      status: number;
+      constructor(message: string, status: number) {
+        super(message);
+        this.name = "ApiError";
+        this.status = status;
+      }
+    }
+    const result = normalizeStructurerError(
+      new FakeApiError("Unauthorized: invalid credentials", 401),
+    );
+    expect(result.kind).toBe("auth_error");
+    if (result.kind === "auth_error") {
+      expect(result.message).toContain("Unauthorized");
+    }
+  });
+
+  it("AbortError (DOMException) → kind=timeout", () => {
+    const abortErr = new DOMException("aborted", "AbortError");
+    const result = normalizeStructurerError(abortErr);
+    expect(result.kind).toBe("timeout");
+  });
+
+  it("err.message に GEMINI_API_KEY 実値が含まれる場合は redact される (R6.6)", () => {
+    const err = new Error("API key 'test-key-xxxyyy' is invalid");
+    const result = normalizeStructurerError(err);
+    expect(result.kind).toBe("auth_error");
+    expect(JSON.stringify(result)).not.toContain("test-key-xxxyyy");
   });
 });

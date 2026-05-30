@@ -24,16 +24,17 @@ import {
   getDeepResearchJsonSchema,
 } from "./schema";
 import { buildDeepResearchPrompt } from "./prompt";
+import { sanitizeMessage } from "./client";
 import type { Store } from "@/types/store";
 import { readEnv, getStructurerModel } from "@/lib/env";
 
 export type StructurerError =
   | { kind: "missing_api_key" }
-  | { kind: "timeout" }
-  | { kind: "rate_limit"; retryAfterSeconds?: number }
-  | { kind: "auth_error" }
-  | { kind: "api_error"; status: number }
-  | { kind: "network_error" }
+  | { kind: "timeout"; message?: string }
+  | { kind: "rate_limit"; retryAfterSeconds?: number; message?: string }
+  | { kind: "auth_error"; message?: string }
+  | { kind: "api_error"; status: number; message?: string }
+  | { kind: "network_error"; message?: string }
   | { kind: "schema_violation"; zodIssues: string[] }
   | { kind: "empty_response" }
   | { kind: "invalid_json"; message: string }
@@ -159,7 +160,7 @@ export function createStructurer(): Structurer {
 
         return parseAndValidateStructurerText(response.text, input.sourceUrls);
       } catch (err) {
-        return { ok: false, error: normalizeError(err) };
+        return { ok: false, error: normalizeStructurerError(err) };
       }
     },
   };
@@ -177,42 +178,66 @@ function dedupe(urls: string[]): string[] {
 /**
  * SDK 生エラーを `StructurerError` に正規化する。
  *
- * 既存 `lib/ai/client.ts` の `normalizeSdkError` と同型ロジック (API キー値・request ID の
- * 漏洩防止)。共通化は将来検討。
+ * PR #71 の `normalizeSdkError` (Stage 1, `client.ts`) と同型ロジック：
+ * - `@google/genai` の `ApiError` は `err.status: number` を直接持つので、regex より
+ *   `err.name === "ApiError"` + `typeof err.status === "number"` で優先判定
+ * - 各分岐で SDK の生メッセージを `sanitizeMessage` 経由で保持し、`error_log` に
+ *   Gemini からの応答 body を残せるようにする (API キー値や request ID は
+ *   `sanitizeMessage` 側で `***` 置換、R6.6)
+ * - SDK モック不要のテストを可能にするため named export とする
  */
-function normalizeError(err: unknown): StructurerError {
+export function normalizeStructurerError(err: unknown): StructurerError {
   if (err instanceof DOMException && err.name === "AbortError") {
     return { kind: "timeout" };
   }
   if (err instanceof TypeError && err.message.toLowerCase().includes("fetch")) {
-    return { kind: "network_error" };
+    return { kind: "network_error", message: sanitizeMessage(err.message) };
   }
   if (err instanceof Error) {
+    const apiErr = err as Error & { status?: unknown; name?: string };
+    if (
+      (apiErr.name === "ApiError" || "status" in apiErr) &&
+      typeof apiErr.status === "number"
+    ) {
+      const status = apiErr.status;
+      const message = sanitizeMessage(err.message);
+      if (status === 401 || status === 403) {
+        return { kind: "auth_error", message };
+      }
+      if (status === 429) {
+        return { kind: "rate_limit", message };
+      }
+      return { kind: "api_error", status, message };
+    }
     const msg = err.message.toLowerCase();
     if (
       msg.includes("401") ||
       msg.includes("unauthorized") ||
       msg.includes("api key")
     ) {
-      return { kind: "auth_error" };
+      return { kind: "auth_error", message: sanitizeMessage(err.message) };
     }
     if (
       msg.includes("429") ||
       msg.includes("rate limit") ||
       msg.includes("quota")
     ) {
-      return { kind: "rate_limit" };
+      return { kind: "rate_limit", message: sanitizeMessage(err.message) };
     }
     const statusMatch = err.message.match(/\b([45]\d\d)\b/);
     if (statusMatch && statusMatch[1] !== undefined) {
       const status = Number.parseInt(statusMatch[1], 10);
       if (Number.isFinite(status)) {
-        return { kind: "api_error", status };
+        return {
+          kind: "api_error",
+          status,
+          message: sanitizeMessage(err.message),
+        };
       }
     }
     return {
       kind: "unknown",
-      message: "Stage 2 構造化呼出でエラーが発生しました",
+      message: sanitizeMessage(err.message),
     };
   }
   return {

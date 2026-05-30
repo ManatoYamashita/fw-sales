@@ -381,7 +381,7 @@ function normalizeSdkError(err: unknown): DeepResearchClientError {
  * - HTTP 認可ヘッダ `Bearer <token>`
  * - OpenAI 形式トークン `sk-[\w-]{20,}`
  */
-function sanitizeMessage(raw: string, maxLen = 800): string {
+export function sanitizeMessage(raw: string, maxLen = 800): string {
   let out = raw;
   const key = process.env.GEMINI_API_KEY;
   if (key && key.length >= 4) {

@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { connection } from "next/server";
+import { after, connection } from "next/server";
 import type { Metadata } from "next";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/card";
 import { ResearchStatusBadge } from "@/components/feature/research-status-badge";
 import { getDeepResearchJobById } from "@/lib/queries/deep-research";
 import { formatRelativeTime, formatDuration } from "@/lib/utils/relative-time";
+import { runPollResearchTick } from "@/app/api/cron/poll-research/pipeline";
+import { isPendingStatus } from "@/types/deep-research";
 import { JobErrorTimeline } from "./_components/job-error-timeline";
 import { JobActionButtons } from "./_components/job-action-buttons";
 import { GeminiLiveStatusCard } from "./_components/gemini-live-status-card";
@@ -32,6 +34,16 @@ export default async function JobDetailPage({
   if (!row) notFound();
 
   const { job, store_name, researcher_display_name } = row;
+
+  // GitHub Actions の scheduled cron 配信遅延 (5 分間隔のはずが
+  // 1〜3 時間スキップされる事象) で進行中ジョブが停滞することがある。
+  // 進行中ジョブの詳細ページを開いた瞬間に 1 tick を背景発火し、
+  // ユーザー視点の体感を改善する。pipeline 側 `shouldPollJob`
+  // (`api_updated_at` 基準の適応間隔 45→22→11→5 分) が dedup するため
+  // 連続アクセスでも余分な Gemini API call は発生しない。
+  if (isPendingStatus(job.status)) {
+    after(kickBackgroundPollTick);
+  }
 
   return (
     <div className="space-y-4">
@@ -137,4 +149,15 @@ export default async function JobDetailPage({
       </div>
     </div>
   );
+}
+
+async function kickBackgroundPollTick(): Promise<void> {
+  try {
+    await runPollResearchTick({ deadline: Date.now() + 50_000 });
+  } catch (err) {
+    console.error(
+      "[research/jobs/[jobId]] background poll tick failed",
+      err,
+    );
+  }
 }

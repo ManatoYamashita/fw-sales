@@ -34,7 +34,10 @@ import type {
   DeepResearchClient,
   DeepResearchTaskState,
 } from "@/lib/ai/deep-research/client";
-import type { Structurer } from "@/lib/ai/deep-research/structurer";
+import type {
+  Structurer,
+  StructurerError,
+} from "@/lib/ai/deep-research/structurer";
 import type {
   DeepResearchJob,
   DeepResearchJobErrorEntry,
@@ -459,11 +462,14 @@ async function runStage2AndFinalize(args: {
       });
       return "still_structuring";
     }
+    const detail = extractStructurerMessage(structured.error);
     await markFailed(
       job,
       "stage2",
       `stage2_${errKind}`,
-      `Stage 2 構造化に失敗しました (${errKind})`,
+      detail
+        ? `Stage 2 構造化に失敗しました (${errKind}): ${detail}`
+        : `Stage 2 構造化に失敗しました (${errKind})`,
     );
     return "failed";
   }
@@ -657,6 +663,26 @@ function inferErrorKind(err: unknown): string {
     return String((err as { kind: unknown }).kind);
   }
   return "unknown";
+}
+
+/**
+ * Stage 2 構造化エラーから、error_log に残すべき詳細メッセージを抽出する純関数。
+ *
+ * - `message?` を持つ variant (api_error / auth_error / rate_limit /
+ *   network_error / timeout / invalid_json / unknown) はその値を返す
+ * - `schema_violation` は Zod issue を `" | "` で結合
+ * - それ以外は undefined (kind 名だけで十分なケース)
+ */
+export function extractStructurerMessage(
+  err: StructurerError,
+): string | undefined {
+  if ("message" in err && typeof err.message === "string" && err.message.length > 0) {
+    return err.message;
+  }
+  if (err.kind === "schema_violation") {
+    return err.zodIssues.join(" | ");
+  }
+  return undefined;
 }
 
 function summarizeError(err: unknown): string {

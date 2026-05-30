@@ -4,6 +4,28 @@ import type { StoreInput } from "@/types/store";
 const PREFECTURE_RE = /^(東京都|北海道|大阪府|京都府|.+?[都道府県])/;
 const CITY_RE = /^(.+?[市区町村郡])/;
 
+// 現行 Google Places API は formattedAddress を
+// "日本、〒150-0043 東京都渋谷区道玄坂..." の形で返す。
+// 古い形式の末尾 " 日本" もあり得るため両方除去する。
+const ADDRESS_PREFIX_RE = /^(?:日本[、,\s]*)?(?:〒\d{3}-?\d{4}\s*)?/;
+const ADDRESS_SUFFIX_RE = /[、,\s]*日本\s*$/;
+
+/**
+ * Google Places `formattedAddress` の周辺ノイズを取り除き、
+ * 純粋な「都道府県 + 市区町村 + 番地以降」だけの形に正規化する。
+ *
+ * 取り除く対象:
+ * - 先頭の `日本、` / `日本 ` / `日本,`
+ * - 先頭の郵便番号 `〒150-0043` / `〒1500043` (任意でハイフン省略)
+ * - 末尾の `日本` (古い形式の suffix)
+ */
+export function normalizeFormattedAddress(raw: string): string {
+  return raw
+    .replace(ADDRESS_PREFIX_RE, "")
+    .replace(ADDRESS_SUFFIX_RE, "")
+    .trim();
+}
+
 export function extractPrefecture(address: string): string {
   return PREFECTURE_RE.exec(address)?.[1] ?? "";
 }
@@ -41,11 +63,19 @@ export function placeResultToStoreInput(place: PlaceResult): StoreInput {
     place.googleMapsUri ??
     `https://www.google.com/maps/search/?api=1&query_place_id=${place.placeId}`;
 
+  // formattedAddress を正規化してから prefecture/city を抽出する。
+  // address には prefecture/city を除いた残差 (番地 + 建物名) のみを保存し、
+  // 表示時に `prefecture + city + address` で再結合する設計と整合させる。
+  const normalized = normalizeFormattedAddress(place.formattedAddress);
+  const prefecture = extractPrefecture(normalized);
+  const city = extractCity(normalized);
+  const addressRest = normalized.slice(prefecture.length + city.length).trim();
+
   return {
     name: place.name,
-    prefecture: extractPrefecture(place.formattedAddress),
-    city: extractCity(place.formattedAddress),
-    address: place.formattedAddress,
+    prefecture,
+    city,
+    address: addressRest,
     genre: mapGenre(place.types),
     priority: "中",
     stage: "未調査",
