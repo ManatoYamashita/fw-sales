@@ -66,4 +66,27 @@ describe("buildDeepResearchPrompt", () => {
     expect(stage2.systemPrompt).toContain("category_1_basic");
     expect(stage2.systemPrompt).toContain("hearing_questions");
   });
+
+  // ---------------------------------------------------------------------------
+  // 住所二重結合バグの regression guard
+  // (lib/places/to-store-input.ts の formattedAddress 正規化と合わせて、
+  //  `${prefecture}${city}${address}` 結合時にプレフィックス重複が起きないこと)
+  // ---------------------------------------------------------------------------
+
+  it("住所行は `${prefecture}${city}${address}` で正しく 1 回だけ結合される", () => {
+    const { stage1 } = buildDeepResearchPrompt({
+      store: {
+        name: "ロクシタンカフェ SHIBUYA TOKYO",
+        prefecture: "東京都",
+        city: "渋谷区",
+        address: "道玄坂２丁目３−１ 渋谷駅前ビル 2-3階",
+        genre: "カフェ",
+        site_url: "",
+      },
+    });
+    const addressLine = stage1.userPrompt.match(/住所: ([^\n]+)/)?.[1] ?? "";
+    expect(addressLine).toBe("東京都渋谷区道玄坂２丁目３−１ 渋谷駅前ビル 2-3階");
+    expect(addressLine).not.toMatch(/東京都.*東京都/);
+    expect(addressLine).not.toMatch(/渋谷区.*渋谷区/);
+  });
 });
