@@ -33,7 +33,7 @@ fw-sales を利用する営業担当者。エリア検索でアポリスト候�
   - 既存同期 AI 分析（5 項目）の置換または廃止
   - 店主への直接コンタクト機能（電話発信・自動メール送付など）
 - **Adjacent expectations**:
-  - 既存 `stores` ドメインの店舗マスタが本機能の入力（必須: 店舗名・所在地）。本機能側で店舗マスタは編集しない。
+  - 既存 `stores` ドメインの店舗マスタが本機能の入力（必須: 店舗名のみ。所在地等は任意で AI が補完）。本機能側で店舗マスタは編集しない。
   - 既存 `notifications` テーブルを拡張して通知を載せるが、通知センター UI は本機能では新設しない。
   - 既存同期 AI 分析と同じ店舗詳細画面に共存させる前提。両者は別経路として区別表示する。
   - エリア検索（`lib/actions/area-search-actions.ts`）からは本機能のキュー登録ボタンを露出させない。
@@ -47,7 +47,7 @@ fw-sales を利用する営業担当者。エリア検索でアポリスト候�
 #### Acceptance Criteria
 1. When ユーザーが店舗詳細画面で Deep Research ジョブ登録アクションを実行する, the Deep Research Pipeline shall その店舗 1 件分のジョブを `queued` 状態でキューに登録し、登録結果をユーザーに返す
 2. If 対象店舗に対して `queued` / `researching` / `structuring` のいずれかの状態の既存ジョブが存在する, the Deep Research Pipeline shall 重複登録を拒否し、既存ジョブへの参照と進行状態をユーザーに返す
-3. If 対象店舗の必須基本情報（店舗名または所在地）が欠落している, the Deep Research Pipeline shall ジョブ登録を拒否し、欠落項目名をユーザーに通知する
+3. If 対象店舗の必須基本情報（店舗名）が欠落している, the Deep Research Pipeline shall ジョブ登録を拒否し、欠落項目名をユーザーに通知する（所在地・ジャンル等の他項目は任意。Stage 1 の Deep Research AI が公開情報からベストエフォートで補完する前提のため必須としない）
 4. When エリア検索結果の一覧画面が表示される, the Deep Research Pipeline shall その画面に Deep Research のキュー登録アクションを露出させない
 5. The Deep Research Pipeline shall ジョブ登録操作の所要時間を、ユーザーが結果を画面で確認できるまで概ね 5 秒以内に収める
 

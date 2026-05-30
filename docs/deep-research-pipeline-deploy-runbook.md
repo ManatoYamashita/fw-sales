@@ -119,7 +119,7 @@ gh workflow enable "Poll Deep Research Jobs"
 
 1. 「AI 分析」タブに Deep Research セクション
 2. 「Deep Research を実行」ボタン → Toast + バッジ「キュー待ち」 + ボタン disabled
-3. 所在地未入力店舗 → Toast「必須項目が未入力です: 所在地」で拒否
+3. 所在地未入力店舗でも登録可（必須は店舗名のみ。所在地等は Stage 1 の AI がベストエフォート補完）。店舗名が空の場合のみ Toast「必須項目が未入力です: 店舗名」で拒否
 
 ### エリア検索 (/stores/new?mode=area)
 

@@ -73,6 +73,49 @@ describe("buildDeepResearchPrompt", () => {
   //  `${prefecture}${city}${address}` 結合時にプレフィックス重複が起きないこと)
   // ---------------------------------------------------------------------------
 
+  // ---------------------------------------------------------------------------
+  // 所在地・ジャンルは任意入力 (必須は店舗名のみ)。空欄でも prompt が落ちず、
+  // AI に推定を促す不明フォールバックへ degrade すること。
+  // ---------------------------------------------------------------------------
+
+  it("所在地・ジャンルが空でも prompt 生成は落ちず不明フォールバックになる", () => {
+    const { stage1 } = buildDeepResearchPrompt({
+      store: {
+        name: "所在地未登録店",
+        prefecture: "",
+        city: "",
+        address: "",
+        genre: "",
+        site_url: "",
+      },
+    });
+
+    // 店舗名 (屋号) は常に埋め込まれる
+    expect(stage1.userPrompt).toMatch(/屋号: 所在地未登録店/);
+    // 空欄は推定を促す不明フォールバックに置き換わる
+    expect(stage1.userPrompt).toMatch(/住所: 不明/);
+    expect(stage1.userPrompt).toMatch(/料理ジャンル: 不明/);
+    // 空文字をそのまま連結した "住所: \n" のような空行を残さない
+    expect(stage1.userPrompt).not.toMatch(/住所: *\n/);
+  });
+
+  it("所在地が空白文字のみでも .trim() 後に不明フォールバックする", () => {
+    const { stage1 } = buildDeepResearchPrompt({
+      store: {
+        name: "空白所在地店",
+        prefecture: "  ",
+        city: "  ",
+        address: "  ",
+        genre: "和食",
+        site_url: "",
+      },
+    });
+
+    expect(stage1.userPrompt).toMatch(/住所: 不明/);
+    // 空白だけの住所行 ("住所:   ") を残さない
+    expect(stage1.userPrompt).not.toMatch(/住所: +\n/);
+  });
+
   it("住所行は `${prefecture}${city}${address}` で正しく 1 回だけ結合される", () => {
     const { stage1 } = buildDeepResearchPrompt({
       store: {

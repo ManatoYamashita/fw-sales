@@ -54,10 +54,15 @@ export function buildDeepResearchPrompt(
 ): DeepResearchPrompts {
   const { store } = input;
 
+  // 店舗名以外は任意入力。空欄でも Deep Research AI が公開情報から補完できるよう、
+  // 欠落項目は推定を促す不明フォールバックに置き換える (site_url と同じ方式)。
+  const location = `${store.prefecture}${store.city}${store.address}`.trim();
   const storeBlock = [
     `屋号: ${store.name}`,
-    `住所: ${store.prefecture}${store.city}${store.address}`,
-    `料理ジャンル: ${store.genre}`,
+    location ? `住所: ${location}` : "住所: 不明 (公開情報から推定してください)",
+    store.genre
+      ? `料理ジャンル: ${store.genre}`
+      : "料理ジャンル: 不明 (公開情報から推定してください)",
     store.site_url ? `公式サイト: ${store.site_url}` : "公式サイト: 不明",
   ].join("\n");
 
