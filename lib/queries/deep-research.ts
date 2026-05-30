@@ -65,6 +65,19 @@ export async function getDeepResearchJobByStore(
 }
 
 /**
+ * 店舗に紐づく最新ジョブ (`enqueued_at` DESC)。進行中・完了・失敗を問わず 1 件。
+ * 店舗詳細の Deep Research 欄から `/research/jobs/[id]` へ誘導する際に使用。
+ */
+export async function getLatestDeepResearchJobByStore(
+  storeId: string,
+): Promise<DeepResearchJob | null> {
+  "use cache";
+  cacheTag(CACHE_TAGS.deepResearchByStore(storeId));
+
+  return repos.deepResearch.findLatestByStore(storeId);
+}
+
+/**
  * 調査キューページ用: in-flight (queued / researching / structuring) の全ジョブ。
  *
  * - スコープ: チーム全員横断 (担当者列に display_name を表示するため LEFT JOIN 済)

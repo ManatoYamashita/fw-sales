@@ -35,6 +35,12 @@ export interface DeepResearchRepository {
   findActiveByStore(storeId: string): Promise<DeepResearchJob | null>;
 
   /**
+   * 店舗の最新ジョブ (`enqueued_at` DESC 1 件、論理削除除く)。
+   * 店舗詳細からジョブ詳細ページへ誘導するリンク用。
+   */
+  findLatestByStore(storeId: string): Promise<DeepResearchJob | null>;
+
+  /**
    * 最古の `queued` ジョブを行ロック (`FOR UPDATE SKIP LOCKED`) で 1 件取得する。
    * 並走 cron tick が同一ジョブを二重に Stage 1 起動するのを防ぐ。
    * 対象が無ければ null。

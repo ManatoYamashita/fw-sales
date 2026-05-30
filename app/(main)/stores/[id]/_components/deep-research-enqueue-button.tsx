@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { toast } from "@/components/ui/toast";
 import { ResearchStatusBadge } from "@/components/feature/research-status-badge";
+import { DeepResearchJobDetailLink } from "./deep-research-job-detail-link";
 import {
   enqueueDeepResearchAction,
   retryDeepResearchAction,
@@ -28,11 +29,14 @@ import type { DeepResearchJob } from "@/types/deep-research";
 interface DeepResearchEnqueueButtonProps {
   storeId: string;
   currentJob: DeepResearchJob | null;
+  /** 調査キューのジョブ詳細 (`/research/jobs/[id]`) へのリンク用 */
+  jobDetailId?: string | null;
 }
 
 export function DeepResearchEnqueueButton({
   storeId,
   currentJob,
+  jobDetailId,
 }: DeepResearchEnqueueButtonProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -66,10 +70,16 @@ export function DeepResearchEnqueueButton({
     });
   };
 
+  const detailLink =
+    jobDetailId ? (
+      <DeepResearchJobDetailLink jobId={jobDetailId} className="shrink-0" />
+    ) : null;
+
   if (isInflight && currentJob) {
     return (
-      <div className="flex items-center gap-2 flex-wrap">
+      <div className="flex items-center gap-2 flex-wrap justify-end">
         <ResearchStatusBadge status={currentJob.status} />
+        {detailLink}
         <Button variant="outline" size="md" disabled>
           {pending ? <Spinner /> : <Sparkles className="h-4 w-4" />}
           実行中
@@ -80,8 +90,9 @@ export function DeepResearchEnqueueButton({
 
   if (isFailed && currentJob) {
     return (
-      <div className="flex items-center gap-2 flex-wrap">
+      <div className="flex items-center gap-2 flex-wrap justify-end">
         <ResearchStatusBadge status="failed" />
+        {detailLink}
         <Button
           variant="default"
           size="md"
@@ -96,14 +107,17 @@ export function DeepResearchEnqueueButton({
   }
 
   return (
-    <Button
-      variant="default"
-      size="md"
-      onClick={handleEnqueue}
-      disabled={pending}
-    >
-      {pending ? <Spinner /> : <Sparkles className="h-4 w-4" />}
-      Deep Research を実行
-    </Button>
+    <div className="flex items-center gap-2 flex-wrap justify-end">
+      {detailLink}
+      <Button
+        variant="default"
+        size="md"
+        onClick={handleEnqueue}
+        disabled={pending}
+      >
+        {pending ? <Spinner /> : <Sparkles className="h-4 w-4" />}
+        Deep Research を実行
+      </Button>
+    </div>
   );
 }

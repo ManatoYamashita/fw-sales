@@ -16,10 +16,12 @@
 
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/card";
 import { DeepResearchEnqueueButton } from "./deep-research-enqueue-button";
+import { DeepResearchJobDetailLink } from "./deep-research-job-detail-link";
 import { DeepResearchReportView } from "./deep-research-report-view";
 import {
   getDeepResearchReport,
   getDeepResearchJobByStore,
+  getLatestDeepResearchJobByStore,
 } from "@/lib/queries/deep-research";
 
 interface DeepResearchSectionProps {
@@ -29,23 +31,33 @@ interface DeepResearchSectionProps {
 export async function DeepResearchSection({
   storeId,
 }: DeepResearchSectionProps) {
-  const [report, currentJob] = await Promise.all([
+  const [report, currentJob, latestJob] = await Promise.all([
     getDeepResearchReport(storeId),
     getDeepResearchJobByStore(storeId),
+    getLatestDeepResearchJobByStore(storeId),
   ]);
+
+  const jobDetailId =
+    currentJob?.id ?? report?.job_id ?? latestJob?.id ?? null;
+  const jobForActions =
+    currentJob ?? (latestJob?.status === "failed" ? latestJob : null);
 
   return (
     <Card>
       <CardHeader className="flex flex-wrap items-center justify-between gap-3">
-        <div>
+        <div className="space-y-1 min-w-0">
           <CardTitle>Deep Research</CardTitle>
           <p className="text-xs text-muted-foreground">
             8 カテゴリ・51 項目の詳細調査。完了まで数十分〜数時間かかります。
           </p>
+          {jobDetailId ? (
+            <DeepResearchJobDetailLink jobId={jobDetailId} />
+          ) : null}
         </div>
         <DeepResearchEnqueueButton
           storeId={storeId}
-          currentJob={currentJob}
+          currentJob={jobForActions}
+          jobDetailId={jobDetailId}
         />
       </CardHeader>
       {report ? (
