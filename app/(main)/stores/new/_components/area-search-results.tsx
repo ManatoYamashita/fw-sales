@@ -1,8 +1,10 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
+import { toast } from "@/components/ui/toast";
 import { PlaceResultList } from "./place-result-list";
 import { bulkAddStoresFromPlacesAction } from "@/lib/actions/area-search-actions";
 import type { PlaceWithMatch } from "@/lib/places/types";
@@ -24,6 +26,7 @@ export function AreaSearchResults({ results }: AreaSearchResultsProps) {
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isBulkPending, startBulkTransition] = useTransition();
+  const router = useRouter();
 
   const handleAdded = (placeId: string) => {
     setAddedIds((prev) => new Set([...prev, placeId]));
@@ -66,16 +69,27 @@ export function AreaSearchResults({ results }: AreaSearchResultsProps) {
     const ids = [...selectedIds];
     startBulkTransition(async () => {
       const result = await bulkAddStoresFromPlacesAction(ids);
-      if (result.ok) {
-        const { added, failed, failedPlaceIds } = result.data;
-        const failedSet = new Set(failedPlaceIds);
-        const succeededIds = ids.filter((id) => !failedSet.has(id));
-        setAddedIds((prev) => new Set([...prev, ...succeededIds]));
-        setSelectedIds(new Set());
-        setBulkResult({ added, failed });
-      } else {
+      if (!result.ok) {
         setError(result.error);
+        return;
       }
+      const { added, failed, failedPlaceIds } = result.data;
+      if (added > 0) {
+        // 1 件でも追加できたら登録店舗一覧へ遷移する (失敗分は toast で通知)。
+        toast.success(
+          failed > 0
+            ? `${added}件を登録しました（${failed}件は失敗）`
+            : `${added}件を登録しました`,
+        );
+        router.push("/stores");
+        return;
+      }
+      // added === 0 (全件失敗): 留まって結果を表示し、再試行できるようにする。
+      const failedSet = new Set(failedPlaceIds);
+      const succeededIds = ids.filter((id) => !failedSet.has(id));
+      setAddedIds((prev) => new Set([...prev, ...succeededIds]));
+      setSelectedIds(new Set());
+      setBulkResult({ added, failed });
     });
   };
 
