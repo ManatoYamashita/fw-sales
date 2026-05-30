@@ -222,6 +222,12 @@ async function sweepStuckJob(args: {
     status: "failed",
     completed_at: occurredAt,
   });
+  // 詳細ページの `getDeepResearchJobById` (`"use cache"`) を即時無効化する。
+  // 一覧 / 店舗別キャッシュも併せて無効化することで、cron / `after()` どちら
+  // 経由の sweep でも UI が次レンダで最新になる。
+  revalidateTag(CACHE_TAGS.deepResearchJob(job.id), "max");
+  revalidateTag(CACHE_TAGS.deepResearchByStore(job.store_id), "max");
+  revalidateTag(CACHE_TAGS.deepResearchQueue, "max");
   await fireFailureNotification(job, errorEntry.message);
 }
 
@@ -265,6 +271,10 @@ async function pollOneResearching(args: {
         status: "researching",
         api_updated_at: state.apiUpdatedAt,
       });
+      // 詳細ページ (`getDeepResearchJobById` の `"use cache"`) を無効化。
+      // `api_updated_at` 更新が UI に反映されない問題への対処。
+      // `pollGeminiJobAction` (`deep-research-actions.ts:356`) と一貫性を保つ。
+      revalidateTag(CACHE_TAGS.deepResearchJob(job.id), "max");
     }
     return "still_running";
   }
@@ -389,6 +399,7 @@ async function runStage2AndFinalize(args: {
     });
   });
 
+  revalidateTag(CACHE_TAGS.deepResearchJob(job.id), "max");
   revalidateTag(CACHE_TAGS.deepResearchByStore(job.store_id), "max");
   revalidateTag(CACHE_TAGS.deepResearchQueue, "max");
 
@@ -448,6 +459,7 @@ async function startOneQueued(args: {
       attempts: job.attempts + 1,
       research_started_at: startedAt,
     });
+    revalidateTag(CACHE_TAGS.deepResearchJob(job.id), "max");
     revalidateTag(CACHE_TAGS.deepResearchByStore(job.store_id), "max");
     revalidateTag(CACHE_TAGS.deepResearchQueue, "max");
   } catch (err) {
@@ -481,6 +493,7 @@ async function markFailed(
     status: "failed",
     completed_at: occurredAt,
   });
+  revalidateTag(CACHE_TAGS.deepResearchJob(job.id), "max");
   revalidateTag(CACHE_TAGS.deepResearchByStore(job.store_id), "max");
   revalidateTag(CACHE_TAGS.deepResearchQueue, "max");
   await fireFailureNotification(job, message);
