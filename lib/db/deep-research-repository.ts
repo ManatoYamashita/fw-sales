@@ -146,6 +146,22 @@ export function makeDeepResearchRepo(
       return row ? fromJobRow(row) : null;
     },
 
+    async findLatestByStore(storeId) {
+      const rows = await executor
+        .select()
+        .from(researchJobs)
+        .where(
+          and(
+            eq(researchJobs.store_id, storeId),
+            isNull(researchJobs.deleted_at),
+          ),
+        )
+        .orderBy(desc(researchJobs.enqueued_at))
+        .limit(1);
+      const row = rows[0];
+      return row ? fromJobRow(row) : null;
+    },
+
     async claimOldestQueued() {
       // FOR UPDATE SKIP LOCKED を使うため raw SQL を採用。
       // 取得した行は呼出側がそのトランザクション内で status を 'researching' へ
