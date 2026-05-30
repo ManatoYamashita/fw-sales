@@ -259,17 +259,98 @@ export async function deleteDeepResearchJobAction(
 
   const job = await repos.deepResearch.getById(jobId);
   if (!job) return failure("ジョブが見つかりません");
-  if (job.status !== "failed") {
-    return failure("削除できるのは failed ジョブのみです");
+  if (job.deleted_at) {
+    return failure("このジョブは既に削除済みです");
   }
 
-  const deleted = await repos.deepResearch.deleteJob(jobId);
+  const deleted = await repos.deepResearch.softDeleteJob(jobId, session.userId);
   if (!deleted) return failure("削除に失敗しました");
 
   revalidateTag(CACHE_TAGS.deepResearchByStore(job.store_id), "max");
   revalidateTag(CACHE_TAGS.deepResearchJob(jobId), "max");
   revalidateTag(CACHE_TAGS.deepResearchQueue, "max");
   return success(undefined);
+}
+
+/**
+ * 任意ステータスのジョブを 1 件論理削除する (`/research` 一覧用)。
+ */
+export async function softDeleteDeepResearchJobAction(
+  jobId: string,
+): Promise<ActionResult<void>> {
+  "use server";
+
+  const session = await getCurrentSession();
+  if (!session) return failure("ログインが必要です");
+
+  if (typeof jobId !== "string" || jobId.trim() === "") {
+    return failure("ジョブ ID が指定されていません");
+  }
+
+  const job = await repos.deepResearch.getById(jobId);
+  if (!job) return failure("ジョブが見つかりません");
+  if (job.deleted_at) return failure("このジョブは既に削除済みです");
+
+  const deleted = await repos.deepResearch.softDeleteJob(jobId, session.userId);
+  if (!deleted) return failure("削除に失敗しました");
+
+  revalidateTag(CACHE_TAGS.deepResearchByStore(job.store_id), "max");
+  revalidateTag(CACHE_TAGS.deepResearchJob(jobId), "max");
+  revalidateTag(CACHE_TAGS.deepResearchQueue, "max");
+  return success(undefined);
+}
+
+export interface SoftDeleteBulkResult {
+  deletedCount: number;
+  requestedCount: number;
+}
+
+/**
+ * 指定ジョブを一括で論理削除する (`/research` 一覧の複数選択用)。
+ */
+export async function softDeleteDeepResearchJobsAction(
+  jobIds: string[],
+): Promise<ActionResult<SoftDeleteBulkResult>> {
+  "use server";
+
+  const session = await getCurrentSession();
+  if (!session) return failure("ログインが必要です");
+
+  if (!Array.isArray(jobIds) || jobIds.length === 0) {
+    return failure("削除対象のジョブが指定されていません");
+  }
+
+  const uniqueIds = [...new Set(jobIds.filter((id) => typeof id === "string"))];
+  if (uniqueIds.length === 0) {
+    return failure("削除対象のジョブが指定されていません");
+  }
+
+  const jobs = await Promise.all(
+    uniqueIds.map(async (id) => repos.deepResearch.getById(id)),
+  );
+  const storeIds = new Set(
+    jobs
+      .filter((job): job is NonNullable<typeof job> => Boolean(job))
+      .map((job) => job.store_id),
+  );
+
+  const deletedCount = await repos.deepResearch.softDeleteJobs(
+    uniqueIds,
+    session.userId,
+  );
+
+  revalidateTag(CACHE_TAGS.deepResearchQueue, "max");
+  for (const storeId of storeIds) {
+    revalidateTag(CACHE_TAGS.deepResearchByStore(storeId), "max");
+  }
+  for (const jobId of uniqueIds) {
+    revalidateTag(CACHE_TAGS.deepResearchJob(jobId), "max");
+  }
+
+  return success({
+    deletedCount,
+    requestedCount: uniqueIds.length,
+  });
 }
 
 // ---------------------------------------------------------------------------

@@ -1,3 +1,5 @@
+"use client";
+
 import { type ReactNode } from "react";
 import { cn } from "@/lib/utils/cn";
 import { DataTableRow } from "./data-table-row";
@@ -33,6 +35,12 @@ export interface DataTableProps<T> {
   density?: DataTableDensity;
   /** 行クリック時のラッパー (Link 用途) */
   rowHref?: (row: T) => string | undefined;
+  rowSelection?: {
+    selectedRowKeys: string[];
+    onChange: (keys: string[]) => void;
+    allRowsLabel?: string;
+    rowLabel?: (row: T) => string;
+  };
 }
 
 const ROW_PADDING: Record<DataTableDensity, string> = {
@@ -53,15 +61,52 @@ export function DataTable<T>({
   className,
   density = "normal",
   rowHref,
+  rowSelection,
 }: DataTableProps<T>) {
   if (rows.length === 0) {
     return <div className={className}>{emptyState ?? null}</div>;
   }
+
+  const rowIds = rows.map((row) => rowKey(row));
+  const selectedSet = rowSelection
+    ? new Set(rowSelection.selectedRowKeys)
+    : new Set<string>();
+  const allSelected =
+    rowSelection && rowIds.length > 0 && rowIds.every((id) => selectedSet.has(id));
+
+  const toggleAllRows = (checked: boolean) => {
+    if (!rowSelection) return;
+    rowSelection.onChange(checked ? rowIds : []);
+  };
+
+  const toggleOneRow = (id: string, checked: boolean) => {
+    if (!rowSelection) return;
+    const next = new Set(rowSelection.selectedRowKeys);
+    if (checked) next.add(id);
+    else next.delete(id);
+    rowSelection.onChange([...next]);
+  };
   return (
     <div className={cn("overflow-x-auto", className)}>
       <table className="w-full text-sm border-collapse">
         <thead>
           <tr className="text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground bg-muted/50 border-y border-border">
+            {rowSelection ? (
+              <th
+                className={cn(
+                  HEADER_PADDING[density],
+                  "font-semibold whitespace-nowrap w-10 text-center",
+                )}
+              >
+                <input
+                  type="checkbox"
+                  checked={Boolean(allSelected)}
+                  onChange={(e) => toggleAllRows(e.currentTarget.checked)}
+                  aria-label={rowSelection.allRowsLabel ?? "全行を選択"}
+                  className="h-4 w-4 accent-primary"
+                />
+              </th>
+            ) : null}
             {columns.map((col) => (
               <th
                 key={col.key}
@@ -86,15 +131,33 @@ export function DataTable<T>({
         <tbody>
           {rows.map((row) => {
             const href = rowHref?.(row);
+            const id = rowKey(row);
             return (
               <DataTableRow
-                key={rowKey(row)}
+                key={id}
                 href={href}
                 className={cn(
                   "border-b border-border/60 last:border-b-0 hover:bg-muted/40 transition-colors",
                   href && "cursor-pointer",
                 )}
               >
+                {rowSelection ? (
+                  <td
+                    data-no-row-click="true"
+                    className={cn(
+                      ROW_PADDING[density],
+                      "align-middle text-center w-10",
+                    )}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedSet.has(id)}
+                      onChange={(e) => toggleOneRow(id, e.currentTarget.checked)}
+                      aria-label={rowSelection.rowLabel?.(row) ?? "行を選択"}
+                      className="h-4 w-4 accent-primary"
+                    />
+                  </td>
+                ) : null}
                 {columns.map((col) => (
                   <td
                     key={col.key}

@@ -89,6 +89,10 @@ export interface DeepResearchJob {
   completed_at: string | null;
   /** Google API の Interaction.updated。cron poll 時に更新される。 */
   api_updated_at: string | null;
+  /** 論理削除時刻。NULL の場合は未削除。 */
+  deleted_at: string | null;
+  /** 論理削除を実行したユーザーID。 */
+  deleted_by: string | null;
 }
 
 /**

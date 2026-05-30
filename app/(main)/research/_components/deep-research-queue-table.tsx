@@ -1,6 +1,15 @@
+"use client";
+
 import Link from "next/link";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { Trash2 } from "lucide-react";
 import { DataTable, type ColumnDef } from "@/components/ui/data-table";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Button } from "@/components/ui/button";
+import { Modal, ModalContent, ModalFooter } from "@/components/ui/modal";
+import { Spinner } from "@/components/ui/spinner";
+import { toast } from "@/components/ui/toast";
 import { ResearchStatusBadge } from "@/components/feature/research-status-badge";
 import {
   formatRelativeTime,
@@ -10,6 +19,10 @@ import {
 } from "@/lib/utils/relative-time";
 import { isPendingStatus } from "@/types/deep-research";
 import type { DeepResearchQueueRow } from "@/types/deep-research";
+import {
+  softDeleteDeepResearchJobAction,
+  softDeleteDeepResearchJobsAction,
+} from "@/lib/actions/deep-research-actions";
 import { RetryJobButton } from "./retry-job-button";
 import { ResearchProgressIndicator } from "./research-progress-indicator";
 
@@ -22,6 +35,60 @@ export function DeepResearchQueueTable({
   rows,
   averageDurationSec,
 }: DeepResearchQueueTableProps) {
+  const router = useRouter();
+  const [selectedJobIds, setSelectedJobIds] = useState<string[]>([]);
+  const [singleDeleteTarget, setSingleDeleteTarget] = useState<{
+    jobId: string;
+    label: string;
+  } | null>(null);
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [isDeletingSingle, startDeleteSingle] = useTransition();
+  const [isDeletingBulk, startDeleteBulk] = useTransition();
+  const visibleJobIdSet = new Set(rows.map((row) => row.job.id));
+  const selectedVisibleJobIds = selectedJobIds.filter((id) =>
+    visibleJobIdSet.has(id),
+  );
+
+  const handleDeleteOne = (jobId: string) => {
+    startDeleteSingle(async () => {
+      const result = await softDeleteDeepResearchJobAction(jobId);
+      if (result.ok) {
+        toast.success("ジョブを削除しました");
+        setSelectedJobIds((prev) => prev.filter((id) => id !== jobId));
+        setSingleDeleteTarget(null);
+        router.refresh();
+      } else {
+        toast.error(result.error ?? "削除に失敗しました");
+      }
+    });
+  };
+
+  const handleDeleteSelected = () => {
+    if (selectedVisibleJobIds.length === 0) return;
+    startDeleteBulk(async () => {
+      const result = await softDeleteDeepResearchJobsAction(selectedVisibleJobIds);
+      if (!result.ok) {
+        toast.error(result.error ?? "一括削除に失敗しました");
+        return;
+      }
+
+      if (result.data.deletedCount === 0) {
+        toast.warn("削除対象が見つかりませんでした");
+      } else if (result.data.deletedCount < result.data.requestedCount) {
+        toast.warn(
+          `${result.data.deletedCount}/${result.data.requestedCount} 件を削除しました`,
+        );
+      } else {
+        toast.success(`${result.data.deletedCount} 件を削除しました`);
+      }
+      setBulkDeleteOpen(false);
+      setSelectedJobIds((prev) =>
+        prev.filter((id) => !selectedVisibleJobIds.includes(id)),
+      );
+      router.refresh();
+    });
+  };
+
   const columns: ColumnDef<DeepResearchQueueRow>[] = [
     {
       key: "store",
@@ -116,28 +183,136 @@ export function DeepResearchQueueTable({
     {
       key: "actions",
       header: "操作",
-      width: "100px",
+      width: "200px",
       preventRowClick: true,
-      cell: (row) =>
-        row.job.status === "failed" ? (
-          <RetryJobButton jobId={row.job.id} />
-        ) : null,
+      cell: (row) => (
+        <div className="flex items-center justify-end gap-2">
+          {row.job.status === "failed" ? <RetryJobButton jobId={row.job.id} /> : null}
+          <Button
+            variant="destructive-outline"
+            size="sm"
+            onClick={() =>
+              setSingleDeleteTarget({
+                jobId: row.job.id,
+                label: row.store_name ?? "削除済み店舗",
+              })
+            }
+            disabled={isDeletingSingle || isDeletingBulk}
+          >
+            {isDeletingSingle ? (
+              <Spinner />
+            ) : (
+              <Trash2 className="h-3.5 w-3.5" />
+            )}
+            削除
+          </Button>
+        </div>
+      ),
     },
   ];
 
   return (
-    <DataTable<DeepResearchQueueRow>
-      columns={columns}
-      rows={[...rows]}
-      rowKey={(row) => row.job.id}
-      rowHref={(row) => `/research/jobs/${row.job.id}`}
-      density="compact"
-      emptyState={
-        <EmptyState
-          title="ジョブがありません"
-          description="店舗詳細ページの「AI 分析」タブから「Deep Research を実行」で投入できます。"
-        />
-      }
-    />
+    <div className="space-y-2">
+      {selectedVisibleJobIds.length > 0 ? (
+        <div className="flex items-center justify-between rounded-md border border-border bg-muted/30 px-3 py-2">
+          <p className="text-sm text-foreground">
+            {selectedVisibleJobIds.length} 件選択中
+          </p>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => setBulkDeleteOpen(true)}
+            disabled={isDeletingBulk || isDeletingSingle}
+          >
+            {isDeletingBulk ? <Spinner /> : <Trash2 className="h-3.5 w-3.5" />}
+            選択中を削除
+          </Button>
+        </div>
+      ) : null}
+
+      <DataTable<DeepResearchQueueRow>
+        columns={columns}
+        rows={[...rows]}
+        rowKey={(row) => row.job.id}
+        rowHref={(row) => `/research/jobs/${row.job.id}`}
+        density="compact"
+        rowSelection={{
+          selectedRowKeys: selectedVisibleJobIds,
+          onChange: setSelectedJobIds,
+          allRowsLabel: "表示中のジョブをすべて選択",
+          rowLabel: (row) =>
+            `${row.store_name ?? "削除済み店舗"} のジョブ ${row.job.id} を選択`,
+        }}
+        emptyState={
+          <EmptyState
+            title="ジョブがありません"
+            description="店舗詳細ページの「AI 分析」タブから「Deep Research を実行」で投入できます。"
+          />
+        }
+      />
+
+      <Modal
+        open={Boolean(singleDeleteTarget)}
+        onOpenChange={(open) => {
+          if (!open) setSingleDeleteTarget(null);
+        }}
+      >
+        <ModalContent title="ジョブを削除しますか?" size="sm">
+          <p className="text-sm text-foreground leading-relaxed">
+            「
+            <strong className="font-semibold">
+              {singleDeleteTarget?.label ?? "対象ジョブ"}
+            </strong>
+            」の Deep Research ジョブを一覧から削除します。この操作は元に戻せません。
+          </p>
+          <ModalFooter>
+            <Button
+              variant="ghost"
+              onClick={() => setSingleDeleteTarget(null)}
+              disabled={isDeletingSingle}
+            >
+              キャンセル
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() =>
+                singleDeleteTarget
+                  ? handleDeleteOne(singleDeleteTarget.jobId)
+                  : undefined
+              }
+              disabled={isDeletingSingle}
+            >
+              {isDeletingSingle ? "削除中…" : "削除する"}
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
+
+      <Modal open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
+        <ModalContent title="選択中のジョブを削除しますか?" size="sm">
+          <p className="text-sm text-foreground leading-relaxed">
+            選択中の
+            <strong className="font-semibold"> {selectedVisibleJobIds.length} 件 </strong>
+            の Deep Research ジョブを削除します。この操作は元に戻せません。
+          </p>
+          <ModalFooter>
+            <Button
+              variant="ghost"
+              onClick={() => setBulkDeleteOpen(false)}
+              disabled={isDeletingBulk}
+            >
+              キャンセル
+            </Button>
+            <Button
+              variant="danger"
+              onClick={handleDeleteSelected}
+              disabled={isDeletingBulk || selectedVisibleJobIds.length === 0}
+            >
+              {isDeletingBulk ? "削除中…" : "削除する"}
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
+    </div>
   );
 }

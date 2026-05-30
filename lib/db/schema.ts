@@ -272,6 +272,12 @@ export const researchJobs = pgTable(
     completed_at: timestamp("completed_at", { withTimezone: true }),
     /** Google API の Interaction.updated 値。cron poll 時に毎回上書き。 */
     api_updated_at: timestamp("api_updated_at", { withTimezone: true }),
+    /** 論理削除時刻。NULL の場合は未削除。 */
+    deleted_at: timestamp("deleted_at", { withTimezone: true }),
+    /** 論理削除を実行したユーザー。 */
+    deleted_by: uuid("deleted_by").references(() => profiles.id, {
+      onDelete: "set null",
+    }),
   },
   (table) => [
     index("research_jobs_status_enqueued_idx").on(

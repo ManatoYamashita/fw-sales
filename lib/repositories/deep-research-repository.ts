@@ -120,6 +120,12 @@ export interface DeepResearchRepository {
   /** failed ジョブを物理削除する。failed 以外の status では何もしない。 */
   deleteJob(jobId: string): Promise<boolean>;
 
+  /** 任意ステータスのジョブを論理削除する。 */
+  softDeleteJob(jobId: string, userId: string): Promise<boolean>;
+
+  /** 指定ID群を一括で論理削除し、削除件数を返す。 */
+  softDeleteJobs(jobIds: string[], userId: string): Promise<number>;
+
   /** Stage 2 構造化完了後にレポートを挿入する。`id` / `created_at` は実装側で生成。 */
   insertReport(input: DeepResearchReportInsert): Promise<DeepResearchReport>;
 

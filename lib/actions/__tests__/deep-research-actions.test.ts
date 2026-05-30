@@ -65,6 +65,8 @@ function makeJob(overrides: Partial<DeepResearchJob> = {}): DeepResearchJob {
     research_completed_at: null,
     completed_at: null,
     api_updated_at: "2026-05-30T10:01:00.000Z",
+    deleted_at: null,
+    deleted_by: null,
     ...overrides,
   };
 }
