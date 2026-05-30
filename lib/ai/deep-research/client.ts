@@ -49,16 +49,38 @@ export interface DeepResearchTaskHandle {
   taskId: string;
 }
 
+/**
+ * Gemini Interaction の token 消費量 (入出力)。
+ * `usage === null` は **Google 側でまだ計算リソースが投入されていない** 状態を示し、
+ * dead-lock 検出に使える重要な信号 (debug 2026-05-30 mpsh1mj9 事例より)。
+ */
+export interface DeepResearchTokenUsage {
+  promptTokens: number;
+  outputTokens: number;
+}
+
 export type DeepResearchTaskState =
-  | { state: "in_progress"; apiUpdatedAt?: string }
+  | {
+      state: "in_progress";
+      apiCreatedAt?: string;
+      apiUpdatedAt?: string;
+      tokenUsage?: DeepResearchTokenUsage;
+    }
   | {
       state: "completed";
       reportMarkdown: string;
       sourceUrls: string[];
-      tokenUsage?: { promptTokens: number; outputTokens: number };
+      tokenUsage?: DeepResearchTokenUsage;
+      apiCreatedAt?: string;
       apiUpdatedAt?: string;
     }
-  | { state: "failed"; reason: string };
+  | {
+      state: "failed";
+      reason: string;
+      apiCreatedAt?: string;
+      apiUpdatedAt?: string;
+      tokenUsage?: DeepResearchTokenUsage;
+    };
 
 export type DeepResearchCancelResult =
   | { cancelled: true }
@@ -165,30 +187,34 @@ export function createDeepResearchClient(): DeepResearchClient {
 export function mapInteractionToState(
   interaction: Interaction,
 ): DeepResearchTaskState {
+  const raw = interaction as unknown as Record<string, unknown>;
+  const apiCreatedAt =
+    typeof raw.created === "string" ? raw.created : undefined;
   const apiUpdatedAt =
-    (interaction as unknown as Record<string, unknown>).updated as
-      | string
-      | undefined;
+    typeof raw.updated === "string" ? raw.updated : undefined;
+  const tokenUsage = extractTokenUsage(interaction);
 
   switch (interaction.status) {
     case "in_progress":
     case "requires_action":
-      return { state: "in_progress", apiUpdatedAt };
+      return {
+        state: "in_progress",
+        ...(apiCreatedAt !== undefined ? { apiCreatedAt } : {}),
+        ...(apiUpdatedAt !== undefined ? { apiUpdatedAt } : {}),
+        ...(tokenUsage ? { tokenUsage } : {}),
+      };
     case "completed": {
       const { reportMarkdown, sourceUrls } = extractMarkdownAndUrls(
         interaction.outputs,
       );
-      const tokenUsage = extractTokenUsage(interaction);
-      const result: DeepResearchTaskState = {
+      return {
         state: "completed",
         reportMarkdown,
         sourceUrls,
-        apiUpdatedAt,
+        ...(apiCreatedAt !== undefined ? { apiCreatedAt } : {}),
+        ...(apiUpdatedAt !== undefined ? { apiUpdatedAt } : {}),
+        ...(tokenUsage ? { tokenUsage } : {}),
       };
-      if (tokenUsage) {
-        result.tokenUsage = tokenUsage;
-      }
-      return result;
     }
     case "failed":
     case "cancelled":
@@ -197,6 +223,9 @@ export function mapInteractionToState(
       return {
         state: "failed",
         reason: `Deep Research タスクが ${interaction.status ?? "unknown"} 状態で終了しました`,
+        ...(apiCreatedAt !== undefined ? { apiCreatedAt } : {}),
+        ...(apiUpdatedAt !== undefined ? { apiUpdatedAt } : {}),
+        ...(tokenUsage ? { tokenUsage } : {}),
       };
   }
 }

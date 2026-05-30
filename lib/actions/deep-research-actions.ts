@@ -360,7 +360,16 @@ export async function softDeleteDeepResearchJobsAction(
 export interface PollGeminiResult {
   jobId: string;
   state: "in_progress" | "completed" | "failed";
+  /** Gemini Interaction の `created` フィールド (タスク受領時刻)。null = 未公開。 */
+  apiCreatedAt: string | null;
+  /** Gemini Interaction の `updated` フィールド (Google 側 state 最終更新)。 */
   apiUpdatedAt: string | null;
+  /**
+   * Gemini Interaction の `usage`。null は **Google 側でトークン消費ゼロ**
+   * であることを示し、dead-lock 検出シグナルになる
+   * (2026-05-30 mpsh1mj9 事例: created === updated かつ usage=null で 2h+ 経過)。
+   */
+  tokenUsage: { promptTokens: number; outputTokens: number } | null;
   polledAt: string;
   message?: string;
 }
@@ -436,13 +445,18 @@ export async function pollGeminiJobAction(
 
     revalidateTag(CACHE_TAGS.deepResearchJob(jobId), "max");
 
+    // 生レスポンスの主要メタデータを呼出側 (Card) へ公開する。
+    // `tokenUsage === null` かつ `apiCreatedAt === apiUpdatedAt` で経過時間が
+    // 長い場合は Google 側で処理が始まっていない可能性が高い (dead-lock)。
+    const apiCreatedAt = state.apiCreatedAt ?? null;
+    const apiUpdatedAt = state.apiUpdatedAt ?? null;
+    const tokenUsage = state.tokenUsage ?? null;
     return success({
       jobId,
       state: state.state,
-      apiUpdatedAt:
-        state.state === "in_progress" || state.state === "completed"
-          ? (state.apiUpdatedAt ?? null)
-          : null,
+      apiCreatedAt,
+      apiUpdatedAt,
+      tokenUsage,
       polledAt,
       ...(state.state === "failed" ? { message: state.reason } : {}),
     });
