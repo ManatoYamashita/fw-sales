@@ -681,14 +681,24 @@ function inferErrorKind(err: unknown): string {
 /**
  * Stage 2 構造化エラーから、error_log に残すべき詳細メッセージを抽出する純関数。
  *
- * - `message?` を持つ variant (api_error / auth_error / rate_limit /
- *   network_error / timeout / invalid_json / unknown) はその値を返す
+ * - `invalid_json` は message に加えて `len=` / `finishReason=` / `preview=` を
+ *   ` | ` 区切りで凝集 (応答 text 切断の原因特定に必須、PR 起票元:
+ *   job_mpsfi8g0_nc3u5t の 3 連続 invalid_json で詳細不明だった反省)
+ * - 他 `message?` を持つ variant (api_error / auth_error / rate_limit /
+ *   network_error / timeout / unknown) はその値を返す
  * - `schema_violation` は Zod issue を `" | "` で結合
  * - それ以外は undefined (kind 名だけで十分なケース)
  */
 export function extractStructurerMessage(
   err: StructurerError,
 ): string | undefined {
+  if (err.kind === "invalid_json") {
+    const parts: string[] = [err.message];
+    if (err.responseLength !== undefined) parts.push(`len=${err.responseLength}`);
+    if (err.finishReason) parts.push(`finishReason=${err.finishReason}`);
+    if (err.responsePreview) parts.push(`preview="${err.responsePreview}"`);
+    return parts.join(" | ");
+  }
   if ("message" in err && typeof err.message === "string" && err.message.length > 0) {
     return err.message;
   }

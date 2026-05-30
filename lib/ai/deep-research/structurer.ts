@@ -37,7 +37,16 @@ export type StructurerError =
   | { kind: "network_error"; message?: string }
   | { kind: "schema_violation"; zodIssues: string[] }
   | { kind: "empty_response" }
-  | { kind: "invalid_json"; message: string }
+  | {
+      kind: "invalid_json";
+      message: string;
+      /** 応答 text の先頭 200 字 (truncation 時は "…(truncated)" 付き)。 */
+      responsePreview?: string;
+      /** 応答 text の全長 (`maxOutputTokens` cap 超過判定の手掛り)。 */
+      responseLength?: number;
+      /** Gemini API の `candidates[0].finishReason` (`MAX_TOKENS` 等)。 */
+      finishReason?: string;
+    }
   | { kind: "unknown"; message: string };
 
 export interface StructurerInput {
@@ -75,6 +84,7 @@ export interface Structurer {
 export function parseAndValidateStructurerText(
   text: string | undefined | null,
   sourceUrlsFallback: string[],
+  meta?: { finishReason?: string },
 ): StructurerResult<StructuredReport> {
   if (typeof text !== "string" || text.length === 0) {
     return { ok: false, error: { kind: "empty_response" } };
@@ -84,11 +94,19 @@ export function parseAndValidateStructurerText(
   try {
     parsed = JSON.parse(text);
   } catch {
+    const PREVIEW_LEN = 200;
+    const responsePreview =
+      text.length > PREVIEW_LEN
+        ? `${text.slice(0, PREVIEW_LEN)}…(truncated)`
+        : text;
     return {
       ok: false,
       error: {
         kind: "invalid_json",
         message: "Stage 2 の応答が JSON として解釈できませんでした",
+        responsePreview,
+        responseLength: text.length,
+        ...(meta?.finishReason ? { finishReason: meta.finishReason } : {}),
       },
     };
   }
@@ -153,12 +171,29 @@ export function createStructurer(): Structurer {
             responseMimeType: "application/json",
             responseJsonSchema: jsonSchema,
             temperature: 0.2,
-            maxOutputTokens: 8192,
+            // 51 項目 × 各 ~200 token + 余裕で 16k 程度。8192 だと冗長な
+            // Markdown 入力 (store データ貧弱なケース) で JSON 途中切断 →
+            // invalid_json が観測されたため拡大 (PR 起票元: job_mpsfi8g0_nc3u5t)
+            maxOutputTokens: 16384,
             abortSignal: signal,
           },
         });
 
-        return parseAndValidateStructurerText(response.text, input.sourceUrls);
+        // candidates[0].finishReason は invalid_json 時のデバッグ手がかり
+        // (MAX_TOKENS なら出力切断確定、STOP なら別原因)
+        const rawFinishReason = (
+          response as unknown as {
+            candidates?: Array<{ finishReason?: unknown }>;
+          }
+        ).candidates?.[0]?.finishReason;
+        const finishReason =
+          typeof rawFinishReason === "string" ? rawFinishReason : undefined;
+
+        return parseAndValidateStructurerText(
+          response.text,
+          input.sourceUrls,
+          finishReason ? { finishReason } : undefined,
+        );
       } catch (err) {
         return { ok: false, error: normalizeStructurerError(err) };
       }

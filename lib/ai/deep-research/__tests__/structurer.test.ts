@@ -121,6 +121,33 @@ describe("parseAndValidateStructurerText", () => {
     }
   });
 
+  it("invalid_json: 短い text と finishReason 無しの場合は preview === text 全体", () => {
+    const result = parseAndValidateStructurerText("not json", []);
+    expect(result.ok).toBe(false);
+    if (!result.ok && result.error.kind === "invalid_json") {
+      expect(result.error.responsePreview).toBe("not json");
+      expect(result.error.responseLength).toBe(8);
+      expect(result.error.finishReason).toBeUndefined();
+    }
+  });
+
+  it("invalid_json: 200 字超 text + finishReason=MAX_TOKENS で preview が切り詰められる", () => {
+    const big = "{ partial json".repeat(20); // 14*20 = 280 字, JSON 不正
+    const result = parseAndValidateStructurerText(big, [], {
+      finishReason: "MAX_TOKENS",
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok && result.error.kind === "invalid_json") {
+      expect(result.error.responseLength).toBe(big.length);
+      expect(result.error.responsePreview?.endsWith("…(truncated)")).toBe(true);
+      // preview は元の text 先頭 200 字 + サフィックスの構造
+      expect(result.error.responsePreview?.startsWith("{ partial json")).toBe(
+        true,
+      );
+      expect(result.error.finishReason).toBe("MAX_TOKENS");
+    }
+  });
+
   it("all_source_urls 空配列なら sourceUrlsFallback で補完される", () => {
     const payload = makeValidPayload();
     payload.all_source_urls = [];
