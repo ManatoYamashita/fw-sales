@@ -93,6 +93,10 @@ export interface DeepResearchJob {
   deleted_at: string | null;
   /** 論理削除を実行したユーザーID。 */
   deleted_by: string | null;
+  /** Stage 1 完了時の生 Markdown。Stage 2 構造化用。structuring 遷移時にセット。 */
+  stage1_markdown: string | null;
+  /** Stage 1 完了時の引用 URL 配列。Stage 2 構造化用。structuring 遷移時にセット。 */
+  stage1_source_urls: string[] | null;
 }
 
 /**
@@ -119,6 +123,8 @@ export interface DeepResearchJobStatusPatch {
   research_completed_at?: string | null;
   completed_at?: string | null;
   api_updated_at?: string | null;
+  stage1_markdown?: string | null;
+  stage1_source_urls?: string[] | null;
 }
 
 /**

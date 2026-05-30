@@ -48,6 +48,12 @@ export interface DeepResearchRepository {
   findOldestResearching(limit: number): Promise<DeepResearchJob[]>;
 
   /**
+   * 最古の `structuring` ジョブを最大 `limit` 件まで返す。
+   * Stage 2 処理 tick で使用。Gemini API 呼出が冪等なためロックは取らない。
+   */
+  findOldestStructuring(limit: number): Promise<DeepResearchJob[]>;
+
+  /**
    * 同時 in-flight (researching + structuring) のジョブ件数を返す。
    * Stage 1 新規起動可否の判定に使用 (`DEEP_RESEARCH_MAX_IN_FLIGHT` との比較)。
    */

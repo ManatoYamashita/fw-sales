@@ -50,22 +50,49 @@ import type { Store } from "@/types/store";
 export interface TickResult {
   swept: number;
   polled: number;
+  /** researching → structuring に遷移したジョブ件数 (Stage 1 完了検知)。 */
+  moved_to_structuring: number;
+  /** Stage 2 構造化が完了して done になったジョブ件数。 */
+  structured: number;
+  /** done になったジョブの合計件数 (moved_to_structuring + structured の文脈での完了)。 */
   completed: number;
   started: number;
   deadline_reached: boolean;
 }
 
-/** 操作ごとの残り時間最小要件 (ms)。 */
-// Stage 2 構造化 (gemini-2.5-flash-lite + 51 項目 responseJsonSchema) は
-// 大きな Markdown 入力で 10-20 秒かかることがあるため、Function deadline 内に
-// 確保する余裕を 30s に設定。残り 30s 未満なら Stage 2 を skip して次 tick へ
-// 送る (Stage 1 完了済みジョブは researching のままなので、次の cron で
-// pollOneResearching が再度 getTask して同じ判定を行う)。
-const RESERVE_STAGE2_MS = 30_000;
-const RESERVE_START_MS = 5_000; // startTask 1 件に必要な目安
-const RESERVE_POLL_ONE_MS = 2_000; // getTask 1 件に必要な目安
-const RESERVE_SWEEP_ONE_MS = 3_000; // cancelTask + DB write に必要な目安
+/**
+ * Stage 2 構造化の各種しきい値。
+ *
+ * RESERVE_STRUCTURING_BUDGET_MS: Stage 2 開始前に必要な最低残り時間。
+ *   tick 開始直後 (deadline=55s) に Stage B が実行されるため通常は達する。
+ *   残り < 40s の場合は structuring のまま次 tick へ (error_log は増やさない)。
+ *
+ * STAGE2_MAX_TIMEOUTS: Stage 2 実行中 timeout の最大許容回数。
+ *   この回数を超えたら stage2_timeout_exceeded で failed にする。
+ */
+const RESERVE_STRUCTURING_BUDGET_MS = 40_000;
+const STAGE2_MAX_TIMEOUTS = 3;
+const RESERVE_START_MS = 5_000;
+const RESERVE_POLL_ONE_MS = 2_000;
+const RESERVE_SWEEP_ONE_MS = 3_000;
 const STUCK_THRESHOLD_MS = 6 * 60 * 60 * 1000; // 6 時間
+
+/**
+ * Stage 2 処理の結果。`runStage2AndFinalize` の戻り値。
+ *
+ * - "completed"        : report 挿入 + done 化 成功
+ * - "still_structuring": timeout → structuring のまま次 tick へ
+ * - "failed"           : 回復不能エラー → failed 化済み
+ */
+type Stage2FinalizeResult = "completed" | "still_structuring" | "failed";
+
+/** error_log 内の "stage2_timeout" エントリ数を返す。再試行制御に使用。 */
+function countStage2Timeouts(job: DeepResearchJob): number {
+  const log = job.error_log ?? [];
+  return log.filter(
+    (e) => e.stage === "stage2" && e.kind === "stage2_timeout",
+  ).length;
+}
 
 /**
  * 適応型ポーリング間隔。
@@ -121,6 +148,8 @@ export async function runPollResearchTick(
   const result: TickResult = {
     swept: 0,
     polled: 0,
+    moved_to_structuring: 0,
+    structured: 0,
     completed: 0,
     started: 0,
     deadline_reached: false,
@@ -138,7 +167,34 @@ export async function runPollResearchTick(
     result.swept += 1;
   }
 
-  // ---- Stage B: Polling fan-out (適応型間隔: 45→22→11→5 分) ----------------
+  // ---- Stage B: Structuring fan-out (Stage 2 専用 tick) --------------------
+  // tick 開始直後なので最大の時間バジェットを Stage 2 に割り当てられる。
+  // 1 tick で最大 1 件処理 (Stage 2 は重いためバジェットを独占させる)。
+  if (!result.deadline_reached) {
+    const structuringJobs = await repos.deepResearch.findOldestStructuring(1);
+    for (const job of structuringJobs) {
+      if (!hasTimeLeft(deadline, RESERVE_STRUCTURING_BUDGET_MS)) {
+        // 残り時間不足: structuring のまま次 tick へ送る。failed にしない。
+        result.deadline_reached = true;
+        break;
+      }
+      const outcome = await processOneStructuring({
+        job,
+        drClient,
+        structurer,
+        deadline,
+        signal,
+      });
+      // "completed" のときのみカウント。"still_structuring" / "failed" は増やさない。
+      if (outcome === "completed") {
+        result.structured += 1;
+        result.completed += 1;
+      }
+    }
+  }
+
+  // ---- Stage C: Polling fan-out (適応型間隔: 45→22→11→5 分) ----------------
+  // completed 検知時は structuring に遷移するのみ。Stage 2 は実行しない。
   if (!result.deadline_reached) {
     const pollLimit = getPollPerTick();
     const researching = await repos.deepResearch.findOldestResearching(pollLimit);
@@ -152,16 +208,14 @@ export async function runPollResearchTick(
       const outcome = await pollOneResearching({
         job,
         drClient,
-        structurer,
-        deadline,
         signal,
       });
       result.polled += 1;
-      if (outcome === "completed") result.completed += 1;
+      if (outcome === "moved_to_structuring") result.moved_to_structuring += 1;
     }
   }
 
-  // ---- Stage C: Start fan-in -----------------------------------------------
+  // ---- Stage D: Start fan-in -----------------------------------------------
   if (!result.deadline_reached && hasTimeLeft(deadline, RESERVE_START_MS)) {
     const inFlight = await repos.deepResearch.countInFlight();
     const cap = getInFlightCap();
@@ -232,19 +286,21 @@ async function sweepStuckJob(args: {
 }
 
 // ---------------------------------------------------------------------------
-// Stage B — Polling
+// Stage C — Polling (researching → structuring 遷移のみ。Stage 2 は実行しない)
 // ---------------------------------------------------------------------------
 
+/**
+ * researching ジョブを 1 件ポーリングする。
+ * Gemini が completed を返した場合は stage1_markdown / stage1_source_urls を保存し、
+ * status を structuring に遷移する。Stage 2 構造化は実行しない (別 tick で行う)。
+ */
 async function pollOneResearching(args: {
   job: DeepResearchJob;
   drClient: DeepResearchClient;
-  structurer: Structurer;
-  deadline: number;
   signal: AbortSignal;
-}): Promise<"completed" | "still_running" | "failed" | "deadline"> {
-  const { job, drClient, structurer, deadline, signal } = args;
+}): Promise<"moved_to_structuring" | "still_running" | "failed"> {
+  const { job, drClient, signal } = args;
   if (!job.deep_research_task_id) {
-    // 想定外 (researching なのに task_id がない) → 失敗扱い
     await markFailed(
       job,
       "stage1",
@@ -284,37 +340,91 @@ async function pollOneResearching(args: {
     return "failed";
   }
 
-  // completed: 残り時間 ≥ 10s なら Stage 2 構造化、足りなければ次 tick へ送る
-  if (!hasTimeLeft(deadline, RESERVE_STAGE2_MS)) {
-    return "deadline";
+  // completed: stage1_markdown / stage1_source_urls を保存して structuring に遷移。
+  // Stage 2 はこの tick では実行しない (次 tick の Stage B で処理)。
+  const now = new Date().toISOString();
+  await repos.deepResearch.updateJobStatus(job.id, {
+    status: "structuring",
+    research_completed_at: now,
+    api_updated_at: state.apiUpdatedAt ?? null,
+    stage1_markdown: state.reportMarkdown,
+    stage1_source_urls: state.sourceUrls,
+  });
+  return "moved_to_structuring";
+}
+
+// ---------------------------------------------------------------------------
+// Stage B — Structuring (Stage 2 専用 tick)
+// ---------------------------------------------------------------------------
+
+/**
+ * structuring ジョブを 1 件取得し、Stage 2 構造化を実行する。
+ * stage1_markdown が job に保存されているため Gemini への追加呼出は不要。
+ *
+ * - 成功 → "completed" (report 挿入 + done 化済み)
+ * - timeout: 上限未達 → "still_structuring" (structuring のまま次 tick へ)
+ * - timeout: 上限超過 → "failed" (stage2_timeout_exceeded で failed 化済み)
+ * - 他の失敗 → "failed"
+ * - stage1_markdown なし → "failed"
+ */
+async function processOneStructuring(args: {
+  job: DeepResearchJob;
+  drClient: DeepResearchClient;
+  structurer: Structurer;
+  deadline: number;
+  signal: AbortSignal;
+}): Promise<Stage2FinalizeResult> {
+  const { job, structurer, deadline, signal } = args;
+
+  const reportMarkdown = job.stage1_markdown;
+  const sourceUrls = job.stage1_source_urls ?? [];
+
+  if (!reportMarkdown) {
+    // stage1_markdown が空: 移行期の旧 structuring ジョブへの防護
+    await markFailed(
+      job,
+      "stage2",
+      "stage2_markdown_missing",
+      "stage1_markdown が空のため Stage 2 を実行できませんでした",
+    );
+    return "failed";
   }
 
-  await runStage2AndFinalize({
+  // Stage 2 timeout 上限チェック
+  const timeoutCount = countStage2Timeouts(job);
+  if (timeoutCount >= STAGE2_MAX_TIMEOUTS) {
+    await repos.deepResearch.appendJobError(job.id, {
+      stage: "stage2",
+      kind: "stage2_timeout_exceeded",
+      message: `Stage 2 のタイムアウト再試行上限 (${STAGE2_MAX_TIMEOUTS} 回) を超えました`,
+      occurred_at: new Date().toISOString(),
+    });
+    await repos.deepResearch.updateJobStatus(job.id, {
+      status: "failed",
+      completed_at: new Date().toISOString(),
+    });
+    return "failed";
+  }
+
+  return runStage2AndFinalize({
     job,
-    completedState: state,
+    reportMarkdown,
+    sourceUrls,
     structurer,
     deadline,
     signal,
   });
-  return "completed";
 }
 
 async function runStage2AndFinalize(args: {
   job: DeepResearchJob;
-  completedState: Extract<DeepResearchTaskState, { state: "completed" }>;
+  reportMarkdown: string;
+  sourceUrls: string[];
   structurer: Structurer;
   deadline: number;
   signal: AbortSignal;
-}): Promise<void> {
-  const { job, completedState, structurer, deadline, signal } = args;
-  const now = new Date().toISOString();
-
-  // 状態を structuring に遷移、完了時刻も記録
-  await repos.deepResearch.updateJobStatus(job.id, {
-    status: "structuring",
-    research_completed_at: now,
-    api_updated_at: completedState.apiUpdatedAt ?? null,
-  });
+}): Promise<Stage2FinalizeResult> {
+  const { job, reportMarkdown, sourceUrls, structurer, deadline, signal } = args;
 
   const store = await repos.store.get(job.store_id);
   if (!store) {
@@ -324,7 +434,7 @@ async function runStage2AndFinalize(args: {
       "stage2_store_not_found",
       "Stage 2 構造化前に対象店舗が見つかりませんでした",
     );
-    return;
+    return "failed";
   }
 
   // 構造化用の AbortSignal は残り時間で制限
@@ -335,8 +445,8 @@ async function runStage2AndFinalize(args: {
 
   const structured = await structurer.structure(
     {
-      reportMarkdown: completedState.reportMarkdown,
-      sourceUrls: completedState.sourceUrls,
+      reportMarkdown,
+      sourceUrls,
       storeContext: {
         name: store.name,
         prefecture: store.prefecture,
@@ -351,6 +461,17 @@ async function runStage2AndFinalize(args: {
 
   if (!structured.ok) {
     const errKind = structured.error.kind;
+    if (errKind === "timeout") {
+      // 実行中 timeout: error_log に記録して structuring のまま次 tick へ。
+      // countStage2Timeouts が上限を検出したら次 tick で failed になる。
+      await repos.deepResearch.appendJobError(job.id, {
+        stage: "stage2",
+        kind: "stage2_timeout",
+        message: "Stage 2 構造化が timeout しました。次 tick で再試行します",
+        occurred_at: new Date().toISOString(),
+      });
+      return "still_structuring";
+    }
     const detail = extractStructurerMessage(structured.error);
     await markFailed(
       job,
@@ -360,7 +481,7 @@ async function runStage2AndFinalize(args: {
         ? `Stage 2 構造化に失敗しました (${errKind}): ${detail}`
         : `Stage 2 構造化に失敗しました (${errKind})`,
     );
-    return;
+    return "failed";
   }
 
   // 構造化成功 → research_reports に書込 + ジョブ done 化 + 完了通知
@@ -385,7 +506,7 @@ async function runStage2AndFinalize(args: {
     full_markdown:
       structured.data.full_markdown.length > 0
         ? structured.data.full_markdown
-        : completedState.reportMarkdown,
+        : reportMarkdown,
     all_source_urls: structured.data.all_source_urls,
     total_cost_yen: null,
     total_duration_sec: durationSec,
@@ -410,6 +531,8 @@ async function runStage2AndFinalize(args: {
     jobId: job.id,
     userId: job.user_id,
   });
+
+  return "completed";
 }
 
 // ---------------------------------------------------------------------------
@@ -595,6 +718,9 @@ export const __internal = {
   shouldPollJob,
   sweepStuckJob,
   pollOneResearching,
+  processOneStructuring,
+  runStage2AndFinalize,
+  countStage2Timeouts,
   startOneQueued,
 };
 

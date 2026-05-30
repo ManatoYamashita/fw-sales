@@ -89,15 +89,22 @@
     {
       "idx": 12,
       "version": "7",
-      "when": 1780140000000,
-      "tag": "0012_add_research_job_soft_delete",
+      "when": 1780148690521,
+      "tag": "0012_lonely_genesis",
       "breakpoints": true
     },
     {
       "idx": 13,
       "version": "7",
-      "when": 1780140600000,
-      "tag": "0013_ensure_research_job_soft_delete_columns",
+      "when": 1780149600000,
+      "tag": "0013_add_research_job_soft_delete",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1780149601000,
+      "tag": "0014_ensure_research_job_soft_delete_columns",
       "breakpoints": true
     }
   ]
