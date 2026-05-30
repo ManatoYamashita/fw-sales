@@ -152,6 +152,26 @@ export function getMonthlyCap(): number {
 }
 
 /**
+ * Stage 1 進捗停滞 (stall) 検知のしきい値 (ミリ秒)。
+ * `researching` のまま Google 側 `api_updated_at` がこの時間以上更新されなければ停滞とみなす。
+ * env は分単位 (`DEEP_RESEARCH_STALL_THRESHOLD_MIN`)、未設定時のデフォルトは 90 分。
+ * 誤検知が出た場合はこの値を大きくするだけで stall sweep を即時無効化できる (再デプロイ不要)。
+ */
+export function getStallThresholdMs(): number {
+  return readPositiveInt("DEEP_RESEARCH_STALL_THRESHOLD_MIN", 90) * 60_000;
+}
+
+/**
+ * Stage 1 進捗停滞検知の grace period (ミリ秒)。
+ * `research_started_at` がこの時間以上前のジョブのみを stall 検知対象とし、
+ * 起動直後 (初回ポーリング 45 分前) の誤検知を防ぐ。
+ * env は分単位 (`DEEP_RESEARCH_STALL_GRACE_MIN`)、未設定時のデフォルトは 60 分。
+ */
+export function getStallGraceMs(): number {
+  return readPositiveInt("DEEP_RESEARCH_STALL_GRACE_MIN", 60) * 60_000;
+}
+
+/**
  * 月次警告閾値 (上限の何 % を超えたら admin 通知を出すか)。
  * 未設定時のデフォルトは 80。0-100 の整数。
  */

@@ -25,6 +25,8 @@ import {
   getPollPerTick,
   getMonthlyCap,
   getMonthlyWarningPercent,
+  getStallThresholdMs,
+  getStallGraceMs,
 } from "@/lib/env";
 import { createDeepResearchClient } from "@/lib/ai/deep-research/client";
 import { createStructurer } from "@/lib/ai/deep-research/structurer";
@@ -49,6 +51,12 @@ import type { Store } from "@/types/store";
 /** 1 tick の処理結果。HTTP レスポンス body に展開される。 */
 export interface TickResult {
   swept: number;
+  /**
+   * 進捗停滞 (Stage 1 の api_updated_at 凍結) で sweep されたジョブ件数。
+   * 6h 経過軸の `swept` とは別計上する (運用切り分け: 停滞頻発=Google 側問題、
+   * 6h スタック頻発=cron 遅延)。
+   */
+  stalled_swept: number;
   polled: number;
   /** researching → structuring に遷移したジョブ件数 (Stage 1 完了検知)。 */
   moved_to_structuring: number;
@@ -147,6 +155,7 @@ export async function runPollResearchTick(
 
   const result: TickResult = {
     swept: 0,
+    stalled_swept: 0,
     polled: 0,
     moved_to_structuring: 0,
     structured: 0,
@@ -165,6 +174,38 @@ export async function runPollResearchTick(
     }
     await sweepStuckJob({ job, drClient, signal });
     result.swept += 1;
+  }
+
+  // ---- Stage A2: Stalled-researching sweep (進捗停滞の早期検知) -------------
+  // `researching` のまま Google 側 interaction の進捗 (api_updated_at) が
+  // しきい値 (既定 90 分) 以上凍結したジョブを 6h 待たず sweep 化する。
+  // Stage B/C/D の前に置くことで failed 化 → countInFlight 減 → 同一 tick の
+  // Stage D で queued 起動、と cap 解放が 1 tick で繋がる。
+  if (!result.deadline_reached) {
+    const now = Date.now();
+    const stalled = await repos.deepResearch.findStalledResearchingJobs(
+      new Date(now - getStallThresholdMs()),
+      new Date(now - getStallGraceMs()),
+      getPollPerTick(),
+    );
+    for (const job of stalled) {
+      if (!hasTimeLeft(deadline, RESERVE_SWEEP_ONE_MS)) {
+        result.deadline_reached = true;
+        break;
+      }
+      await sweepStuckJob({
+        job,
+        drClient,
+        signal,
+        reason: {
+          kind: "stage1_stalled_no_progress",
+          message: `Stage 1 の進捗 (api_updated_at) が ${Math.round(
+            getStallThresholdMs() / 60_000,
+          )} 分以上更新されず停滞したため sweep 化`,
+        },
+      });
+      result.stalled_swept += 1;
+    }
   }
 
   // ---- Stage B: Structuring fan-out (Stage 2 専用 tick) --------------------
@@ -242,8 +283,14 @@ async function sweepStuckJob(args: {
   job: DeepResearchJob;
   drClient: DeepResearchClient;
   signal: AbortSignal;
+  /**
+   * error_log に記録する kind/message を上書きする。
+   * 進捗停滞 sweep (Stage A2) が独自の理由を渡すために使う。
+   * 未指定なら 6h スタック sweep の従来挙動 (stage1_stuck / stage2_stuck)。
+   */
+  reason?: { kind: string; message: string };
 }): Promise<void> {
-  const { job, drClient, signal } = args;
+  const { job, drClient, signal, reason } = args;
   const occurredAt = new Date().toISOString();
 
   // cancelTask は best-effort
@@ -265,8 +312,8 @@ async function sweepStuckJob(args: {
   const stage = job.status === "structuring" ? "stage2" : "stage1";
   const errorEntry: DeepResearchJobErrorEntry = {
     stage: "sweep",
-    kind: stage === "stage2" ? "stage2_stuck" : "stage1_stuck",
-    message: `6h 経過した ${job.status} 状態のジョブを sweep 化`,
+    kind: reason?.kind ?? (stage === "stage2" ? "stage2_stuck" : "stage1_stuck"),
+    message: reason?.message ?? `6h 経過した ${job.status} 状態のジョブを sweep 化`,
     occurred_at: occurredAt,
     ...(cancelResult !== undefined ? { cancel_result: cancelResult } : {}),
   };
