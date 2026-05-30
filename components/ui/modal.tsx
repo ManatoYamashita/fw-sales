@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
@@ -46,12 +47,21 @@ export function Modal({
   const isControlled = open !== undefined;
   const value = isControlled ? open : internalOpen;
 
+  // Keep a ref to the latest onOpenChange so setOpen stays stable even when
+  // the caller passes a new inline function every render (e.g. inside a Dialog
+  // that has its own state).  Updating the ref inside useLayoutEffect rather
+  // than during render avoids the react-hooks/refs lint error.
+  const onOpenChangeRef = useRef(onOpenChange);
+  useLayoutEffect(() => {
+    onOpenChangeRef.current = onOpenChange;
+  });
+
   const setOpen = useCallback(
     (next: boolean) => {
       if (!isControlled) setInternalOpen(next);
-      onOpenChange?.(next);
+      onOpenChangeRef.current?.(next);
     },
-    [isControlled, onOpenChange],
+    [isControlled],
   );
 
   return (
