@@ -40,7 +40,7 @@ vi.mock("@/lib/supabase/server", () => ({
 }));
 
 vi.mock("next/cache", () => ({
-  revalidateTag: vi.fn(),
+  updateTag: vi.fn(),
 }));
 
 import {

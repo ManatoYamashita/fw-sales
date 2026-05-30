@@ -19,7 +19,7 @@
 import "server-only";
 
 import { z } from "zod";
-import { revalidateTag } from "next/cache";
+import { updateTag } from "next/cache";
 import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
 import { getCurrentSession } from "@/lib/supabase/server";
@@ -147,7 +147,7 @@ export async function createPromptTemplateAction(
       });
     });
 
-    revalidateTag(CACHE_TAGS.promptTemplates, "max");
+    updateTag(CACHE_TAGS.promptTemplates);
     return success(template);
   } catch (e) {
     if (e instanceof Error && e.message === "LIMIT_EXCEEDED") {
@@ -190,7 +190,7 @@ export async function updatePromptTemplateAction(
 
   if (!updated) return failure("テンプレートが見つかりません");
 
-  revalidateTag(CACHE_TAGS.promptTemplates, "max");
+  updateTag(CACHE_TAGS.promptTemplates);
   return success(updated);
 }
 
@@ -216,7 +216,7 @@ export async function deletePromptTemplateAction(
   const deleted = await repos.promptTemplate.delete(validId, session.userId);
   if (!deleted) return failure("テンプレートが見つかりません");
 
-  revalidateTag(CACHE_TAGS.promptTemplates, "max");
+  updateTag(CACHE_TAGS.promptTemplates);
   return success(true);
 }
 
@@ -242,7 +242,7 @@ export async function setDefaultPromptTemplateAction(
     );
     if (!updated) return failure("デフォルトテンプレートを変更できませんでした");
 
-    revalidateTag(CACHE_TAGS.promptTemplates, "max");
+    updateTag(CACHE_TAGS.promptTemplates);
     return success(updated);
   } catch {
     return failure("デフォルトテンプレートを変更できませんでした");
