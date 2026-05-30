@@ -460,6 +460,38 @@ export async function pollGeminiJobAction(
   }
 }
 
+export interface JobStatusSnapshot {
+  status: JobStatus;
+  taskId: string | null;
+}
+
+/**
+ * ジョブの現在 status / task_id を読み取り専用で返す (詳細ページの自動リフレッシュ判定用)。
+ *
+ * - poll tick は発火しない。`getById` で DB 最新を直接読み (`"use cache"` を経由しない)、
+ *   背景 tick がジョブを進めたかをクライアントが軽量に検知できるようにする。
+ * - クライアント (`JobAutoRefresh`) は本 status が前回値と変わった瞬間だけ
+ *   `router.refresh()` を呼ぶため、`structuring` の Stage 2 が `after()` 経由で
+ *   並行二重起動する事故を避けられる (refresh = ページ再描画 = `after()` 再発火のため)。
+ */
+export async function getDeepResearchJobStatusAction(
+  jobId: string,
+): Promise<ActionResult<JobStatusSnapshot>> {
+  "use server";
+
+  if (typeof jobId !== "string" || jobId.trim() === "") {
+    return failure("ジョブ ID が指定されていません");
+  }
+
+  const session = await getCurrentSession();
+  if (!session) return failure("ログインが必要です");
+
+  const job = await repos.deepResearch.getById(jobId);
+  if (!job) return failure("ジョブが見つかりません");
+
+  return success({ status: job.status, taskId: job.deep_research_task_id });
+}
+
 function inferErrorKind(err: unknown): string {
   if (typeof err === "object" && err !== null && "kind" in err) {
     return String((err as { kind: unknown }).kind);

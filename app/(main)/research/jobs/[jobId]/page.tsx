@@ -11,6 +11,7 @@ import { isPendingStatus } from "@/types/deep-research";
 import { JobErrorTimeline } from "./_components/job-error-timeline";
 import { JobActionButtons } from "./_components/job-action-buttons";
 import { GeminiLiveStatusCard } from "./_components/gemini-live-status-card";
+import { JobAutoRefresh } from "./_components/job-auto-refresh";
 
 type Params = Promise<{ jobId: string }>;
 
@@ -47,6 +48,11 @@ export default async function JobDetailPage({
 
   return (
     <div className="space-y-4">
+      <JobAutoRefresh
+        jobId={job.id}
+        status={job.status}
+        taskId={job.deep_research_task_id}
+      />
       <div className="space-y-1">
         <Link
           href="/research"
