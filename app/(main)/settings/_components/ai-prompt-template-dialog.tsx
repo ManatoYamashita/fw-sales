@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   Plus,
@@ -19,6 +19,7 @@ import { FormField } from "@/components/ui/form-field";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Card } from "@/components/ui/card";
+import { Tabs, TabsList, TabsTrigger, TabsPanel } from "@/components/ui/tabs";
 import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils/cn";
 import {
@@ -28,10 +29,12 @@ import {
   setDefaultPromptTemplateAction,
 } from "@/lib/actions/prompt-template-actions";
 import {
-  parseFewshots,
+  parseTemplateBody,
   serializeFewshots,
+  serializeFreeform,
   type AiPromptTemplate,
   type FewShotExample,
+  type PromptTemplateKind,
 } from "@/types/ai-prompt-template";
 import { formatDate } from "@/lib/utils/date";
 import {
@@ -41,6 +44,7 @@ import {
   canRemoveFewshot,
   MAX_FEWSHOTS,
   MAX_FEWSHOT_LENGTH,
+  MAX_FREEFORM_LENGTH,
 } from "./ai-prompt-template-helpers";
 
 const MAX_TEMPLATES = 5;
@@ -137,21 +141,21 @@ export function AiPromptTemplatesShell({ templates, isLoggedIn }: ShellProps) {
 
       <Card.Body className="space-y-4">
         <p className="text-sm text-muted-foreground leading-relaxed">
-          AI 店舗分析で使用する Few-shot 例を管理します。業種や自社のトーンに合わせた
-          Few-shot を設定することで、分析結果をカスタマイズできます。
+          AI 店舗分析で使用するテンプレートを管理します。構造化された Few-shot 例、
+          または自由記述テキストで、業種や自社のトーンに合わせて分析結果をカスタマイズできます。
         </p>
 
         {!isLoggedIn ? (
           <EmptyState
             icon={<FileText />}
             title="ログインするとテンプレートを管理できます"
-            description="AI店舗分析で使うFew-shot例を、ユーザーごとに管理できるようになります。"
+            description="AI店舗分析で使うFew-shot例や自由記述テキストを、ユーザーごとに管理できるようになります。"
           />
         ) : templates.length === 0 ? (
           <EmptyState
             icon={<FileText />}
             title="まだテンプレートはありません"
-            description="「新規作成」から Few-shot 例を追加できます。"
+            description="「新規作成」から Few-shot 例または自由記述テキストを追加できます。"
           />
         ) : (
           <ul className="divide-y divide-border rounded-lg border border-border overflow-hidden">
@@ -337,17 +341,26 @@ function TemplateDialog({ dialogMode, onSuccess, onClose }: TemplateDialogProps)
   const isEdit = dialogMode.mode === "edit";
   const existing = isEdit ? dialogMode.template : null;
 
+  // 編集時は既存 body を一度だけパースして種別・初期値を決める
+  const parsedBody = useMemo(
+    () => (existing ? parseTemplateBody(existing.body) : null),
+    [existing],
+  );
+
+  const [kind, setKind] = useState<PromptTemplateKind>(() =>
+    parsedBody?.kind === "freeform" ? "freeform" : "fewshots",
+  );
   const [name, setName] = useState(() => (existing ? existing.name : ""));
   const [fewshots, setFewshots] = useState<EditableFewShot[]>(() => {
-    if (!existing) return [toEditableNew()];
-    const parsed = parseFewshots(existing.body);
-    return parsed && parsed.length > 0 ? parsed.map(toEditable) : [toEditableNew()];
+    const fs = parsedBody?.kind === "fewshots" ? parsedBody.fewshots : null;
+    return fs && fs.length > 0 ? fs.map(toEditable) : [toEditableNew()];
   });
-  const [parseWarn] = useState<boolean>(() => {
-    if (!existing) return false;
-    const parsed = parseFewshots(existing.body);
-    return parsed === null || parsed.length === 0;
-  });
+  const [freeText, setFreeText] = useState<string>(() =>
+    parsedBody?.kind === "freeform" ? parsedBody.text : "",
+  );
+  const [parseWarn] = useState<boolean>(
+    () => existing != null && parsedBody === null,
+  );
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -369,11 +382,20 @@ function TemplateDialog({ dialogMode, onSuccess, onClose }: TemplateDialogProps)
     }
   };
 
+  const canSubmit =
+    name.trim().length > 0 &&
+    (kind === "freeform" ? freeText.trim().length > 0 : true);
+
   const handleSubmit = () => {
     setError(null);
     const fd = new FormData();
     fd.set("name", name);
-    fd.set("body", serializeFewshots(toFewShotExamples(fewshots)));
+    fd.set(
+      "body",
+      kind === "freeform"
+        ? serializeFreeform(freeText)
+        : serializeFewshots(toFewShotExamples(fewshots)),
+    );
     if (isEdit && existing) {
       fd.set("id", existing.id);
     }
@@ -398,7 +420,7 @@ function TemplateDialog({ dialogMode, onSuccess, onClose }: TemplateDialogProps)
     <Modal open onOpenChange={(v) => { if (!v && !isPending) onClose(); }}>
       <ModalContent
         title={isEdit ? "テンプレートを編集" : "テンプレートを新規作成"}
-        description="Few-shot 例を設定することで AI 分析結果をカスタマイズできます。"
+        description="Few-shot 例、または自由記述テキストで AI 分析結果をカスタマイズできます。"
         size="lg"
       >
         <div className="max-h-[60vh] overflow-y-auto space-y-6 pr-1">
@@ -422,34 +444,85 @@ function TemplateDialog({ dialogMode, onSuccess, onClose }: TemplateDialogProps)
             </span>
           </FormField>
 
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-foreground">
-                Few-shot 例（{fewshots.length} / {MAX_FEWSHOTS} 件）
-              </span>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={addFewshot}
-                disabled={!canAddFewshot(fewshots) || isPending}
-              >
-                <PlusCircle className="h-3.5 w-3.5" />
-                例を追加
-              </Button>
-            </div>
+          <Tabs
+            defaultValue={kind}
+            value={kind}
+            onValueChange={(v) => setKind(v as PromptTemplateKind)}
+          >
+            <TabsList>
+              <TabsTrigger value="fewshots" disabled={isPending}>
+                Few-shot 形式
+              </TabsTrigger>
+              <TabsTrigger value="freeform" disabled={isPending}>
+                自由記述
+              </TabsTrigger>
+            </TabsList>
 
-            {fewshots.map((ex, i) => (
-              <FewShotEditor
-                key={ex.localId}
-                index={i}
-                example={ex}
-                canRemove={canRemoveFewshot(fewshots)}
-                isPending={isPending}
-                onChange={(patch) => updateFewshot(ex.localId, patch)}
-                onRemove={() => removeFewshot(ex.localId)}
-              />
-            ))}
-          </div>
+            <TabsPanel value="fewshots" className="space-y-4">
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                入出力例（タイトル・店舗情報・理想の架電スクリプト）を 1〜
+                {MAX_FEWSHOTS} 件登録します。AI に文体を学習させたい場合に向いています。
+              </p>
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-foreground">
+                  Few-shot 例（{fewshots.length} / {MAX_FEWSHOTS} 件）
+                </span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={addFewshot}
+                  disabled={!canAddFewshot(fewshots) || isPending}
+                >
+                  <PlusCircle className="h-3.5 w-3.5" />
+                  例を追加
+                </Button>
+              </div>
+
+              {fewshots.map((ex, i) => (
+                <FewShotEditor
+                  key={ex.localId}
+                  index={i}
+                  example={ex}
+                  canRemove={canRemoveFewshot(fewshots)}
+                  isPending={isPending}
+                  onChange={(patch) => updateFewshot(ex.localId, patch)}
+                  onRemove={() => removeFewshot(ex.localId)}
+                />
+              ))}
+            </TabsPanel>
+
+            <TabsPanel value="freeform" className="space-y-4">
+              <FormField
+                label="テンプレート本文"
+                required
+                htmlFor="tpl-freeform"
+                hint="AI への指示や理想の架電スクリプトを自由に記述できます。{ASSIGNED_SALES} と書くと担当者名に自動で置き換わります（任意）。"
+              >
+                <Textarea
+                  id="tpl-freeform"
+                  value={freeText}
+                  onChange={(e) => setFreeText(e.target.value)}
+                  placeholder={
+                    "例:\n落ち着いた丁寧なトーンで分析してください。\n架電スクリプトは「ご準備中にすみません」で始め、\n私ファーストWEBの{ASSIGNED_SALES}と申しまして…と続けてください。"
+                  }
+                  rows={12}
+                  maxLength={MAX_FREEFORM_LENGTH}
+                  disabled={isPending}
+                />
+                <span
+                  className={cn(
+                    "text-xs text-right block",
+                    freeText.length > MAX_FREEFORM_LENGTH
+                      ? "text-warning font-medium"
+                      : "text-muted-foreground",
+                  )}
+                >
+                  {freeText.length.toLocaleString()} /{" "}
+                  {MAX_FREEFORM_LENGTH.toLocaleString()} 文字
+                </span>
+              </FormField>
+            </TabsPanel>
+          </Tabs>
 
           {error && (
             <p className="text-sm text-destructive" role="alert">
@@ -465,7 +538,7 @@ function TemplateDialog({ dialogMode, onSuccess, onClose }: TemplateDialogProps)
           <Button
             variant="primary"
             onClick={handleSubmit}
-            disabled={isPending || name.trim().length === 0}
+            disabled={isPending || !canSubmit}
           >
             {isPending ? "保存中…" : isEdit ? "更新する" : "作成する"}
           </Button>

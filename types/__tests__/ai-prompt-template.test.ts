@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   parseFewshots,
+  parseTemplateBody,
   serializeFewshots,
+  serializeFreeform,
   type FewShotExample,
 } from "../ai-prompt-template";
 
@@ -101,15 +103,15 @@ describe("parseFewshots", () => {
 // ---------------------------------------------------------------------------
 
 describe("serializeFewshots", () => {
-  it("FewShotExample[]を{ fewshots: [...] }形式のJSON文字列にする", () => {
+  it("FewShotExample[]を{ kind, fewshots: [...] }形式のJSON文字列にする", () => {
     const result = serializeFewshots([EXAMPLE_A]);
     const parsed = JSON.parse(result) as unknown;
-    expect(parsed).toEqual({ fewshots: [EXAMPLE_A] });
+    expect(parsed).toEqual({ kind: "fewshots", fewshots: [EXAMPLE_A] });
   });
 
-  it("空配列を{ fewshots: [] }にシリアライズする", () => {
+  it("空配列を{ kind, fewshots: [] }にシリアライズする", () => {
     const result = serializeFewshots([]);
-    expect(JSON.parse(result)).toEqual({ fewshots: [] });
+    expect(JSON.parse(result)).toEqual({ kind: "fewshots", fewshots: [] });
   });
 
   it("serializeFewshots → parseFewshots のroundtripが成立する", () => {
@@ -124,5 +126,97 @@ describe("serializeFewshots", () => {
     const parsed = parseFewshots(serializeFewshots(examples));
     expect(parsed?.[0]).toEqual(EXAMPLE_B);
     expect(parsed?.[1]).toEqual(EXAMPLE_A);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseTemplateBody (判別共用体 + 後方互換)
+// ---------------------------------------------------------------------------
+
+describe("parseTemplateBody", () => {
+  it("kind=fewshots の body を fewshots として解釈する", () => {
+    const body = serializeFewshots([EXAMPLE_A, EXAMPLE_B]);
+    const result = parseTemplateBody(body);
+    expect(result).toEqual({
+      kind: "fewshots",
+      fewshots: [EXAMPLE_A, EXAMPLE_B],
+    });
+  });
+
+  it("kind=freeform の body を freeform として解釈する", () => {
+    const body = serializeFreeform("丁寧なトーンで分析してください");
+    const result = parseTemplateBody(body);
+    expect(result).toEqual({
+      kind: "freeform",
+      text: "丁寧なトーンで分析してください",
+    });
+  });
+
+  it("空文字の freeform text も保持する", () => {
+    const result = parseTemplateBody(JSON.stringify({ kind: "freeform", text: "" }));
+    expect(result).toEqual({ kind: "freeform", text: "" });
+  });
+
+  it("後方互換: kind 無し + fewshots 配列を fewshots として解釈する", () => {
+    const legacy = JSON.stringify({ fewshots: [EXAMPLE_A] });
+    const result = parseTemplateBody(legacy);
+    expect(result).toEqual({ kind: "fewshots", fewshots: [EXAMPLE_A] });
+  });
+
+  it("freeform で text が文字列でない場合は null", () => {
+    expect(
+      parseTemplateBody(JSON.stringify({ kind: "freeform", text: 42 })),
+    ).toBeNull();
+    expect(
+      parseTemplateBody(JSON.stringify({ kind: "freeform" })),
+    ).toBeNull();
+  });
+
+  it("未知の kind は null", () => {
+    expect(
+      parseTemplateBody(JSON.stringify({ kind: "unknown", text: "x" })),
+    ).toBeNull();
+  });
+
+  it("不正 JSON / null / 配列は null", () => {
+    expect(parseTemplateBody("not json")).toBeNull();
+    expect(parseTemplateBody("")).toBeNull();
+    expect(parseTemplateBody(JSON.stringify(null))).toBeNull();
+    expect(parseTemplateBody(JSON.stringify([EXAMPLE_A]))).toBeNull();
+  });
+
+  it("kind=fewshots でも fewshots が不正なら null", () => {
+    expect(
+      parseTemplateBody(JSON.stringify({ kind: "fewshots", fewshots: "x" })),
+    ).toBeNull();
+    expect(
+      parseTemplateBody(
+        JSON.stringify({ kind: "fewshots", fewshots: [{ title: 1 }] }),
+      ),
+    ).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// serializeFreeform
+// ---------------------------------------------------------------------------
+
+describe("serializeFreeform", () => {
+  it("text を { kind: 'freeform', text } 形式の JSON 文字列にする", () => {
+    const result = serializeFreeform("自由記述テキスト");
+    expect(JSON.parse(result)).toEqual({
+      kind: "freeform",
+      text: "自由記述テキスト",
+    });
+  });
+
+  it("serializeFreeform → parseTemplateBody の roundtrip が成立する", () => {
+    const text = "改行も\n保持される\nテキスト";
+    const parsed = parseTemplateBody(serializeFreeform(text));
+    expect(parsed).toEqual({ kind: "freeform", text });
+  });
+
+  it("freeform body は parseFewshots では null になる", () => {
+    expect(parseFewshots(serializeFreeform("x"))).toBeNull();
   });
 });

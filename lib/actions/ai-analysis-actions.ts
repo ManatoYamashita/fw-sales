@@ -34,7 +34,7 @@ import { checkRateLimit } from "@/lib/ai/rate-limiter";
 import { OPERATOR_TYPES, type OperatorType } from "@/types/store";
 import { repos } from "@/lib/repositories";
 import { getCurrentSession } from "@/lib/supabase/server";
-import { parseFewshots, type FewShotExample } from "@/types/ai-prompt-template";
+import { parseTemplateBody, type TemplateBody } from "@/types/ai-prompt-template";
 
 const TIMEOUT_MS = 60_000;
 const MAX_INSTRUCTIONS_LENGTH = 500;
@@ -156,7 +156,7 @@ export async function analyzeStoreAction(
   const assignedSales = readString(formData, "assignedSales");
 
   const templateId = readNullableTrimmedString(formData, "templateId");
-  let customFewshots: FewShotExample[] | undefined;
+  let customBody: TemplateBody | undefined;
   if (templateId) {
     const idResult = z.string().uuid().safeParse(templateId);
     if (idResult.success) {
@@ -168,14 +168,21 @@ export async function analyzeStoreAction(
             session.userId,
           );
           if (template) {
-            const parsed = parseFewshots(template.body);
-            if (parsed && parsed.length > 0) {
-              customFewshots = parsed;
+            const parsed = parseTemplateBody(template.body);
+            // 中身が空のテンプレートは採用せず標準フォールバックに委ねる
+            const hasContent =
+              parsed?.kind === "freeform"
+                ? parsed.text.trim().length > 0
+                : parsed?.kind === "fewshots"
+                  ? parsed.fewshots.length > 0
+                  : false;
+            if (parsed && hasContent) {
+              customBody = parsed;
             }
           }
         }
       } catch {
-        customFewshots = undefined;
+        customBody = undefined;
       }
     }
   }
@@ -187,7 +194,7 @@ export async function analyzeStoreAction(
       additionalInstructions,
       assignedSales,
     },
-    customFewshots,
+    customBody,
   );
 
   // ④ LLM 呼出 (Req 2.6: 60s timeout 経由で AbortSignal が発火)
@@ -215,7 +222,7 @@ export async function analyzeStoreAction(
     }
 
     const fallbackWarning =
-      templateId && !customFewshots
+      templateId && !customBody
         ? "指定テンプレートの読み込みに失敗したため、標準テンプレートで分析しました"
         : undefined;
     return success(validated.value, fallbackWarning);

@@ -25,8 +25,10 @@ import { CACHE_TAGS } from "@/lib/cache";
 import { getCurrentSession } from "@/lib/supabase/server";
 import { failure, readString, success, type ActionResult } from "./_helpers";
 import {
-  parseFewshots,
+  parseTemplateBody,
   serializeFewshots,
+  serializeFreeform,
+  MAX_FREEFORM_LENGTH,
   type AiPromptTemplate,
 } from "@/types/ai-prompt-template";
 
@@ -72,6 +74,15 @@ const fewshotsSchema = z
     { message: "各 Few-shot 例の合計文字数は 4000 字以内にしてください" },
   );
 
+const freeformSchema = z
+  .string()
+  .trim()
+  .min(1, "テンプレート本文を入力してください")
+  .max(
+    MAX_FREEFORM_LENGTH,
+    `テンプレート本文は ${MAX_FREEFORM_LENGTH.toLocaleString()} 文字以内にしてください`,
+  );
+
 const templateIdSchema = z.string().uuid();
 
 function parseTemplateId(id: string): string | null {
@@ -81,16 +92,29 @@ function parseTemplateId(id: string): string | null {
 
 /**
  * body 文字列を解析・検証し、正規化済み JSON 文字列を返す。
- * parseFewshots で構造チェックし、fewshotsSchema で詳細制約を検証する。
+ * parseTemplateBody で種別を判定し、kind ごとに詳細制約を検証する。
+ * - fewshots: fewshotsSchema(各例 1〜10 件・4000 字制約・{ASSIGNED_SALES} 必須)
+ * - freeform: freeformSchema(1〜MAX_FREEFORM_LENGTH 字、プレースホルダは任意)
  */
 function validateBody(
   raw: string,
 ): { ok: true; normalized: string } | { ok: false; error: string } {
-  const parsed = parseFewshots(raw);
+  const parsed = parseTemplateBody(raw);
   if (parsed === null) {
     return { ok: false, error: "テンプレートの内容が不正です" };
   }
-  const result = fewshotsSchema.safeParse(parsed);
+
+  if (parsed.kind === "freeform") {
+    const result = freeformSchema.safeParse(parsed.text);
+    if (!result.success) {
+      const msg =
+        result.error.issues[0]?.message ?? "テンプレートの内容が不正です";
+      return { ok: false, error: msg };
+    }
+    return { ok: true, normalized: serializeFreeform(result.data) };
+  }
+
+  const result = fewshotsSchema.safeParse(parsed.fewshots);
   if (!result.success) {
     const msg =
       result.error.issues[0]?.message ?? "テンプレートの内容が不正です";
