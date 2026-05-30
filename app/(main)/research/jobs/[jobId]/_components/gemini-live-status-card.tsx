@@ -59,18 +59,28 @@ export function GeminiLiveStatusCard({
   const [lastResult, setLastResult] = useState<PollGeminiResult | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
   const [lastPolledAt, setLastPolledAt] = useState<string | null>(null);
-  const [cooldownActive, setCooldownActive] = useState(false);
+  const [cooldownRemainingMs, setCooldownRemainingMs] = useState(0);
   const ranOnceRef = useRef(false);
-  const cooldownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cooldownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const canPoll = status === "researching" && !!taskId;
+  const cooldownActive = cooldownRemainingMs > 0;
 
   const startCooldown = useCallback(() => {
-    setCooldownActive(true);
-    if (cooldownTimerRef.current) clearTimeout(cooldownTimerRef.current);
-    cooldownTimerRef.current = setTimeout(() => {
-      setCooldownActive(false);
-    }, COOLDOWN_MS);
+    if (cooldownTimerRef.current) clearInterval(cooldownTimerRef.current);
+    // 残秒数を 1s 間隔で減算。`Date.now()` は effect 内クロージャでのみ使い、
+    // React 19 の component-purity ルール (render 中の impure 呼出禁止) に抵触しない。
+    const endsAt = Date.now() + COOLDOWN_MS;
+    const tick = () => {
+      const remain = Math.max(endsAt - Date.now(), 0);
+      setCooldownRemainingMs(remain);
+      if (remain === 0 && cooldownTimerRef.current) {
+        clearInterval(cooldownTimerRef.current);
+        cooldownTimerRef.current = null;
+      }
+    };
+    tick();
+    cooldownTimerRef.current = setInterval(tick, 1000);
   }, []);
 
   const runPoll = useCallback(() => {
@@ -100,7 +110,7 @@ export function GeminiLiveStatusCard({
 
   useEffect(
     () => () => {
-      if (cooldownTimerRef.current) clearTimeout(cooldownTimerRef.current);
+      if (cooldownTimerRef.current) clearInterval(cooldownTimerRef.current);
     },
     [],
   );
@@ -110,6 +120,17 @@ export function GeminiLiveStatusCard({
   }
 
   const buttonDisabled = pending || cooldownActive;
+  const cooldownRemainingSec = Math.ceil(cooldownRemainingMs / 1000);
+  const buttonLabel = pending
+    ? "問合せ中…"
+    : cooldownActive
+      ? `次の問合せまで ${cooldownRemainingSec}s`
+      : "更新";
+  const buttonTitle = pending
+    ? "Gemini に問合せ中です。完了までしばらくお待ちください。"
+    : cooldownActive
+      ? `連続呼出を抑止するクールダウン中です (残り ${cooldownRemainingSec}s)。`
+      : "Gemini に最新状態を問合せる";
   const displayState = lastResult?.state;
   const displayApiUpdatedAt =
     lastResult?.apiUpdatedAt ?? apiUpdatedAtFromDb ?? null;
@@ -123,14 +144,15 @@ export function GeminiLiveStatusCard({
           size="sm"
           onClick={runPoll}
           disabled={buttonDisabled}
-          aria-label="Gemini に最新状態を問合せる"
+          aria-label={buttonTitle}
+          title={buttonTitle}
         >
           {pending ? (
             <Spinner />
           ) : (
             <RefreshCw className="h-3.5 w-3.5" />
           )}
-          更新
+          {buttonLabel}
         </Button>
       </CardHeader>
       <CardBody>
