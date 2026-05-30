@@ -1,10 +1,10 @@
 "use client";
 
-import Link from "next/link";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Trash2 } from "lucide-react";
 import { DataTable, type ColumnDef } from "@/components/ui/data-table";
+import { useDataTableRowNavigating } from "@/components/ui/data-table-row";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalContent, ModalFooter } from "@/components/ui/modal";
@@ -25,10 +25,33 @@ import {
 } from "@/lib/actions/deep-research-actions";
 import { RetryJobButton } from "./retry-job-button";
 import { ResearchProgressIndicator } from "./research-progress-indicator";
+import { cn } from "@/lib/utils/cn";
 
 interface DeepResearchQueueTableProps {
   rows: readonly DeepResearchQueueRow[];
   averageDurationSec?: number | null;
+}
+
+function StoreNameCell({ row }: { row: DeepResearchQueueRow }) {
+  const isNavigating = useDataTableRowNavigating();
+  return (
+    <span className="inline-flex items-center gap-2 min-w-0">
+      <span
+        className={cn(
+          "font-medium truncate",
+          row.store_name ? "text-foreground" : "text-muted-foreground italic",
+        )}
+      >
+        {row.store_name ?? "(削除済み)"}
+      </span>
+      {isNavigating ? (
+        <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground shrink-0">
+          <Spinner className="h-3.5 w-3.5 text-primary" />
+          読み込み中…
+        </span>
+      ) : null}
+    </span>
+  );
 }
 
 export function DeepResearchQueueTable({
@@ -93,17 +116,7 @@ export function DeepResearchQueueTable({
     {
       key: "store",
       header: "店舗名",
-      cell: (row) =>
-        row.store_name ? (
-          <Link
-            href={`/stores/${row.job.store_id}`}
-            className="font-medium text-foreground hover:text-primary hover:underline"
-          >
-            {row.store_name}
-          </Link>
-        ) : (
-          <span className="text-muted-foreground italic">(削除済み)</span>
-        ),
+      cell: (row) => <StoreNameCell row={row} />,
     },
     {
       key: "status",
