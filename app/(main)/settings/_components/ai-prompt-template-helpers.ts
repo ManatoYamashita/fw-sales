@@ -1,5 +1,7 @@
 import type { FewShotExample } from "@/types/ai-prompt-template";
 
+export { MAX_FREEFORM_LENGTH } from "@/types/ai-prompt-template";
+
 export const MAX_FEWSHOTS = 10;
 export const MAX_FEWSHOT_LENGTH = 4000;
 

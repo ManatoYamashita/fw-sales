@@ -51,7 +51,11 @@ import {
   setDefaultPromptTemplateAction,
 } from "../prompt-template-actions";
 import type { AiPromptTemplate } from "@/types/ai-prompt-template";
-import { serializeFewshots } from "@/types/ai-prompt-template";
+import {
+  serializeFewshots,
+  serializeFreeform,
+  MAX_FREEFORM_LENGTH,
+} from "@/types/ai-prompt-template";
 
 // ---------------------------------------------------------------------------
 // テストデータ
@@ -318,6 +322,76 @@ describe("createPromptTemplateAction", () => {
       { is_default: boolean },
     ];
     expect(insertInput.is_default).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// freeform (自由記述) バリデーション
+// ---------------------------------------------------------------------------
+
+describe("freeform テンプレートのバリデーション", () => {
+  it("freeform body で正常に作成できる({ASSIGNED_SALES} なしでも可)", async () => {
+    const created = makeTemplateRow({ name: "自由記述テンプレ" });
+    mockGetCurrentSession.mockResolvedValue(SESSION_A);
+    const txInsert = vi.fn().mockResolvedValue(created);
+    mockTransaction.mockImplementationOnce(
+      (fn: (tx: { promptTemplate: typeof mockRepo }) => Promise<AiPromptTemplate>) =>
+        fn({ promptTemplate: { ...mockRepo, countByUser: vi.fn().mockResolvedValue(1), insert: txInsert } }),
+    );
+
+    const result = await createPromptTemplateAction(
+      makeCreateFormData({ body: serializeFreeform("丁寧なトーンで分析してください") }),
+    );
+
+    expect(result.ok).toBe(true);
+    // 正規化済み freeform body が insert される
+    const [insertInput] = txInsert.mock.calls[0] as [{ body: string }];
+    expect(JSON.parse(insertInput.body)).toEqual({
+      kind: "freeform",
+      text: "丁寧なトーンで分析してください",
+    });
+  });
+
+  it("freeform body が空文字なら failure", async () => {
+    mockGetCurrentSession.mockResolvedValue(SESSION_A);
+    const result = await createPromptTemplateAction(
+      makeCreateFormData({ body: serializeFreeform("   ") }),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/本文を入力/);
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
+
+  it("freeform body が上限超過なら failure", async () => {
+    mockGetCurrentSession.mockResolvedValue(SESSION_A);
+    const tooLong = "あ".repeat(MAX_FREEFORM_LENGTH + 1);
+    const result = await createPromptTemplateAction(
+      makeCreateFormData({ body: serializeFreeform(tooLong) }),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/文字以内/);
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
+
+  it("freeform body で更新できる", async () => {
+    const updated = makeTemplateRow({ name: "更新" });
+    mockGetCurrentSession.mockResolvedValue(SESSION_A);
+    mockRepo.update.mockResolvedValue(updated);
+
+    const result = await updatePromptTemplateAction(
+      makeUpdateFormData({ body: serializeFreeform("更新後の自由記述") }),
+    );
+
+    expect(result.ok).toBe(true);
+    const [, , patch] = mockRepo.update.mock.calls[0] as [
+      string,
+      string,
+      { body: string },
+    ];
+    expect(JSON.parse(patch.body)).toEqual({
+      kind: "freeform",
+      text: "更新後の自由記述",
+    });
   });
 });
 

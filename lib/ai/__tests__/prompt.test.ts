@@ -156,31 +156,81 @@ describe("buildAnalysisPrompt - カスタム fewshots (Issue #42 Phase 3)", () =
   ];
 
   it("fewshots 指定時: カスタム店舗情報が systemPrompt に含まれる", () => {
-    const { systemPrompt } = buildAnalysisPrompt(baseInput, customExamples);
+    const { systemPrompt } = buildAnalysisPrompt(baseInput, {
+      kind: "fewshots",
+      fewshots: customExamples,
+    });
     expect(systemPrompt).toMatch(/東京都渋谷区・イタリアン・パスタ専門/);
     expect(systemPrompt).toMatch(/大阪府難波・焼肉・黒毛和牛/);
   });
 
   it("fewshots 指定時: ハードコード URL(導楽 / 蕎楽亭)が含まれない", () => {
-    const { systemPrompt } = buildAnalysisPrompt(baseInput, customExamples);
+    const { systemPrompt } = buildAnalysisPrompt(baseInput, {
+      kind: "fewshots",
+      fewshots: customExamples,
+    });
     expect(systemPrompt).not.toMatch(/A1405\/A140504\/14096697/);
     expect(systemPrompt).not.toMatch(/A1309\/A130905\/13000479/);
   });
 
   it("fewshots 指定時: {ASSIGNED_SALES} プレースホルダーが発信者名に置換される", () => {
-    const { systemPrompt } = buildAnalysisPrompt(baseInput, customExamples);
+    const { systemPrompt } = buildAnalysisPrompt(baseInput, {
+      kind: "fewshots",
+      fewshots: customExamples,
+    });
     expect(systemPrompt).toMatch(/私ファーストWEBの渡部と申しまして/);
     expect(systemPrompt).not.toMatch(/\{ASSIGNED_SALES\}/);
   });
 
-  it("fewshots undefined → ハードコード 2 例(導楽 / 蕎楽亭)にフォールバック", () => {
+  it("template undefined → ハードコード 2 例(導楽 / 蕎楽亭)にフォールバック", () => {
     const { systemPrompt } = buildAnalysisPrompt(baseInput, undefined);
     expect(systemPrompt).toMatch(/A1405\/A140504\/14096697/);
     expect(systemPrompt).toMatch(/A1309\/A130905\/13000479/);
   });
 
   it("fewshots 空配列 → ハードコード 2 例(導楽 / 蕎楽亭)にフォールバック", () => {
-    const { systemPrompt } = buildAnalysisPrompt(baseInput, []);
+    const { systemPrompt } = buildAnalysisPrompt(baseInput, {
+      kind: "fewshots",
+      fewshots: [],
+    });
+    expect(systemPrompt).toMatch(/A1405\/A140504\/14096697/);
+    expect(systemPrompt).toMatch(/A1309\/A130905\/13000479/);
+  });
+});
+
+describe("buildAnalysisPrompt - 自由記述テンプレート (freeform)", () => {
+  it("freeform 指定時: 自由記述テキストが systemPrompt に含まれる", () => {
+    const text = "落ち着いた丁寧なトーンで分析してください。架電は短めに。";
+    const { systemPrompt } = buildAnalysisPrompt(baseInput, {
+      kind: "freeform",
+      text,
+    });
+    expect(systemPrompt).toMatch(/落ち着いた丁寧なトーンで分析してください/);
+  });
+
+  it("freeform 指定時: ハードコード 2 例(導楽 / 蕎楽亭)で置換され含まれない", () => {
+    const { systemPrompt } = buildAnalysisPrompt(baseInput, {
+      kind: "freeform",
+      text: "自由記述の本文",
+    });
+    expect(systemPrompt).not.toMatch(/A1405\/A140504\/14096697/);
+    expect(systemPrompt).not.toMatch(/A1309\/A130905\/13000479/);
+  });
+
+  it("freeform 指定時: {ASSIGNED_SALES} が発信者名に置換される", () => {
+    const { systemPrompt } = buildAnalysisPrompt(baseInput, {
+      kind: "freeform",
+      text: "私ファーストWEBの{ASSIGNED_SALES}と申しまして…という冒頭で。",
+    });
+    expect(systemPrompt).toMatch(/私ファーストWEBの渡部と申しまして/);
+    expect(systemPrompt).not.toMatch(/\{ASSIGNED_SALES\}/);
+  });
+
+  it("freeform で text が空文字 → ハードコード 2 例にフォールバック", () => {
+    const { systemPrompt } = buildAnalysisPrompt(baseInput, {
+      kind: "freeform",
+      text: "   ",
+    });
     expect(systemPrompt).toMatch(/A1405\/A140504\/14096697/);
     expect(systemPrompt).toMatch(/A1309\/A130905\/13000479/);
   });

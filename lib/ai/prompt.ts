@@ -5,7 +5,10 @@
  * - user message Parts: フォーム値 JSON / 取得済 HTML 全文 / 自由追加指示 を別 Part として並べる
  *   - HTML と追加指示は空時に省略
  * - assigned_sales が空文字の場合は neutral placeholder「担当者」に差替(prefix「私ファーストWEBの」はテンプレート側が保持)
- * - fewshots 引数が指定されている場合はカスタム Few-shot を使用し、未指定/空配列の場合はハードコード 2 例にフォールバック
+ * - template 引数(TemplateBody)で Few-shot / 自由記述 を切替える:
+ *   - kind="fewshots": カスタム Few-shot 例を整形して使用
+ *   - kind="freeform": 自由記述テキストで Few-shot 枠を丸ごと置換({ASSIGNED_SALES} は置換)
+ *   - 未指定 / 空: ハードコード 2 例にフォールバック
  *
  * 関連: design.md §「PromptBuilder」, requirements.md §2.4, §3.4, §7.1, §7.2
  */
@@ -14,7 +17,7 @@ import "server-only";
 
 import type { Part } from "@google/genai";
 import type { Store } from "@/types/store";
-import type { FewShotExample } from "@/types/ai-prompt-template";
+import type { FewShotExample, TemplateBody } from "@/types/ai-prompt-template";
 
 export interface BuildAnalysisPromptInput {
   formValues: Pick<
@@ -152,18 +155,21 @@ ${script}
  * AI 分析用の system prompt + user Parts を組立てる純関数。
  *
  * - 同一入力に対して deterministic な結果を返す
- * - fewshots 指定時はカスタム例を使用、未指定/空配列はハードコード 2 例にフォールバック
+ * - template 指定時は kind に応じて Few-shot / 自由記述を使用、未指定/空はハードコード 2 例にフォールバック
  * - 構造化出力契約はユーザーの追加指示で上書き不可(Req 7.3)
  */
 export function buildAnalysisPrompt(
   input: BuildAnalysisPromptInput,
-  fewshots?: FewShotExample[],
+  template?: TemplateBody,
 ): BuiltPrompt {
   const sales = input.assignedSales.trim() || NEUTRAL_SALES_PLACEHOLDER;
 
   let fewshotSection: string;
-  if (fewshots && fewshots.length > 0) {
-    fewshotSection = formatCustomFewShots(fewshots, sales);
+  if (template?.kind === "freeform" && template.text.trim().length > 0) {
+    // 自由記述: Few-shot 枠をユーザーのテキストで丸ごと置換({ASSIGNED_SALES} は置換)
+    fewshotSection = template.text.replaceAll("{ASSIGNED_SALES}", sales);
+  } else if (template?.kind === "fewshots" && template.fewshots.length > 0) {
+    fewshotSection = formatCustomFewShots(template.fewshots, sales);
   } else {
     const fewshot1 = FEW_SHOT_DOURAKU_TEMPLATE.replaceAll(
       "{ASSIGNED_SALES}",
