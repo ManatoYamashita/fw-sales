@@ -272,6 +272,10 @@ export const researchJobs = pgTable(
     completed_at: timestamp("completed_at", { withTimezone: true }),
     /** Google API の Interaction.updated 値。cron poll 時に毎回上書き。 */
     api_updated_at: timestamp("api_updated_at", { withTimezone: true }),
+    /** Stage 1 (Deep Research) 完了時の生 Markdown レポート。Stage 2 構造化に使用。 */
+    stage1_markdown: text("stage1_markdown"),
+    /** Stage 1 (Deep Research) 完了時の引用 URL 配列。Stage 2 構造化に使用。 */
+    stage1_source_urls: jsonb("stage1_source_urls"),
   },
   (table) => [
     index("research_jobs_status_enqueued_idx").on(
