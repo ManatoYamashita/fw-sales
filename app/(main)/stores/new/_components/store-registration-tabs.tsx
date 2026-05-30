@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useOptimistic,
   useRef,
   useState,
   useTransition,
@@ -12,7 +13,9 @@ import {
 } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Card } from "@/components/ui/card";
+import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { cn } from "@/lib/utils/cn";
 import { StoreNewForm } from "./store-new-form";
 import type { PromptTemplateOption } from "./ai-analysis-panel";
 import {
@@ -76,7 +79,7 @@ export function StoreRegistrationTabs({
 }: StoreRegistrationTabsProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [, startTransition] = useTransition();
+  const [isPending, startTransition] = useTransition();
 
   // mode は URL から derive (Copilot レビュー対応: state を URL に従属させる)。
   // initialMode は SSR 初回レンダリング時の fallback として使用。
@@ -84,6 +87,11 @@ export function StoreRegistrationTabs({
     const raw = searchParams.get("mode");
     return raw !== null ? normalizeMode(raw) : initialMode;
   }, [searchParams, initialMode]);
+
+  // 楽観的モード: クリック直後にタブのハイライトを即時更新するための値。
+  // router.push の RSC 往復が完了するまで startTransition が pending を維持し、
+  // 完了後は mode (URL 由来) に自動で戻る。「固まる」体感を解消する。
+  const [optimisticMode, setOptimisticMode] = useOptimistic(mode);
 
   const [stepUnlocked, setStepUnlocked] = useState(false);
   const [urlImport, setUrlImport] = useState<UrlLoadPayload | null>(null);
@@ -114,10 +122,12 @@ export function StoreRegistrationTabs({
       // ルーター更新だけ View Transition の対象にする (上部パネルの fade)。
       // 下部 state リセットは上記 useEffect で URL 変化に追従する形で実行。
       startTransition(() => {
+        // クリックしたタブを即時ハイライト (RSC 往復を待たない)。
+        setOptimisticMode(normalized);
         router.push(`/stores/new?mode=${normalized}`, { scroll: false });
       });
     },
-    [mode, router],
+    [mode, router, setOptimisticMode],
   );
 
   const handleUrlLoaded = (payload: UrlLoadPayload) => {
@@ -151,20 +161,32 @@ export function StoreRegistrationTabs({
       <Card>
         <Card.Body className="space-y-5">
           <Tabs
-            value={mode}
+            value={optimisticMode}
             onValueChange={handleModeChange}
             defaultValue={initialMode}
             variant="pill"
           >
-            <div className="flex justify-center">
+            <div className="relative flex justify-center">
               <TabsList>
                 <TabsTrigger value="manual">手動</TabsTrigger>
                 <TabsTrigger value="url">URL 貼付</TabsTrigger>
                 <TabsTrigger value="area">エリア検索</TabsTrigger>
               </TabsList>
+              {isPending && (
+                <Spinner
+                  className="absolute right-0 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+                />
+              )}
             </div>
           </Tabs>
 
+          <div
+            className={cn(
+              "transition-opacity",
+              isPending && "pointer-events-none opacity-60",
+            )}
+            aria-busy={isPending}
+          >
           <ViewTransition default="none" enter="fade-in" exit="fade-out">
             {/* 手動モードでフォーム展開後は ManualStartPanel を隠す。
                 StoreNewForm の `initialName` は `useState` 初期値にしか使われないため、
@@ -183,12 +205,19 @@ export function StoreRegistrationTabs({
               />
             )}
           </ViewTransition>
+          </div>
         </Card.Body>
       </Card>
 
       {stepUnlocked && (
         <ViewTransition default="none" enter="fade-in" exit="fade-out">
-          <div className="space-y-4">
+          <div
+            className={cn(
+              "space-y-4 transition-opacity",
+              isPending && "pointer-events-none opacity-60",
+            )}
+            aria-busy={isPending}
+          >
             {mode === "manual" && (
               <StoreNewForm
                 key={manualStoreName}
