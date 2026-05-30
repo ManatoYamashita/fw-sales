@@ -8,7 +8,7 @@
  *
  * 登録時の検証順序 (design.md §enqueueDeepResearchAction):
  *   ① 認証 (getCurrentSession)
- *   ② 店舗の必須項目 (name, address) 取得
+ *   ② 店舗の必須項目 (name のみ) 取得 — 所在地等は任意
  *   ③ 重複ジョブ検出 (findActiveByStore)
  *   ④ 日次上限 (countByUserSinceDay)
  *   ⑤ 月次上限 (countByMonth)
@@ -65,22 +65,14 @@ export async function enqueueDeepResearchAction(
   }
 
   // ② 店舗の必須項目チェック (R1.3)
+  // 必須は店舗名のみ。所在地など他の項目は Stage 1 の Deep Research AI が
+  // 公開情報からベストエフォートで補完するため、未入力でも登録を許可する。
   const store = await repos.store.get(storeId);
   if (!store) {
     return failure("対象店舗が見つかりません");
   }
-  const missing: string[] = [];
-  if (!store.name || store.name.trim() === "") missing.push("店舗名");
-  if (
-    !store.address ||
-    store.address.trim() === "" ||
-    !store.prefecture ||
-    !store.city
-  ) {
-    missing.push("所在地");
-  }
-  if (missing.length > 0) {
-    return failure(`必須項目が未入力です: ${missing.join(", ")}`);
+  if (!store.name || store.name.trim() === "") {
+    return failure("必須項目が未入力です: 店舗名");
   }
 
   // ③ 重複ジョブ検出 (R1.2)

@@ -616,7 +616,7 @@ export async function enqueueDeepResearchAction(
 ```
 
 - Preconditions: ユーザーログイン済 (`getCurrentUser()` が non-null)
-- 内部チェック順序: (i) 認証, (ii) 店舗の必須項目 (`name`, `address_jp` 等) 取得, (iii) `findActiveByStore` で重複, (iv) `countByUserSinceDay` で日次上限, (v) `countByMonth` で月次上限, (vi) `insertJob`
+- 内部チェック順序: (i) 認証, (ii) 店舗の必須項目 (`name` のみ。所在地等は任意で Stage 1 AI が補完) 取得, (iii) `findActiveByStore` で重複, (iv) `countByUserSinceDay` で日次上限, (v) `countByMonth` で月次上限, (vi) `insertJob`
 - 戻り値: 成功時 `ok: true, data: { jobId, status: "queued" }`、失敗時 `ok: false, error: "<message>"`
 - revalidateTag: `CACHE_TAGS.deepResearchByStore(storeId)`, `CACHE_TAGS.stores`
 

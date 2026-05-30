@@ -10,24 +10,34 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
   mockRepo,
+  mockStoreRepo,
   mockGetCurrentSession,
   mockRevalidateTag,
   mockGetTask,
   mockCreateClient,
+  mockGetDailyUserCap,
+  mockGetMonthlyCap,
 } = vi.hoisted(() => ({
   mockRepo: {
     getById: vi.fn(),
     updateJobStatus: vi.fn(),
     appendJobError: vi.fn(),
+    findActiveByStore: vi.fn(),
+    countByUserSinceDay: vi.fn(),
+    countByMonth: vi.fn(),
+    insertJob: vi.fn(),
   },
+  mockStoreRepo: { get: vi.fn() },
   mockGetCurrentSession: vi.fn(),
   mockRevalidateTag: vi.fn(),
   mockGetTask: vi.fn(),
   mockCreateClient: vi.fn(),
+  mockGetDailyUserCap: vi.fn(),
+  mockGetMonthlyCap: vi.fn(),
 }));
 
 vi.mock("@/lib/repositories", () => ({
-  repos: { deepResearch: mockRepo },
+  repos: { deepResearch: mockRepo, store: mockStoreRepo },
 }));
 
 vi.mock("@/lib/supabase/server", () => ({
@@ -42,7 +52,16 @@ vi.mock("@/lib/ai/deep-research/client", () => ({
   createDeepResearchClient: mockCreateClient,
 }));
 
-import { pollGeminiJobAction } from "../deep-research-actions";
+vi.mock("@/lib/env", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/env")>();
+  return {
+    ...actual,
+    getDailyUserCap: mockGetDailyUserCap,
+    getMonthlyCap: mockGetMonthlyCap,
+  };
+});
+
+import { enqueueDeepResearchAction, pollGeminiJobAction } from "../deep-research-actions";
 import type { DeepResearchJob } from "@/types/deep-research";
 
 const JOB_ID = "job_test_xyz";
@@ -79,6 +98,133 @@ beforeEach(() => {
     getTask: mockGetTask,
     startTask: vi.fn(),
     cancelTask: vi.fn(),
+  });
+  mockGetDailyUserCap.mockReturnValue(30);
+  mockGetMonthlyCap.mockReturnValue(1000);
+});
+
+describe("enqueueDeepResearchAction", () => {
+  /** 店舗名以外も埋まった「正常系」をセットアップ。overrides で欠落を再現する。 */
+  function setupHappyPath(storeOverrides: Record<string, unknown> = {}) {
+    mockGetCurrentSession.mockResolvedValue(SESSION);
+    mockStoreRepo.get.mockResolvedValue({
+      id: STORE_ID,
+      name: "テスト食堂",
+      prefecture: "東京都",
+      city: "新宿区",
+      address: "西新宿 1-1-1",
+      ...storeOverrides,
+    });
+    mockRepo.findActiveByStore.mockResolvedValue(null);
+    mockRepo.countByUserSinceDay.mockResolvedValue(0);
+    mockRepo.countByMonth.mockResolvedValue(0);
+    mockRepo.insertJob.mockResolvedValue(
+      makeJob({ status: "queued", deep_research_task_id: null }),
+    );
+  }
+
+  it("店舗名のみ有り・所在地が全て空でも success (= 必須は店舗名のみ)", async () => {
+    setupHappyPath({ address: "", prefecture: "", city: "" });
+
+    const result = await enqueueDeepResearchAction(STORE_ID);
+
+    expect(result.ok).toBe(true);
+    expect(mockRepo.insertJob).toHaveBeenCalledWith({
+      store_id: STORE_ID,
+      user_id: USER_ID,
+    });
+  });
+
+  it("所在地の一部 (prefecture/city) のみ空でも所在地を必須扱いしない", async () => {
+    setupHappyPath({ prefecture: "", city: "", address: "西新宿 1-1-1" });
+
+    const result = await enqueueDeepResearchAction(STORE_ID);
+
+    // 所在地を必須にしていた頃は failure になっていたケース。緩和後は success。
+    expect(result.ok).toBe(true);
+    expect(mockRepo.insertJob).toHaveBeenCalledTimes(1);
+  });
+
+  it("店舗名が空白なら failure「必須項目が未入力です: 店舗名」で insertJob を呼ばない", async () => {
+    setupHappyPath({ name: "   " });
+
+    const result = await enqueueDeepResearchAction(STORE_ID);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBe("必須項目が未入力です: 店舗名");
+    expect(mockRepo.insertJob).not.toHaveBeenCalled();
+  });
+
+  it("storeId が空文字なら認証より前に failure", async () => {
+    const result = await enqueueDeepResearchAction("");
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/店舗 ID/);
+    expect(mockGetCurrentSession).not.toHaveBeenCalled();
+  });
+
+  it("storeId が空白文字のみでも trim 後に failure (認証より前)", async () => {
+    const result = await enqueueDeepResearchAction("   ");
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/店舗 ID/);
+    expect(mockGetCurrentSession).not.toHaveBeenCalled();
+  });
+
+  it("未ログインなら failure を返し store.get を呼ばない", async () => {
+    mockGetCurrentSession.mockResolvedValue(null);
+
+    const result = await enqueueDeepResearchAction(STORE_ID);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/ログイン/);
+    expect(mockStoreRepo.get).not.toHaveBeenCalled();
+    expect(mockRepo.insertJob).not.toHaveBeenCalled();
+  });
+
+  it("対象店舗が存在しなければ failure で insertJob を呼ばない", async () => {
+    mockGetCurrentSession.mockResolvedValue(SESSION);
+    mockStoreRepo.get.mockResolvedValue(null);
+
+    const result = await enqueueDeepResearchAction(STORE_ID);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/見つかりません/);
+    expect(mockRepo.insertJob).not.toHaveBeenCalled();
+  });
+
+  it("進行中ジョブがあれば重複として failure", async () => {
+    setupHappyPath();
+    mockRepo.findActiveByStore.mockResolvedValue(
+      makeJob({ status: "researching" }),
+    );
+
+    const result = await enqueueDeepResearchAction(STORE_ID);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/進行中/);
+    expect(mockRepo.insertJob).not.toHaveBeenCalled();
+  });
+
+  it("日次上限到達なら failure で insertJob を呼ばない", async () => {
+    setupHappyPath();
+    mockGetDailyUserCap.mockReturnValue(5);
+    mockRepo.countByUserSinceDay.mockResolvedValue(5);
+
+    const result = await enqueueDeepResearchAction(STORE_ID);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/本日の登録上限/);
+    expect(mockRepo.insertJob).not.toHaveBeenCalled();
+  });
+
+  it("成功時は store/job/queue の 3 タグを revalidate する", async () => {
+    setupHappyPath({ address: "", prefecture: "", city: "" });
+
+    const result = await enqueueDeepResearchAction(STORE_ID);
+
+    expect(result.ok).toBe(true);
+    expect(mockRevalidateTag).toHaveBeenCalledTimes(3);
   });
 });
 
