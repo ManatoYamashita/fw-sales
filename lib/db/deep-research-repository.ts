@@ -18,7 +18,18 @@
 
 import "server-only";
 
-import { and, asc, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  sql,
+} from "drizzle-orm";
 
 import { db, type DbClient, type Tx } from "./client";
 import { profiles, researchJobs, researchReports, stores } from "./schema";
@@ -298,6 +309,30 @@ export function makeDeepResearchRepo(
             isNull(researchJobs.deleted_at),
           ),
         );
+      return rows.map(fromJobRow);
+    },
+
+    async findStalledResearchingJobs(staleBefore, startedBefore, limit) {
+      const safeLimit = Math.max(0, Math.min(limit, 100));
+      if (safeLimit === 0) return [];
+      const rows = await executor
+        .select()
+        .from(researchJobs)
+        .where(
+          and(
+            eq(researchJobs.status, "researching"),
+            isNull(researchJobs.deleted_at),
+            // grace: 起動直後 (初回ポーリング 45 分前) を除外
+            lt(researchJobs.research_started_at, startedBefore),
+            // positive evidence: 一度は Google が updated を返した確証があるもののみ
+            isNotNull(researchJobs.api_updated_at),
+            // 進捗凍結: その updated がしきい値より古い
+            lt(researchJobs.api_updated_at, staleBefore),
+          ),
+        )
+        // 最も長く停滞しているものから処理する
+        .orderBy(asc(researchJobs.api_updated_at))
+        .limit(safeLimit);
       return rows.map(fromJobRow);
     },
 

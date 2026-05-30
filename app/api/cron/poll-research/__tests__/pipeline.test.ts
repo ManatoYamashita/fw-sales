@@ -9,8 +9,14 @@
  *   Case 5: Stage 2 timeout 上限超過 → failed (stage2_timeout_exceeded)
  *   Case 6: Stage 2 本当の失敗 (schema_violation) → failed、completed 増えない
  *   Case 7: queued → researching (startOneQueued 既存動作)
+ *   Case S1〜S8: Stage A2 進捗停滞 (stall) 検知 sweep
+ *     S1 cancel+stage1_stalled_no_progress で failed / S2 cancel throw でも failed /
+ *     S3 stalled_swept 別計上 / S3a cap 解放リンケージ / S3b 負の対照(cap 一杯) /
+ *     S4 クエリ引数境界 / S5 0件 no-op / S6 deadline skip / S7 6h sweep と共存 /
+ *     S8 reason 未指定の回帰
  *
- * 関連: deep-research-pipeline spec (Issue #43 follow-up, Stage 2 timeout fix)
+ * 関連: deep-research-pipeline spec (Issue #43 follow-up, Stage 2 timeout fix /
+ *       Stage 1 stall detection)
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -20,6 +26,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // ---------------------------------------------------------------------------
 const {
   mockFindStuck,
+  mockFindStalled,
   mockFindResearching,
   mockFindStructuring,
   mockClaimQueued,
@@ -35,9 +42,12 @@ const {
   mockGetPollPerTick,
   mockGetMonthlyCap,
   mockGetMonthlyWarningPercent,
+  mockGetStallThresholdMs,
+  mockGetStallGraceMs,
   mockCountByMonthRepo,
 } = vi.hoisted(() => ({
   mockFindStuck: vi.fn(),
+  mockFindStalled: vi.fn(),
   mockFindResearching: vi.fn(),
   mockFindStructuring: vi.fn(),
   mockClaimQueued: vi.fn(),
@@ -53,6 +63,8 @@ const {
   mockGetPollPerTick: vi.fn(),
   mockGetMonthlyCap: vi.fn(),
   mockGetMonthlyWarningPercent: vi.fn(),
+  mockGetStallThresholdMs: vi.fn(),
+  mockGetStallGraceMs: vi.fn(),
   mockCountByMonthRepo: vi.fn(),
 }));
 
@@ -60,6 +72,7 @@ vi.mock("@/lib/repositories", () => ({
   repos: {
     deepResearch: {
       findStuckJobs: mockFindStuck,
+      findStalledResearchingJobs: mockFindStalled,
       findOldestResearching: mockFindResearching,
       findOldestStructuring: mockFindStructuring,
       claimOldestQueued: mockClaimQueued,
@@ -85,6 +98,8 @@ vi.mock("@/lib/env", () => ({
   getPollPerTick: mockGetPollPerTick,
   getMonthlyCap: mockGetMonthlyCap,
   getMonthlyWarningPercent: mockGetMonthlyWarningPercent,
+  getStallThresholdMs: mockGetStallThresholdMs,
+  getStallGraceMs: mockGetStallGraceMs,
   readEnv: vi.fn(),
 }));
 
@@ -197,6 +212,7 @@ const SIGNAL = new AbortController().signal;
 beforeEach(() => {
   vi.resetAllMocks();
   mockFindStuck.mockResolvedValue([]);
+  mockFindStalled.mockResolvedValue([]);
   mockFindResearching.mockResolvedValue([]);
   mockFindStructuring.mockResolvedValue([]);
   mockClaimQueued.mockResolvedValue(null);
@@ -222,6 +238,8 @@ beforeEach(() => {
   mockGetPollPerTick.mockReturnValue(5);
   mockGetMonthlyCap.mockReturnValue(1000);
   mockGetMonthlyWarningPercent.mockReturnValue(80);
+  mockGetStallThresholdMs.mockReturnValue(90 * 60_000); // 90 分
+  mockGetStallGraceMs.mockReturnValue(60 * 60_000); // 60 分
 });
 
 // ---------------------------------------------------------------------------
@@ -605,6 +623,249 @@ describe("Case 7: startOneQueued — queued → researching", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Case S1〜S8: Stage A2 進捗停滞 (stall) 検知 sweep
+// ---------------------------------------------------------------------------
+describe("Stage A2: 進捗停滞 (stall) 検知 sweep", () => {
+  function makeStalledJob(
+    overrides: Partial<DeepResearchJob> = {},
+  ): DeepResearchJob {
+    return makeJob({
+      status: "researching",
+      deep_research_task_id: TASK_ID,
+      research_started_at: "2026-05-30T08:00:00.000Z",
+      api_updated_at: "2026-05-30T08:00:00.000Z", // 進捗が凍結 (古い)
+      ...overrides,
+    });
+  }
+
+  it("S1: cancelTask + stage1_stalled_no_progress で failed 化し失敗通知する", async () => {
+    const cancelTask = vi.fn().mockResolvedValue({ cancelled: true });
+    await __internal.sweepStuckJob({
+      job: makeStalledJob(),
+      drClient: makeDrClient({ cancelTask }),
+      signal: SIGNAL,
+      reason: {
+        kind: "stage1_stalled_no_progress",
+        message: "Stage 1 の進捗が停滞",
+      },
+    });
+
+    expect(cancelTask).toHaveBeenCalledWith({ taskId: TASK_ID }, SIGNAL);
+    expect(mockAppendJobError).toHaveBeenCalledWith(
+      JOB_ID,
+      expect.objectContaining({
+        stage: "sweep",
+        kind: "stage1_stalled_no_progress",
+      }),
+    );
+    expect(mockUpdateJobStatus).toHaveBeenCalledWith(
+      JOB_ID,
+      expect.objectContaining({
+        status: "failed",
+        completed_at: expect.any(String),
+      }),
+    );
+    expect(mockRevalidateTag).toHaveBeenCalled();
+    expect(mockCreateNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "deep_research_failed" }),
+    );
+  });
+
+  it("S2: cancelTask が throw でも failed 化し cancel_result.cancelled=false を記録 (best-effort)", async () => {
+    const cancelTask = vi.fn().mockRejectedValue(new Error("boom"));
+    await __internal.sweepStuckJob({
+      job: makeStalledJob(),
+      drClient: makeDrClient({ cancelTask }),
+      signal: SIGNAL,
+      reason: { kind: "stage1_stalled_no_progress", message: "x" },
+    });
+
+    expect(mockAppendJobError).toHaveBeenCalledWith(
+      JOB_ID,
+      expect.objectContaining({
+        kind: "stage1_stalled_no_progress",
+        cancel_result: { cancelled: false, reason: "api_error" },
+      }),
+    );
+    expect(mockUpdateJobStatus).toHaveBeenCalledWith(
+      JOB_ID,
+      expect.objectContaining({ status: "failed" }),
+    );
+  });
+
+  it("S3: runPollResearchTick で stalled_swept=1 / swept=0 と別計上される", async () => {
+    mockFindStalled.mockResolvedValue([makeStalledJob()]);
+    const drClient = makeDrClient({
+      cancelTask: vi.fn().mockResolvedValue({ cancelled: true }),
+    });
+
+    const result: TickResult = await runPollResearchTick({
+      deadline: FAR_FUTURE_DEADLINE,
+      drClient,
+      structurer: makeStructurer({ ok: false, error: { kind: "timeout" } }),
+    });
+
+    expect(result.stalled_swept).toBe(1);
+    expect(result.swept).toBe(0); // 6h sweep とは別計上
+  });
+
+  it("S3a (cap 解放リンケージ): stall を failed 化した分 inFlight が空くと同一 tick の Stage D が起動する", async () => {
+    mockFindStalled.mockResolvedValue([makeStalledJob()]);
+    // sweep 後の inFlight 状態を表現: cap(10) 未満の 9 → Stage D が claim できる
+    mockCountInFlight.mockResolvedValue(9);
+    mockClaimQueued.mockResolvedValue(
+      makeJob({
+        status: "queued",
+        deep_research_task_id: null,
+        research_started_at: null,
+        attempts: 0,
+      }),
+    );
+    const drClient = makeDrClient({
+      cancelTask: vi.fn().mockResolvedValue({ cancelled: true }),
+      startTask: vi.fn().mockResolvedValue({ taskId: "new_task" }),
+    });
+
+    const result: TickResult = await runPollResearchTick({
+      deadline: FAR_FUTURE_DEADLINE,
+      drClient,
+      structurer: makeStructurer({ ok: false, error: { kind: "timeout" } }),
+    });
+
+    expect(result.stalled_swept).toBe(1);
+    expect(mockClaimQueued).toHaveBeenCalled();
+  });
+
+  it("S3b (負の対照): stall が無く inFlight が cap 一杯なら Stage D は queued を起動しない", async () => {
+    mockFindStalled.mockResolvedValue([]);
+    mockCountInFlight.mockResolvedValue(10); // cap(10) 一杯
+    mockClaimQueued.mockResolvedValue(makeJob({ status: "queued" }));
+
+    const result: TickResult = await runPollResearchTick({
+      deadline: FAR_FUTURE_DEADLINE,
+      drClient: makeDrClient(),
+      structurer: makeStructurer({ ok: false, error: { kind: "timeout" } }),
+    });
+
+    expect(result.stalled_swept).toBe(0);
+    // cap ゲートが効いているので claim されない (S3a の linkage が空虚でないことの裏付け)
+    expect(mockClaimQueued).not.toHaveBeenCalled();
+  });
+
+  it("S5 (no-op): 停滞ジョブが 0 件なら sweep せず stalled_swept=0、failed 遷移も起きない", async () => {
+    mockFindStalled.mockResolvedValue([]);
+    const cancelTask = vi.fn();
+
+    const result: TickResult = await runPollResearchTick({
+      deadline: FAR_FUTURE_DEADLINE,
+      drClient: makeDrClient({ cancelTask }),
+      structurer: makeStructurer({ ok: false, error: { kind: "timeout" } }),
+    });
+
+    expect(result.stalled_swept).toBe(0);
+    expect(cancelTask).not.toHaveBeenCalled();
+    expect(mockUpdateJobStatus).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ status: "failed" }),
+    );
+  });
+
+  it("S4: findStalledResearchingJobs が (staleBefore, startedBefore, pollPerTick) で呼ばれる", async () => {
+    await runPollResearchTick({
+      deadline: FAR_FUTURE_DEADLINE,
+      drClient: makeDrClient(),
+      structurer: makeStructurer({ ok: false, error: { kind: "timeout" } }),
+    });
+
+    expect(mockFindStalled).toHaveBeenCalledTimes(1);
+    const call = mockFindStalled.mock.calls[0];
+    if (!call) throw new Error("findStalledResearchingJobs が呼ばれていません");
+    const [staleBefore, startedBefore, limit] = call;
+    expect(staleBefore).toBeInstanceOf(Date);
+    expect(startedBefore).toBeInstanceOf(Date);
+    // grace(60分) は threshold(90分) より新しい境界 → startedBefore > staleBefore
+    expect(startedBefore.getTime()).toBeGreaterThan(staleBefore.getTime());
+    expect(limit).toBe(5); // getPollPerTick
+  });
+
+  it("S6: deadline 不足なら stall sweep を実行せず stalled_swept=0 / deadline_reached=true", async () => {
+    mockFindStalled.mockResolvedValue([makeStalledJob()]);
+    const tightDeadline = Date.now() + 1_000; // < RESERVE_SWEEP_ONE_MS(3000)
+
+    const result: TickResult = await runPollResearchTick({
+      deadline: tightDeadline,
+      drClient: makeDrClient({ cancelTask: vi.fn() }),
+      structurer: makeStructurer({ ok: false, error: { kind: "timeout" } }),
+    });
+
+    expect(result.stalled_swept).toBe(0);
+    expect(result.deadline_reached).toBe(true);
+    expect(mockUpdateJobStatus).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ status: "failed" }),
+    );
+  });
+
+  it("S7: 6h sweep と stall sweep が両方発火し別 kind で計上される", async () => {
+    mockFindStuck.mockResolvedValue([
+      makeJob({
+        id: "job_6h",
+        status: "researching",
+        research_started_at: "2026-01-01T00:00:00.000Z",
+      }),
+    ]);
+    mockFindStalled.mockResolvedValue([makeStalledJob({ id: "job_stall" })]);
+
+    const result: TickResult = await runPollResearchTick({
+      deadline: FAR_FUTURE_DEADLINE,
+      drClient: makeDrClient({
+        cancelTask: vi.fn().mockResolvedValue({ cancelled: true }),
+      }),
+      structurer: makeStructurer({ ok: false, error: { kind: "timeout" } }),
+    });
+
+    expect(result.swept).toBe(1);
+    expect(result.stalled_swept).toBe(1);
+    expect(mockAppendJobError).toHaveBeenCalledWith(
+      "job_6h",
+      expect.objectContaining({ kind: "stage1_stuck" }),
+    );
+    expect(mockAppendJobError).toHaveBeenCalledWith(
+      "job_stall",
+      expect.objectContaining({ kind: "stage1_stalled_no_progress" }),
+    );
+  });
+
+  it("S8 (回帰): reason 未指定 sweepStuckJob は researching→stage1_stuck / structuring→stage2_stuck", async () => {
+    const drClient = makeDrClient({
+      cancelTask: vi.fn().mockResolvedValue({ cancelled: true }),
+    });
+
+    await __internal.sweepStuckJob({
+      job: makeJob({ status: "researching" }),
+      drClient,
+      signal: SIGNAL,
+    });
+    expect(mockAppendJobError).toHaveBeenCalledWith(
+      JOB_ID,
+      expect.objectContaining({ kind: "stage1_stuck" }),
+    );
+
+    mockAppendJobError.mockClear();
+
+    await __internal.sweepStuckJob({
+      job: makeStructuringJob(),
+      drClient,
+      signal: SIGNAL,
+    });
+    expect(mockAppendJobError).toHaveBeenCalledWith(
+      JOB_ID,
+      expect.objectContaining({ kind: "stage2_stuck" }),
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
 // TickResult の形状確認
 // ---------------------------------------------------------------------------
 describe("TickResult の形状", () => {
@@ -617,6 +878,7 @@ describe("TickResult の形状", () => {
 
     expect(result).toMatchObject({
       swept: expect.any(Number),
+      stalled_swept: expect.any(Number),
       polled: expect.any(Number),
       moved_to_structuring: expect.any(Number),
       structured: expect.any(Number),

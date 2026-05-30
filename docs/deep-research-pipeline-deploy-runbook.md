@@ -46,6 +46,15 @@ gh secret set DATABASE_URL    # Supabase Session Pooler (port 5432) の接続文
 | `DEEP_RESEARCH_DAILY_USER_CAP` | 任意 | default: `30` |
 | `DEEP_RESEARCH_MONTHLY_CAP` | 任意 | default: `1000` |
 | `DEEP_RESEARCH_MONTHLY_WARNING_PERCENT` | 任意 | default: `80` |
+| `DEEP_RESEARCH_STALL_THRESHOLD_MIN` | 任意 | default: `90` (分)。`researching` のまま `api_updated_at` がこの時間以上凍結したら停滞 sweep。大きくすると stall 検知を即時無効化 (再デプロイ不要) |
+| `DEEP_RESEARCH_STALL_GRACE_MIN` | 任意 | default: `60` (分)。`research_started_at` がこの時間以上前のジョブのみ stall 検知対象 (起動直後の誤検知防止) |
+
+> **進捗停滞 (stall) 検知**: cron tick の Stage A2 が「`researching` のまま Google 側
+> `api_updated_at` が `DEEP_RESEARCH_STALL_THRESHOLD_MIN` 以上更新されない」ジョブを 6h
+> 待たず `failed` 化する (`error_log.kind = "stage1_stalled_no_progress"`)。tick レスポンス
+> JSON の `stalled_swept` 件数で監視可能。6h 経過軸の `swept` とは別計上 (停滞頻発=Google
+> 側問題、6h スタック頻発=cron 遅延、と切り分けられる)。誤検知が出たら閾値 env を大きくする
+> だけで即時無効化できる (コード revert 不要)。
 
 > **Vercel CLI バグ**: `vercel env add <name> preview` は `git_branch_required` で
 > 失敗する (v54.4.1 時点)。 REST API 経由でバルク追加が確実。

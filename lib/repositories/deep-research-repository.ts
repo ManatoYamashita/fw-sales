@@ -97,6 +97,24 @@ export interface DeepResearchRepository {
    */
   findStuckJobs(thresholdAt: Date): Promise<DeepResearchJob[]>;
 
+  /**
+   * `researching` のまま Google 側 interaction の進捗 (`api_updated_at`) が
+   * 凍結したジョブを返す。Stage 1 進捗停滞 (stall) の早期検知 sweep で使用。
+   *
+   * positive-evidence 方式: `api_updated_at IS NOT NULL` かつ古いものに限定し、
+   * 起動直後 / 未ポーリング (NULL) のジョブを誤検知しない。NULL 系は従来の
+   * `findStuckJobs` (6h, `research_started_at` 軸) に委ねる二層防御。
+   *
+   * @param staleBefore   `api_updated_at` がこれより古ければ停滞とみなす境界時刻
+   * @param startedBefore `research_started_at` がこれより古いもののみ (grace period)
+   * @param limit         1 tick で処理する最大件数 (deadline 保護、実装側で 0..100 にクランプ)
+   */
+  findStalledResearchingJobs(
+    staleBefore: Date,
+    startedBefore: Date,
+    limit: number,
+  ): Promise<DeepResearchJob[]>;
+
   getById(jobId: string): Promise<DeepResearchJob | null>;
 
   /** ID で 1 件取得 (stores + profiles LEFT JOIN 済み DTO)。 詳細ページ用。 */

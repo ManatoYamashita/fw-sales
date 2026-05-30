@@ -573,7 +573,9 @@ export interface DeepResearchRepository {
 - `export const dynamic = "force-dynamic"; export const maxDuration = 60;`
 - 処理開始時に `const deadline = Date.now() + 55_000;` を固定
 - **1 tick 内で時間が許す限り次の 3 ステージを順次実行**（同時 in-flight 上限は環境変数 `DEEP_RESEARCH_MAX_IN_FLIGHT`、polling 件数は `DEEP_RESEARCH_POLL_PER_TICK`）:
-  1. **Stuck sweep**: `findStuckJobs(now - 6h)` で 6h スタック中の `researching` / `structuring` を取得 →各ジョブに対し `DeepResearchClient.cancelTask` を best-effort で呼出 →`failed` に遷移 + 通知作成。`error_log.kind = "stage1_stuck"` または `"stage2_stuck"`
+  1. **Stuck sweep (2層防御)**: 進捗の有無を直交する 2 軸で検出する。
+     - **(a) 経過時間軸 (6h)**: `findStuckJobs(now - 6h)` で `research_started_at < now-6h` の `researching` / `structuring` を取得 →`cancelTask` (best-effort) →`failed` + 通知。`error_log.kind = "stage1_stuck"` / `"stage2_stuck"`。api_updated_at が NULL のまま (= 一度もポーリング応答が無い) 異常系の最終安全網。
+     - **(b) 進捗停滞軸 (既定 90 分, Stage A2)**: `findStalledResearchingJobs(now - STALL_THRESHOLD, now - STALL_GRACE, POLL_PER_TICK)` で「`researching` のまま `api_updated_at` (= Google `interaction.updated`) が `DEEP_RESEARCH_STALL_THRESHOLD_MIN` 以上凍結」したジョブを 6h 待たず検出 →同じ sweep 経路で `failed` + 通知。`error_log.kind = "stage1_stalled_no_progress"`、`TickResult.stalled_swept` に別計上。positive-evidence 方式 (`api_updated_at IS NOT NULL` かつ古い) + grace period (`DEEP_RESEARCH_STALL_GRACE_MIN`) で起動直後/未ポーリングの正当な長尺ジョブ (Stage 1 は 1〜3h 想定) を誤検知しない。R5.6 に従い自動リトライはせず、再投入はユーザー操作 (`retryDeepResearchAction`) に委ねる。失敗時は閾値 env を大きくして即時無効化可能 (再デプロイ不要)。
   2. **Polling fan-out**: `findOldestResearching(DEEP_RESEARCH_POLL_PER_TICK)` で取得した各ジョブに対し `DeepResearchClient.getTask` を呼ぶ。`state === "completed"` なら、残り時間 ≥ 10s の場合のみ Stage 2 (`Structurer.structure`) を実行 → 成功で `done` + レポート書込 + 通知作成、失敗で `failed` + 通知作成。`state === "failed"` なら直ちに `failed` + 通知。`state === "in_progress"` なら次 tick へ
   3. **Start fan-in**: `countInFlight()` < `DEEP_RESEARCH_MAX_IN_FLIGHT` かつ残り時間 ≥ 5s なら、`claimOldestQueued()` で 1 件取り出して `DeepResearchClient.startTask` を呼び `researching` + `deep_research_task_id` 保存。失敗時は `failed` + 通知
 - 各サブ操作前に `Date.now() < deadline` をチェック。残り時間が当該操作の想定下限（Stage 2: 10s、startTask: 5s）を下回る場合は当該操作を skip
