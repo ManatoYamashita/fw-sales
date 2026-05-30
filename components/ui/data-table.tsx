@@ -137,8 +137,9 @@ export function DataTable<T>({
                 key={id}
                 href={href}
                 className={cn(
-                  "border-b border-border/60 last:border-b-0 hover:bg-muted/40 transition-colors",
-                  href && "cursor-pointer",
+                  "border-b border-border/60 last:border-b-0 transition-colors",
+                  href &&
+                    "cursor-pointer hover:bg-muted/70 active:bg-muted/80 data-[navigating=true]:hover:bg-muted/70",
                 )}
               >
                 {rowSelection ? (
