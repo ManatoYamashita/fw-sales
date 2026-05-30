@@ -96,11 +96,17 @@ export function createDeepResearchClient(): DeepResearchClient {
       try {
         // `client.interactions.create` を非同期 (background:true) で投入。
         // signal は SDK の RequestOptions.signal 経由で AbortController を渡す。
+        //
+        // `deep-research-preview-04-2026` agent は `system_instruction`
+        // パラメータをサポートせず、HTTP 400 (invalid_request) を返す。
+        // systemPrompt は input の先頭に結合して 1 つの prompt として渡す。
+        const combinedInput = [input.systemPrompt, input.userPrompt]
+          .filter((s) => typeof s === "string" && s.length > 0)
+          .join("\n\n");
         const interaction = (await ai.interactions.create(
           {
             agent: getDeepResearchModel(),
-            input: input.userPrompt,
-            system_instruction: input.systemPrompt,
+            input: combinedInput,
             background: true,
           },
           { signal },

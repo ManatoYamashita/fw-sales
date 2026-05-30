@@ -165,7 +165,7 @@ describe("DeepResearchClient", () => {
     ).rejects.toMatchObject({ kind: "missing_api_key" });
   });
 
-  it("startTask: SDK モック経由で id を返す", async () => {
+  it("startTask: SDK モック経由で id を返す & systemPrompt + userPrompt が input に結合される", async () => {
     mockCreate.mockResolvedValueOnce({ id: "interactions/abc123" });
     const client = createDeepResearchClient();
     const result = await client.startTask(
@@ -173,15 +173,28 @@ describe("DeepResearchClient", () => {
       SIGNAL,
     );
     expect(result.taskId).toBe("interactions/abc123");
-    // SDK 呼出引数を検証 (agent / input / system_instruction / background:true)
     expect(mockCreate).toHaveBeenCalledTimes(1);
     const args = mockCreate.mock.calls[0]?.[0] as Record<string, unknown>;
+    // deep-research-preview-04-2026 は system_instruction 非対応のため、
+    // systemPrompt + \n\n + userPrompt を input に集約して渡す。
     expect(args).toMatchObject({
-      input: "user",
-      system_instruction: "sys",
+      input: "sys\n\nuser",
       background: true,
     });
+    expect(args).not.toHaveProperty("system_instruction");
     expect(typeof args.agent).toBe("string");
+  });
+
+  it("startTask: systemPrompt が空でも userPrompt のみで送られる", async () => {
+    mockCreate.mockResolvedValueOnce({ id: "interactions/def456" });
+    const client = createDeepResearchClient();
+    await client.startTask(
+      { systemPrompt: "", userPrompt: "user only" },
+      SIGNAL,
+    );
+    const args = mockCreate.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(args.input).toBe("user only");
+    expect(args).not.toHaveProperty("system_instruction");
   });
 
   it("cancelTask: SDK モック経由で cancelled=true", async () => {
