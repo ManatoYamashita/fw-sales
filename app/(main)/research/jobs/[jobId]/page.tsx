@@ -8,6 +8,7 @@ import { getDeepResearchJobById } from "@/lib/queries/deep-research";
 import { formatRelativeTime, formatDuration } from "@/lib/utils/relative-time";
 import { JobErrorTimeline } from "./_components/job-error-timeline";
 import { JobActionButtons } from "./_components/job-action-buttons";
+import { GeminiLiveStatusCard } from "./_components/gemini-live-status-card";
 
 type Params = Promise<{ jobId: string }>;
 
@@ -53,6 +54,13 @@ export default async function JobDetailPage({
       <div className="flex items-center gap-2">
         <JobActionButtons jobId={job.id} status={job.status} />
       </div>
+
+      <GeminiLiveStatusCard
+        jobId={job.id}
+        status={job.status}
+        taskId={job.deep_research_task_id}
+        apiUpdatedAtFromDb={job.api_updated_at}
+      />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Card>
