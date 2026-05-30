@@ -96,6 +96,8 @@ function fromJobRow(row: JobRow): DeepResearchJob {
     research_completed_at: toIsoString(row.research_completed_at),
     completed_at: toIsoString(row.completed_at),
     api_updated_at: toIsoString(row.api_updated_at),
+    stage1_markdown: (row.stage1_markdown as string | null | undefined) ?? null,
+    stage1_source_urls: (row.stage1_source_urls as string[] | null | undefined) ?? null,
   };
 }
 
@@ -163,6 +165,18 @@ export function makeDeepResearchRepo(
         .select()
         .from(researchJobs)
         .where(eq(researchJobs.status, "researching"))
+        .orderBy(asc(researchJobs.enqueued_at))
+        .limit(safeLimit);
+      return rows.map(fromJobRow);
+    },
+
+    async findOldestStructuring(limit) {
+      const safeLimit = Math.max(0, Math.min(limit, 100));
+      if (safeLimit === 0) return [];
+      const rows = await executor
+        .select()
+        .from(researchJobs)
+        .where(eq(researchJobs.status, "structuring"))
         .orderBy(asc(researchJobs.enqueued_at))
         .limit(safeLimit);
       return rows.map(fromJobRow);
@@ -355,6 +369,12 @@ export function makeDeepResearchRepo(
       if (patch.api_updated_at !== undefined) {
         setClause.api_updated_at =
           patch.api_updated_at === null ? null : new Date(patch.api_updated_at);
+      }
+      if (patch.stage1_markdown !== undefined) {
+        setClause.stage1_markdown = patch.stage1_markdown;
+      }
+      if (patch.stage1_source_urls !== undefined) {
+        setClause.stage1_source_urls = patch.stage1_source_urls;
       }
       const updated = await executor
         .update(researchJobs)
