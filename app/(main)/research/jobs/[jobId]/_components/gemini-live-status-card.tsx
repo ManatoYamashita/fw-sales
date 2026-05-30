@@ -23,6 +23,22 @@ interface GeminiLiveStatusCardProps {
 
 const COOLDOWN_MS = 10_000;
 
+/**
+ * Google 側 dead-lock 判定の閾値 (ms)。
+ *
+ * Gemini Deep Research が `usage === null` (= トークン消費ゼロ) かつ
+ * `apiCreatedAt === apiUpdatedAt` (= 内部状態が一度も更新されていない)
+ * のまま **これ以上の時間が経過** したら、Google バックエンドが
+ * このタスクを受領後一切処理していない可能性が高い。
+ *
+ * 2026-05-30 mpsh1mj9 実観測: created=14:56:39, updated=14:56:39 のまま 2h 経過、
+ * usage=null。ユーザーがキャンセル + 再投入で復旧。
+ *
+ * 30 分は「Stage 1 通常下限 (30 分〜2 時間)」の下端と一致させ、
+ * 「正常に Web 探索中なら usage は数千 token は乗っているはず」という前提に基づく。
+ */
+const DEADLOCK_DETECTION_MS = 30 * 60 * 1000;
+
 const STATE_META: Record<
   PollGeminiResult["state"],
   {
@@ -60,6 +76,12 @@ export function GeminiLiveStatusCard({
   const [lastError, setLastError] = useState<string | null>(null);
   const [lastPolledAt, setLastPolledAt] = useState<string | null>(null);
   const [cooldownRemainingMs, setCooldownRemainingMs] = useState(0);
+  /**
+   * 「いま」の Unix ms。dead-lock 判定の経過時間計算に使う。
+   * `Date.now()` を render path で直接呼ぶと React 19 purity 規約に
+   * 違反するため、effect 内で 30 秒間隔に更新して state 経由で参照する。
+   */
+  const [nowMs, setNowMs] = useState(0);
   const ranOnceRef = useRef(false);
   const cooldownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -115,6 +137,15 @@ export function GeminiLiveStatusCard({
     [],
   );
 
+  // dead-lock 判定用の現在時刻を 5 秒間隔で更新。
+  // `setState` を effect 本体で同期実行すると `react-hooks/set-state-in-effect`
+  // (cascading render リスク) で叱られるため、interval callback のみで更新する。
+  // mount 直後の 5 秒間は `nowMs === 0` で判定がスキップされる (許容)。
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 5_000);
+    return () => clearInterval(id);
+  }, []);
+
   if (!canPoll) {
     return null;
   }
@@ -132,8 +163,27 @@ export function GeminiLiveStatusCard({
       ? `連続呼出を抑止するクールダウン中です (残り ${cooldownRemainingSec}s)。`
       : "Gemini に最新状態を問合せる";
   const displayState = lastResult?.state;
+  const displayApiCreatedAt = lastResult?.apiCreatedAt ?? null;
   const displayApiUpdatedAt =
     lastResult?.apiUpdatedAt ?? apiUpdatedAtFromDb ?? null;
+  const displayTokenUsage = lastResult?.tokenUsage ?? null;
+
+  // Dead-lock 判定: in_progress, usage=null, created=updated, 経過時間 > 閾値
+  const deadlockSuspicion = (() => {
+    if (nowMs === 0) return null; // useEffect 起動前 (SSR)
+    if (displayState !== "in_progress") return null;
+    if (displayTokenUsage !== null) return null;
+    if (!displayApiCreatedAt || !displayApiUpdatedAt) return null;
+    if (displayApiCreatedAt !== displayApiUpdatedAt) return null;
+    const createdMs = Date.parse(displayApiCreatedAt);
+    if (!Number.isFinite(createdMs)) return null;
+    const elapsedMs = nowMs - createdMs;
+    if (elapsedMs < DEADLOCK_DETECTION_MS) return null;
+    return {
+      elapsedMinutes: Math.floor(elapsedMs / 60_000),
+      createdIso: displayApiCreatedAt,
+    };
+  })();
 
   return (
     <Card>
@@ -200,7 +250,53 @@ export function GeminiLiveStatusCard({
             >
               {formatRelativeTime(displayApiUpdatedAt)}
             </dd>
+
+            <dt className="text-muted-foreground">Gemini 側受領</dt>
+            <dd
+              title={
+                displayApiCreatedAt
+                  ? new Date(displayApiCreatedAt).toLocaleString("ja-JP")
+                  : undefined
+              }
+            >
+              {displayApiCreatedAt
+                ? formatRelativeTime(displayApiCreatedAt)
+                : "—"}
+            </dd>
+
+            <dt className="text-muted-foreground">トークン使用</dt>
+            <dd>
+              {displayTokenUsage ? (
+                <span className="tabular-nums">
+                  入力 {displayTokenUsage.promptTokens.toLocaleString()} /
+                  出力 {displayTokenUsage.outputTokens.toLocaleString()}
+                </span>
+              ) : (
+                <span className="text-muted-foreground">
+                  0 (Google 側で計算リソース未投入)
+                </span>
+              )}
+            </dd>
           </dl>
+
+          {deadlockSuspicion && (
+            <div
+              role="alert"
+              className="mt-3 rounded-md border border-warning/50 bg-warning/10 px-3 py-2 text-xs text-foreground"
+            >
+              <p className="font-semibold text-warning">
+                Google 側で処理が停滞している可能性があります
+              </p>
+              <p className="mt-1 text-foreground/80">
+                受領から{deadlockSuspicion.elapsedMinutes}分経過していますが、
+                トークン消費が 0、かつ Gemini 内部状態が一度も更新されていません
+                (created === updated)。Google
+                バックエンドがこのタスクを dead-lock している可能性があります。
+                キャンセル + 再投入をご検討ください
+                (放置すれば 6 時間後に自動 sweep されます)。
+              </p>
+            </div>
+          )}
 
           {(lastError || lastResult?.message) && (
             <p className="mt-3 text-xs text-destructive break-words">
