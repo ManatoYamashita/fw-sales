@@ -18,7 +18,7 @@
 
 import "server-only";
 
-import { and, asc, desc, eq, gte, inArray, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 
 import { db, type DbClient, type Tx } from "./client";
 import { profiles, researchJobs, researchReports, stores } from "./schema";
@@ -96,6 +96,8 @@ function fromJobRow(row: JobRow): DeepResearchJob {
     research_completed_at: toIsoString(row.research_completed_at),
     completed_at: toIsoString(row.completed_at),
     api_updated_at: toIsoString(row.api_updated_at),
+    deleted_at: toIsoString(row.deleted_at),
+    deleted_by: row.deleted_by,
     stage1_markdown: (row.stage1_markdown as string | null | undefined) ?? null,
     stage1_source_urls: (row.stage1_source_urls as string[] | null | undefined) ?? null,
   };
@@ -135,6 +137,7 @@ export function makeDeepResearchRepo(
           and(
             eq(researchJobs.store_id, storeId),
             inArray(researchJobs.status, PENDING_STATUSES),
+            isNull(researchJobs.deleted_at),
           ),
         )
         .orderBy(asc(researchJobs.enqueued_at))
@@ -150,6 +153,7 @@ export function makeDeepResearchRepo(
       const rows = await executor.execute(sql`
         SELECT * FROM "research_jobs"
         WHERE "status" = 'queued'
+          AND "deleted_at" IS NULL
         ORDER BY "enqueued_at" ASC
         LIMIT 1
         FOR UPDATE SKIP LOCKED
@@ -164,7 +168,9 @@ export function makeDeepResearchRepo(
       const rows = await executor
         .select()
         .from(researchJobs)
-        .where(eq(researchJobs.status, "researching"))
+        .where(
+          and(eq(researchJobs.status, "researching"), isNull(researchJobs.deleted_at)),
+        )
         .orderBy(asc(researchJobs.enqueued_at))
         .limit(safeLimit);
       return rows.map(fromJobRow);
@@ -176,7 +182,9 @@ export function makeDeepResearchRepo(
       const rows = await executor
         .select()
         .from(researchJobs)
-        .where(eq(researchJobs.status, "structuring"))
+        .where(
+          and(eq(researchJobs.status, "structuring"), isNull(researchJobs.deleted_at)),
+        )
         .orderBy(asc(researchJobs.enqueued_at))
         .limit(safeLimit);
       return rows.map(fromJobRow);
@@ -186,7 +194,12 @@ export function makeDeepResearchRepo(
       const rows = await executor
         .select({ count: sql<number>`count(*)::int` })
         .from(researchJobs)
-        .where(inArray(researchJobs.status, IN_FLIGHT_STATUSES));
+        .where(
+          and(
+            inArray(researchJobs.status, IN_FLIGHT_STATUSES),
+            isNull(researchJobs.deleted_at),
+          ),
+        );
       return rows[0]?.count ?? 0;
     },
 
@@ -194,7 +207,12 @@ export function makeDeepResearchRepo(
       const rows = await executor
         .select({ count: sql<number>`count(*)::int` })
         .from(researchJobs)
-        .where(inArray(researchJobs.status, PENDING_STATUSES));
+        .where(
+          and(
+            inArray(researchJobs.status, PENDING_STATUSES),
+            isNull(researchJobs.deleted_at),
+          ),
+        );
       return rows[0]?.count ?? 0;
     },
 
@@ -208,7 +226,12 @@ export function makeDeepResearchRepo(
         .from(researchJobs)
         .leftJoin(stores, eq(researchJobs.store_id, stores.id))
         .leftJoin(profiles, eq(researchJobs.user_id, profiles.id))
-        .where(inArray(researchJobs.status, PENDING_STATUSES))
+        .where(
+          and(
+            inArray(researchJobs.status, PENDING_STATUSES),
+            isNull(researchJobs.deleted_at),
+          ),
+        )
         .orderBy(asc(researchJobs.enqueued_at))
         .limit(200);
       return rows.map(fromQueueJoinRow);
@@ -225,7 +248,7 @@ export function makeDeepResearchRepo(
         .from(researchJobs)
         .leftJoin(stores, eq(researchJobs.store_id, stores.id))
         .leftJoin(profiles, eq(researchJobs.user_id, profiles.id))
-        .where(eq(researchJobs.status, "done"))
+        .where(and(eq(researchJobs.status, "done"), isNull(researchJobs.deleted_at)))
         .orderBy(desc(researchJobs.completed_at))
         .limit(safeLimit);
       return rows.map(fromQueueJoinRow);
@@ -242,7 +265,7 @@ export function makeDeepResearchRepo(
         .from(researchJobs)
         .leftJoin(stores, eq(researchJobs.store_id, stores.id))
         .leftJoin(profiles, eq(researchJobs.user_id, profiles.id))
-        .where(eq(researchJobs.status, "failed"))
+        .where(and(eq(researchJobs.status, "failed"), isNull(researchJobs.deleted_at)))
         .orderBy(desc(researchJobs.completed_at))
         .limit(safeLimit);
       return rows.map(fromQueueJoinRow);
@@ -256,6 +279,7 @@ export function makeDeepResearchRepo(
           and(
             inArray(researchJobs.status, IN_FLIGHT_STATUSES),
             lt(researchJobs.research_started_at, thresholdAt),
+            isNull(researchJobs.deleted_at),
           ),
         );
       return rows.map(fromJobRow);
@@ -442,6 +466,33 @@ export function makeDeepResearchRepo(
       return deleted.length > 0;
     },
 
+    async softDeleteJob(jobId, userId) {
+      const deleted = await executor
+        .update(researchJobs)
+        .set({
+          deleted_at: new Date(),
+          deleted_by: userId,
+        })
+        .where(and(eq(researchJobs.id, jobId), isNull(researchJobs.deleted_at)))
+        .returning({ id: researchJobs.id });
+      return deleted.length > 0;
+    },
+
+    async softDeleteJobs(jobIds, userId) {
+      if (jobIds.length === 0) return 0;
+      const deleted = await executor
+        .update(researchJobs)
+        .set({
+          deleted_at: new Date(),
+          deleted_by: userId,
+        })
+        .where(
+          and(inArray(researchJobs.id, jobIds), isNull(researchJobs.deleted_at)),
+        )
+        .returning({ id: researchJobs.id });
+      return deleted.length;
+    },
+
     async getAverageDurationSec() {
       const rows = await executor
         .select({
@@ -463,6 +514,7 @@ export function makeDeepResearchRepo(
         .from(researchJobs)
         .leftJoin(stores, eq(researchJobs.store_id, stores.id))
         .leftJoin(profiles, eq(researchJobs.user_id, profiles.id))
+        .where(isNull(researchJobs.deleted_at))
         .orderBy(desc(researchJobs.enqueued_at))
         .limit(safeLimit);
       return rows.map(fromQueueJoinRow);
@@ -472,7 +524,12 @@ export function makeDeepResearchRepo(
       const rows = await executor
         .selectDistinct({ store_id: researchJobs.store_id })
         .from(researchJobs)
-        .where(inArray(researchJobs.status, PENDING_STATUSES));
+        .where(
+          and(
+            inArray(researchJobs.status, PENDING_STATUSES),
+            isNull(researchJobs.deleted_at),
+          ),
+        );
       return rows.map((r) => r.store_id);
     },
   };

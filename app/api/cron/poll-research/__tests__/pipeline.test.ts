@@ -126,6 +126,8 @@ function makeJob(overrides: Partial<DeepResearchJob> = {}): DeepResearchJob {
     research_completed_at: null,
     completed_at: null,
     api_updated_at: null,
+    deleted_at: null,
+    deleted_by: null,
     stage1_markdown: null,
     stage1_source_urls: null,
     ...overrides,
