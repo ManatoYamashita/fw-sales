@@ -34,7 +34,10 @@ import type {
   DeepResearchClient,
   DeepResearchTaskState,
 } from "@/lib/ai/deep-research/client";
-import type { Structurer } from "@/lib/ai/deep-research/structurer";
+import type {
+  Structurer,
+  StructurerError,
+} from "@/lib/ai/deep-research/structurer";
 import type {
   DeepResearchJob,
   DeepResearchJobErrorEntry,
@@ -53,7 +56,12 @@ export interface TickResult {
 }
 
 /** 操作ごとの残り時間最小要件 (ms)。 */
-const RESERVE_STAGE2_MS = 10_000; // Stage 2 構造化に必要な目安
+// Stage 2 構造化 (gemini-2.5-flash-lite + 51 項目 responseJsonSchema) は
+// 大きな Markdown 入力で 10-20 秒かかることがあるため、Function deadline 内に
+// 確保する余裕を 30s に設定。残り 30s 未満なら Stage 2 を skip して次 tick へ
+// 送る (Stage 1 完了済みジョブは researching のままなので、次の cron で
+// pollOneResearching が再度 getTask して同じ判定を行う)。
+const RESERVE_STAGE2_MS = 30_000;
 const RESERVE_START_MS = 5_000; // startTask 1 件に必要な目安
 const RESERVE_POLL_ONE_MS = 2_000; // getTask 1 件に必要な目安
 const RESERVE_SWEEP_ONE_MS = 3_000; // cancelTask + DB write に必要な目安
@@ -333,11 +341,14 @@ async function runStage2AndFinalize(args: {
 
   if (!structured.ok) {
     const errKind = structured.error.kind;
+    const detail = extractStructurerMessage(structured.error);
     await markFailed(
       job,
       "stage2",
       `stage2_${errKind}`,
-      `Stage 2 構造化に失敗しました (${errKind})`,
+      detail
+        ? `Stage 2 構造化に失敗しました (${errKind}): ${detail}`
+        : `Stage 2 構造化に失敗しました (${errKind})`,
     );
     return;
   }
@@ -529,6 +540,26 @@ function inferErrorKind(err: unknown): string {
     return String((err as { kind: unknown }).kind);
   }
   return "unknown";
+}
+
+/**
+ * Stage 2 構造化エラーから、error_log に残すべき詳細メッセージを抽出する純関数。
+ *
+ * - `message?` を持つ variant (api_error / auth_error / rate_limit /
+ *   network_error / timeout / invalid_json / unknown) はその値を返す
+ * - `schema_violation` は Zod issue を `" | "` で結合
+ * - それ以外は undefined (kind 名だけで十分なケース)
+ */
+export function extractStructurerMessage(
+  err: StructurerError,
+): string | undefined {
+  if ("message" in err && typeof err.message === "string" && err.message.length > 0) {
+    return err.message;
+  }
+  if (err.kind === "schema_violation") {
+    return err.zodIssues.join(" | ");
+  }
+  return undefined;
 }
 
 function summarizeError(err: unknown): string {
