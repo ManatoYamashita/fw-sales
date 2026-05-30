@@ -273,6 +273,133 @@ export async function deleteDeepResearchJobAction(
 }
 
 // ---------------------------------------------------------------------------
+// Gemini ライブ問合せ (ジョブ詳細ページの「Gemini ライブ状態」Card 用)
+// ---------------------------------------------------------------------------
+
+export interface PollGeminiResult {
+  jobId: string;
+  state: "in_progress" | "completed" | "failed";
+  apiUpdatedAt: string | null;
+  polledAt: string;
+  message?: string;
+}
+
+/**
+ * 研究中ジョブの Gemini Interaction を 1 回ポーリングし、status と
+ * `api_updated_at` を返す。 `done` / `failed` / `queued` / `structuring`
+ * は早期 return で Gemini を呼ばない。
+ *
+ * - status 遷移は本アクションでは行わない (cron pipeline `pollOneResearching`
+ *   に任せる)。Stage 2 構造化は重いため Server Action timeout のリスクを避ける。
+ * - `in_progress` / `completed` で `apiUpdatedAt` が取れたら DB に書き戻す。
+ *   これは cron pipeline の適応型ポーリング間隔判定 (`shouldPollJob`) と
+ *   整合させるため (重複 Gemini 呼出を抑止する設計意図と一致)。
+ * - `failed` のときは status を遷移させず `appendJobError` で監査ログに残す。
+ *   実 status 遷移は次 cron tick が同じレスポンスを見て `markFailed` を呼ぶ。
+ */
+export async function pollGeminiJobAction(
+  jobId: string,
+): Promise<ActionResult<PollGeminiResult>> {
+  "use server";
+
+  if (typeof jobId !== "string" || jobId.trim() === "") {
+    return failure("ジョブ ID が指定されていません");
+  }
+
+  const session = await getCurrentSession();
+  if (!session) return failure("ログインが必要です");
+
+  const job = await repos.deepResearch.getById(jobId);
+  if (!job) return failure("ジョブが見つかりません");
+
+  if (job.status === "done" || job.status === "failed") {
+    return failure("完了/失敗ジョブは Gemini に問合せできません");
+  }
+  if (job.status === "queued" || !job.deep_research_task_id) {
+    return failure("まだ Gemini に投入されていません");
+  }
+  if (job.status === "structuring") {
+    return failure("Stage 2 構造化中のため Gemini への問合せはスキップします");
+  }
+
+  const { createDeepResearchClient } = await import(
+    "@/lib/ai/deep-research/client"
+  );
+  const client = createDeepResearchClient();
+
+  const polledAt = new Date().toISOString();
+  try {
+    const state = await client.getTask(
+      { taskId: job.deep_research_task_id },
+      AbortSignal.timeout(15_000),
+    );
+
+    if (state.state === "in_progress" && state.apiUpdatedAt) {
+      await repos.deepResearch.updateJobStatus(jobId, {
+        status: "researching",
+        api_updated_at: state.apiUpdatedAt,
+      });
+    } else if (state.state === "completed") {
+      await repos.deepResearch.updateJobStatus(jobId, {
+        status: "researching",
+        api_updated_at: state.apiUpdatedAt ?? polledAt,
+      });
+    } else if (state.state === "failed") {
+      await repos.deepResearch.appendJobError(jobId, {
+        stage: "stage1",
+        kind: "manual_poll_stage1_failed",
+        message: state.reason,
+        occurred_at: polledAt,
+      });
+    }
+
+    revalidateTag(CACHE_TAGS.deepResearchJob(jobId), "max");
+
+    return success({
+      jobId,
+      state: state.state,
+      apiUpdatedAt:
+        state.state === "in_progress" || state.state === "completed"
+          ? (state.apiUpdatedAt ?? null)
+          : null,
+      polledAt,
+      ...(state.state === "failed" ? { message: state.reason } : {}),
+    });
+  } catch (err) {
+    const kind = inferErrorKind(err);
+    const message = summarizeError(err);
+    await repos.deepResearch.appendJobError(jobId, {
+      stage: "stage1",
+      kind: `manual_poll_${kind}`,
+      message,
+      occurred_at: polledAt,
+    });
+    revalidateTag(CACHE_TAGS.deepResearchJob(jobId), "max");
+    return failure(`Gemini API 呼出に失敗しました (${kind})`);
+  }
+}
+
+function inferErrorKind(err: unknown): string {
+  if (typeof err === "object" && err !== null && "kind" in err) {
+    return String((err as { kind: unknown }).kind);
+  }
+  return "unknown";
+}
+
+function summarizeError(err: unknown): string {
+  if (typeof err === "object" && err !== null) {
+    const obj = err as Record<string, unknown>;
+    if (typeof obj.message === "string") return obj.message;
+    if (typeof obj.kind === "string") {
+      const status =
+        typeof obj.status === "number" ? ` (HTTP ${obj.status})` : "";
+      return `${obj.kind}${status}`;
+    }
+  }
+  return "Gemini API 呼出で不明なエラーが発生";
+}
+
+// ---------------------------------------------------------------------------
 // 時刻ヘルパ (JST 日次/月次集計)
 // ---------------------------------------------------------------------------
 
