@@ -225,4 +225,73 @@ describe("DeepResearchClient", () => {
       expect(JSON.stringify(e)).not.toContain("test-key-xxx");
     }
   });
+
+  it("startTask: ApiError(status=400) → kind=api_error + message に HTTP body を保持", async () => {
+    // @google/genai の ApiError 形 (status を直接持つ)
+    class FakeApiError extends Error {
+      status: number;
+      constructor(message: string, status: number) {
+        super(message);
+        this.name = "ApiError";
+        this.status = status;
+      }
+    }
+    const body =
+      '{"error":{"code":400,"message":"Model deep-research-preview-04-2026 not found","status":"NOT_FOUND"}}';
+    mockCreate.mockRejectedValueOnce(new FakeApiError(body, 400));
+    const client = createDeepResearchClient();
+    try {
+      await client.startTask(
+        { systemPrompt: "sys", userPrompt: "user" },
+        SIGNAL,
+      );
+      throw new Error("should have thrown");
+    } catch (err) {
+      const e = err as { kind: string; status?: number; message?: string };
+      expect(e.kind).toBe("api_error");
+      expect(e.status).toBe(400);
+      expect(e.message).toContain("Model deep-research-preview-04-2026 not found");
+    }
+  });
+
+  it("startTask: ApiError(status=404) → kind=not_found", async () => {
+    class FakeApiError extends Error {
+      status: number;
+      constructor(message: string, status: number) {
+        super(message);
+        this.name = "ApiError";
+        this.status = status;
+      }
+    }
+    mockCreate.mockRejectedValueOnce(new FakeApiError("interaction not found", 404));
+    const client = createDeepResearchClient();
+    await expect(
+      client.startTask({ systemPrompt: "sys", userPrompt: "user" }, SIGNAL),
+    ).rejects.toMatchObject({ kind: "not_found" });
+  });
+
+  it("startTask: 一般的なシークレット文字列が message から redact される", async () => {
+    // AIza... / Bearer ... / sk-... の 3 パターン
+    const dirty =
+      "Auth failed with key AIzaSyABCDEFGHIJKLMNOPQRSTUVWXYZ012345, sent header 'Bearer abc.def.ghi-jkl_mno=' and OpenAI sk-proj-AAAAAAAAAAAAAAAAAAAAAAAA";
+    mockCreate.mockRejectedValueOnce(new Error(dirty));
+    const client = createDeepResearchClient();
+    try {
+      await client.startTask(
+        { systemPrompt: "sys", userPrompt: "user" },
+        SIGNAL,
+      );
+      throw new Error("should have thrown");
+    } catch (err) {
+      const serialized = JSON.stringify(err);
+      // 各パターンの実値が漏れていないこと
+      expect(serialized).not.toContain("AIzaSyABCDEFGHIJKLMNOPQRSTUVWXYZ012345");
+      expect(serialized).not.toContain("abc.def.ghi-jkl_mno=");
+      expect(serialized).not.toContain("sk-proj-AAAAAAAAAAAAAAAAAAAAAAAA");
+      // redacted トークンが含まれること
+      expect(serialized).toContain("AIza***");
+      expect(serialized).toContain("Bearer ***");
+      expect(serialized).toContain("sk-***");
+    }
+  });
 });

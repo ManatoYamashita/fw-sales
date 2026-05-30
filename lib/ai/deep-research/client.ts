@@ -38,11 +38,11 @@ type Annotation = Interactions.Annotation;
 export type DeepResearchClientError =
   | { kind: "missing_api_key" }
   | { kind: "timeout" }
-  | { kind: "rate_limit"; retryAfterSeconds?: number }
-  | { kind: "auth_error" }
-  | { kind: "api_error"; status: number }
-  | { kind: "network_error" }
-  | { kind: "not_found" }
+  | { kind: "rate_limit"; retryAfterSeconds?: number; message?: string }
+  | { kind: "auth_error"; message?: string }
+  | { kind: "api_error"; status: number; message?: string }
+  | { kind: "network_error"; message?: string }
+  | { kind: "not_found"; message?: string }
   | { kind: "unknown"; message: string };
 
 export interface DeepResearchTaskHandle {
@@ -285,6 +285,10 @@ function extractTokenUsage(
  * 既存 `lib/ai/client.ts` の同名関数と同型ロジック (API キー値・request ID の
  * 漏洩防止)。Deep Research 固有として `not_found` を追加 (cancel 時の
  * already-terminal 判定に使用)。
+ *
+ * 各分岐で SDK の生メッセージを `sanitizeMessage` 経由で保持し、`error_log` に
+ * Gemini からの応答 body を残せるようにする (R6.6: API キー値・request ID は
+ * `redactSecrets` で `***` 置換)。
  */
 function normalizeSdkError(err: unknown): DeepResearchClientError {
   if (isDeepResearchClientError(err)) {
@@ -294,47 +298,93 @@ function normalizeSdkError(err: unknown): DeepResearchClientError {
     return { kind: "timeout" };
   }
   if (err instanceof TypeError && err.message.toLowerCase().includes("fetch")) {
-    return { kind: "network_error" };
+    return { kind: "network_error", message: sanitizeMessage(err.message) };
   }
   if (err instanceof Error) {
+    // @google/genai の `ApiError` は `status: number` を直接持つため、
+    // regex でメッセージから推定するより `err.status` を優先する。
+    const apiErr = err as Error & { status?: unknown; name?: string };
+    if (
+      (apiErr.name === "ApiError" || "status" in apiErr) &&
+      typeof apiErr.status === "number"
+    ) {
+      const status = apiErr.status;
+      const message = sanitizeMessage(err.message);
+      if (status === 401 || status === 403) {
+        return { kind: "auth_error", message };
+      }
+      if (status === 404) {
+        return { kind: "not_found", message };
+      }
+      if (status === 429) {
+        return { kind: "rate_limit", message };
+      }
+      return { kind: "api_error", status, message };
+    }
     const msg = err.message.toLowerCase();
     if (
       msg.includes("404") ||
       msg.includes("not found") ||
       msg.includes("not_found")
     ) {
-      return { kind: "not_found" };
+      return { kind: "not_found", message: sanitizeMessage(err.message) };
     }
     if (
       msg.includes("401") ||
       msg.includes("unauthorized") ||
       msg.includes("api key")
     ) {
-      return { kind: "auth_error" };
+      return { kind: "auth_error", message: sanitizeMessage(err.message) };
     }
     if (
       msg.includes("429") ||
       msg.includes("rate limit") ||
       msg.includes("quota")
     ) {
-      return { kind: "rate_limit" };
+      return { kind: "rate_limit", message: sanitizeMessage(err.message) };
     }
     const statusMatch = err.message.match(/\b([45]\d\d)\b/);
     if (statusMatch && statusMatch[1] !== undefined) {
       const status = Number.parseInt(statusMatch[1], 10);
       if (Number.isFinite(status)) {
-        return { kind: "api_error", status };
+        return {
+          kind: "api_error",
+          status,
+          message: sanitizeMessage(err.message),
+        };
       }
     }
     return {
       kind: "unknown",
-      message: "Deep Research API 呼出でエラーが発生しました",
+      message: sanitizeMessage(err.message),
     };
   }
   return {
     kind: "unknown",
     message: "Deep Research API 呼出で不明なエラーが発生しました",
   };
+}
+
+/**
+ * SDK エラーメッセージを `error_log` に保存する前段で
+ * (1) 既知シークレットを `***` に置換し、(2) 800 字でカットする。
+ *
+ * 置換対象:
+ * - 環境変数 `GEMINI_API_KEY` の実値
+ * - Google API キーの典型パターン `AIza[\w-]{20,}`
+ * - HTTP 認可ヘッダ `Bearer <token>`
+ * - OpenAI 形式トークン `sk-[\w-]{20,}`
+ */
+function sanitizeMessage(raw: string, maxLen = 800): string {
+  let out = raw;
+  const key = process.env.GEMINI_API_KEY;
+  if (key && key.length >= 4) {
+    out = out.split(key).join("***");
+  }
+  out = out.replace(/AIza[\w-]{20,}/g, "AIza***");
+  out = out.replace(/Bearer\s+[\w.\-+/=]+/gi, "Bearer ***");
+  out = out.replace(/sk-[\w-]{20,}/g, "sk-***");
+  return out.length <= maxLen ? out : `${out.slice(0, maxLen)}…(truncated)`;
 }
 
 function makeError(err: DeepResearchClientError): DeepResearchClientError {
