@@ -17,6 +17,7 @@ const {
   mockCreateClient,
   mockGetDailyUserCap,
   mockGetMonthlyCap,
+  mockRunPollTick,
 } = vi.hoisted(() => ({
   mockRepo: {
     getById: vi.fn(),
@@ -34,6 +35,7 @@ const {
   mockCreateClient: vi.fn(),
   mockGetDailyUserCap: vi.fn(),
   mockGetMonthlyCap: vi.fn(),
+  mockRunPollTick: vi.fn(),
 }));
 
 vi.mock("@/lib/repositories", () => ({
@@ -52,6 +54,10 @@ vi.mock("@/lib/ai/deep-research/client", () => ({
   createDeepResearchClient: mockCreateClient,
 }));
 
+vi.mock("@/app/api/cron/poll-research/pipeline", () => ({
+  runPollResearchTick: mockRunPollTick,
+}));
+
 vi.mock("@/lib/env", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/env")>();
   return {
@@ -61,7 +67,11 @@ vi.mock("@/lib/env", async (importOriginal) => {
   };
 });
 
-import { enqueueDeepResearchAction, pollGeminiJobAction } from "../deep-research-actions";
+import {
+  advanceStructuringAction,
+  enqueueDeepResearchAction,
+  pollGeminiJobAction,
+} from "../deep-research-actions";
 import type { DeepResearchJob } from "@/types/deep-research";
 
 const JOB_ID = "job_test_xyz";
@@ -101,6 +111,7 @@ beforeEach(() => {
   });
   mockGetDailyUserCap.mockReturnValue(30);
   mockGetMonthlyCap.mockReturnValue(1000);
+  mockRunPollTick.mockResolvedValue(undefined);
 });
 
 describe("enqueueDeepResearchAction", () => {
@@ -319,5 +330,105 @@ describe("pollGeminiJobAction", () => {
       `deep-research:job:${JOB_ID}`,
       "max",
     );
+  });
+});
+
+describe("advanceStructuringAction", () => {
+  it("未ログインなら failure を返し tick を発火しない", async () => {
+    mockGetCurrentSession.mockResolvedValue(null);
+    const result = await advanceStructuringAction(JOB_ID);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/ログイン/);
+    expect(mockRunPollTick).not.toHaveBeenCalled();
+  });
+
+  it("jobId が空なら認証より前に failure", async () => {
+    const result = await advanceStructuringAction("");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/ジョブ ID/);
+    expect(mockGetCurrentSession).not.toHaveBeenCalled();
+    expect(mockRunPollTick).not.toHaveBeenCalled();
+  });
+
+  it("ジョブが存在しなければ failure で tick を発火しない", async () => {
+    mockGetCurrentSession.mockResolvedValue(SESSION);
+    mockRepo.getById.mockResolvedValue(null);
+    const result = await advanceStructuringAction(JOB_ID);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/見つかりません/);
+    expect(mockRunPollTick).not.toHaveBeenCalled();
+  });
+
+  it("structuring 以外 (researching) なら tick を発火せず現在 status を返す", async () => {
+    mockGetCurrentSession.mockResolvedValue(SESSION);
+    mockRepo.getById.mockResolvedValue(makeJob({ status: "researching" }));
+
+    const result = await advanceStructuringAction(JOB_ID);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.status).toBe("researching");
+      expect(result.data.settled).toBe(false);
+    }
+    expect(mockRunPollTick).not.toHaveBeenCalled();
+  });
+
+  it("structuring なら tick を 1 回発火し、読み直した done を settled=true で返す", async () => {
+    mockGetCurrentSession.mockResolvedValue(SESSION);
+    mockRepo.getById
+      .mockResolvedValueOnce(makeJob({ status: "structuring" }))
+      .mockResolvedValueOnce(makeJob({ status: "done" }));
+
+    const result = await advanceStructuringAction(JOB_ID);
+
+    expect(mockRunPollTick).toHaveBeenCalledTimes(1);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.status).toBe("done");
+      expect(result.data.settled).toBe(true);
+    }
+    expect(mockRevalidateTag).toHaveBeenCalledWith(
+      `deep-research:job:${JOB_ID}`,
+      "max",
+    );
+  });
+
+  it("tick 後もまだ structuring なら settled=false を返す", async () => {
+    mockGetCurrentSession.mockResolvedValue(SESSION);
+    mockRepo.getById
+      .mockResolvedValueOnce(makeJob({ status: "structuring" }))
+      .mockResolvedValueOnce(makeJob({ status: "structuring" }));
+
+    const result = await advanceStructuringAction(JOB_ID);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.status).toBe("structuring");
+      expect(result.data.settled).toBe(false);
+    }
+  });
+
+  it("tick が throw しても握りつぶし、読み直した status を返す (並行競合の無害化)", async () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockGetCurrentSession.mockResolvedValue(SESSION);
+    mockRepo.getById
+      .mockResolvedValueOnce(makeJob({ status: "structuring" }))
+      .mockResolvedValueOnce(makeJob({ status: "done" }));
+    mockRunPollTick.mockRejectedValueOnce(
+      Object.assign(
+        new Error("duplicate key value violates unique constraint"),
+        { code: "23505" },
+      ),
+    );
+
+    const result = await advanceStructuringAction(JOB_ID);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.status).toBe("done");
+      expect(result.data.settled).toBe(true);
+    }
+    expect(mockRunPollTick).toHaveBeenCalledTimes(1);
+    errSpy.mockRestore();
   });
 });
