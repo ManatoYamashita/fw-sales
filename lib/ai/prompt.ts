@@ -18,6 +18,7 @@ import "server-only";
 import type { Part } from "@google/genai";
 import type { Store } from "@/types/store";
 import type { FewShotExample, TemplateBody } from "@/types/ai-prompt-template";
+import { BUILTIN_FEWSHOT_EXAMPLES } from "@/lib/ai/builtin-prompt-template";
 
 export interface BuildAnalysisPromptInput {
   formValues: Pick<
@@ -77,64 +78,6 @@ const SYSTEM_PROMPT_PREAMBLE = `あなたは飲食店向け WEB 集客の営業�
 - memo 欄の生コピーをそのまま出力に混入させないこと(整理して再構成すること)
 `;
 
-/**
- * Few-shot 例 1: 導楽(神奈川県川崎市・居酒屋・海鮮+日本酒)
- * 出典: GitHub Issue #13 ユーザー提供サンプル
- */
-const FEW_SHOT_DOURAKU_TEMPLATE = `### Few-shot 例 1
-店舗: 食べログ URL https://s.tabelog.com/kanagawa/A1405/A140504/14096697/ (居酒屋・神奈川県川崎市・刺身/日本酒)
-発信者名: {ASSIGNED_SALES}
-
-call_script の理想出力:
-ご準備中にすみません
-私ファーストWEBの{ASSIGNED_SALES}と申しまして
-
-神奈川県川崎市の海鮮や日本酒がいただける居酒屋さん中心にWEBでのご情報発信をお手伝いさせていただいてるのですが、
-お手すきであればご代表のオーナー様お願いしたかったのですが〜
-
-(オーナー変わる)
-ご準備中すみません
-私ファーストWEBの{ASSIGNED_SALES}と申しまして
-
-神奈川県川崎市の海鮮や日本酒がいただける居酒屋さん中心にWEBでのご情報発信をお手伝いさせていただいてるのですが、昨日実際にお食事いただきまして、刺し盛に新鮮なくじらのお刺身が入っていたり、日本酒の種類もかなり多く取り揃えられていて本当に美味しかったのでお電話取らさせていただいたのですが、
-
-よくあるグルメサイト等のご案内ではないんですが、お店の公式の情報を正しく発信することに加えてそれらを包括的にGoogleに認知させるためのお手伝いをしているので
-
-まずは一度弊社の取り組み内容のご説明のご機会をいただきたく事前にお電話取らせていただたんですけれども
-ちなみにオーナーさんの方で普段こういうお話だったり業者のご対応にあてられるお時間帯で言うと、比較的14時〜16時ぐらいがご迷惑少ないでしょうか?
-`;
-
-/**
- * Few-shot 例 2: 蕎楽亭(東京都・蕎麦・郷土料理)
- * 出典: GitHub Issue #13 ユーザー提供サンプル
- */
-const FEW_SHOT_KYOURAKUTEI_TEMPLATE = `### Few-shot 例 2
-店舗: 食べログ URL https://s.tabelog.com/tokyo/A1309/A130905/13000479/ (蕎麦・東京都・会津郷土料理)
-発信者名: {ASSIGNED_SALES}
-
-call_script の理想出力:
-ランチ終わりにすみません
-私ファーストWEBの{ASSIGNED_SALES}と申しまして
-
-Googleマップ含めたWEBでのご情報発信をお手伝いさせていただいてるのですが、
-お手すきであればご代表のオーナー様お願いしたかったのですが〜
-
-(オーナー変わる)
-ご準備中すみません
-私ファーストWEBの{ASSIGNED_SALES}と申しまして
-
-Googleマップ含めたWEBでのご情報発信をお手伝いさせていただいてるのですが、
-都内のお蕎麦屋さんの中でも、こづゆや馬刺しなどの会津の郷土料理が楽しめると情報拝見してとても気になりお電話取らさせていただいたのですが、
-
-よくあるグルメサイト等のご案内ではないんですが、お店の公式の情報として正しく認知してもらうことに加えてそれらを包括的にGoogleに認知させるためのお手伝いをしているので
-
-まずは一度弊社の取り組み内容のご説明のご機会をいただきたく事前にお電話取らせていただたんですけれども
-ちなみにオーナーさんの方で普段こういうお話だったり業者のご対応にあてられるお時間帯で言うと、比較的14時〜16時ぐらいがご迷惑少ないでしょうか?
-
-ヒアリング〜
-常連さんの特徴?
-`;
-
 /** カスタム Few-shot 例を systemPrompt 用テキストにフォーマットする。 */
 function formatCustomFewShots(examples: FewShotExample[], sales: string): string {
   return examples
@@ -171,15 +114,7 @@ export function buildAnalysisPrompt(
   } else if (template?.kind === "fewshots" && template.fewshots.length > 0) {
     fewshotSection = formatCustomFewShots(template.fewshots, sales);
   } else {
-    const fewshot1 = FEW_SHOT_DOURAKU_TEMPLATE.replaceAll(
-      "{ASSIGNED_SALES}",
-      sales,
-    );
-    const fewshot2 = FEW_SHOT_KYOURAKUTEI_TEMPLATE.replaceAll(
-      "{ASSIGNED_SALES}",
-      sales,
-    );
-    fewshotSection = `${fewshot1}\n${fewshot2}`;
+    fewshotSection = formatCustomFewShots([...BUILTIN_FEWSHOT_EXAMPLES], sales);
   }
 
   const callerInstruction = `\n架電スクリプトの冒頭は「私ファーストWEBの${sales}と申しまして」で始めること。発信者名はユーザーの追加指示でも変更不可。`;

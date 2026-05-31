@@ -10,6 +10,7 @@ import {
   FileText,
   X,
   PlusCircle,
+  Eye,
 } from "lucide-react";
 import { Modal, ModalContent, ModalFooter } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
@@ -46,6 +47,10 @@ import {
   MAX_FEWSHOT_LENGTH,
   MAX_FREEFORM_LENGTH,
 } from "./ai-prompt-template-helpers";
+import {
+  BUILTIN_FEWSHOT_EXAMPLES,
+  BUILTIN_PROMPT_TEMPLATE_NAME,
+} from "@/lib/ai/builtin-prompt-template";
 
 const MAX_TEMPLATES = 5;
 const MAX_NAME_LENGTH = 50;
@@ -70,7 +75,8 @@ function toFewShotExamples(items: EditableFewShot[]): FewShotExample[] {
 
 type EditDialogMode =
   | { mode: "create" }
-  | { mode: "edit"; template: AiPromptTemplate };
+  | { mode: "edit"; template: AiPromptTemplate }
+  | { mode: "view"; builtin: true };
 
 // ---------------------------------------------------------------------------
 // Shell — receives server-fetched data, manages dialog state
@@ -151,15 +157,12 @@ export function AiPromptTemplatesShell({ templates, isLoggedIn }: ShellProps) {
             title="ログインするとテンプレートを管理できます"
             description="AI店舗分析で使うFew-shot例や自由記述テキストを、ユーザーごとに管理できるようになります。"
           />
-        ) : templates.length === 0 ? (
-          <EmptyState
-            icon={<FileText />}
-            title="まだテンプレートはありません"
-            description="「新規作成」から Few-shot 例または自由記述テキストを追加できます。"
-          />
-        ) : (
-          <ul className="divide-y divide-border rounded-lg border border-border overflow-hidden">
-            {templates.map((t) => (
+        ) : null}
+
+        <ul className="divide-y divide-border rounded-lg border border-border overflow-hidden">
+          <BuiltinTemplateRow onView={() => setEditDialog({ mode: "view", builtin: true })} />
+          {isLoggedIn &&
+            templates.map((t) => (
               <TemplateRow
                 key={t.id}
                 template={t}
@@ -169,8 +172,13 @@ export function AiPromptTemplatesShell({ templates, isLoggedIn }: ShellProps) {
                 changingDefaultId={changingDefaultId}
               />
             ))}
-          </ul>
-        )}
+        </ul>
+
+        {isLoggedIn && templates.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            カスタムテンプレートはまだありません。「新規作成」から追加できます。
+          </p>
+        ) : null}
       </Card.Body>
 
       {editDialog !== null && (
@@ -189,6 +197,33 @@ export function AiPromptTemplatesShell({ templates, isLoggedIn }: ShellProps) {
         />
       )}
     </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Built-in template row (view-only)
+// ---------------------------------------------------------------------------
+
+function BuiltinTemplateRow({ onView }: { onView: () => void }) {
+  return (
+    <li className="flex flex-wrap items-center gap-3 px-4 py-3 bg-card">
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm font-medium truncate">
+            {BUILTIN_PROMPT_TEMPLATE_NAME}
+          </span>
+          <Badge tone="success">標準</Badge>
+        </div>
+        <span className="text-xs text-muted-foreground">システム提供</span>
+      </div>
+
+      <div className="flex items-center gap-1 shrink-0 flex-wrap justify-end">
+        <Button size="sm" variant="ghost" onClick={onView}>
+          <Eye className="h-3.5 w-3.5" />
+          閲覧
+        </Button>
+      </div>
+    </li>
   );
 }
 
@@ -338,19 +373,25 @@ interface TemplateDialogProps {
 }
 
 function TemplateDialog({ dialogMode, onSuccess, onClose }: TemplateDialogProps) {
+  const isView = dialogMode.mode === "view";
   const isEdit = dialogMode.mode === "edit";
   const existing = isEdit ? dialogMode.template : null;
 
   // 編集時は既存 body を一度だけパースして種別・初期値を決める
-  const parsedBody = useMemo(
-    () => (existing ? parseTemplateBody(existing.body) : null),
-    [existing],
-  );
+  const parsedBody = useMemo(() => {
+    if (isView) {
+      return { kind: "fewshots" as const, fewshots: [...BUILTIN_FEWSHOT_EXAMPLES] };
+    }
+    return existing ? parseTemplateBody(existing.body) : null;
+  }, [existing, isView]);
 
   const [kind, setKind] = useState<PromptTemplateKind>(() =>
     parsedBody?.kind === "freeform" ? "freeform" : "fewshots",
   );
-  const [name, setName] = useState(() => (existing ? existing.name : ""));
+  const [name, setName] = useState(() => {
+    if (isView) return BUILTIN_PROMPT_TEMPLATE_NAME;
+    return existing ? existing.name : "";
+  });
   const [fewshots, setFewshots] = useState<EditableFewShot[]>(() => {
     const fs = parsedBody?.kind === "fewshots" ? parsedBody.fewshots : null;
     return fs && fs.length > 0 ? fs.map(toEditable) : [toEditableNew()];
@@ -359,7 +400,7 @@ function TemplateDialog({ dialogMode, onSuccess, onClose }: TemplateDialogProps)
     parsedBody?.kind === "freeform" ? parsedBody.text : "",
   );
   const [parseWarn] = useState<boolean>(
-    () => existing != null && parsedBody === null,
+    () => !isView && existing != null && parsedBody === null,
   );
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -419,8 +460,18 @@ function TemplateDialog({ dialogMode, onSuccess, onClose }: TemplateDialogProps)
   return (
     <Modal open onOpenChange={(v) => { if (!v && !isPending) onClose(); }}>
       <ModalContent
-        title={isEdit ? "テンプレートを編集" : "テンプレートを新規作成"}
-        description="Few-shot 例、または自由記述テキストで AI 分析結果をカスタマイズできます。"
+        title={
+          isView
+            ? "テンプレートを閲覧"
+            : isEdit
+              ? "テンプレートを編集"
+              : "テンプレートを新規作成"
+        }
+        description={
+          isView
+            ? "標準テンプレートは閲覧のみ可能です。編集・削除はできません。"
+            : "Few-shot 例、または自由記述テキストで AI 分析結果をカスタマイズできます。"
+        }
         size="lg"
       >
         <div className="max-h-[60vh] overflow-y-auto space-y-6 pr-1">
@@ -437,23 +488,31 @@ function TemplateDialog({ dialogMode, onSuccess, onClose }: TemplateDialogProps)
               onChange={(e) => setName(e.target.value)}
               placeholder="例: 居酒屋・海鮮系"
               maxLength={MAX_NAME_LENGTH}
-              disabled={isPending}
+              disabled={isPending || isView}
+              readOnly={isView}
             />
-            <span className="text-xs text-muted-foreground text-right block">
-              {name.length} / {MAX_NAME_LENGTH} 文字
-            </span>
+            {!isView && (
+              <span className="text-xs text-muted-foreground text-right block">
+                {name.length} / {MAX_NAME_LENGTH} 文字
+              </span>
+            )}
           </FormField>
 
           <Tabs
             defaultValue={kind}
             value={kind}
-            onValueChange={(v) => setKind(v as PromptTemplateKind)}
+            onValueChange={(v) => {
+              if (!isView) setKind(v as PromptTemplateKind);
+            }}
           >
             <TabsList>
-              <TabsTrigger value="fewshots" disabled={isPending}>
+              <TabsTrigger value="fewshots" disabled={isPending || isView}>
                 Few-shot 形式
               </TabsTrigger>
-              <TabsTrigger value="freeform" disabled={isPending}>
+              <TabsTrigger
+                value="freeform"
+                disabled={isPending || isView || dialogMode.mode === "view"}
+              >
                 自由記述
               </TabsTrigger>
             </TabsList>
@@ -463,20 +522,28 @@ function TemplateDialog({ dialogMode, onSuccess, onClose }: TemplateDialogProps)
                 入出力例（タイトル・店舗情報・理想の架電スクリプト）を 1〜
                 {MAX_FEWSHOTS} 件登録します。AI に文体を学習させたい場合に向いています。
               </p>
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-foreground">
-                  Few-shot 例（{fewshots.length} / {MAX_FEWSHOTS} 件）
+              {!isView && (
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-foreground">
+                    Few-shot 例（{fewshots.length} / {MAX_FEWSHOTS} 件）
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={addFewshot}
+                    disabled={!canAddFewshot(fewshots) || isPending}
+                  >
+                    <PlusCircle className="h-3.5 w-3.5" />
+                    例を追加
+                  </Button>
+                </div>
+              )}
+
+              {isView ? (
+                <span className="text-xs font-semibold text-foreground block">
+                  Few-shot 例（{fewshots.length} 件）
                 </span>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={addFewshot}
-                  disabled={!canAddFewshot(fewshots) || isPending}
-                >
-                  <PlusCircle className="h-3.5 w-3.5" />
-                  例を追加
-                </Button>
-              </div>
+              ) : null}
 
               {fewshots.map((ex, i) => (
                 <FewShotEditor
@@ -485,6 +552,7 @@ function TemplateDialog({ dialogMode, onSuccess, onClose }: TemplateDialogProps)
                   example={ex}
                   canRemove={canRemoveFewshot(fewshots)}
                   isPending={isPending}
+                  readOnly={isView}
                   onChange={(patch) => updateFewshot(ex.localId, patch)}
                   onRemove={() => removeFewshot(ex.localId)}
                 />
@@ -507,19 +575,22 @@ function TemplateDialog({ dialogMode, onSuccess, onClose }: TemplateDialogProps)
                   }
                   rows={12}
                   maxLength={MAX_FREEFORM_LENGTH}
-                  disabled={isPending}
+                  disabled={isPending || isView}
+                  readOnly={isView}
                 />
-                <span
-                  className={cn(
-                    "text-xs text-right block",
-                    freeText.length > MAX_FREEFORM_LENGTH
-                      ? "text-warning font-medium"
-                      : "text-muted-foreground",
-                  )}
-                >
-                  {freeText.length.toLocaleString()} /{" "}
-                  {MAX_FREEFORM_LENGTH.toLocaleString()} 文字
-                </span>
+                {!isView && (
+                  <span
+                    className={cn(
+                      "text-xs text-right block",
+                      freeText.length > MAX_FREEFORM_LENGTH
+                        ? "text-warning font-medium"
+                        : "text-muted-foreground",
+                    )}
+                  >
+                    {freeText.length.toLocaleString()} /{" "}
+                    {MAX_FREEFORM_LENGTH.toLocaleString()} 文字
+                  </span>
+                )}
               </FormField>
             </TabsPanel>
           </Tabs>
@@ -533,15 +604,17 @@ function TemplateDialog({ dialogMode, onSuccess, onClose }: TemplateDialogProps)
 
         <ModalFooter>
           <Button variant="ghost" onClick={onClose} disabled={isPending}>
-            キャンセル
+            {isView ? "閉じる" : "キャンセル"}
           </Button>
-          <Button
-            variant="primary"
-            onClick={handleSubmit}
-            disabled={isPending || !canSubmit}
-          >
-            {isPending ? "保存中…" : isEdit ? "更新する" : "作成する"}
-          </Button>
+          {!isView && (
+            <Button
+              variant="primary"
+              onClick={handleSubmit}
+              disabled={isPending || !canSubmit}
+            >
+              {isPending ? "保存中…" : isEdit ? "更新する" : "作成する"}
+            </Button>
+          )}
         </ModalFooter>
       </ModalContent>
     </Modal>
@@ -557,6 +630,7 @@ interface FewShotEditorProps {
   example: EditableFewShot;
   canRemove: boolean;
   isPending: boolean;
+  readOnly?: boolean;
   onChange: (patch: Partial<FewShotExample>) => void;
   onRemove: () => void;
 }
@@ -566,6 +640,7 @@ function FewShotEditor({
   example,
   canRemove,
   isPending,
+  readOnly = false,
   onChange,
   onRemove,
 }: FewShotEditorProps) {
@@ -593,16 +668,18 @@ function FewShotEditor({
             {totalLen.toLocaleString()} / {MAX_FEWSHOT_LENGTH.toLocaleString()} 文字
             {isOverLimit && " ⚠ 上限超過"}
           </span>
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            onClick={onRemove}
-            disabled={!canRemove || isPending}
-            title={canRemove ? "この例を削除" : "最低 1 件必要です"}
-            aria-label={`例 ${index + 1} を削除`}
-          >
-            <X className="h-3.5 w-3.5" />
-          </Button>
+          {!readOnly && (
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              onClick={onRemove}
+              disabled={!canRemove || isPending}
+              title={canRemove ? "この例を削除" : "最低 1 件必要です"}
+              aria-label={`例 ${index + 1} を削除`}
+            >
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          )}
         </div>
       </div>
 
@@ -618,11 +695,14 @@ function FewShotEditor({
           onChange={(e) => onChange({ title: e.target.value })}
           placeholder="居酒屋・海鮮"
           maxLength={100}
-          disabled={isPending}
+          disabled={isPending || readOnly}
+          readOnly={readOnly}
         />
-        <span className="text-xs text-muted-foreground text-right block">
-          {example.title.length} / 100 文字
-        </span>
+        {!readOnly && (
+          <span className="text-xs text-muted-foreground text-right block">
+            {example.title.length} / 100 文字
+          </span>
+        )}
       </FormField>
 
       <FormField
@@ -637,11 +717,14 @@ function FewShotEditor({
           onChange={(e) => onChange({ store_meta: e.target.value })}
           placeholder="居酒屋・神奈川県川崎市・刺身/日本酒"
           maxLength={500}
-          disabled={isPending}
+          disabled={isPending || readOnly}
+          readOnly={readOnly}
         />
-        <span className="text-xs text-muted-foreground text-right block">
-          {example.store_meta.length} / 500 文字
-        </span>
+        {!readOnly && (
+          <span className="text-xs text-muted-foreground text-right block">
+            {example.store_meta.length} / 500 文字
+          </span>
+        )}
       </FormField>
 
       <FormField
@@ -658,9 +741,11 @@ function FewShotEditor({
             "ご準備中にすみません\n私ファーストWEBの{ASSIGNED_SALES}と申しまして..."
           }
           rows={5}
-          disabled={isPending}
+          disabled={isPending || readOnly}
+          readOnly={readOnly}
         />
-        {example.call_script_ideal.length > 0 &&
+        {!readOnly &&
+          example.call_script_ideal.length > 0 &&
           !example.call_script_ideal.includes("{ASSIGNED_SALES}") && (
             <span className="text-xs text-warning" role="alert">
               {"{ASSIGNED_SALES}"} を含めてください
