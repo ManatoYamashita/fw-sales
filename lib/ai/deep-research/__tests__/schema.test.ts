@@ -104,7 +104,9 @@ describe("getDeepResearchJsonSchema", () => {
     const ordering = schema.propertyOrdering as string[];
     expect(ordering[0]).toBe("category_1_basic");
     expect(ordering).toContain("hearing_questions");
-    expect(ordering).toContain("full_markdown");
+    // full_markdown は LLM 出力スキーマから除外済み (token 節約 / MAX_TOKENS 切断回避)。
+    // 最終 report の full_markdown は pipeline 側が reportMarkdown を注入する。
+    expect(ordering).not.toContain("full_markdown");
   });
 });
 

@@ -80,6 +80,11 @@ export interface TickResult {
  */
 const RESERVE_STRUCTURING_BUDGET_MS = 40_000;
 const STAGE2_MAX_TIMEOUTS = 3;
+/**
+ * Stage 2 構造化の "retryable" 失敗 (invalid_json / schema_violation) の最大再試行回数。
+ * これを超えたら stage2_structure_retry_exceeded で failed にする。
+ */
+const STAGE2_MAX_STRUCTURE_RETRIES = 2;
 const RESERVE_START_MS = 5_000;
 const RESERVE_POLL_ONE_MS = 2_000;
 const RESERVE_SWEEP_ONE_MS = 3_000;
@@ -99,6 +104,20 @@ function countStage2Timeouts(job: DeepResearchJob): number {
   const log = job.error_log ?? [];
   return log.filter(
     (e) => e.stage === "stage2" && e.kind === "stage2_timeout",
+  ).length;
+}
+
+/**
+ * error_log 内の retryable な Stage 2 構造化失敗 (invalid_json / schema_violation)
+ * の件数を返す。縮約再試行の上限制御に使用。
+ */
+function countStage2StructureRetries(job: DeepResearchJob): number {
+  const log = job.error_log ?? [];
+  return log.filter(
+    (e) =>
+      e.stage === "stage2" &&
+      (e.kind === "stage2_invalid_json" ||
+        e.kind === "stage2_schema_violation"),
   ).length;
 }
 
@@ -411,7 +430,10 @@ async function pollOneResearching(args: {
  * - 成功 → "completed" (report 挿入 + done 化済み)
  * - timeout: 上限未達 → "still_structuring" (structuring のまま次 tick へ)
  * - timeout: 上限超過 → "failed" (stage2_timeout_exceeded で failed 化済み)
- * - 他の失敗 → "failed"
+ * - invalid_json / schema_violation: 上限未達 → "still_structuring"
+ *   (次 tick で concise 縮約再試行)、上限超過 → "failed"
+ *   (stage2_structure_retry_exceeded で failed 化済み)
+ * - 他の回復不能エラー (api_error 等) → "failed"
  * - stage1_markdown なし → "failed"
  */
 async function processOneStructuring(args: {
@@ -453,6 +475,22 @@ async function processOneStructuring(args: {
     return "failed";
   }
 
+  // Stage 2 構造化 (invalid_json / schema_violation) リトライ上限チェック
+  const structureRetries = countStage2StructureRetries(job);
+  if (structureRetries >= STAGE2_MAX_STRUCTURE_RETRIES) {
+    await repos.deepResearch.appendJobError(job.id, {
+      stage: "stage2",
+      kind: "stage2_structure_retry_exceeded",
+      message: `Stage 2 構造化の再試行上限 (${STAGE2_MAX_STRUCTURE_RETRIES} 回) を超えました`,
+      occurred_at: new Date().toISOString(),
+    });
+    await repos.deepResearch.updateJobStatus(job.id, {
+      status: "failed",
+      completed_at: new Date().toISOString(),
+    });
+    return "failed";
+  }
+
   return runStage2AndFinalize({
     job,
     reportMarkdown,
@@ -460,6 +498,8 @@ async function processOneStructuring(args: {
     structurer,
     deadline,
     signal,
+    // 過去に retryable 失敗があれば縮約モードで再構造化する。
+    concise: structureRetries > 0,
   });
 }
 
@@ -470,8 +510,18 @@ async function runStage2AndFinalize(args: {
   structurer: Structurer;
   deadline: number;
   signal: AbortSignal;
+  /** 縮約再試行モード。Structurer に渡して簡潔出力 + 増量 maxOutputTokens にする。 */
+  concise?: boolean;
 }): Promise<Stage2FinalizeResult> {
-  const { job, reportMarkdown, sourceUrls, structurer, deadline, signal } = args;
+  const {
+    job,
+    reportMarkdown,
+    sourceUrls,
+    structurer,
+    deadline,
+    signal,
+    concise,
+  } = args;
 
   const store = await repos.store.get(job.store_id);
   if (!store) {
@@ -494,6 +544,7 @@ async function runStage2AndFinalize(args: {
     {
       reportMarkdown,
       sourceUrls,
+      concise,
       storeContext: {
         name: store.name,
         prefecture: store.prefecture,
@@ -508,6 +559,7 @@ async function runStage2AndFinalize(args: {
 
   if (!structured.ok) {
     const errKind = structured.error.kind;
+    const detail = extractStructurerMessage(structured.error);
     if (errKind === "timeout") {
       // 実行中 timeout: error_log に記録して structuring のまま次 tick へ。
       // countStage2Timeouts が上限を検出したら次 tick で failed になる。
@@ -519,7 +571,20 @@ async function runStage2AndFinalize(args: {
       });
       return "still_structuring";
     }
-    const detail = extractStructurerMessage(structured.error);
+    if (errKind === "invalid_json" || errKind === "schema_violation") {
+      // 出力切断 (MAX_TOKENS) やスキーマ不一致は一過性のことがある。error_log に
+      // 記録して structuring のまま次 tick へ (次回は concise で縮約再試行)。
+      // countStage2StructureRetries が上限を検出したら次 tick で failed になる。
+      await repos.deepResearch.appendJobError(job.id, {
+        stage: "stage2",
+        kind: `stage2_${errKind}`,
+        message: detail
+          ? `Stage 2 構造化に失敗しました (${errKind}): ${detail}。次 tick で縮約再試行します`
+          : `Stage 2 構造化に失敗しました (${errKind})。次 tick で縮約再試行します`,
+        occurred_at: new Date().toISOString(),
+      });
+      return "still_structuring";
+    }
     await markFailed(
       job,
       "stage2",
@@ -550,10 +615,7 @@ async function runStage2AndFinalize(args: {
     category_7_owned_media: structured.data.category_7_owned_media,
     category_8_other: structured.data.category_8_other,
     hearing_questions: structured.data.hearing_questions as HearingQuestion[],
-    full_markdown:
-      structured.data.full_markdown.length > 0
-        ? structured.data.full_markdown
-        : reportMarkdown,
+    full_markdown: reportMarkdown,
     all_source_urls: structured.data.all_source_urls,
     total_cost_yen: null,
     total_duration_sec: durationSec,

@@ -112,6 +112,16 @@ export function getStructurerModel(): string {
 }
 
 /**
+ * Stage 2 構造化 (Gemini) の `maxOutputTokens` 上限。
+ * `full_markdown` を出力スキーマから除外したため通常は十分だが、tier=B の
+ * `source_quote` 長文化などに備えた余裕として env で調整可能にする (再デプロイ不要)。
+ * 未設定時のデフォルトは 16384。
+ */
+export function getStructurerMaxOutputTokens(): number {
+  return readPositiveInt("DEEP_RESEARCH_STRUCTURER_MAX_TOKENS", 16384);
+}
+
+/**
  * GitHub Actions cron から `/api/cron/poll-research` を叩く際の共有シークレット。
  * 必須環境変数。未設定なら throw する (運用 misconfig を起動時に検出)。
  */

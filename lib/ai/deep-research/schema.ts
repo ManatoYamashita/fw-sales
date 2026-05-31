@@ -123,7 +123,6 @@ export const DeepResearchReportSchema = z
     category_7_owned_media: CategoryArray,
     category_8_other: CategoryArray,
     hearing_questions: z.array(HearingQuestionSchema),
-    full_markdown: z.string(),
     all_source_urls: z.array(z.string()),
   })
   .strict();
@@ -143,7 +142,6 @@ const REPORT_PROPERTY_ORDERING = [
   "category_7_owned_media",
   "category_8_other",
   "hearing_questions",
-  "full_markdown",
   "all_source_urls",
 ] as const;
 

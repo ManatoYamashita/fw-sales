@@ -200,7 +200,6 @@ const SUCCESS_REPORT: StructuredReport = {
   category_7_owned_media: [],
   category_8_other: [],
   hearing_questions: [],
-  full_markdown: MARKDOWN,
   all_source_urls: SOURCE_URLS,
 };
 
@@ -324,6 +323,15 @@ describe("Case 2: processOneStructuring — Stage 2 成功", () => {
     expect(outcome).toBe("completed");
     expect(structurer.structure).toHaveBeenCalledTimes(1);
     expect(mockInsertReport).toHaveBeenCalledTimes(1);
+    // full_markdown は LLM 出力ではなく stage1_markdown (reportMarkdown) を注入する
+    expect(mockInsertReport).toHaveBeenCalledWith(
+      expect.objectContaining({ full_markdown: MARKDOWN }),
+    );
+    // 通常実行 (リトライ前) は concise を立てない
+    expect(structurer.structure).toHaveBeenCalledWith(
+      expect.objectContaining({ concise: false }),
+      expect.anything(),
+    );
     expect(mockUpdateJobStatus).toHaveBeenCalledWith(
       JOB_ID,
       expect.objectContaining({ status: "done" }),
@@ -519,10 +527,115 @@ describe("Case 5: Stage 2 timeout 上限超過 (3回) → failed", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Case 6: Stage 2 本当の失敗 (schema_violation) → failed
+// Case 5b: Stage 2 構造化リトライ (invalid_json / schema_violation)
+// ---------------------------------------------------------------------------
+describe("Case 5b: Stage 2 invalid_json/schema_violation → 縮約リトライ", () => {
+  it("invalid_json 1回目: still_structuring を返し error_log に stage2_invalid_json を追加", async () => {
+    const job = makeStructuringJob();
+    const structurer = makeStructurer({
+      ok: false,
+      error: {
+        kind: "invalid_json",
+        message: "JSON 解釈不能",
+        finishReason: "MAX_TOKENS",
+        responseLength: 32875,
+      },
+    });
+
+    const outcome = await __internal.processOneStructuring({
+      job,
+      drClient: makeDrClient(),
+      structurer,
+      deadline: FAR_FUTURE_DEADLINE,
+      signal: SIGNAL,
+    });
+
+    expect(outcome).toBe("still_structuring");
+    expect(mockAppendJobError).toHaveBeenCalledWith(
+      JOB_ID,
+      expect.objectContaining({ kind: "stage2_invalid_json" }),
+    );
+    // failed にはしない
+    expect(mockUpdateJobStatus).not.toHaveBeenCalledWith(
+      JOB_ID,
+      expect.objectContaining({ status: "failed" }),
+    );
+    expect(mockInsertReport).not.toHaveBeenCalled();
+  });
+
+  it("既に retryable 失敗が1件あると concise=true で再構造化する", async () => {
+    const job = makeStructuringJob({
+      error_log: [
+        {
+          stage: "stage2",
+          kind: "stage2_invalid_json",
+          message: "前回",
+          occurred_at: "2026-05-30T11:00:00.000Z",
+        },
+      ],
+    });
+    const structurer = makeStructurer({ ok: true, data: SUCCESS_REPORT });
+
+    const outcome = await __internal.processOneStructuring({
+      job,
+      drClient: makeDrClient(),
+      structurer,
+      deadline: FAR_FUTURE_DEADLINE,
+      signal: SIGNAL,
+    });
+
+    expect(outcome).toBe("completed");
+    expect(structurer.structure).toHaveBeenCalledWith(
+      expect.objectContaining({ concise: true }),
+      expect.anything(),
+    );
+  });
+
+  it("retryable 失敗が上限 (2件) に達したら structurer を呼ばず stage2_structure_retry_exceeded で failed", async () => {
+    const job = makeStructuringJob({
+      error_log: [
+        {
+          stage: "stage2",
+          kind: "stage2_invalid_json",
+          message: "1",
+          occurred_at: "2026-05-30T11:00:00.000Z",
+        },
+        {
+          stage: "stage2",
+          kind: "stage2_schema_violation",
+          message: "2",
+          occurred_at: "2026-05-30T11:05:00.000Z",
+        },
+      ],
+    });
+    const structurer = makeStructurer({ ok: true, data: SUCCESS_REPORT });
+
+    const outcome = await __internal.processOneStructuring({
+      job,
+      drClient: makeDrClient(),
+      structurer,
+      deadline: FAR_FUTURE_DEADLINE,
+      signal: SIGNAL,
+    });
+
+    expect(outcome).toBe("failed");
+    expect(structurer.structure).not.toHaveBeenCalled();
+    expect(mockAppendJobError).toHaveBeenCalledWith(
+      JOB_ID,
+      expect.objectContaining({ kind: "stage2_structure_retry_exceeded" }),
+    );
+    expect(mockUpdateJobStatus).toHaveBeenCalledWith(
+      JOB_ID,
+      expect.objectContaining({ status: "failed" }),
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Case 6: Stage 2 本当の失敗 (回復不能 kind) → failed
 // ---------------------------------------------------------------------------
 describe("Case 6: Stage 2 本当の失敗 → failed", () => {
-  it("schema_violation エラーは failed になり completed は増えない", async () => {
+  it("schema_violation 1回目は still_structuring (retryable)、failed にはしない", async () => {
     const job = makeStructuringJob();
     const structurer = makeStructurer({
       ok: false,
@@ -537,10 +650,10 @@ describe("Case 6: Stage 2 本当の失敗 → failed", () => {
       signal: SIGNAL,
     });
 
-    expect(outcome).toBe("failed");
-    expect(mockUpdateJobStatus).toHaveBeenCalledWith(
+    expect(outcome).toBe("still_structuring");
+    expect(mockAppendJobError).toHaveBeenCalledWith(
       JOB_ID,
-      expect.objectContaining({ status: "failed" }),
+      expect.objectContaining({ kind: "stage2_schema_violation" }),
     );
     expect(mockInsertReport).not.toHaveBeenCalled();
   });
