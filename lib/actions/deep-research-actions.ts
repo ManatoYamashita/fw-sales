@@ -498,6 +498,81 @@ export async function getDeepResearchJobStatusAction(
   return success({ status: job.status, taskId: job.deep_research_task_id });
 }
 
+export interface AdvanceStructuringResult {
+  jobId: string;
+  /** tick 実行後に読み直したジョブ status。 */
+  status: JobStatus;
+  /** structuring を外れた (= 構造化が done/failed に確定した) か。 */
+  settled: boolean;
+  polledAt: string;
+}
+
+/**
+ * structuring (Stage 2) のジョブを 1 tick 分能動的に前進させる
+ * (ジョブ詳細ページの「構造化ライブ状態」Card 用)。
+ *
+ * GitHub Actions cron の配信遅延で Stage 2 が停滞しても、ユーザーが画面を
+ * 開いている間は本アクションのポーリングで構造化を進められるようにする。
+ *
+ * - structuring 以外なら tick を発火せず現在 status を返す (Card 側が監視を止める)。
+ * - 内部で cron と同じ `runPollResearchTick` を 1 回実行する。並行 cron tick が
+ *   同一ジョブの Stage 2 を処理して `research_reports` の UNIQUE(job_id) 制約違反等で
+ *   throw しても、ジョブ自体は別 tick が done/failed 化しているため握りつぶし、
+ *   status を読み直して返す (pipeline には手を入れず、本アクション層で無害化する)。
+ * - Stage 2 は重いため、呼出側 Card で単一フライト + クールダウンを掛け連打を防ぐ。
+ */
+export async function advanceStructuringAction(
+  jobId: string,
+): Promise<ActionResult<AdvanceStructuringResult>> {
+  "use server";
+
+  if (typeof jobId !== "string" || jobId.trim() === "") {
+    return failure("ジョブ ID が指定されていません");
+  }
+
+  const session = await getCurrentSession();
+  if (!session) return failure("ログインが必要です");
+
+  const job = await repos.deepResearch.getById(jobId);
+  if (!job) return failure("ジョブが見つかりません");
+
+  const polledAt = new Date().toISOString();
+
+  // structuring 以外は前進対象外。現在 status をそのまま返す。
+  if (job.status !== "structuring") {
+    return success({
+      jobId,
+      status: job.status,
+      settled: job.status === "done" || job.status === "failed",
+      polledAt,
+    });
+  }
+
+  const { runPollResearchTick } = await import(
+    "@/app/api/cron/poll-research/pipeline"
+  );
+  try {
+    await runPollResearchTick({ deadline: Date.now() + 50_000 });
+  } catch (err) {
+    // 並行 tick が同一 structuring を処理した際の競合 (UNIQUE(job_id) 違反等) は
+    // 想定内。ジョブ status は別 tick が確定させているため握りつぶす。
+    console.error(
+      "[advanceStructuringAction] poll tick error (ignored)",
+      err,
+    );
+  }
+
+  const refreshed = await repos.deepResearch.getById(jobId);
+  const status = refreshed?.status ?? job.status;
+  revalidateTag(CACHE_TAGS.deepResearchJob(jobId), "max");
+  return success({
+    jobId,
+    status,
+    settled: status === "done" || status === "failed",
+    polledAt,
+  });
+}
+
 function inferErrorKind(err: unknown): string {
   if (typeof err === "object" && err !== null && "kind" in err) {
     return String((err as { kind: unknown }).kind);

@@ -17,9 +17,10 @@ import { isPendingStatus, type JobStatus } from "@/types/deep-research";
  * - `router.refresh()` は Server Component を再実行し `after()` を再発火させる。
  *   固定間隔で refresh すると `structuring` の Stage 2 (Gemini 構造化) が並行二重
  *   起動しうるため、ここでは「status が変化した瞬間だけ refresh」に限定する。
- * - `researching` かつ taskId 有りは `GeminiLiveStatusCard` が Gemini 直問合せ +
- *   refresh を担当するため対象外 (二重 watch を避ける)。本コンポーネントは
- *   その補集合 (queued / structuring / researching かつ taskId 未設定) を担う。
+ * - `researching` かつ taskId 有りは `GeminiLiveStatusCard`、`structuring` は
+ *   `StructuringLiveCard` がそれぞれ能動ポーリング + refresh を担当するため対象外
+ *   (二重 watch を避ける)。本コンポーネントはその補集合 (queued /
+ *   researching かつ taskId 未設定) を読み取り専用で監視する。
  * - status 監視は読み取り専用 action (`getDeepResearchJobStatusAction`) を使い、
  *   poll tick を発火しない。
  */
@@ -35,8 +36,12 @@ interface JobAutoRefreshProps {
 export function JobAutoRefresh({ jobId, status, taskId }: JobAutoRefreshProps) {
   const router = useRouter();
 
-  // researching(+taskId) は GeminiLiveStatusCard が担当するため除外。
-  const handledByLiveCard = status === "researching" && !!taskId;
+  // researching(+taskId) は GeminiLiveStatusCard、structuring は
+  // StructuringLiveCard が能動ポーリングで担当するため、ここでは除外する
+  // (二重監視・二重 tick 発火を避ける)。本コンポーネントは queued と
+  // researching(taskId 未設定) のみを読み取り専用で監視する。
+  const handledByLiveCard =
+    (status === "researching" && !!taskId) || status === "structuring";
   const shouldWatch = isPendingStatus(status) && !handledByLiveCard;
 
   useEffect(() => {
