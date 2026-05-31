@@ -68,7 +68,7 @@ export default async function StoresPage({ searchParams }: PageProps) {
         <div className="flex items-center gap-2">
           <Link
             href="/stores/new"
-            className="inline-flex items-center gap-1.5 h-10 px-4 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-secondary transition-colors"
+            className="inline-flex items-center gap-1.5 h-10 px-4 rounded-lg border border-transparent bg-primary text-primary-foreground text-sm font-medium transition-colors hover:bg-background hover:text-foreground hover:border-foreground"
           >
             <Plus className="h-4 w-4" />
             店舗を登録
