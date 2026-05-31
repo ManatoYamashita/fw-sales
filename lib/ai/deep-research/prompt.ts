@@ -35,8 +35,14 @@ export interface BuildDeepResearchPromptInput {
 export interface DeepResearchPrompts {
   /** Stage 1 (Deep Research) に投げる system + user prompt */
   stage1: { systemPrompt: string; userPrompt: string };
-  /** Stage 2 (gemini-2.5-flash-lite) 構造化用 system + user prompt */
-  stage2: (reportMarkdown: string) => {
+  /**
+   * Stage 2 (gemini-2.5-flash-lite) 構造化用 system + user prompt。
+   * `concise=true` (再試行時) は簡潔出力プロンプトを返し JSON 切断の再発を抑える。
+   */
+  stage2: (
+    reportMarkdown: string,
+    concise?: boolean,
+  ) => {
     systemPrompt: string;
     userPrompt: string;
   };
@@ -71,8 +77,8 @@ export function buildDeepResearchPrompt(
       systemPrompt: buildStage1SystemPrompt(),
       userPrompt: buildStage1UserPrompt(storeBlock),
     },
-    stage2: (reportMarkdown) => ({
-      systemPrompt: buildStage2SystemPrompt(),
+    stage2: (reportMarkdown, concise = false) => ({
+      systemPrompt: buildStage2SystemPrompt(concise),
       userPrompt: buildStage2UserPrompt(storeBlock, reportMarkdown),
     }),
   };
@@ -130,8 +136,8 @@ function renderItemsBlockForPrompt(): string {
 // Stage 2 (gemini-2.5-flash-lite) プロンプト
 // ---------------------------------------------------------------------------
 
-function buildStage2SystemPrompt(): string {
-  return [
+function buildStage2SystemPrompt(concise = false): string {
+  const lines = [
     "Stage 1 で生成された Markdown レポートを、定義済 JSON Schema に従って構造化してください。",
     "",
     "## 構造化規則",
@@ -140,9 +146,19 @@ function buildStage2SystemPrompt(): string {
     "- tier=B: confidence (0-100)、source_urls (配列)、source_quote (抜粋) を必須",
     "- tier=C: hearing_question を必須、value は null 可",
     "- hearing_questions 配列には全 C 項目を {category, question} 形式で抽出",
-    "- full_markdown には Stage 1 の Markdown を原文のまま格納",
     "- all_source_urls には Stage 1 が引用した URL を重複排除して配列化",
-  ].join("\n");
+  ];
+  if (concise) {
+    // 再試行時: 前回の出力が maxOutputTokens 超過で途中切断され invalid_json に
+    // なったケースの再発防止。説明文を排し、各フィールドを短くするよう指示する。
+    lines.push(
+      "",
+      "## 重要 (再試行)",
+      "- 前回の出力は不完全な JSON でした。JSON 以外のテキスト (説明文・コードフェンス) を一切付けず、JSON Schema に厳密準拠した完結した JSON のみを出力すること",
+      "- source_quote は要点のみ簡潔に (各 1 文以内)。value も冗長な装飾を避ける",
+    );
+  }
+  return lines.join("\n");
 }
 
 function buildStage2UserPrompt(

@@ -6,11 +6,16 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { getStallThresholdMs, getStallGraceMs } from "../env";
+import {
+  getStallThresholdMs,
+  getStallGraceMs,
+  getStructurerMaxOutputTokens,
+} from "../env";
 
 const KEYS = [
   "DEEP_RESEARCH_STALL_THRESHOLD_MIN",
   "DEEP_RESEARCH_STALL_GRACE_MIN",
+  "DEEP_RESEARCH_STRUCTURER_MAX_TOKENS",
 ] as const;
 
 let saved: Record<string, string | undefined>;
@@ -61,5 +66,23 @@ describe("getStallGraceMs", () => {
   it("不正値はデフォルトにフォールバック", () => {
     process.env.DEEP_RESEARCH_STALL_GRACE_MIN = "-1";
     expect(getStallGraceMs()).toBe(60 * 60_000);
+  });
+});
+
+describe("getStructurerMaxOutputTokens", () => {
+  it("未設定ならデフォルト 16384", () => {
+    expect(getStructurerMaxOutputTokens()).toBe(16384);
+  });
+
+  it("正常値はそのまま返る", () => {
+    process.env.DEEP_RESEARCH_STRUCTURER_MAX_TOKENS = "32768";
+    expect(getStructurerMaxOutputTokens()).toBe(32768);
+  });
+
+  it("不正値 (0 / 負 / 非数値) はデフォルトにフォールバック", () => {
+    for (const bad of ["0", "-1", "abc", ""]) {
+      process.env.DEEP_RESEARCH_STRUCTURER_MAX_TOKENS = bad;
+      expect(getStructurerMaxOutputTokens()).toBe(16384);
+    }
   });
 });

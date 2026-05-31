@@ -26,7 +26,11 @@ import {
 import { buildDeepResearchPrompt } from "./prompt";
 import { sanitizeMessage } from "./client";
 import type { Store } from "@/types/store";
-import { readEnv, getStructurerModel } from "@/lib/env";
+import {
+  readEnv,
+  getStructurerModel,
+  getStructurerMaxOutputTokens,
+} from "@/lib/env";
 
 export type StructurerError =
   | { kind: "missing_api_key" }
@@ -57,6 +61,12 @@ export interface StructurerInput {
     Store,
     "name" | "prefecture" | "city" | "address" | "genre" | "site_url"
   >;
+  /**
+   * 再試行時の縮約モード。前回 invalid_json / schema_violation で失敗した
+   * ジョブの再構造化時に true を渡すと、簡潔出力プロンプト + 増量した
+   * maxOutputTokens で再実行し、JSON 切断の再発を抑える。
+   */
+  concise?: boolean;
 }
 
 export type StructurerResult<T> =
@@ -123,6 +133,12 @@ export function parseAndValidateStructurerText(
     ) {
       obj.all_source_urls = dedupe(sourceUrlsFallback);
     }
+    // full_markdown は LLM 出力スキーマから除外済み (token 節約)。
+    // 万一モデルが混入させても `.strict()` 検証で弾かれないよう防御的に除去する。
+    // 最終的な full_markdown は呼出側 (pipeline) が reportMarkdown を注入する。
+    if ("full_markdown" in obj) {
+      delete obj.full_markdown;
+    }
   }
 
   const validated = DeepResearchReportSchema.safeParse(parsed);
@@ -153,9 +169,18 @@ export function createStructurer(): Structurer {
       const ai = new GoogleGenAI({ apiKey });
 
       const prompts = buildDeepResearchPrompt({ store: input.storeContext });
-      const { systemPrompt, userPrompt } = prompts.stage2(input.reportMarkdown);
+      const { systemPrompt, userPrompt } = prompts.stage2(
+        input.reportMarkdown,
+        input.concise ?? false,
+      );
 
       const jsonSchema = getDeepResearchJsonSchema();
+
+      // 再試行時 (concise) は出力切断の再発を避けるため上限を上乗せする。
+      const baseMaxTokens = getStructurerMaxOutputTokens();
+      const maxOutputTokens = input.concise
+        ? baseMaxTokens + 8192
+        : baseMaxTokens;
 
       try {
         const response = await ai.models.generateContent({
@@ -171,10 +196,10 @@ export function createStructurer(): Structurer {
             responseMimeType: "application/json",
             responseJsonSchema: jsonSchema,
             temperature: 0.2,
-            // 51 項目 × 各 ~200 token + 余裕で 16k 程度。8192 だと冗長な
-            // Markdown 入力 (store データ貧弱なケース) で JSON 途中切断 →
-            // invalid_json が観測されたため拡大 (PR 起票元: job_mpsfi8g0_nc3u5t)
-            maxOutputTokens: 16384,
+            // full_markdown を出力スキーマから除外したため通常 16k で十分。
+            // env (`DEEP_RESEARCH_STRUCTURER_MAX_TOKENS`) で調整可能、再試行
+            // (concise) 時はさらに +8192 して JSON 切断の再発を抑える。
+            maxOutputTokens,
             abortSignal: signal,
           },
         });

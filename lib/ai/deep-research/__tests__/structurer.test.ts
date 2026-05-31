@@ -42,7 +42,6 @@ interface Payload {
   category_7_owned_media: PayloadItem[];
   category_8_other: PayloadItem[];
   hearing_questions: { category: string; question: string }[];
-  full_markdown: string;
   all_source_urls: string[];
 }
 
@@ -63,7 +62,6 @@ function makeValidPayload(): Payload {
     category_7_owned_media: [],
     category_8_other: [],
     hearing_questions: [],
-    full_markdown: "## 屋号\nサンプル食堂",
     all_source_urls: ["https://example.com"],
   };
 }
@@ -75,7 +73,21 @@ describe("parseAndValidateStructurerText", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.data.category_1_basic).toHaveLength(1);
-      expect(result.data.full_markdown).toContain("サンプル食堂");
+      // full_markdown は出力スキーマから除外済み。data に存在しないことを確認。
+      expect(result.data).not.toHaveProperty("full_markdown");
+    }
+  });
+
+  it("LLM が full_markdown を混入させても strip されて成功する", () => {
+    const payload = makeValidPayload() as Payload & { full_markdown?: string };
+    payload.full_markdown = "## 余計な full_markdown\n本来不要な巨大テキスト";
+    const result = parseAndValidateStructurerText(
+      JSON.stringify(payload),
+      [],
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data).not.toHaveProperty("full_markdown");
     }
   });
 
