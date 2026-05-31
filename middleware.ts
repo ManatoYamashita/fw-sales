@@ -59,6 +59,7 @@ export const config = {
   /*
    * 保護対象は `(main)` Route Group 配下の全ページ。除外は次の通り:
    * - `/login` / `/auth/*` (認証経路自体)
+   * - `/privacy` / `/terms` (未認証でも閲覧する法的ページ。`(legal)` Route Group)
    * - `/api/*` (API 経路)
    * - `/_next/*` (Next.js 内部アセット)
    * - 拡張子付き静的アセット (favicon / public/ 配下)
@@ -67,6 +68,6 @@ export const config = {
    *   (PWA install / SNS リンクプレビュー / クローラー)
    */
   matcher: [
-    "/((?!login|auth|api|_next/static|_next/image|favicon\\.ico|manifest\\.webmanifest|robots\\.txt|sitemap\\.xml|\\.well-known/|.*\\.(?:svg|png|jpg|jpeg|gif|webp|avif|ico|css|js|mjs|woff|woff2|ttf|otf|map|txt|xml|webmanifest)$).*)",
+    "/((?!login|auth|privacy|terms|api|_next/static|_next/image|favicon\\.ico|manifest\\.webmanifest|robots\\.txt|sitemap\\.xml|\\.well-known/|.*\\.(?:svg|png|jpg|jpeg|gif|webp|avif|ico|css|js|mjs|woff|woff2|ttf|otf|map|txt|xml|webmanifest)$).*)",
   ],
 };

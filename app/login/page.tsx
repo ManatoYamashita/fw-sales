@@ -12,6 +12,7 @@
  */
 
 import { Suspense, type ReactNode } from "react";
+import Link from "next/link";
 import { GoogleSignInButton } from "./_components/google-signin-button";
 
 type LoginSearchParams = Promise<{
@@ -91,7 +92,25 @@ export default function LoginPage({ searchParams }: LoginPageProps) {
         </Suspense>
 
         <p className="text-center text-xs text-muted-foreground">
-          サインインにより、利用規約と社内ポリシーに同意したものとみなされます。
+          サインインにより、
+          <Link
+            href="/terms"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-medium text-foreground underline underline-offset-2 transition-colors hover:text-primary"
+          >
+            利用規約
+          </Link>
+          と
+          <Link
+            href="/privacy"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-medium text-foreground underline underline-offset-2 transition-colors hover:text-primary"
+          >
+            プライバシーポリシー
+          </Link>
+          に同意したものとみなされます。
         </p>
       </div>
     </main>
