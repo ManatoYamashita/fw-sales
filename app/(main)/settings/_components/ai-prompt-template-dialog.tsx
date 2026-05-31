@@ -511,7 +511,7 @@ function TemplateDialog({ dialogMode, onSuccess, onClose }: TemplateDialogProps)
               </TabsTrigger>
               <TabsTrigger
                 value="freeform"
-                disabled={isPending || isView || dialogMode.mode === "view"}
+                disabled={isPending || isView}
               >
                 自由記述
               </TabsTrigger>
