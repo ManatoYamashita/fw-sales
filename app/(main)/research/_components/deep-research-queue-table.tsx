@@ -226,23 +226,6 @@ export function DeepResearchQueueTable({
 
   return (
     <div className="space-y-2">
-      {selectedVisibleJobIds.length > 0 ? (
-        <div className="flex items-center justify-between rounded-md border border-border bg-muted/30 px-3 py-2">
-          <p className="text-sm text-foreground">
-            {selectedVisibleJobIds.length} 件選択中
-          </p>
-          <Button
-            variant="destructive"
-            size="sm"
-            onClick={() => setBulkDeleteOpen(true)}
-            disabled={isDeletingBulk || isDeletingSingle}
-          >
-            {isDeletingBulk ? <Spinner /> : <Trash2 className="h-3.5 w-3.5" />}
-            選択中を削除
-          </Button>
-        </div>
-      ) : null}
-
       <DataTable<DeepResearchQueueRow>
         columns={columns}
         rows={[...rows]}
@@ -263,6 +246,23 @@ export function DeepResearchQueueTable({
           />
         }
       />
+
+      {selectedVisibleJobIds.length > 0 ? (
+        <div className="flex items-center justify-between rounded-md border border-border bg-muted/30 px-3 py-2">
+          <p className="text-sm text-foreground">
+            {selectedVisibleJobIds.length} 件選択中
+          </p>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => setBulkDeleteOpen(true)}
+            disabled={isDeletingBulk || isDeletingSingle}
+          >
+            {isDeletingBulk ? <Spinner /> : <Trash2 className="h-3.5 w-3.5" />}
+            削除
+          </Button>
+        </div>
+      ) : null}
 
       <Modal
         open={Boolean(singleDeleteTarget)}
