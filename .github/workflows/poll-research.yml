@@ -35,11 +35,14 @@
 name: Poll Deep Research Jobs
 
 on:
-  schedule:
-    # 5 分間隔: パイプライン側で適応型ポーリング (45→22→11→5 分) を適用
-    - cron: "*/5 * * * *"
-    # 60 日無活動による自動無効化を防ぐ週次 noop (毎週月曜 00:00 UTC)
-    - cron: "0 0 * * 1"
+  # Issue #102: 手動貼付フローへ移行したため、自動ポーリングの cron を停止。
+  # /api/cron/poll-research は死蔵 (コードは残置)。完走しない Stage 1 を月 8,640 回叩く
+  # 無駄・ログ汚染・コストを断つ。デバッグ用に workflow_dispatch のみ残す。
+  # schedule:
+  #   # 5 分間隔: パイプライン側で適応型ポーリング (45→22→11→5 分) を適用
+  #   - cron: "*/5 * * * *"
+  #   # 60 日無活動による自動無効化を防ぐ週次 noop (毎週月曜 00:00 UTC)
+  #   - cron: "0 0 * * 1"
   workflow_dispatch:
 
 jobs:

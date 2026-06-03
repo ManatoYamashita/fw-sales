@@ -1,11 +1,9 @@
 import Link from "next/link";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
-import { ChannelBadge } from "@/components/feature/channel-badge";
 import { Search, CheckCircle2 } from "lucide-react";
-import { formatDate } from "@/lib/utils/date";
+import { findStage } from "@/types/stage";
 import type { Store } from "@/types/store";
-import type { Research } from "@/types/research";
 
 export function WaitingList({ stores }: { stores: Store[] }) {
   if (stores.length === 0) {
@@ -46,17 +44,13 @@ export function WaitingList({ stores }: { stores: Store[] }) {
   );
 }
 
-export function DoneList({
-  rows,
-}: {
-  rows: Array<{ store: Store; research: Research }>;
-}) {
-  if (rows.length === 0) {
+export function DoneList({ stores }: { stores: Store[] }) {
+  if (stores.length === 0) {
     return (
       <Card>
         <EmptyState
-          title="完了した調査はまだありません"
-          description="調査待ちタブから着手してください。"
+          title="調査済みの店舗はまだありません"
+          description="貼付ワークベンチで構造化・架電生成を完了すると、ここに表示されます。"
         />
       </Card>
     );
@@ -64,28 +58,34 @@ export function DoneList({
   return (
     <Card>
       <ul className="divide-y divide-border/60">
-        {rows.map(({ store, research }) => (
-          <li key={research.id}>
-            <Link
-              href={`/research/${store.id}`}
-              className="flex items-start justify-between gap-3 px-5 py-3 hover:bg-muted/40 transition-colors"
-            >
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold text-foreground">
-                  {store.name}
-                </p>
-                <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">
-                  {research.sales_hook || research.total_review}
-                </p>
-                <p className="text-xs text-muted-foreground/70 mt-1">
-                  調査者 {research.researcher} ・{" "}
-                  {formatDate(research.updated_at)}
-                </p>
-              </div>
-              <ChannelBadge channel={research.channel} />
-            </Link>
-          </li>
-        ))}
+        {stores.map((s) => {
+          const stage = findStage(s.stage);
+          return (
+            <li key={s.id}>
+              <Link
+                href={`/research/${s.id}`}
+                className="flex items-center justify-between gap-3 px-5 py-3 hover:bg-muted/40 transition-colors"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-foreground">
+                    {s.name}
+                  </p>
+                  <p className="text-xs text-muted-foreground truncate">
+                    {[s.prefecture, s.city, s.genre].filter(Boolean).join(" / ")}
+                  </p>
+                </div>
+                {stage ? (
+                  <span
+                    className="inline-flex h-6 items-center px-2.5 rounded-full text-xs font-medium"
+                    style={{ color: stage.color, backgroundColor: stage.bg }}
+                  >
+                    {stage.label}
+                  </span>
+                ) : null}
+              </Link>
+            </li>
+          );
+        })}
       </ul>
     </Card>
   );
