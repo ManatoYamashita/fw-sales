@@ -1,20 +1,32 @@
 import { Suspense, type ReactNode } from "react";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
+import { cn } from "@/lib/utils/cn";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
 import { loadNavBadgeCounts } from "@/components/layout/nav-badges";
 import { getCurrentProfile } from "@/lib/supabase/server";
 import { getRecentNotifications } from "@/lib/queries/notification";
 
-async function SidebarShell() {
+async function SidebarShell({
+  defaultCollapsed,
+}: {
+  defaultCollapsed: boolean;
+}) {
   // build 時 prerender を skip (USE_CACHE_TIMEOUT 対策)。
   await connection();
   const [counts, profile] = await Promise.all([
     loadNavBadgeCounts(),
     getCurrentProfile(),
   ]);
-  return <Sidebar counts={counts} currentProfile={profile} />;
+  return (
+    <Sidebar
+      counts={counts}
+      currentProfile={profile}
+      defaultCollapsed={defaultCollapsed}
+    />
+  );
 }
 
 /**
@@ -34,10 +46,13 @@ async function TopbarShell() {
   return <Topbar notifications={notifications} />;
 }
 
-function SidebarFallback() {
+function SidebarFallback({ collapsed }: { collapsed: boolean }) {
   return (
     <aside
-      className="hidden md:flex md:sticky md:top-0 md:self-start w-60 shrink-0 bg-sidebar border-r border-sidebar-border h-dvh flex-col"
+      className={cn(
+        "hidden md:flex md:sticky md:top-0 md:self-start shrink-0 bg-sidebar border-r border-sidebar-border h-dvh flex-col",
+        collapsed ? "md:w-16" : "md:w-60",
+      )}
       aria-hidden
     >
       <div className="h-15 border-b border-sidebar-border" />
@@ -54,11 +69,17 @@ function TopbarFallback() {
   );
 }
 
-export default function MainLayout({ children }: { children: ReactNode }) {
+export default async function MainLayout({
+  children,
+}: {
+  children: ReactNode;
+}) {
+  // Cookie からデスクトップ折りたたみ状態を復元 (フォールバックのちらつき防止)。
+  const collapsed = (await cookies()).get("sidebar_collapsed")?.value === "1";
   return (
     <div className="flex min-h-dvh bg-background text-foreground">
-      <Suspense fallback={<SidebarFallback />}>
-        <SidebarShell />
+      <Suspense fallback={<SidebarFallback collapsed={collapsed} />}>
+        <SidebarShell defaultCollapsed={collapsed} />
       </Suspense>
       <div className="flex-1 flex flex-col min-w-0 overflow-x-clip">
         <Suspense fallback={<TopbarFallback />}>

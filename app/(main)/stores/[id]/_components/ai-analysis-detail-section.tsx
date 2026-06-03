@@ -29,6 +29,8 @@ export interface AiAnalysisDetailSectionProps {
   assignedSalesName?: string;
   /** SSR で取得したプロンプトテンプレート一覧(Issue #42 Phase 4-D) */
   promptTemplates: readonly PromptTemplateOption[];
+  /** 当該店舗に Deep Research レポートが存在するか (オプトイン UI 表示判定) */
+  hasDeepResearchReport?: boolean;
 }
 
 export function AiAnalysisDetailSection({
@@ -36,6 +38,7 @@ export function AiAnalysisDetailSection({
   isApiKeyConfigured,
   assignedSalesName,
   promptTemplates,
+  hasDeepResearchReport,
 }: AiAnalysisDetailSectionProps) {
   const router = useRouter();
   const [aiResult, setAiResult] = useState<AiAnalysisResult | null>(
@@ -120,6 +123,7 @@ export function AiAnalysisDetailSection({
         onResultFieldChange={onAiResultFieldChange}
         storeId={store.id}
         promptTemplates={promptTemplates}
+        hasDeepResearchReport={hasDeepResearchReport}
       />
       {aiResult !== null && (
         <div className="flex items-center justify-end gap-2">

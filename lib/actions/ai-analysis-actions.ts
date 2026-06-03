@@ -34,10 +34,13 @@ import { checkRateLimit } from "@/lib/ai/rate-limiter";
 import { OPERATOR_TYPES, type OperatorType } from "@/types/store";
 import { repos } from "@/lib/repositories";
 import { getCurrentSession } from "@/lib/supabase/server";
+import { getDeepResearchReport } from "@/lib/queries/deep-research";
 import { parseTemplateBody, type TemplateBody } from "@/types/ai-prompt-template";
 
 const TIMEOUT_MS = 60_000;
 const MAX_INSTRUCTIONS_LENGTH = 500;
+/** Deep Research 本文をプロンプトに混ぜる際の上限文字数 (過大プロンプト防止)。 */
+const MAX_DEEP_RESEARCH_LENGTH = 20_000;
 
 function asOperatorType(raw: string): OperatorType {
   return (OPERATOR_TYPES as readonly string[]).includes(raw)
@@ -155,6 +158,16 @@ export async function analyzeStoreAction(
   );
   const assignedSales = readString(formData, "assignedSales");
 
+  // Deep Research レポートをオプトインで取り込む (storeId 必須・レポート存在時のみ反映)
+  let deepResearchMarkdown: string | null = null;
+  if (formData.get("includeDeepResearch") === "true" && storeId) {
+    const report = await getDeepResearchReport(storeId);
+    const markdown = report?.full_markdown?.trim();
+    if (markdown) {
+      deepResearchMarkdown = markdown.slice(0, MAX_DEEP_RESEARCH_LENGTH);
+    }
+  }
+
   const templateId = readNullableTrimmedString(formData, "templateId");
   let customBody: TemplateBody | undefined;
   if (templateId) {
@@ -193,6 +206,7 @@ export async function analyzeStoreAction(
       htmlContent,
       additionalInstructions,
       assignedSales,
+      deepResearchMarkdown,
     },
     customBody,
   );

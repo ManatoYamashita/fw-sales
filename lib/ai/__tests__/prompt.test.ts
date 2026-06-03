@@ -139,6 +139,50 @@ describe("buildAnalysisPrompt", () => {
   });
 });
 
+describe("buildAnalysisPrompt - Deep Research 調査結果", () => {
+  it("deepResearchMarkdown 未指定なら Deep Research Part は省略", () => {
+    const { userParts } = buildAnalysisPrompt(baseInput);
+    const drPart = userParts.find((p) =>
+      p.text?.includes("Deep Research 調査結果"),
+    );
+    expect(drPart).toBeUndefined();
+  });
+
+  it("deepResearchMarkdown が null/空文字なら Part 省略", () => {
+    for (const md of [null, "", "   "]) {
+      const { userParts } = buildAnalysisPrompt({
+        ...baseInput,
+        deepResearchMarkdown: md,
+      });
+      const drPart = userParts.find((p) =>
+        p.text?.includes("Deep Research 調査結果"),
+      );
+      expect(drPart).toBeUndefined();
+    }
+  });
+
+  it("deepResearchMarkdown 非空なら Part が含まれ、HTML の後・追加指示の前に並ぶ", () => {
+    const { userParts } = buildAnalysisPrompt({
+      ...baseInput,
+      htmlContent: "<html><body>HTMLテスト</body></html>",
+      deepResearchMarkdown: "## カテゴリ1\nオーナーは山田氏",
+      additionalInstructions: "コスパ重視で",
+    });
+    const texts = userParts.map((p) => p.text ?? "");
+    const htmlIdx = texts.findIndex((t) => t.includes("ページ HTML"));
+    const drIdx = texts.findIndex((t) => t.includes("Deep Research 調査結果"));
+    const instrIdx = texts.findIndex((t) => t.includes("ユーザー追加指示"));
+    expect(drIdx).toBeGreaterThan(htmlIdx);
+    expect(drIdx).toBeLessThan(instrIdx);
+    expect(texts[drIdx]).toMatch(/オーナーは山田氏/);
+  });
+
+  it("systemPrompt に Deep Research を一次情報として重視する指示が含まれる", () => {
+    const { systemPrompt } = buildAnalysisPrompt(baseInput);
+    expect(systemPrompt).toMatch(/Deep Research 調査結果.*一次情報として重視/);
+  });
+});
+
 describe("buildAnalysisPrompt - カスタム fewshots (Issue #42 Phase 3)", () => {
   const customExamples: FewShotExample[] = [
     {

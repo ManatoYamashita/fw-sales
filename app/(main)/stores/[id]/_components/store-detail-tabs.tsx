@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { Edit2, MoreHorizontal } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsPanel } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -33,6 +34,8 @@ interface StoreDetailTabsProps {
   deepResearchSlot?: ReactNode;
   /** SSR で取得したプロンプトテンプレート一覧(Issue #42 Phase 4-D) */
   promptTemplates: readonly PromptTemplateOption[];
+  /** 当該店舗に Deep Research レポートが存在するか (AI 分析オプトイン UI 表示判定) */
+  hasDeepResearchReport?: boolean;
 }
 
 export function StoreDetailTabs({
@@ -43,11 +46,34 @@ export function StoreDetailTabs({
   dealCount,
   deepResearchSlot,
   promptTemplates,
+  hasDeepResearchReport,
 }: StoreDetailTabsProps) {
   const editHref = `/stores/${store.id}/edit`;
 
+  // 調査キューの完了行から `?tab=ai#deep-research` で来た場合は AI 分析タブを初期表示。
+  const searchParams = useSearchParams();
+  const initialTab = searchParams.get("tab") === "ai" ? "ai" : "basic";
+
+  // `#deep-research` アンカー指定時は Deep Research セクションへスクロール。
+  // スロットは Suspense ストリーミングで遅延描画されるため数回リトライする。
+  useEffect(() => {
+    if (initialTab !== "ai" || window.location.hash !== "#deep-research") return;
+    let attempts = 0;
+    let raf = 0;
+    const tryScroll = () => {
+      const el = document.getElementById("deep-research");
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+      }
+      if (attempts++ < 30) raf = requestAnimationFrame(tryScroll);
+    };
+    raf = requestAnimationFrame(tryScroll);
+    return () => cancelAnimationFrame(raf);
+  }, [initialTab]);
+
   return (
-    <Tabs defaultValue="basic" variant="pill">
+    <Tabs defaultValue={initialTab} variant="pill">
       <div className="flex items-center gap-2 flex-wrap">
         <StageInlineSelect storeId={store.id} current={store.stage} />
         <TabsList>
@@ -109,6 +135,7 @@ export function StoreDetailTabs({
           isApiKeyConfigured={isApiKeyConfigured}
           assignedSalesName={assignedSalesName}
           promptTemplates={promptTemplates}
+          hasDeepResearchReport={hasDeepResearchReport}
         />
         {deepResearchSlot}
       </TabsPanel>

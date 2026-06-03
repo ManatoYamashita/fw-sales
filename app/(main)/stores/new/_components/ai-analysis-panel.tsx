@@ -94,6 +94,11 @@ export interface AiAnalysisPanelProps {
   storeId: string | null;
   /** SSR で取得したプロンプトテンプレート一覧(Issue #42 Phase 4-D) */
   promptTemplates: readonly PromptTemplateOption[];
+  /**
+   * 当該店舗に Deep Research レポートが存在するか。
+   * true かつ storeId ありのときのみ「結果をプロンプトに含める」チェックボックスを表示。
+   */
+  hasDeepResearchReport?: boolean;
 }
 
 const FIELD_DEFS: Array<{
@@ -147,6 +152,7 @@ function buildFormDataFromSnapshot(
   additionalInstructions: string,
   storeId: string | null,
   templateId: string,
+  includeDeepResearch: boolean,
 ): FormData {
   const fd = new FormData();
   fd.set("name", snap.name);
@@ -167,6 +173,7 @@ function buildFormDataFromSnapshot(
   fd.set("additionalInstructions", additionalInstructions);
   fd.set("assignedSales", snap.assignedSales);
   fd.set("storeId", storeId ?? "");
+  fd.set("includeDeepResearch", includeDeepResearch ? "true" : "false");
   if (templateId) {
     fd.set("templateId", templateId);
   }
@@ -184,9 +191,13 @@ export function AiAnalysisPanel({
   onResultFieldChange,
   storeId,
   promptTemplates,
+  hasDeepResearchReport = false,
 }: AiAnalysisPanelProps) {
   // 自由追加指示 (再実行間で保持、Req 2.8)
   const [additionalInstructions, setAdditionalInstructions] = useState("");
+  // Deep Research 結果をプロンプトに含めるか (レポート存在時のみ UI 表示、初期 ON)
+  const canIncludeDeepResearch = Boolean(storeId) && hasDeepResearchReport;
+  const [includeDeepResearch, setIncludeDeepResearch] = useState(true);
   // デフォルトテンプレートがあれば初期選択、なければ標準テンプレート (Issue #42 Phase 4-D)
   const [templateId, setTemplateId] = useState<string>(() => {
     const def = promptTemplates.find((t) => t.is_default);
@@ -206,7 +217,13 @@ export function AiAnalysisPanel({
       toast.error("店舗名を入力してください");
       return;
     }
-    const fd = buildFormDataFromSnapshot(snap, additionalInstructions, storeId, templateId);
+    const fd = buildFormDataFromSnapshot(
+      snap,
+      additionalInstructions,
+      storeId,
+      templateId,
+      canIncludeDeepResearch && includeDeepResearch,
+    );
     startTransition(async () => {
       const result = await analyzeStoreAction(fd);
       if (result.ok) {
@@ -291,6 +308,26 @@ export function AiAnalysisPanel({
               ))}
             </Select>
           </FormField>
+        )}
+
+        {/* Deep Research 結果のオプトイン (レポート存在時のみ) */}
+        {canIncludeDeepResearch && (
+          <label className="flex items-start gap-2.5 rounded-md border border-border bg-muted/30 px-3 py-2.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={includeDeepResearch}
+              onChange={(e) => setIncludeDeepResearch(e.target.checked)}
+              className="mt-0.5 h-4 w-4 shrink-0 accent-primary"
+            />
+            <span className="text-sm leading-snug">
+              <span className="font-medium text-foreground">
+                Deep Research の結果をプロンプトに含める
+              </span>
+              <span className="block text-xs text-muted-foreground mt-0.5">
+                この店舗の Deep Research レポート(8 カテゴリの詳細調査)を AI 分析の参考情報として与えます。
+              </span>
+            </span>
+          </label>
         )}
 
         {/* CTA + 自由追加指示 */}

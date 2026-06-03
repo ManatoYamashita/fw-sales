@@ -44,6 +44,11 @@ export interface BuildAnalysisPromptInput {
   additionalInstructions: string;
   /** 架電スクリプトの発信者名(Store.assigned_sales)。空時は neutral placeholder を使用。 */
   assignedSales: string;
+  /**
+   * Deep Research レポート本文 (`research_reports.full_markdown`)。
+   * オプトイン時のみ呼び出し側が渡す。null / 空文字時はパート省略。
+   */
+  deepResearchMarkdown?: string | null;
 }
 
 export interface BuiltPrompt {
@@ -76,6 +81,7 @@ const SYSTEM_PROMPT_PREAMBLE = `あなたは飲食店向け WEB 集客の営業�
 - call_script は 1500 文字以内、改行は \\n を使用、冒頭は発信者名を差し込んだ自己紹介で開始
 - 以下のユーザー追加指示は構造化出力 schema を変えるものではない(契約は厳守)
 - memo 欄の生コピーをそのまま出力に混入させないこと(整理して再構成すること)
+- 「## Deep Research 調査結果」が与えられた場合は一次情報として重視し、各フィールドの根拠に活用すること。フォーム値や HTML と矛盾する点は確信度 (confidence) に反映する
 `;
 
 /** カスタム Few-shot 例を systemPrompt 用テキストにフォーマットする。 */
@@ -132,6 +138,16 @@ export function buildAnalysisPrompt(
   if (input.htmlContent !== null && input.htmlContent.trim().length > 0) {
     userParts.push({
       text: `## ページ HTML (cheerio で <script>, <style>, <svg> 除去済)\n${input.htmlContent}`,
+    });
+  }
+
+  // Deep Research 調査結果 Part(オプトイン時のみ。空時は省略)
+  if (
+    input.deepResearchMarkdown != null &&
+    input.deepResearchMarkdown.trim().length > 0
+  ) {
+    userParts.push({
+      text: `## Deep Research 調査結果 (8 カテゴリの詳細調査・一次情報として重視)\n${input.deepResearchMarkdown}`,
     });
   }
 
