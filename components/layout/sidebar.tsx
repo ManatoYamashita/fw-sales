@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LogOut, Menu, X, Zap } from "lucide-react";
+import { LogOut, Menu, PanelLeft, PanelLeftClose, X, Zap } from "lucide-react";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { NAV_ITEMS } from "@/lib/domain/nav";
 import { cn } from "@/lib/utils/cn";
@@ -23,9 +23,24 @@ export interface SidebarProps {
    * null は未認証想定だが middleware が拾うため通常は到達しない。
    */
   currentProfile?: Profile | null;
+  /**
+   * デスクトップ (md 以上) でアイコンレールに折りたたんだ初期状態。
+   * SSR 時に Cookie `sidebar_collapsed` を読んで layout から注入し、
+   * フォールバック中のちらつき (w-60 → w-16) を防ぐ。
+   */
+  defaultCollapsed?: boolean;
 }
 
-export function Sidebar({ counts, currentProfile }: SidebarProps) {
+/** デスクトップの折りたたみ状態を 1 年間 Cookie に保存する。 */
+function persistCollapsed(next: boolean): void {
+  document.cookie = `sidebar_collapsed=${next ? "1" : "0"}; path=/; max-age=31536000; samesite=lax`;
+}
+
+export function Sidebar({
+  counts,
+  currentProfile,
+  defaultCollapsed = false,
+}: SidebarProps) {
   const displayName = currentProfile?.display_name ?? "ゲスト";
   // 現状 ProfileRole は "member" | "placeholder" の 2 値。
   // 表示は placeholder の場合のみラベルを変える(管理者ロールは将来 Issue で追加)。
@@ -34,6 +49,15 @@ export function Sidebar({ counts, currentProfile }: SidebarProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const close = () => setOpen(false);
+
+  // デスクトップ (md 以上) のアイコンレール折りたたみ。モバイルのドロワー (open) とは独立。
+  const [collapsed, setCollapsed] = useState(defaultCollapsed);
+  const toggleCollapsed = () =>
+    setCollapsed((prev) => {
+      const next = !prev;
+      persistCollapsed(next);
+      return next;
+    });
 
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [signOutError, setSignOutError] = useState<string | null>(null);
@@ -92,19 +116,31 @@ export function Sidebar({ counts, currentProfile }: SidebarProps) {
           "fixed md:sticky md:top-0 md:self-start z-40 h-dvh w-60 shrink-0",
           "bg-sidebar text-sidebar-foreground border-r border-sidebar-border",
           "flex flex-col",
-          "transition-transform duration-200 ease-out",
+          "transition-[transform,width] duration-200 ease-out",
+          // デスクトップのみ折りたたみ幅を切替 (モバイルは常に w-60 ドロワー)
+          collapsed ? "md:w-16" : "md:w-60",
           open ? "translate-x-0" : "-translate-x-full md:translate-x-0",
         )}
       >
         {/* Brand */}
-        <div className="flex items-center gap-2.5 px-4 h-15 border-b border-sidebar-border">
+        <div
+          className={cn(
+            "flex items-center gap-2.5 h-15 border-b border-sidebar-border px-4",
+            collapsed && "md:px-0 md:justify-center",
+          )}
+        >
           <span
-            className="h-9 w-9 rounded-lg bg-gradient-to-br from-info to-primary flex items-center justify-center text-primary-foreground shadow-xs"
+            className="h-9 w-9 rounded-lg bg-gradient-to-br from-info to-primary flex items-center justify-center text-primary-foreground shadow-xs shrink-0"
             aria-hidden
           >
             <Zap className="h-4.5 w-4.5" />
           </span>
-          <div className="leading-tight min-w-0 flex-1">
+          <div
+            className={cn(
+              "leading-tight min-w-0 flex-1",
+              collapsed && "md:hidden",
+            )}
+          >
             <p className="text-sm font-semibold tracking-tight text-sidebar-foreground truncate">
               FirstWeb
             </p>
@@ -131,7 +167,12 @@ export function Sidebar({ counts, currentProfile }: SidebarProps) {
           aria-label="メイン"
           className="flex-1 overflow-y-auto px-2 py-3 space-y-0.5"
         >
-          <p className="px-3 pt-1 pb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <p
+            className={cn(
+              "px-3 pt-1 pb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground",
+              collapsed && "md:hidden",
+            )}
+          >
             メニュー
           </p>
           {NAV_ITEMS.filter((item) => !item.disabled).map((item) => {
@@ -145,11 +186,13 @@ export function Sidebar({ counts, currentProfile }: SidebarProps) {
                 key={item.href}
                 href={item.href}
                 onClick={close}
+                title={collapsed ? item.label : undefined}
                 aria-current={active ? "page" : undefined}
                 data-active={active ? "true" : undefined}
                 className={cn(
                   "group relative flex items-center gap-2.5 h-9 px-3 rounded-md text-sm transition-colors",
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
+                  collapsed && "md:justify-center md:px-0",
                   active
                     ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
                     : "text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
@@ -169,11 +212,16 @@ export function Sidebar({ counts, currentProfile }: SidebarProps) {
                       : "text-muted-foreground group-hover:text-sidebar-accent-foreground",
                   )}
                 />
-                <span className="flex-1 truncate">{item.label}</span>
+                <span
+                  className={cn("flex-1 truncate", collapsed && "md:hidden")}
+                >
+                  {item.label}
+                </span>
                 {typeof count === "number" && count > 0 ? (
                   <span
                     className={cn(
                       "inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full text-[11px] font-semibold tabular-nums",
+                      collapsed && "md:hidden",
                       active
                         ? "bg-sidebar-primary text-sidebar-primary-foreground"
                         : "bg-secondary text-secondary-foreground",
@@ -187,6 +235,32 @@ export function Sidebar({ counts, currentProfile }: SidebarProps) {
           })}
         </nav>
 
+        {/* デスクトップ専用: アイコンレール折りたたみトグル (モバイルは X/Menu で開閉) */}
+        <div className="hidden md:block px-2 py-2 border-t border-sidebar-border">
+          <button
+            type="button"
+            onClick={toggleCollapsed}
+            aria-label={collapsed ? "サイドバーを展開" : "サイドバーを折りたたむ"}
+            aria-pressed={collapsed}
+            title={collapsed ? "サイドバーを展開" : "サイドバーを折りたたむ"}
+            className={cn(
+              "flex items-center gap-2.5 h-9 w-full rounded-md text-sm transition-colors",
+              "text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
+              collapsed ? "justify-center px-0" : "px-3",
+            )}
+          >
+            {collapsed ? (
+              <PanelLeft className="h-4 w-4 shrink-0" aria-hidden />
+            ) : (
+              <PanelLeftClose className="h-4 w-4 shrink-0" aria-hidden />
+            )}
+            {!collapsed ? (
+              <span className="flex-1 text-left truncate">折りたたむ</span>
+            ) : null}
+          </button>
+        </div>
+
         {/* User block — Topbar の UserMenu を統合 */}
         <div
           ref={userMenuRef}
@@ -198,10 +272,12 @@ export function Sidebar({ counts, currentProfile }: SidebarProps) {
             aria-expanded={userMenuOpen}
             aria-label={`ユーザーメニュー: ${displayName}`}
             onClick={() => setUserMenuOpen((v) => !v)}
+            title={collapsed ? displayName : undefined}
             className={cn(
               "flex w-full items-center gap-3 px-1 py-1 rounded-md text-left",
               "hover:bg-sidebar-accent/60 transition-colors",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
+              collapsed && "md:justify-center",
             )}
           >
             <span
@@ -220,7 +296,12 @@ export function Sidebar({ counts, currentProfile }: SidebarProps) {
                 <span>{getInitial(displayName)}</span>
               )}
             </span>
-            <div className="min-w-0 flex-1 leading-tight">
+            <div
+              className={cn(
+                "min-w-0 flex-1 leading-tight",
+                collapsed && "md:hidden",
+              )}
+            >
               <p className="text-sm font-semibold text-sidebar-foreground truncate">
                 {displayName}
               </p>
@@ -235,6 +316,8 @@ export function Sidebar({ counts, currentProfile }: SidebarProps) {
               role="menu"
               className={cn(
                 "absolute left-3 right-3 bottom-full mb-2 z-30",
+                // 折りたたみ時はレール幅が狭いため、デスクトップのみ右に展開して幅を確保
+                collapsed && "md:left-2 md:right-auto md:w-56",
                 "rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md",
               )}
             >

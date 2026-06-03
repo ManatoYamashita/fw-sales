@@ -230,7 +230,13 @@ export function DeepResearchQueueTable({
         columns={columns}
         rows={[...rows]}
         rowKey={(row) => row.job.id}
-        rowHref={(row) => `/research/jobs/${row.job.id}`}
+        rowHref={(row) =>
+          // 完了行は店舗詳細の AI 分析タブ (Deep Research 結果) へ。
+          // 店舗削除済み (store_name === null) はジョブ詳細にフォールバック。
+          row.job.status === "done" && row.store_name !== null
+            ? `/stores/${row.job.store_id}?tab=ai#deep-research`
+            : `/research/jobs/${row.job.id}`
+        }
         density="compact"
         rowSelection={{
           selectedRowKeys: selectedVisibleJobIds,
