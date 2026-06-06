@@ -30,6 +30,7 @@ import {
 import { validateAiAnalysis } from "@/lib/ai/validate";
 import { checkRateLimit } from "@/lib/ai/rate-limiter";
 import type {
+  DeepResearchJob,
   DeepResearchReportInsert,
   HearingQuestion,
 } from "@/types/deep-research";
@@ -73,12 +74,16 @@ export async function structureFromPastedMarkdownAction(
   const store = await repos.store.get(storeId);
   if (!store) return failure("対象店舗が見つかりません");
 
+  // job は catch でも参照するため try 外で宣言する (例外時に failed 化してリークを防ぐ)。
+  let job: DeepResearchJob | null = null;
   try {
     // ① ジョブを作成 (status は default "queued"、最終的に done 化する)。
-    const job = await repos.deepResearch.insertJob({
+    job = await repos.deepResearch.insertJob({
       store_id: storeId,
       user_id: session.userId,
     });
+    // 以降の try 本体では非 null の jobId を使う (async クロージャ内で job の絞り込みが失われるため)。
+    const jobId = job.id;
 
     // ② Stage 2 構造化。失敗時は concise (簡潔出力 + 増量トークン) で 1 回だけ再試行。
     const structurer = createStructurer();
@@ -103,7 +108,7 @@ export async function structureFromPastedMarkdownAction(
 
     // ③ レポート組み立て。構造化成功なら 51 項目、失敗なら 8 カテゴリ空配列 + 原文のみ。
     const baseInsert = {
-      job_id: job.id,
+      job_id: jobId,
       store_id: storeId,
       full_markdown: md,
       total_cost_yen: null,
@@ -149,7 +154,7 @@ export async function structureFromPastedMarkdownAction(
     const completedAt = new Date().toISOString();
     const report = await repos.transaction(async ({ deepResearch }) => {
       const inserted = await deepResearch.insertReport(reportInsert);
-      await deepResearch.updateJobStatus(job.id, {
+      await deepResearch.updateJobStatus(jobId, {
         status: "done",
         completed_at: completedAt,
         // 再構造化のソースとして原文と引用 URL を job にも残す。
@@ -173,13 +178,36 @@ export async function structureFromPastedMarkdownAction(
     revalidateTag(CACHE_TAGS.store(storeId), "max");
 
     return success(
-      { jobId: job.id, reportId: report.id, structured: structuredOk },
+      { jobId, reportId: report.id, structured: structuredOk },
       structuredOk
         ? "構造化して保存しました"
         : "51 項目の構造化に失敗したため原文のみ保存しました。架電生成は実行できます。",
     );
   } catch (err) {
     console.error("[structureFromPastedMarkdownAction] failed", err);
+    // 作成済みジョブが queued のまま残ると findActiveByStore が拾い、店舗が恒久的に
+    // 「DeepResearching...」表示になる。例外時は failed 化して error_log を残す。
+    if (job) {
+      try {
+        const failedAt = new Date().toISOString();
+        await repos.deepResearch.updateJobStatus(job.id, {
+          status: "failed",
+          completed_at: failedAt,
+        });
+        await repos.deepResearch.appendJobError(job.id, {
+          stage: "stage2",
+          kind: "manual_paste_structure_failed",
+          message: err instanceof Error ? err.message : String(err),
+          occurred_at: failedAt,
+        });
+      } catch (cleanupErr) {
+        // cleanup の二重例外は握り潰し、元エラーのメッセージを優先して返す。
+        console.error(
+          "[structureFromPastedMarkdownAction] job cleanup failed",
+          cleanupErr,
+        );
+      }
+    }
     return failure("構造化結果の保存に失敗しました。時間をおいて再度お試しください。");
   }
 }

@@ -28,6 +28,7 @@ const {
     insertJob: vi.fn(),
     insertReport: vi.fn(),
     updateJobStatus: vi.fn(),
+    appendJobError: vi.fn(),
   },
   mockProfileRepo: { findById: vi.fn() },
   mockTransaction: vi.fn(),
@@ -151,6 +152,7 @@ beforeEach(() => {
   });
   mockDeepResearchRepo.insertReport.mockResolvedValue({ id: "report_1" });
   mockDeepResearchRepo.updateJobStatus.mockResolvedValue({ id: "job_1" });
+  mockDeepResearchRepo.appendJobError.mockResolvedValue({ id: "job_1" });
   // transaction はコールバックに { deepResearch } を渡して結果を返す。
   mockTransaction.mockImplementation(
     async (fn: (tx: { deepResearch: typeof mockDeepResearchRepo }) => unknown) =>
@@ -239,6 +241,44 @@ describe("structureFromPastedMarkdownAction", () => {
 
     expect(res.ok).toBe(true);
     expect(mockStoreRepo.update).not.toHaveBeenCalled();
+  });
+
+  it("insertJob 後に例外: 作成済み job を failed 化し error_log を残す (queued リーク防止)", async () => {
+    mockStructure.mockResolvedValue({ ok: true, data: STRUCTURED_DATA });
+    // transaction (insertReport + done 化) を失敗させ、catch 経路へ落とす。
+    mockTransaction.mockRejectedValue(new Error("db down"));
+
+    const res = await structureFromPastedMarkdownAction(STORE_ID, MARKDOWN);
+
+    expect(res.ok).toBe(false);
+    // 作成済み job (job_1) は failed + completed_at へ遷移させる。
+    expect(mockDeepResearchRepo.updateJobStatus).toHaveBeenCalledWith(
+      "job_1",
+      expect.objectContaining({
+        status: "failed",
+        completed_at: expect.any(String),
+      }),
+    );
+    // error_log に失敗エントリを append する。
+    expect(mockDeepResearchRepo.appendJobError).toHaveBeenCalledWith(
+      "job_1",
+      expect.objectContaining({
+        stage: "stage2",
+        kind: "manual_paste_structure_failed",
+      }),
+    );
+  });
+
+  it("cleanup 自体が失敗しても元エラーの失敗結果を返す (二重例外を握り潰す)", async () => {
+    mockStructure.mockResolvedValue({ ok: true, data: STRUCTURED_DATA });
+    mockTransaction.mockRejectedValue(new Error("db down"));
+    mockDeepResearchRepo.updateJobStatus.mockRejectedValue(
+      new Error("cleanup also failed"),
+    );
+
+    const res = await structureFromPastedMarkdownAction(STORE_ID, MARKDOWN);
+
+    expect(res.ok).toBe(false);
   });
 });
 

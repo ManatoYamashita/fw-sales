@@ -106,9 +106,11 @@ export function PasteWorkbench({ store, initialReport }: PasteWorkbenchProps) {
   const onSave = () => {
     if (!aiResult) return;
     startSaving(async () => {
+      // 既に「架電済み」の店舗は降格させない (structureFromPastedMarkdownAction と同ロジック)。
+      const nextStage = store.stage === "架電済み" ? "架電済み" : "DeepResearch済み";
       const res = await updateStorePatchAction(store.id, {
         ai_analysis_result: aiResult,
-        stage: "DeepResearch済み",
+        stage: nextStage,
       });
       if (res.ok) {
         toast.success("店舗に保存しました");
@@ -228,7 +230,7 @@ export function PasteWorkbench({ store, initialReport }: PasteWorkbenchProps) {
                 <Button
                   type="button"
                   variant="primary"
-                  disabled={saving}
+                  disabled={busy}
                   onClick={onSave}
                 >
                   {saving ? "保存中…" : "保存して店舗へ"}
