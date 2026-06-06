@@ -6,24 +6,24 @@ import type { Store } from "@/types/store";
 import type { Research } from "@/types/research";
 
 export interface ResearchQueue {
+  /** 調査待ち: 未調査の店舗。 */
   waiting: Store[];
-  done: Array<{ store: Store; research: Research }>;
+  /** 調査済み: DeepResearch 済み / 架電済みの店舗。 */
+  done: Store[];
 }
 
 export async function getResearchQueue(): Promise<ResearchQueue> {
   "use cache";
-  cacheTag(CACHE_TAGS.stores, CACHE_TAGS.research);
-  const [stores, research] = await Promise.all([
-    repos.store.list(),
-    repos.research.list(),
-  ]);
-  const researchByStore = new Map(research.map((r) => [r.store_id, r]));
+  // 手動貼付フローでは done は stage で判定する(旧 research テーブル非依存)。
+  // 店舗の stage が変われば CACHE_TAGS.stores の revalidate で本クエリも失効する。
+  cacheTag(CACHE_TAGS.stores);
+  const stores = await repos.store.list();
 
   return {
     waiting: stores.filter((s) => s.stage === "未調査"),
-    done: stores
-      .filter((s) => researchByStore.has(s.id))
-      .map((s) => ({ store: s, research: researchByStore.get(s.id)! })),
+    done: stores.filter(
+      (s) => s.stage === "DeepResearch済み" || s.stage === "架電済み",
+    ),
   };
 }
 

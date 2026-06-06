@@ -43,7 +43,7 @@ app/
 │   ├── layout.tsx
 │   ├── dashboard/             # KPI / アクションキュー / パイプラインサマリー
 │   ├── stores/                # 一覧・登録 (URL Import + AI 分析)・詳細・編集
-│   ├── research/              # 調査キュー・記録
+│   ├── research/              # 調査キュー (調査対象登録 + DeepResearch 結果貼付ワークベンチ)
 │   ├── pipeline/              # Kanban
 │   ├── actions/               # DM/Tel スクリプト + 実行記録
 │   ├── deals/                 # 商談一覧・新規・詳細

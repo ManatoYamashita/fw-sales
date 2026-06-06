@@ -3,6 +3,14 @@
 Deep Research パイプラインの初期セットアップ + 以降の運用手順。
 仕様詳細: `.kiro/specs/deep-research-pipeline/design.md`
 
+> **⚠ 2026-06-03 — 本パイプラインは死蔵 (Issue #102)**
+> Stage 1 (Google Deep Research API) + GitHub Actions cron が完走しない問題のため、
+> **手動貼付フロー**へ移行しました。`poll-research.yml` の cron は停止済み
+> (`workflow_dispatch` のみ)、店舗詳細の「Deep Research を実行」ボタンも撤去済みです。
+> 新フローでは Gemini UI (専用 Gem) で DeepResearch を実行し、結果 Markdown を
+> `/research/[storeId]` の貼付ワークベンチに貼り付けて構造化・架電生成します。
+> 以下の cron / Stage 1 セットアップ手順は**履歴参照用**です (コード自体は残置)。
+
 > **CI 自動 migration**: PR merge 時に `drizzle/**` 変更があれば GitHub Actions
 > (`migrate.yml`) が `pnpm db:migrate` を自動実行。手動 SQL 適用は不要。
 
