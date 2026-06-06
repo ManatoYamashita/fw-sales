@@ -224,25 +224,69 @@ export async function updateStorePatchAction(
 }
 
 export async function deleteStoreAction(id: string): Promise<ActionResult> {
-  const dealsToDelete = await repos.deal.list(id);
   try {
-    await repos.transaction(async ({ deal, store }) => {
-      for (const d of dealsToDelete) {
-        await deal.delete(d.id);
-      }
-      const removed = await store.delete(id);
-      if (!removed) throw new Error("店舗が見つかりませんでした");
-    });
+    const removed = await repos.store.delete(id);
+    if (!removed) return failure("店舗が見つかりませんでした");
   } catch (err) {
     return failure(
       err instanceof Error ? err.message : "店舗の削除に失敗しました",
     );
   }
+  // 関連レコード (商談 / 調査 / ハンドオフ / Deep Research) は FK の
+  // ON DELETE CASCADE (migration 0015) で連鎖削除される。集合タグを広く revalidate する。
   invalidateAllStoreScopes(id);
   revalidateTag(CACHE_TAGS.deals, "max");
   revalidateTag(CACHE_TAGS.dealsByStore(id), "max");
-  for (const d of dealsToDelete) {
-    revalidateTag(CACHE_TAGS.deal(d.id), "max");
-  }
+  revalidateTag(CACHE_TAGS.research, "max");
+  revalidateTag(CACHE_TAGS.researchByStore(id), "max");
+  revalidateTag(CACHE_TAGS.handoffs, "max");
+  revalidateTag(CACHE_TAGS.handoffsByStore(id), "max");
+  revalidateTag(CACHE_TAGS.deepResearchQueue, "max");
+  revalidateTag(CACHE_TAGS.deepResearchByStore(id), "max");
   redirect("/stores");
+}
+
+export interface BulkDeleteStoresResult {
+  deletedCount: number;
+  requestedCount: number;
+}
+
+/**
+ * 店舗を一括削除する。関連レコード (商談 / 調査 / ハンドオフ / Deep Research) は
+ * FK の ON DELETE CASCADE (migration 0015) で連鎖削除される。
+ * 一覧ページに留まるため redirect せず、呼び出し側で router.refresh() する想定。
+ */
+export async function bulkDeleteStoresAction(
+  ids: string[],
+): Promise<ActionResult<BulkDeleteStoresResult>> {
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return failure("削除対象の店舗が指定されていません");
+  }
+  const uniqueIds = [
+    ...new Set(ids.filter((id) => typeof id === "string" && id.trim() !== "")),
+  ];
+  if (uniqueIds.length === 0) {
+    return failure("削除対象の店舗が指定されていません");
+  }
+
+  let deletedCount: number;
+  try {
+    deletedCount = await repos.store.bulkDelete(uniqueIds);
+  } catch (err) {
+    return failure(
+      err instanceof Error ? err.message : "店舗の削除に失敗しました",
+    );
+  }
+
+  // 集合タグを広く revalidate（個別 store タグは削除した ID 分だけ飛ばす）。
+  invalidateAllStoreScopes();
+  revalidateTag(CACHE_TAGS.deals, "max");
+  revalidateTag(CACHE_TAGS.research, "max");
+  revalidateTag(CACHE_TAGS.handoffs, "max");
+  revalidateTag(CACHE_TAGS.deepResearchQueue, "max");
+  for (const id of uniqueIds) {
+    revalidateTag(CACHE_TAGS.store(id), "max");
+  }
+
+  return success({ deletedCount, requestedCount: uniqueIds.length });
 }

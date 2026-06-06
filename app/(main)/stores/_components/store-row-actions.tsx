@@ -52,7 +52,7 @@ export function StoreRowActions({
           <p className="text-sm text-foreground leading-relaxed">
             「<strong className="font-semibold">{storeName}</strong>」を削除します。
             <br />
-            関連する商談も同時に削除されます。
+            関連する商談・調査・ハンドオフ・Deep Research も同時に削除されます。
             <br />
             この操作は取り消せません。
           </p>
