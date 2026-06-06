@@ -1,6 +1,7 @@
 "use client";
 
 import { useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { CheckCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -20,6 +21,7 @@ export function AddStoreButton({
   isAdded,
   onAdded,
 }: AddStoreButtonProps) {
+  const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
   if (isAdded) {
@@ -37,6 +39,8 @@ export function AddStoreButton({
       if (result.ok) {
         onAdded(placeId);
         toast.success(result.message ?? `「${placeName}」を追加しました`);
+        // 追加した店舗の詳細ページへ遷移 (トーストは遷移後も Toaster が表示する)。
+        router.push(`/stores/${result.data.id}`);
       } else {
         toast.error(result.error);
       }
