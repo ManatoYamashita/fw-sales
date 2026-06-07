@@ -1,5 +1,4 @@
 import { cacheLife, cacheTag } from "next/cache";
-import { connection } from "next/server";
 import { Card } from "@/components/ui/card";
 import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
@@ -15,8 +14,6 @@ async function loadRecentStores(): Promise<Store[]> {
 }
 
 export async function RecentStoresTable() {
-  // build 時 prerender を skip (USE_CACHE_TIMEOUT 対策)。
-  await connection();
   const rows = await loadRecentStores();
   return <RecentStoresTableView rows={rows} />;
 }

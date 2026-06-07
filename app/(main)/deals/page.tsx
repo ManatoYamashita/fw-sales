@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { connection } from "next/server";
 import { listDealsCached } from "@/lib/queries/deals";
 import { listStores } from "@/lib/queries/stores";
 import { getAllProfiles } from "@/lib/queries/profiles";
@@ -14,8 +13,6 @@ export const metadata: Metadata = {
 };
 
 export default async function DealsPage() {
-  // build 時 prerender を skip (USE_CACHE_TIMEOUT 対策)。
-  await connection();
   const [deals, stores, profiles] = await Promise.all([
     listDealsCached(),
     listStores({}),
