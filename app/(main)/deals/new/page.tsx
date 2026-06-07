@@ -1,6 +1,5 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { connection } from "next/server";
 import Link from "next/link";
 import { DealNewForm } from "./_components/deal-new-form";
 import { getStoreCached } from "@/lib/queries/stores";
@@ -14,8 +13,6 @@ interface PageProps {
 }
 
 export default async function NewDealPage({ searchParams }: PageProps) {
-  // build 時 prerender を skip (USE_CACHE_TIMEOUT 対策)。
-  await connection();
   const sp = await searchParams;
   if (!sp.store) {
     notFound();

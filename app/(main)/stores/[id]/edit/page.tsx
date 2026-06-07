@@ -1,6 +1,5 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { connection } from "next/server";
 import Link from "next/link";
 import { StoreEditForm } from "./_components/store-edit-form";
 import { getStoreCached } from "@/lib/queries/stores";
@@ -27,8 +26,6 @@ export default async function StoreEditPage({
 }: {
   params: Params;
 }) {
-  // build 時 prerender を skip (USE_CACHE_TIMEOUT 対策)。
-  await connection();
   const { id } = await params;
   const [store, profiles, session] = await Promise.all([
     getStoreCached(id),

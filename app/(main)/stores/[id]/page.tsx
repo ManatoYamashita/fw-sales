@@ -1,7 +1,6 @@
 import { Suspense } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { connection } from "next/server";
 import type { Metadata } from "next";
 import { StoreTitleSection } from "./_components/store-title-section";
 import { StoreDetailTabs } from "./_components/store-detail-tabs";
@@ -42,8 +41,6 @@ export default async function StoreDetailPage({
 }: {
   params: Params;
 }) {
-  // build 時 prerender を skip (USE_CACHE_TIMEOUT 対策)。
-  await connection();
   const { id } = await params;
   const [store, profiles, session] = await Promise.all([
     getStoreCached(id),
