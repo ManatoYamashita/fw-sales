@@ -1,17 +1,24 @@
 "use client";
 
-import { Inbox } from "lucide-react";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { Inbox, Trash2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { DataTable, type ColumnDef } from "@/components/ui/data-table";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Button } from "@/components/ui/button";
+import { Modal, ModalContent, ModalFooter } from "@/components/ui/modal";
+import { Spinner } from "@/components/ui/spinner";
 import { StageBadge } from "@/components/feature/stage-badge";
 import { ChannelBadge } from "@/components/feature/channel-badge";
 import { IndividualStoreBadge } from "@/components/feature/individual-store-badge";
 import { StarRating } from "@/components/ui/star-rating";
 import { resolveDisplayState } from "@/types/stage";
 import { formatDate } from "@/lib/utils/date";
+import { toast } from "@/components/ui/toast";
 import type { Store } from "@/types/store";
 import { StoreRowActions } from "./store-row-actions";
+import { bulkDeleteStoresAction } from "@/lib/actions/store-actions";
 
 export interface StoresTableViewProps {
   stores: readonly Store[];
@@ -134,29 +141,129 @@ export function StoresTableView({
   profileEntries,
   activeDrStoreIds,
 }: StoresTableViewProps) {
+  const router = useRouter();
   const profileMap = new Map(profileEntries);
   const activeSet = new Set(activeDrStoreIds);
   const columns = buildColumns(profileMap, activeSet);
 
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [isDeleting, startDelete] = useTransition();
+
+  // 表示中の行のみを選択対象として扱う。フィルタで一覧から消えた行の ID は selectedIds に
+  // 残るが、件数表示・一括削除の対象は selectedVisibleIds に限定する (表示中の行のみ操作する)。
+  const visibleIdSet = new Set(stores.map((s) => s.id));
+  const selectedVisibleIds = selectedIds.filter((id) => visibleIdSet.has(id));
+
+  const handleBulkDelete = () => {
+    if (selectedVisibleIds.length === 0) return;
+    const targetIds = selectedVisibleIds;
+    startDelete(async () => {
+      const result = await bulkDeleteStoresAction(targetIds);
+      if (!result.ok) {
+        toast.error(result.error ?? "一括削除に失敗しました");
+        return;
+      }
+      const { deletedCount, requestedCount } = result.data;
+      if (deletedCount === 0) {
+        toast.warn("削除対象が見つかりませんでした");
+      } else if (deletedCount < requestedCount) {
+        toast.warn(`${deletedCount}/${requestedCount} 件を削除しました`);
+      } else {
+        toast.success(`${deletedCount} 件を削除しました`);
+      }
+      setBulkOpen(false);
+      setSelectedIds((prev) => prev.filter((id) => !targetIds.includes(id)));
+      router.refresh();
+    });
+  };
+
   return (
-    <Card>
-      <Card.Header>
-        <Card.Title>店舗一覧</Card.Title>
-        <span className="text-sm text-muted-foreground">{stores.length} 件</span>
-      </Card.Header>
-      <DataTable
-        columns={columns}
-        rows={[...stores]}
-        rowKey={(s) => s.id}
-        rowHref={(s) => `/stores/${s.id}`}
-        emptyState={
-          <EmptyState
-            icon={<Inbox />}
-            title="該当する店舗がありません"
-            description="検索条件を変更するか、店舗を新しく登録してください。"
-          />
-        }
-      />
-    </Card>
+    <>
+      <Card>
+        <Card.Header>
+          <Card.Title>店舗一覧</Card.Title>
+          <span className="text-sm text-muted-foreground">
+            {stores.length} 件
+          </span>
+        </Card.Header>
+        <DataTable
+          columns={columns}
+          rows={[...stores]}
+          rowKey={(s) => s.id}
+          rowHref={(s) => `/stores/${s.id}`}
+          rowSelection={{
+            selectedRowKeys: selectedVisibleIds,
+            onChange: setSelectedIds,
+            allRowsLabel: "表示中の店舗をすべて選択",
+            rowLabel: (s) => `${s.name} を選択`,
+          }}
+          emptyState={
+            <EmptyState
+              icon={<Inbox />}
+              title="該当する店舗がありません"
+              description="検索条件を変更するか、店舗を新しく登録してください。"
+            />
+          }
+        />
+      </Card>
+
+      {/* 下部固定バー: 1 件以上選択時のみ表示。sticky でメインコンテンツ幅に追従し、
+          サイドバー折りたたみ (#106) でも左端がズレない (エリア検索の一括バーと同じ仕組み)。 */}
+      {selectedVisibleIds.length > 0 && (
+        <div
+          role="region"
+          aria-label="選択した店舗の一括操作"
+          className="sticky bottom-0 z-30 flex flex-wrap items-center gap-2 border-t border-border bg-background/80 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-md"
+        >
+          <Button variant="ghost" size="sm" onClick={() => setSelectedIds([])}>
+            選択を解除
+          </Button>
+          <span className="text-sm text-muted-foreground" aria-live="polite">
+            {selectedVisibleIds.length}件選択中
+          </span>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => setBulkOpen(true)}
+            disabled={isDeleting}
+            className="ml-auto gap-1.5"
+          >
+            {isDeleting ? <Spinner /> : <Trash2 className="h-3.5 w-3.5" />}
+            削除
+          </Button>
+        </div>
+      )}
+
+      <Modal open={bulkOpen} onOpenChange={setBulkOpen}>
+        <ModalContent title="選択中の店舗を削除しますか?" size="sm">
+          <p className="text-sm text-foreground leading-relaxed">
+            選択中の
+            <strong className="font-semibold">
+              {" "}
+              {selectedVisibleIds.length} 件{" "}
+            </strong>
+            の店舗を削除します。関連する商談・調査・ハンドオフ・Deep Research も
+            同時に完全に削除されます。この操作は取り消せません。
+          </p>
+          <ModalFooter>
+            <Button
+              variant="ghost"
+              onClick={() => setBulkOpen(false)}
+              disabled={isDeleting}
+            >
+              キャンセル
+            </Button>
+            <Button
+              variant="danger"
+              onClick={handleBulkDelete}
+              disabled={isDeleting || selectedVisibleIds.length === 0}
+            >
+              {isDeleting ? "削除中…" : "削除する"}
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
+    </>
   );
 }

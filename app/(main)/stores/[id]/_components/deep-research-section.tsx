@@ -6,23 +6,19 @@
  * レイアウト (Tabs 構造なし) のため、カードレベルの新規セクションとして実装する。
  * 内部の 8 カテゴリ切替は `DeepResearchReportView` 内の Tabs プリミティブが担う。
  *
- * 構造:
- * - レポートあり → DeepResearchReportView (内部 8 カテゴリ Tabs)
- * - 進行中ジョブあり → 進行中バッジ + CTA disabled
- * - どちらもなし → CTA active
+ * 手動貼付フロー (Issue #102) への移行に伴い、自動キュー投入 (DeepResearchEnqueueButton)
+ * と旧ジョブ詳細リンク (DeepResearchJobDetailLink) は撤去し、貼付ワークベンチ
+ * (`/research/[storeId]`) への導線に置き換えた。表示は `DeepResearchReportView` のみ。
  *
- * 関連: requirements.md §5.1, §5.2, §7.1, §7.2, §7.3
+ * 構造:
+ * - レポートあり → DeepResearchReportView (内部 8 カテゴリ Tabs) + 「貼付ワークベンチを開く」
+ * - レポートなし → 「結果を貼り付ける」導線のみ
  */
 
+import Link from "next/link";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/card";
-import { DeepResearchEnqueueButton } from "./deep-research-enqueue-button";
-import { DeepResearchJobDetailLink } from "./deep-research-job-detail-link";
 import { DeepResearchReportView } from "./deep-research-report-view";
-import {
-  getDeepResearchReport,
-  getDeepResearchJobByStore,
-  getLatestDeepResearchJobByStore,
-} from "@/lib/queries/deep-research";
+import { getDeepResearchReport } from "@/lib/queries/deep-research";
 
 interface DeepResearchSectionProps {
   storeId: string;
@@ -31,16 +27,7 @@ interface DeepResearchSectionProps {
 export async function DeepResearchSection({
   storeId,
 }: DeepResearchSectionProps) {
-  const [report, currentJob, latestJob] = await Promise.all([
-    getDeepResearchReport(storeId),
-    getDeepResearchJobByStore(storeId),
-    getLatestDeepResearchJobByStore(storeId),
-  ]);
-
-  const jobDetailId =
-    currentJob?.id ?? report?.job_id ?? latestJob?.id ?? null;
-  const jobForActions =
-    currentJob ?? (latestJob?.status === "failed" ? latestJob : null);
+  const report = await getDeepResearchReport(storeId);
 
   return (
     <Card>
@@ -48,17 +35,15 @@ export async function DeepResearchSection({
         <div className="space-y-1 min-w-0">
           <CardTitle>Deep Research</CardTitle>
           <p className="text-xs text-muted-foreground">
-            8 カテゴリ・51 項目の詳細調査。完了まで数十分〜数時間かかります。
+            8 カテゴリ・51 項目の詳細調査。Gemini の DeepResearch 結果を貼付ワークベンチに貼り付けて作成します。
           </p>
-          {jobDetailId ? (
-            <DeepResearchJobDetailLink jobId={jobDetailId} />
-          ) : null}
         </div>
-        <DeepResearchEnqueueButton
-          storeId={storeId}
-          currentJob={jobForActions}
-          jobDetailId={jobDetailId}
-        />
+        <Link
+          href={`/research/${storeId}`}
+          className="inline-flex h-9 items-center px-3 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+        >
+          {report ? "貼付ワークベンチを開く" : "結果を貼り付ける"}
+        </Link>
       </CardHeader>
       {report ? (
         <CardBody>

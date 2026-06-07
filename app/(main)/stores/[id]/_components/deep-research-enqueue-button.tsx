@@ -50,7 +50,8 @@ export function DeepResearchEnqueueButton({
       const result = await enqueueDeepResearchAction(storeId);
       if (result.ok) {
         toast.success("Deep Research をキューに登録しました");
-        router.refresh();
+        // 投入したジョブの進捗ページへ遷移し、ライブ進捗を確認できるようにする。
+        router.push(`/research/jobs/${result.data.jobId}`);
       } else {
         toast.error(result.error);
       }
@@ -63,7 +64,8 @@ export function DeepResearchEnqueueButton({
       const result = await retryDeepResearchAction(currentJob.id);
       if (result.ok) {
         toast.success("再投入しました。新規ジョブをキューに登録しました");
-        router.refresh();
+        // 再投入で作成した新規ジョブの進捗ページへ遷移する。
+        router.push(`/research/jobs/${result.data.newJobId}`);
       } else {
         toast.error(result.error);
       }

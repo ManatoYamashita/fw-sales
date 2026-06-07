@@ -69,17 +69,36 @@ function TopbarFallback() {
   );
 }
 
-export default async function MainLayout({
+/**
+ * サイドバー枠を担う非同期コンポーネント。
+ *
+ * `sidebar_collapsed` Cookie は Request-time API のため、Cache Components 下では
+ * 必ず `<Suspense>` 配下で読み取る必要がある。レイアウト本体で直接 await すると
+ * html/body の静的シェル prerender が丸ごとブロックされ、build が
+ * "Uncached data was accessed outside of <Suspense>" で失敗する。
+ *
+ * Cookie はリクエスト時に即解決するため、実行時はこの内側 Suspense の
+ * 正しい幅フォールバックが描画され、折りたたみ状態のちらつきは発生しない。
+ * 外側 Suspense の fallback (collapsed=false) は prerender 時の静的シェル用。
+ */
+async function SidebarSlot() {
+  const collapsed = (await cookies()).get("sidebar_collapsed")?.value === "1";
+  return (
+    <Suspense fallback={<SidebarFallback collapsed={collapsed} />}>
+      <SidebarShell defaultCollapsed={collapsed} />
+    </Suspense>
+  );
+}
+
+export default function MainLayout({
   children,
 }: {
   children: ReactNode;
 }) {
-  // Cookie からデスクトップ折りたたみ状態を復元 (フォールバックのちらつき防止)。
-  const collapsed = (await cookies()).get("sidebar_collapsed")?.value === "1";
   return (
     <div className="flex min-h-dvh bg-background text-foreground">
-      <Suspense fallback={<SidebarFallback collapsed={collapsed} />}>
-        <SidebarShell defaultCollapsed={collapsed} />
+      <Suspense fallback={<SidebarFallback collapsed={false} />}>
+        <SidebarSlot />
       </Suspense>
       <div className="flex-1 flex flex-col min-w-0 overflow-x-clip">
         <Suspense fallback={<TopbarFallback />}>
