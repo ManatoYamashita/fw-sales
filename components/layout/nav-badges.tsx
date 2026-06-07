@@ -1,4 +1,4 @@
-import { cacheTag } from "next/cache";
+import { cacheLife, cacheTag } from "next/cache";
 import { CACHE_TAGS } from "@/lib/cache";
 import { getNavBadgeCounts, type NavBadgeCounts } from "@/lib/queries/stats";
 
@@ -9,6 +9,7 @@ import { getNavBadgeCounts, type NavBadgeCounts } from "@/lib/queries/stats";
  */
 export async function loadNavBadgeCounts(): Promise<NavBadgeCounts> {
   "use cache";
+  cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.stores, CACHE_TAGS.deals, CACHE_TAGS.handoffs);
   return getNavBadgeCounts();
 }

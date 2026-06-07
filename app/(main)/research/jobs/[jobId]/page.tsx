@@ -59,7 +59,7 @@ export default async function JobDetailPage({
           href="/research"
           className="text-xs text-muted-foreground hover:text-foreground"
         >
-          ← 調査キュー
+          ← 調査
         </Link>
         <div className="flex items-center gap-3 flex-wrap">
           <h2 className="text-xl font-bold text-foreground">

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { cacheTag } from "next/cache";
+import { cacheLife, cacheTag } from "next/cache";
 import { connection } from "next/server";
 import { ChannelBadge } from "@/components/feature/channel-badge";
 import { getPipelineColumns } from "@/lib/queries/pipeline";
@@ -11,6 +11,7 @@ import type { StageId } from "@/types/stage";
 
 async function loadColumns(filter: StoreFilter) {
   "use cache";
+  cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.stores, CACHE_TAGS.pipeline);
   return getPipelineColumns(filter);
 }

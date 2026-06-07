@@ -9,7 +9,7 @@
  */
 
 import "server-only";
-import { cacheTag } from "next/cache";
+import { cacheLife, cacheTag } from "next/cache";
 import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
 import type { Profile } from "@/types/profile";
@@ -24,6 +24,7 @@ export async function getAllProfiles(options?: {
   readonly excludePlaceholders?: boolean;
 }): Promise<readonly Profile[]> {
   "use cache";
+  cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.profiles);
   return repos.profile.findAll(options);
 }
@@ -34,6 +35,7 @@ export async function getAllProfiles(options?: {
  */
 export async function getProfileById(id: string): Promise<Profile | null> {
   "use cache";
+  cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.profile(id));
   return repos.profile.findById(id);
 }
@@ -46,6 +48,7 @@ export async function getProfilesByIds(
   ids: readonly string[],
 ): Promise<readonly Profile[]> {
   "use cache";
+  cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.profiles);
   return repos.profile.findManyByIds(ids);
 }

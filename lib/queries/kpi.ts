@@ -1,5 +1,5 @@
 import "server-only";
-import { cacheTag } from "next/cache";
+import { cacheLife, cacheTag } from "next/cache";
 import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
 import { CONTACTED_STAGES } from "@/lib/domain/stages";
@@ -22,6 +22,7 @@ export interface KpiSnapshot {
 
 export async function getKpiSnapshot(): Promise<KpiSnapshot> {
   "use cache";
+  cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.kpi, CACHE_TAGS.stores, CACHE_TAGS.handoffs);
 
   const [stores, handoffs] = await Promise.all([

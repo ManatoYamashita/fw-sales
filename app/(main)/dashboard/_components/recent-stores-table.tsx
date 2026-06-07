@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { cacheTag } from "next/cache";
+import { cacheLife, cacheTag } from "next/cache";
 import { connection } from "next/server";
 import { Card } from "@/components/ui/card";
 import { DataTable, type ColumnDef } from "@/components/ui/data-table";
@@ -14,6 +14,7 @@ import { Inbox } from "lucide-react";
 
 async function loadRecentStores(): Promise<Store[]> {
   "use cache";
+  cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.stores);
   const all = await repos.store.list();
   return all.slice(0, 5);

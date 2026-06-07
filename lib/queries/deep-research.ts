@@ -17,7 +17,7 @@
 
 import "server-only";
 
-import { cacheTag } from "next/cache";
+import { cacheLife, cacheTag } from "next/cache";
 import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
 import { getCurrentSession } from "@/lib/supabase/server";
@@ -46,6 +46,7 @@ async function getDeepResearchReportCached(
   storeId: string,
 ): Promise<DeepResearchReport | null> {
   "use cache";
+  cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.deepResearchByStore(storeId));
 
   return repos.deepResearch.getReportByStore(storeId);
@@ -59,6 +60,7 @@ export async function getDeepResearchJobByStore(
   storeId: string,
 ): Promise<DeepResearchJob | null> {
   "use cache";
+  cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.deepResearchByStore(storeId));
 
   return repos.deepResearch.findActiveByStore(storeId);
@@ -72,13 +74,14 @@ export async function getLatestDeepResearchJobByStore(
   storeId: string,
 ): Promise<DeepResearchJob | null> {
   "use cache";
+  cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.deepResearchByStore(storeId));
 
   return repos.deepResearch.findLatestByStore(storeId);
 }
 
 /**
- * 調査キューページ用: in-flight (queued / researching / structuring) の全ジョブ。
+ * 調査ページ用: in-flight (queued / researching / structuring) の全ジョブ。
  *
  * - スコープ: チーム全員横断 (担当者列に display_name を表示するため LEFT JOIN 済)
  * - 並び順: 最古優先 (`enqueued_at ASC`)
@@ -89,31 +92,34 @@ export async function listInFlightDeepResearchJobs(): Promise<
   DeepResearchQueueRow[]
 > {
   "use cache";
+  cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.deepResearchQueue);
 
   return repos.deepResearch.listInFlight();
 }
 
 /**
- * 調査キューページ用: 完了 (`done`) の最新 `limit` 件。
+ * 調査ページ用: 完了 (`done`) の最新 `limit` 件。
  * デフォルト 30 件、 ハードキャップ 100 件 (repository 層でクランプ)。
  */
 export async function listRecentDoneDeepResearchJobs(
   limit = 30,
 ): Promise<DeepResearchQueueRow[]> {
   "use cache";
+  cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.deepResearchQueue);
 
   return repos.deepResearch.listRecentDone(limit);
 }
 
 /**
- * 調査キューページ用: 失敗 (`failed`) の最新 `limit` 件。
+ * 調査ページ用: 失敗 (`failed`) の最新 `limit` 件。
  */
 export async function listRecentFailedDeepResearchJobs(
   limit = 30,
 ): Promise<DeepResearchQueueRow[]> {
   "use cache";
+  cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.deepResearchQueue);
 
   return repos.deepResearch.listRecentFailed(limit);
@@ -126,6 +132,7 @@ export async function getDeepResearchJobById(
   jobId: string,
 ): Promise<DeepResearchQueueRow | null> {
   "use cache";
+  cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.deepResearchJob(jobId));
   cacheTag(CACHE_TAGS.stores);
   cacheTag(CACHE_TAGS.profiles);
@@ -140,18 +147,20 @@ export async function getDeepResearchJobById(
  */
 export async function getAverageResearchDuration(): Promise<number | null> {
   "use cache";
+  cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.deepResearchQueue);
 
   return repos.deepResearch.getAverageDurationSec();
 }
 
 /**
- * 調査キューページ用: 全ジョブを `enqueued_at DESC` で返す。
+ * 調査ページ用: 全ジョブを `enqueued_at DESC` で返す。
  */
 export async function listAllDeepResearchJobs(): Promise<
   DeepResearchQueueRow[]
 > {
   "use cache";
+  cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.deepResearchQueue);
 
   return repos.deepResearch.listAll(200);
@@ -163,6 +172,7 @@ export async function listAllDeepResearchJobs(): Promise<
  */
 export async function listActiveDeepResearchStoreIds(): Promise<Set<string>> {
   "use cache";
+  cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.deepResearchQueue);
 
   const ids = await repos.deepResearch.listActiveStoreIds();

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { cacheTag } from "next/cache";
+import { cacheLife, cacheTag } from "next/cache";
 import { connection } from "next/server";
 import { Search, Send, ArrowLeftRight } from "lucide-react";
 import { Card } from "@/components/ui/card";
@@ -12,6 +12,7 @@ import type { Handoff } from "@/types/handoff";
 
 async function loadQueue() {
   "use cache";
+  cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.stores, CACHE_TAGS.handoffs, CACHE_TAGS.actionQueue);
   return getActionQueue();
 }

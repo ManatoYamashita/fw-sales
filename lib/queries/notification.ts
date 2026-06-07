@@ -13,7 +13,7 @@
 
 import "server-only";
 
-import { cacheTag } from "next/cache";
+import { cacheLife, cacheTag } from "next/cache";
 import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
 import type { Notification } from "@/types/notification";
@@ -33,6 +33,7 @@ export async function getRecentNotifications(
   limit: number = DEFAULT_LIMIT,
 ): Promise<readonly Notification[]> {
   "use cache";
+  cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.notifications);
 
   if (!userId || userId.trim() === "") return [];

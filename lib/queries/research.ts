@@ -1,5 +1,5 @@
 import "server-only";
-import { cacheTag } from "next/cache";
+import { cacheLife, cacheTag } from "next/cache";
 import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
 import type { Store } from "@/types/store";
@@ -14,6 +14,7 @@ export interface ResearchQueue {
 
 export async function getResearchQueue(): Promise<ResearchQueue> {
   "use cache";
+  cacheLife("longBackstop");
   // 手動貼付フローでは done は stage で判定する(旧 research テーブル非依存)。
   // 店舗の stage が変われば CACHE_TAGS.stores の revalidate で本クエリも失効する。
   cacheTag(CACHE_TAGS.stores);
@@ -31,6 +32,7 @@ export async function getResearchByStore(
   storeId: string,
 ): Promise<Research | null> {
   "use cache";
+  cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.researchByStore(storeId), CACHE_TAGS.research);
   return repos.research.getByStoreId(storeId);
 }

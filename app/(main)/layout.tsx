@@ -1,7 +1,6 @@
 import { Suspense, type ReactNode } from "react";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { connection } from "next/server";
 import { cn } from "@/lib/utils/cn";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
@@ -14,8 +13,9 @@ async function SidebarShell({
 }: {
   defaultCollapsed: boolean;
 }) {
-  // build 時 prerender を skip (USE_CACHE_TIMEOUT 対策)。
-  await connection();
+  // getCurrentProfile() が cookies() を読むため本コンポーネントは動的レンダ。
+  // build 時の prerender 対象外となり USE_CACHE_TIMEOUT は発生しない
+  // (loadNavBadgeCounts() は 'use cache' でリクエスト時充填 + cross-request キャッシュ)。
   const [counts, profile] = await Promise.all([
     loadNavBadgeCounts(),
     getCurrentProfile(),
@@ -37,7 +37,7 @@ async function SidebarShell({
  * (auth-and-notifications spec §1.1, §1.5)。
  */
 async function TopbarShell() {
-  await connection();
+  // getCurrentProfile() の cookies() 読取で動的化されるため connection() は不要。
   const profile = await getCurrentProfile();
   if (!profile) {
     redirect("/login");
