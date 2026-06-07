@@ -78,7 +78,7 @@ export async function getLatestDeepResearchJobByStore(
 }
 
 /**
- * 調査キューページ用: in-flight (queued / researching / structuring) の全ジョブ。
+ * 調査ページ用: in-flight (queued / researching / structuring) の全ジョブ。
  *
  * - スコープ: チーム全員横断 (担当者列に display_name を表示するため LEFT JOIN 済)
  * - 並び順: 最古優先 (`enqueued_at ASC`)
@@ -95,7 +95,7 @@ export async function listInFlightDeepResearchJobs(): Promise<
 }
 
 /**
- * 調査キューページ用: 完了 (`done`) の最新 `limit` 件。
+ * 調査ページ用: 完了 (`done`) の最新 `limit` 件。
  * デフォルト 30 件、 ハードキャップ 100 件 (repository 層でクランプ)。
  */
 export async function listRecentDoneDeepResearchJobs(
@@ -108,7 +108,7 @@ export async function listRecentDoneDeepResearchJobs(
 }
 
 /**
- * 調査キューページ用: 失敗 (`failed`) の最新 `limit` 件。
+ * 調査ページ用: 失敗 (`failed`) の最新 `limit` 件。
  */
 export async function listRecentFailedDeepResearchJobs(
   limit = 30,
@@ -146,7 +146,7 @@ export async function getAverageResearchDuration(): Promise<number | null> {
 }
 
 /**
- * 調査キューページ用: 全ジョブを `enqueued_at DESC` で返す。
+ * 調査ページ用: 全ジョブを `enqueued_at DESC` で返す。
  */
 export async function listAllDeepResearchJobs(): Promise<
   DeepResearchQueueRow[]

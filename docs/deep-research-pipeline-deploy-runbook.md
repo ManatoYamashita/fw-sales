@@ -116,9 +116,9 @@ gh workflow enable "Poll Deep Research Jobs"
 
 本番 (`https://fw-sales.vercel.app`) にログイン後:
 
-### 調査キュー (/research)
+### 調査 (/research)
 
-1. サイドバー「調査キュー」がクリック可能、 in-flight 件数バッジ表示
+1. サイドバー「調査」がクリック可能、 in-flight 件数バッジ表示
 2. 3 タブ: 実行中 / 完了 / 失敗
 3. 実行中タブ: プログレスバー (3 ステップ) + 推定残り時間 + 最終更新時刻
 4. 失敗タブ: 「再投入」ボタン
