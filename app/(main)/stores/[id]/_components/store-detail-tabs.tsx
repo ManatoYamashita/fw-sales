@@ -50,7 +50,7 @@ export function StoreDetailTabs({
 }: StoreDetailTabsProps) {
   const editHref = `/stores/${store.id}/edit`;
 
-  // 調査キューの完了行から `?tab=ai#deep-research` で来た場合は AI 分析タブを初期表示。
+  // 調査ページの完了行から `?tab=ai#deep-research` で来た場合は AI 分析タブを初期表示。
   const searchParams = useSearchParams();
   const initialTab = searchParams.get("tab") === "ai" ? "ai" : "basic";
 

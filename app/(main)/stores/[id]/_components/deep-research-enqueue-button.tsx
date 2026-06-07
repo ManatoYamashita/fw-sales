@@ -29,7 +29,7 @@ import type { DeepResearchJob } from "@/types/deep-research";
 interface DeepResearchEnqueueButtonProps {
   storeId: string;
   currentJob: DeepResearchJob | null;
-  /** 調査キューのジョブ詳細 (`/research/jobs/[id]`) へのリンク用 */
+  /** 調査ページのジョブ詳細 (`/research/jobs/[id]`) へのリンク用 */
   jobDetailId?: string | null;
 }
 

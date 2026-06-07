@@ -28,7 +28,7 @@ export interface NavItem {
 export const NAV_ITEMS: readonly NavItem[] = [
   { href: "/dashboard", label: "ダッシュボード", icon: LayoutGrid, disabled: true },
   { href: "/stores", label: "店舗一覧", icon: StoreIcon, badgeKey: "stores" },
-  { href: "/research", label: "調査キュー", icon: Search, badgeKey: "research" },
+  { href: "/research", label: "調査", icon: Search, badgeKey: "research" },
   { href: "/pipeline", label: "パイプライン", icon: GitBranch, badgeKey: "pipeline", disabled: true },
   { href: "/actions", label: "営業アクション", icon: Send, disabled: true },
   { href: "/deals", label: "商談管理", icon: Handshake, badgeKey: "deals", disabled: true },
