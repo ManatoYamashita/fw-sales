@@ -1,6 +1,5 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { connection } from "next/server";
 import Link from "next/link";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -37,8 +36,6 @@ export default async function DealDetailPage({
 }: {
   params: Params;
 }) {
-  // build 時 prerender を skip (USE_CACHE_TIMEOUT 対策)。
-  await connection();
   const { id } = await params;
   const deal = await getDealCached(id);
   if (!deal) notFound();
