@@ -125,13 +125,13 @@ gh workflow enable "Poll Deep Research Jobs"
 
 ### 店舗詳細 (/stores/[id])
 
-1. 「AI 分析」タブに Deep Research セクション
-2. 「Deep Research を実行」ボタン → Toast + バッジ「キュー待ち」 + ボタン disabled
-3. 所在地未入力店舗でも登録可（必須は店舗名のみ。所在地等は Stage 1 の AI がベストエフォート補完）。店舗名が空の場合のみ Toast「必須項目が未入力です: 店舗名」で拒否
+1. 「AI 分析」タブ末尾に Deep Research セクション（8 カテゴリ・51 項目）
+2. 自動キュー投入ボタンは #102 で撤去済み。レポートなし → 「結果を貼り付ける」、レポートあり → 「貼付ワークベンチを開く」で `/research/[storeId]` へ遷移
+3. 店舗登録は店舗名のみ必須（所在地等は任意）。店舗名が空なら「店舗名を入力してください」で拒否
 
 ### エリア検索 (/stores/new?mode=area)
 
-- 検索結果カードに「Deep Research を実行」CTA が **表示されない** こと (仕様)
+- 自動キュー投入 (enqueue) は #102 で全廃済みのため、エリア検索を含め全画面で「Deep Research を実行」CTA は存在しない
 
 ---
 
