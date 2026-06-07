@@ -20,10 +20,8 @@ export interface AreaSearchResultsProps {
 export function AreaSearchResults({ results }: AreaSearchResultsProps) {
   const [addedIds, setAddedIds] = useState<ReadonlySet<string>>(new Set());
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
-  const [bulkResult, setBulkResult] = useState<{
-    added: number;
-    failed: number;
-  } | null>(null);
+  // bulkResult は全件失敗 (added === 0) のときだけ set される失敗専用の結果。
+  const [bulkResult, setBulkResult] = useState<{ failed: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isBulkPending, startBulkTransition] = useTransition();
   const router = useRouter();
@@ -89,7 +87,7 @@ export function AreaSearchResults({ results }: AreaSearchResultsProps) {
       const succeededIds = ids.filter((id) => !failedSet.has(id));
       setAddedIds((prev) => new Set([...prev, ...succeededIds]));
       setSelectedIds(new Set());
-      setBulkResult({ added, failed });
+      setBulkResult({ failed });
     });
   };
 
@@ -127,17 +125,10 @@ export function AreaSearchResults({ results }: AreaSearchResultsProps) {
         </div>
       )}
       {/* bulkResult は全件失敗 (added === 0) の分岐でしか set されないため、
-          成功 0 件のときは「登録できませんでした」と失敗件数のみを示す。
-          added > 0 の表示は将来の分岐追加に備えた防御的フォールバック。 */}
+          失敗メッセージに固定し、role="alert" で確実に読み上げさせる。 */}
       {bulkResult && (
-        <p
-          className="text-sm text-destructive"
-          role="status"
-          aria-live="polite"
-        >
-          {bulkResult.added > 0
-            ? `${bulkResult.added}件追加しました（${bulkResult.failed}件は失敗）`
-            : `登録できませんでした（${bulkResult.failed}件失敗）`}
+        <p className="text-sm text-destructive" role="alert">
+          登録できませんでした（{bulkResult.failed}件失敗）
         </p>
       )}
 
