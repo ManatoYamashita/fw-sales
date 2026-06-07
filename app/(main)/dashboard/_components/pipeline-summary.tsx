@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { cacheLife, cacheTag } from "next/cache";
-import { connection } from "next/server";
 import { Card } from "@/components/ui/card";
 import { getPipelineSummary } from "@/lib/queries/pipeline";
 import { CACHE_TAGS } from "@/lib/cache";
@@ -13,8 +12,6 @@ async function loadSummary() {
 }
 
 export async function PipelineSummary() {
-  // build 時 prerender を skip (USE_CACHE_TIMEOUT 対策)。
-  await connection();
   const rows = await loadSummary();
   const max = Math.max(...rows.map((r) => r.count), 1);
 
