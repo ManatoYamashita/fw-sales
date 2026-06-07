@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { cacheTag } from "next/cache";
+import { cacheLife, cacheTag } from "next/cache";
 import { connection } from "next/server";
 import { Card } from "@/components/ui/card";
 import { getPipelineSummary } from "@/lib/queries/pipeline";
@@ -7,6 +7,7 @@ import { CACHE_TAGS } from "@/lib/cache";
 
 async function loadSummary() {
   "use cache";
+  cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.stores, CACHE_TAGS.pipeline);
   return getPipelineSummary();
 }

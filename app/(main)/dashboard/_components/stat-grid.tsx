@@ -1,4 +1,4 @@
-import { cacheTag } from "next/cache";
+import { cacheLife, cacheTag } from "next/cache";
 import { connection } from "next/server";
 import {
   Store as StoreIcon,
@@ -15,6 +15,7 @@ import { CACHE_TAGS } from "@/lib/cache";
 
 async function loadStats() {
   "use cache";
+  cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.stats, CACHE_TAGS.stores, CACHE_TAGS.handoffs);
   return getDashboardStats();
 }
