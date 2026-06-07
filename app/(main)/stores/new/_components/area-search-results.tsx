@@ -126,24 +126,32 @@ export function AreaSearchResults({ results }: AreaSearchResultsProps) {
           {error}
         </div>
       )}
+      {/* bulkResult は全件失敗 (added === 0) の分岐でしか set されないため、
+          成功 0 件のときは「登録できませんでした」と失敗件数のみを示す。
+          added > 0 の表示は将来の分岐追加に備えた防御的フォールバック。 */}
       {bulkResult && (
-        <p className="text-sm text-muted-foreground" aria-live="polite">
-          {bulkResult.added}件追加しました
-          {bulkResult.failed > 0 && (
-            <span className="text-destructive">
-              {" "}/ {bulkResult.failed}件失敗しました
-            </span>
-          )}
+        <p
+          className="text-sm text-destructive"
+          role="status"
+          aria-live="polite"
+        >
+          {bulkResult.added > 0
+            ? `${bulkResult.added}件追加しました（${bulkResult.failed}件は失敗）`
+            : `登録できませんでした（${bulkResult.failed}件失敗）`}
         </p>
       )}
 
-      <PlaceResultList
-        results={results}
-        addedIds={addedIds}
-        selectedIds={selectedIds}
-        onAdded={handleAdded}
-        onToggle={handleToggle}
-      />
+      {/* バー表示中はリスト末尾に下部余白を足し、最後の数件が sticky バーの
+          下に隠れてクリック/確認しづらくなるのを防ぐ。バー高さ + 余白の目安。 */}
+      <div className={showBar ? "pb-20" : undefined}>
+        <PlaceResultList
+          results={results}
+          addedIds={addedIds}
+          selectedIds={selectedIds}
+          onAdded={handleAdded}
+          onToggle={handleToggle}
+        />
+      </div>
 
       {/* 下部固定バー: 1 件以上選択時のみ表示。
           sticky にすることでメインのコンテンツ幅に追従し、サイドバー折りたたみ (#106) でも
