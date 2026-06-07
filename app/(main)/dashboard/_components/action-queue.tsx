@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { cacheLife, cacheTag } from "next/cache";
-import { connection } from "next/server";
 import { Search, Send, ArrowLeftRight } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -81,8 +80,6 @@ function HandoffItem({ handoff }: { handoff: Handoff }) {
 }
 
 export async function ActionQueue() {
-  // build 時 prerender を skip (USE_CACHE_TIMEOUT 対策)。
-  await connection();
   const queue = await loadQueue();
   const isEmpty =
     queue.needsResearch.length === 0 &&

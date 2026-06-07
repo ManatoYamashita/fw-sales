@@ -14,6 +14,7 @@
 
 import "server-only";
 import { cookies } from "next/headers";
+import { unstable_rethrow } from "next/navigation";
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { repos } from "@/lib/repositories";
@@ -91,6 +92,12 @@ export async function getCurrentSession(): Promise<CurrentSession | null> {
       email: data.user.email ?? "",
     };
   } catch (err) {
+    // Next.js の制御フローエラー (redirect / dynamic rendering / prerender 中断 /
+    // cookies() の hanging promise rejection 等) は握り潰さず再 throw する。
+    // これを catch してしまうと、ページを静的 prerender した際に共有レイアウトの
+    // 認証が "cookies() rejects when the prerender is complete" で build を落とす。
+    // unstable_rethrow が Next 内部エラーのみ再 throw し、それ以外は素通りする。
+    unstable_rethrow(err);
     console.error("[auth] getCurrentSession failed:", err);
     return null;
   }
