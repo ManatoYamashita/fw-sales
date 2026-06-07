@@ -118,7 +118,7 @@ gh workflow enable "Poll Deep Research Jobs"
 
 ### 調査 (/research)
 
-1. サイドバー「調査」がクリック可能、 in-flight 件数バッジ表示
+1. サイドバー「調査」がクリック可能
 2. 2 タブ: 調査待ち / 調査済み (各タブに件数表示)
 3. 調査待ちタブ: 店舗行の「調査開始」から貼付ワークベンチ (`/research/[storeId]`) へ遷移し、Gemini の DeepResearch 結果 Markdown を貼り付けて構造化・架電生成
 4. 調査済みタブ: 構造化・架電生成を終えた店舗が stage バッジ付きで一覧表示
