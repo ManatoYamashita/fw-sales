@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { cacheLife, cacheTag } from "next/cache";
-import { connection } from "next/server";
 import { ChannelBadge } from "@/components/feature/channel-badge";
 import { getPipelineColumns } from "@/lib/queries/pipeline";
 import { getAllProfiles } from "@/lib/queries/profiles";
@@ -17,8 +16,6 @@ async function loadColumns(filter: StoreFilter) {
 }
 
 export async function KanbanBoard({ filter }: { filter: StoreFilter }) {
-  // build 時 prerender を skip (USE_CACHE_TIMEOUT 対策)。
-  await connection();
   const [columns, profiles] = await Promise.all([
     loadColumns(filter),
     getAllProfiles({ excludePlaceholders: false }),

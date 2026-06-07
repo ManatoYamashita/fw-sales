@@ -1,6 +1,5 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { connection } from "next/server";
 import { PasteWorkbench } from "./_components/paste-workbench";
 import { getStoreCached } from "@/lib/queries/stores";
 import { getDeepResearchReport } from "@/lib/queries/deep-research";
@@ -24,8 +23,6 @@ export default async function ResearchDetailPage({
 }: {
   params: Params;
 }) {
-  // build 時 prerender を skip (USE_CACHE_TIMEOUT 対策)。
-  await connection();
   const { storeId } = await params;
   const [store, report] = await Promise.all([
     getStoreCached(storeId),

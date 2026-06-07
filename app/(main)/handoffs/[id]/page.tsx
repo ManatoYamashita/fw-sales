@@ -1,6 +1,5 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { connection } from "next/server";
 import Link from "next/link";
 import { HandoffForm } from "./_components/handoff-form";
 import { getHandoffCached } from "@/lib/queries/handoffs";
@@ -22,8 +21,6 @@ export default async function HandoffDetailPage({
 }: {
   params: Params;
 }) {
-  // build 時 prerender を skip (USE_CACHE_TIMEOUT 対策)。
-  await connection();
   const { id } = await params;
   const handoff = await getHandoffCached(id);
   if (!handoff) notFound();

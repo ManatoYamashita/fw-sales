@@ -6,6 +6,11 @@ const nextConfig: NextConfig = {
   // 担うため、TTL は保険として長めに設定する。stale 5m / revalidate 6h / expire 7d。
   cacheLife: {
     longBackstop: { stale: 300, revalidate: 21600, expire: 604800 },
+    // build 時 prerender 充填を避けたい重いクエリ用の保険プロファイル。
+    // expire < DYNAMIC_EXPIRE(300s) で当該 'use cache' は prerender 対象から除外され
+    // dynamic-hole 化する = build 時に prod DB へ充填しに行かず、リクエスト時充填 +
+    // 短期 runtime cache で運用する。無効化は全 mutation の revalidateTag(タグ駆動)が担う。
+    dynamicHole: { stale: 60, revalidate: 120, expire: 240 },
   },
   // React の <ViewTransition> を `<Link>` ナビゲーションでも動かすためのフラグ。
   // setState ベースの startTransition では不要だが、将来のページ遷移でも使えるように有効化。

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { after, connection } from "next/server";
+import { after } from "next/server";
 import type { Metadata } from "next";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/card";
 import { ResearchStatusBadge } from "@/components/feature/research-status-badge";
@@ -30,7 +30,6 @@ export default async function JobDetailPage({
 }: {
   params: Params;
 }) {
-  await connection();
   const { jobId } = await params;
   const row = await getDeepResearchJobById(jobId);
   if (!row) notFound();
