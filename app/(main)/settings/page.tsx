@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import type { Metadata } from "next";
 import { cacheLife, cacheTag } from "next/cache";
 import { Card } from "@/components/ui/card";
@@ -19,7 +20,10 @@ export const metadata: Metadata = { title: "設定" };
 
 async function loadCounts() {
   "use cache";
-  cacheLife("longBackstop");
+  // 4テーブルを full list する最重クエリ。longBackstop だと build 時 prerender 充填が走り、
+  // データ増大時に将来 USE_CACHE_TIMEOUT を招き得る。dynamicHole(expire<DYNAMIC_EXPIRE=300s)
+  // で build 充填を回避し、リクエスト時充填 + 短期 runtime cache + タグ無効化で運用する。
+  cacheLife("dynamicHole");
   cacheTag(
     CACHE_TAGS.stores,
     CACHE_TAGS.research,
@@ -40,8 +44,32 @@ async function loadCounts() {
   };
 }
 
-export default async function SettingsPage() {
+function CountsGridSkeleton() {
+  return (
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      {Array.from({ length: 4 }).map((_, i) => (
+        <div
+          key={i}
+          className="h-[88px] rounded-lg bg-card border border-border animate-pulse"
+        />
+      ))}
+    </div>
+  );
+}
+
+async function CountsGrid() {
   const counts = await loadCounts();
+  return (
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <Stat label="店舗" value={counts.stores} icon={<StoreIcon />} />
+      <Stat label="調査" value={counts.research} icon={<Search />} />
+      <Stat label="商談" value={counts.deals} icon={<Handshake />} />
+      <Stat label="引き継ぎ" value={counts.handoffs} icon={<ArrowLeftRight />} />
+    </div>
+  );
+}
+
+export default function SettingsPage() {
   return (
     <div className="space-y-6 max-w-4xl">
       <div>
@@ -51,22 +79,19 @@ export default async function SettingsPage() {
         </Text>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Stat label="店舗" value={counts.stores} icon={<StoreIcon />} />
-        <Stat label="調査" value={counts.research} icon={<Search />} />
-        <Stat label="商談" value={counts.deals} icon={<Handshake />} />
-        <Stat
-          label="引き継ぎ"
-          value={counts.handoffs}
-          icon={<ArrowLeftRight />}
-        />
-      </div>
+      {/* 件数は最重クエリのため dynamic-hole + Suspense で静的シェルから切り離す。 */}
+      <Suspense fallback={<CountsGridSkeleton />}>
+        <CountsGrid />
+      </Suspense>
 
       <ThemeToggleCard />
 
       <DataActions />
 
-      <AiPromptTemplatesCard />
+      {/* getCurrentSession() で cookies を読む動的コンポーネント。静的シェルを保つため隔離。 */}
+      <Suspense fallback={null}>
+        <AiPromptTemplatesCard />
+      </Suspense>
 
       <Card>
         <Card.Header>
