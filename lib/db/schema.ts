@@ -146,7 +146,7 @@ export const deals = pgTable("deals", {
   id: text("id").primaryKey(),
   store_id: text("store_id")
     .notNull()
-    .references(() => stores.id),
+    .references(() => stores.id, { onDelete: "cascade" }),
   store_name: text("store_name").notNull(),
   date: text("date").notNull(),
   meeting_type: text("meeting_type").notNull(),
@@ -184,7 +184,7 @@ export const research = pgTable("research", {
   id: text("id").primaryKey(),
   store_id: text("store_id")
     .notNull()
-    .references(() => stores.id),
+    .references(() => stores.id, { onDelete: "cascade" }),
   store_name: text("store_name").notNull(),
   total_review: text("total_review").notNull(),
   strength1: text("strength1").notNull(),
@@ -241,7 +241,7 @@ export const researchJobs = pgTable(
     id: text("id").primaryKey(),
     store_id: text("store_id")
       .notNull()
-      .references(() => stores.id),
+      .references(() => stores.id, { onDelete: "cascade" }),
     user_id: uuid("user_id")
       .notNull()
       .references(() => profiles.id),
@@ -313,10 +313,10 @@ export const researchReports = pgTable(
     id: text("id").primaryKey(),
     job_id: text("job_id")
       .notNull()
-      .references(() => researchJobs.id),
+      .references(() => researchJobs.id, { onDelete: "cascade" }),
     store_id: text("store_id")
       .notNull()
-      .references(() => stores.id),
+      .references(() => stores.id, { onDelete: "cascade" }),
     category_1_basic: jsonb("category_1_basic").notNull().default([]),
     category_2_owner: jsonb("category_2_owner").notNull().default([]),
     category_3_menu: jsonb("category_3_menu").notNull().default([]),
@@ -352,11 +352,11 @@ export const handoffs = pgTable("handoffs", {
   id: text("id").primaryKey(),
   store_id: text("store_id")
     .notNull()
-    .references(() => stores.id),
+    .references(() => stores.id, { onDelete: "cascade" }),
   store_name: text("store_name").notNull(),
   deal_id: text("deal_id")
     .notNull()
-    .references(() => deals.id),
+    .references(() => deals.id, { onDelete: "cascade" }),
   contract_services: text("contract_services").notNull(),
   initial_fee: integer("initial_fee").notNull(),
   monthly_fee: integer("monthly_fee").notNull(),

@@ -106,6 +106,13 @@
       "when": 1780149601000,
       "tag": "0014_ensure_research_job_soft_delete_columns",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1780756054580,
+      "tag": "0015_store_cascade_delete",
+      "breakpoints": true
     }
   ]
 }

@@ -21,7 +21,7 @@
  */
 
 import "server-only";
-import { eq, desc, and, or, ilike, type SQL } from "drizzle-orm";
+import { eq, desc, and, or, ilike, inArray, type SQL } from "drizzle-orm";
 import { db, type DbClient, type Tx } from "./client";
 import { stores } from "./schema";
 import {
@@ -201,6 +201,18 @@ export function makeStoreRepo(executor: DbClient | Tx): StoreRepository {
         .where(eq(stores.id, id))
         .returning({ id: stores.id });
       return deleted.length > 0;
+    },
+
+    async bulkDelete(ids) {
+      if (ids.length === 0) return 0;
+      // 関連テーブル (deals / research / handoffs / research_jobs / research_reports) は
+      // FK の ON DELETE CASCADE (migration 0015) で連鎖削除される。
+      // RETURNING id で実際に削除された件数を確定する。
+      const deleted = await executor
+        .delete(stores)
+        .where(inArray(stores.id, ids))
+        .returning({ id: stores.id });
+      return deleted.length;
     },
   };
 }
