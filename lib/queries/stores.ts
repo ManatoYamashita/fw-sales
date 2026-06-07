@@ -1,5 +1,5 @@
 import "server-only";
-import { cacheTag } from "next/cache";
+import { cacheLife, cacheTag } from "next/cache";
 import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
 import {
@@ -12,6 +12,7 @@ import type { StageId } from "@/types/stage";
 
 async function listAllStoresCached() {
   "use cache";
+  cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.stores);
   return repos.store.list();
 }
@@ -83,6 +84,7 @@ export async function listStores(
 
 export async function getStoreCached(id: string): Promise<Store | null> {
   "use cache";
+  cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.store(id), CACHE_TAGS.stores);
   return repos.store.get(id);
 }

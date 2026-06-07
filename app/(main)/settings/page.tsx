@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { cacheTag } from "next/cache";
+import { cacheLife, cacheTag } from "next/cache";
 import { connection } from "next/server";
 import { Card } from "@/components/ui/card";
 import { Stat } from "@/components/ui/stat";
@@ -20,6 +20,7 @@ export const metadata: Metadata = { title: "設定" };
 
 async function loadCounts() {
   "use cache";
+  cacheLife("longBackstop");
   cacheTag(
     CACHE_TAGS.stores,
     CACHE_TAGS.research,

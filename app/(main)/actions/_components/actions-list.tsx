@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { cacheTag } from "next/cache";
+import { cacheLife, cacheTag } from "next/cache";
 import { connection } from "next/server";
 import { Send } from "lucide-react";
 import { Card } from "@/components/ui/card";
@@ -12,6 +12,7 @@ import { ACTION_READY_STAGES } from "@/lib/domain/stages";
 
 async function loadActionableStores() {
   "use cache";
+  cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.stores, CACHE_TAGS.actionQueue);
   const all = await repos.store.list();
   return all.filter((s) =>

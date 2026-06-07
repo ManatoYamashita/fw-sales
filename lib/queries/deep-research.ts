@@ -17,7 +17,7 @@
 
 import "server-only";
 
-import { cacheTag } from "next/cache";
+import { cacheLife, cacheTag } from "next/cache";
 import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
 import { getCurrentSession } from "@/lib/supabase/server";
@@ -46,6 +46,7 @@ async function getDeepResearchReportCached(
   storeId: string,
 ): Promise<DeepResearchReport | null> {
   "use cache";
+  cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.deepResearchByStore(storeId));
 
   return repos.deepResearch.getReportByStore(storeId);
@@ -59,6 +60,7 @@ export async function getDeepResearchJobByStore(
   storeId: string,
 ): Promise<DeepResearchJob | null> {
   "use cache";
+  cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.deepResearchByStore(storeId));
 
   return repos.deepResearch.findActiveByStore(storeId);
@@ -72,6 +74,7 @@ export async function getLatestDeepResearchJobByStore(
   storeId: string,
 ): Promise<DeepResearchJob | null> {
   "use cache";
+  cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.deepResearchByStore(storeId));
 
   return repos.deepResearch.findLatestByStore(storeId);
@@ -89,6 +92,7 @@ export async function listInFlightDeepResearchJobs(): Promise<
   DeepResearchQueueRow[]
 > {
   "use cache";
+  cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.deepResearchQueue);
 
   return repos.deepResearch.listInFlight();
@@ -102,6 +106,7 @@ export async function listRecentDoneDeepResearchJobs(
   limit = 30,
 ): Promise<DeepResearchQueueRow[]> {
   "use cache";
+  cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.deepResearchQueue);
 
   return repos.deepResearch.listRecentDone(limit);
@@ -114,6 +119,7 @@ export async function listRecentFailedDeepResearchJobs(
   limit = 30,
 ): Promise<DeepResearchQueueRow[]> {
   "use cache";
+  cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.deepResearchQueue);
 
   return repos.deepResearch.listRecentFailed(limit);
@@ -126,6 +132,7 @@ export async function getDeepResearchJobById(
   jobId: string,
 ): Promise<DeepResearchQueueRow | null> {
   "use cache";
+  cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.deepResearchJob(jobId));
   cacheTag(CACHE_TAGS.stores);
   cacheTag(CACHE_TAGS.profiles);
@@ -140,6 +147,7 @@ export async function getDeepResearchJobById(
  */
 export async function getAverageResearchDuration(): Promise<number | null> {
   "use cache";
+  cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.deepResearchQueue);
 
   return repos.deepResearch.getAverageDurationSec();
@@ -152,6 +160,7 @@ export async function listAllDeepResearchJobs(): Promise<
   DeepResearchQueueRow[]
 > {
   "use cache";
+  cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.deepResearchQueue);
 
   return repos.deepResearch.listAll(200);
@@ -163,6 +172,7 @@ export async function listAllDeepResearchJobs(): Promise<
  */
 export async function listActiveDeepResearchStoreIds(): Promise<Set<string>> {
   "use cache";
+  cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.deepResearchQueue);
 
   const ids = await repos.deepResearch.listActiveStoreIds();

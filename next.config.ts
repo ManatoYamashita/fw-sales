@@ -2,6 +2,11 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   cacheComponents: true,
+  // `'use cache'` 共通プロファイル。無効化は全 mutation の revalidateTag(タグ駆動)が
+  // 担うため、TTL は保険として長めに設定する。stale 5m / revalidate 6h / expire 7d。
+  cacheLife: {
+    longBackstop: { stale: 300, revalidate: 21600, expire: 604800 },
+  },
   // React の <ViewTransition> を `<Link>` ナビゲーションでも動かすためのフラグ。
   // setState ベースの startTransition では不要だが、将来のページ遷移でも使えるように有効化。
   experimental: {
