@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { cacheLife, cacheTag } from "next/cache";
+import { connection } from "next/server";
 import { Card } from "@/components/ui/card";
 import { DataTable, type ColumnDef } from "@/components/ui/data-table";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -62,6 +63,8 @@ const columns: ColumnDef<Store>[] = [
 ];
 
 export async function RecentStoresTable() {
+  // build 時 prerender を skip (USE_CACHE_TIMEOUT 対策)。
+  await connection();
   const rows = await loadRecentStores();
   return (
     <Card>
