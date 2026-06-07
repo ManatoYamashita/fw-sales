@@ -1,6 +1,5 @@
 import Link from "next/link";
 import type { Metadata } from "next";
-import { connection } from "next/server";
 import { ArrowLeftRight } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { DataTable, type ColumnDef } from "@/components/ui/data-table";
@@ -61,8 +60,6 @@ const columns: ColumnDef<Handoff>[] = [
 ];
 
 export default async function HandoffsPage() {
-  // build 時 prerender を skip (USE_CACHE_TIMEOUT 対策)。
-  await connection();
   const handoffs = await listHandoffsCached();
   return (
     <div className="space-y-4">

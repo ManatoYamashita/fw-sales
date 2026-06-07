@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { connection } from "next/server";
 import { Card } from "@/components/ui/card";
 import { Stat } from "@/components/ui/stat";
 import { Heading, Text } from "@/components/ui/typography";
@@ -19,8 +18,6 @@ const FUNNEL_BAR_TONE = [
 ];
 
 export default async function KpiPage() {
-  // build 時 prerender を skip (USE_CACHE_TIMEOUT 対策)。
-  await connection();
   const snapshot = await getKpiSnapshot();
   const maxFunnel = Math.max(...snapshot.funnel.map((s) => s.count), 1);
   const maxChannel = Math.max(

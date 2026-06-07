@@ -1,6 +1,5 @@
 import Link from "next/link";
 import type { Metadata } from "next";
-import { connection } from "next/server";
 import { Card } from "@/components/ui/card";
 import { DataTable, type ColumnDef } from "@/components/ui/data-table";
 import { Badge } from "@/components/ui/badge";
@@ -93,8 +92,6 @@ function buildDealColumns(profileNameById: Map<string, string>): ColumnDef<Deal>
 }
 
 export default async function DealsPage() {
-  // build 時 prerender を skip (USE_CACHE_TIMEOUT 対策)。
-  await connection();
   const [deals, stores, profiles] = await Promise.all([
     listDealsCached(),
     listStores({}),
