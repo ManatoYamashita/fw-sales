@@ -150,7 +150,8 @@ export function StoresTableView({
   const [bulkOpen, setBulkOpen] = useState(false);
   const [isDeleting, startDelete] = useTransition();
 
-  // フィルタ変更で一覧から消えた行の選択は破棄する (表示中の行のみを選択対象とする)。
+  // 表示中の行のみを選択対象として扱う。フィルタで一覧から消えた行の ID は selectedIds に
+  // 残るが、件数表示・一括削除の対象は selectedVisibleIds に限定する (表示中の行のみ操作する)。
   const visibleIdSet = new Set(stores.map((s) => s.id));
   const selectedVisibleIds = selectedIds.filter((id) => visibleIdSet.has(id));
 

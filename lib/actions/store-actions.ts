@@ -278,14 +278,20 @@ export async function bulkDeleteStoresAction(
     );
   }
 
-  // 集合タグを広く revalidate（個別 store タグは削除した ID 分だけ飛ばす）。
+  // 集合タグを広く revalidate する。
   invalidateAllStoreScopes();
   revalidateTag(CACHE_TAGS.deals, "max");
   revalidateTag(CACHE_TAGS.research, "max");
   revalidateTag(CACHE_TAGS.handoffs, "max");
   revalidateTag(CACHE_TAGS.deepResearchQueue, "max");
+  // 各店舗スコープの *ByStore タグも削除 ID 分だけ飛ばし、単一削除 (deleteStoreAction) と
+  // 対称にする。これらでタグ付けされた店舗詳細側のキャッシュが古い関連データを返すのを防ぐ。
   for (const id of uniqueIds) {
     revalidateTag(CACHE_TAGS.store(id), "max");
+    revalidateTag(CACHE_TAGS.dealsByStore(id), "max");
+    revalidateTag(CACHE_TAGS.researchByStore(id), "max");
+    revalidateTag(CACHE_TAGS.handoffsByStore(id), "max");
+    revalidateTag(CACHE_TAGS.deepResearchByStore(id), "max");
   }
 
   return success({ deletedCount, requestedCount: uniqueIds.length });
