@@ -242,8 +242,8 @@ export async function deleteStoreAction(id: string): Promise<ActionResult> {
       err instanceof Error ? err.message : "店舗の削除に失敗しました",
     );
   }
-  // 関連レコード (商談 / 調査 / ハンドオフ / Deep Research) は FK の
-  // ON DELETE CASCADE (migration 0015) で連鎖削除される。集合タグを広く revalidate する。
+  // 関連レコード (商談 / 調査 / ハンドオフ) は FK の ON DELETE CASCADE で連鎖削除される。
+  // task 4.2 (PR3a): Deep Research タグは撤去 (#121 / #110 連動)。
   invalidateAllStoreScopes(id);
   revalidateTag(CACHE_TAGS.deals, "max");
   revalidateTag(CACHE_TAGS.dealsByStore(id), "max");
@@ -251,8 +251,6 @@ export async function deleteStoreAction(id: string): Promise<ActionResult> {
   revalidateTag(CACHE_TAGS.researchByStore(id), "max");
   revalidateTag(CACHE_TAGS.handoffs, "max");
   revalidateTag(CACHE_TAGS.handoffsByStore(id), "max");
-  revalidateTag(CACHE_TAGS.deepResearchQueue, "max");
-  revalidateTag(CACHE_TAGS.deepResearchByStore(id), "max");
   redirect("/stores");
 }
 
@@ -289,11 +287,11 @@ export async function bulkDeleteStoresAction(
   }
 
   // 集合タグを広く revalidate する。
+  // task 4.2 (PR3a): Deep Research タグは撤去 (#121 / #110 連動)。
   invalidateAllStoreScopes();
   revalidateTag(CACHE_TAGS.deals, "max");
   revalidateTag(CACHE_TAGS.research, "max");
   revalidateTag(CACHE_TAGS.handoffs, "max");
-  revalidateTag(CACHE_TAGS.deepResearchQueue, "max");
   // 各店舗スコープの *ByStore タグも削除 ID 分だけ飛ばし、単一削除 (deleteStoreAction) と
   // 対称にする。これらでタグ付けされた店舗詳細側のキャッシュが古い関連データを返すのを防ぐ。
   for (const id of uniqueIds) {
@@ -301,7 +299,6 @@ export async function bulkDeleteStoresAction(
     revalidateTag(CACHE_TAGS.dealsByStore(id), "max");
     revalidateTag(CACHE_TAGS.researchByStore(id), "max");
     revalidateTag(CACHE_TAGS.handoffsByStore(id), "max");
-    revalidateTag(CACHE_TAGS.deepResearchByStore(id), "max");
   }
 
   return success({ deletedCount, requestedCount: uniqueIds.length });

@@ -13,7 +13,6 @@ import { MapEmbedCard } from "./map-embed-card";
 import { WebAssetCard } from "./web-asset-card";
 import { MemoCard } from "./memo-card";
 import { AiAnalysisDetailSection } from "./ai-analysis-detail-section";
-import type { PromptTemplateOption } from "@/app/(main)/stores/new/_components/ai-analysis-panel";
 import { StageInlineSelect } from "./stage-inline-select";
 import { DeleteStoreButton } from "./delete-store-button";
 import type { Store } from "@/types/store";
@@ -23,31 +22,16 @@ interface StoreDetailTabsProps {
   store: Store;
   profiles: readonly Profile[];
   isApiKeyConfigured: boolean;
-  assignedSalesName: string;
   dealCount: number;
-  /**
-   * AI 分析タブ末尾に差し込む Deep Research セクション (RSC スロット)。
-   * 親 RSC (`page.tsx`) で `<Suspense><DeepResearchSection storeId={...}/></Suspense>`
-   * を生成して渡す。client component である本タブから async server component を
-   * 直接 import できないため、ReactNode prop として注入する。
-   * deep-research-pipeline spec #43 で追加。
-   */
-  deepResearchSlot?: ReactNode;
-  /** SSR で取得したプロンプトテンプレート一覧(Issue #42 Phase 4-D) */
-  promptTemplates: readonly PromptTemplateOption[];
-  /** 当該店舗に Deep Research レポートが存在するか (AI 分析オプトイン UI 表示判定) */
-  hasDeepResearchReport?: boolean;
+  // task 4.2 (PR3a): deepResearchSlot / promptTemplates / hasDeepResearchReport /
+  // assignedSalesName を撤去。営業資産生成は SalesAssetsGenerator に集約済み。
 }
 
 export function StoreDetailTabs({
   store,
   profiles,
   isApiKeyConfigured,
-  assignedSalesName,
   dealCount,
-  deepResearchSlot,
-  promptTemplates,
-  hasDeepResearchReport,
 }: StoreDetailTabsProps) {
   const editHref = `/stores/${store.id}/edit`;
 
@@ -135,11 +119,7 @@ export function StoreDetailTabs({
         <AiAnalysisDetailSection
           store={store}
           isApiKeyConfigured={isApiKeyConfigured}
-          assignedSalesName={assignedSalesName}
-          promptTemplates={promptTemplates}
-          hasDeepResearchReport={hasDeepResearchReport}
         />
-        {deepResearchSlot}
       </TabsPanel>
     </Tabs>
   );

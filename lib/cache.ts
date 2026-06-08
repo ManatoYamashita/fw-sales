@@ -24,14 +24,8 @@ export const CACHE_TAGS = {
   profile: (id: string) => `profile:${id}`,
   notifications: "notifications",
   notification: (id: string) => `notification:${id}`,
-  // deep-research-pipeline spec (Issue #43)
-  deepResearchByStore: (storeId: string) => `deep-research:store:${storeId}`,
-  deepResearchJob: (jobId: string) => `deep-research:job:${jobId}`,
-  /**
-   * Deep Research キューページ (`/research`) の一覧用集合タグ。
-   * enqueue / status 遷移 / retry / sweep の各所で revalidate される。
-   */
-  deepResearchQueue: "deep-research:queue",
+  // task 4.2 (PR3a): deepResearchByStore / deepResearchJob / deepResearchQueue を撤去
+  // (#121 / #110 連動)。
   // AI プロンプトテンプレート (Issue #42)
   promptTemplates: "prompt-templates",
 } as const;

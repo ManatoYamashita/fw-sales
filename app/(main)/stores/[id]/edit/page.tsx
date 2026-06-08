@@ -4,10 +4,6 @@ import Link from "next/link";
 import { StoreEditForm } from "./_components/store-edit-form";
 import { getStoreCached } from "@/lib/queries/stores";
 import { getAllProfiles } from "@/lib/queries/profiles";
-import { isApiKeyConfigured } from "@/lib/env";
-import { getCurrentSession } from "@/lib/supabase/server";
-import { listPromptTemplatesCached } from "@/lib/queries/prompt-templates";
-import type { PromptTemplateOption } from "@/app/(main)/stores/new/_components/ai-analysis-panel";
 
 type Params = Promise<{ id: string }>;
 
@@ -27,20 +23,13 @@ export default async function StoreEditPage({
   params: Params;
 }) {
   const { id } = await params;
-  const [store, profiles, session] = await Promise.all([
+  const [store, profiles] = await Promise.all([
     getStoreCached(id),
     getAllProfiles({ excludePlaceholders: false }),
-    getCurrentSession(),
   ]);
   if (!store) notFound();
-  // GEMINI_API_KEY の有無を SSR で判定して props で渡す(Req 2.7)
-  const apiKeyConfigured = isApiKeyConfigured();
-  // プロンプトテンプレート一覧: id/name/is_default のみに絞ってクライアントへ渡す (Issue #42 Phase 4-D)
-  const promptTemplates: PromptTemplateOption[] = session
-    ? (await listPromptTemplatesCached(session.userId)).map(
-        ({ id, name, is_default }) => ({ id, name, is_default }),
-      )
-    : [];
+  // task 4.2 (PR3a): AiAnalysisPanel 撤去に伴い isApiKeyConfigured / promptTemplates の
+  // 取得・受渡しを削除。営業資産生成は店舗詳細の SalesAssetsGenerator に集約。
   return (
     <div className="space-y-4 max-w-4xl mx-auto">
       <div>
@@ -54,12 +43,7 @@ export default async function StoreEditPage({
           店舗を編集
         </h2>
       </div>
-      <StoreEditForm
-        store={store}
-        isApiKeyConfigured={apiKeyConfigured}
-        profiles={profiles}
-        promptTemplates={promptTemplates}
-      />
+      <StoreEditForm store={store} profiles={profiles} />
     </div>
   );
 }

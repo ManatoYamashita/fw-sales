@@ -15,11 +15,6 @@ import { Select } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { MemoInput, MemoTextarea } from "./memo-input";
 import { ServiceCheckboxGroup } from "./service-checkbox-group";
-import {
-  AiAnalysisPanel,
-  type AiAnalysisFormSnapshot,
-  type PromptTemplateOption,
-} from "./ai-analysis-panel";
 import { createStoreAction } from "@/lib/actions/store-actions";
 import { decideChannel } from "@/lib/domain/channel";
 import {
@@ -30,12 +25,6 @@ import type { Profile } from "@/types/profile";
 import { toast } from "@/components/ui/toast";
 import type { ApplyConfidence, ApplyResult } from "@/lib/url-parser/types";
 import { confidenceToBg } from "@/lib/url-parser/confidence-color";
-import { useBeforeUnload } from "@/lib/hooks/use-before-unload";
-import type {
-  AiAnalysisResult,
-  AiAnalysisConfidence,
-  ConfidenceFieldKey,
-} from "@/types/ai-analysis";
 
 type FormState = {
   name: string;
@@ -98,8 +87,6 @@ export interface StoreNewFormInitialImport {
 }
 
 export interface StoreNewFormProps {
-  /** SSR で取得した GEMINI_API_KEY 設定済み boolean(Req 2.7) */
-  isApiKeyConfigured: boolean;
   /** 担当者選択肢 (RSC で `getAllProfiles()` 経由で取得) */
   profiles: readonly Profile[];
   /** 現在ログイン中の profile.id (デフォルト担当者として使用) */
@@ -108,17 +95,13 @@ export interface StoreNewFormProps {
   initialImport?: StoreNewFormInitialImport | null;
   /** 手動モードで親パネルから渡される店舗名。`initialImport` がある場合はそちらが優先される。 */
   initialName?: string;
-  /** SSR で取得したプロンプトテンプレート一覧(Issue #42 Phase 4-D) */
-  promptTemplates: readonly PromptTemplateOption[];
 }
 
 export function StoreNewForm({
-  isApiKeyConfigured,
   profiles,
   currentProfileId,
   initialImport = null,
   initialName = "",
-  promptTemplates,
 }: StoreNewFormProps) {
   const initial: FormState = {
     ...INITIAL,
@@ -156,21 +139,11 @@ export function StoreNewForm({
   const [confidence, setConfidence] = useState<ApplyConfidence>(
     initialImport?.suggested.confidence ?? {},
   );
-  const [aiResult, setAiResult] = useState<AiAnalysisResult | null>(null);
-  const [aiConfidence, setAiConfidence] = useState<
-    Partial<AiAnalysisConfidence>
-  >({});
-  // AI 結果が未保存かどうか。`useBeforeUnload` の連動に使う(Req 6.4)。
-  const [aiPersisted, setAiPersisted] = useState<boolean>(true);
-  // URL 解析時に取得した HTML 全文(AI 分析の入力として再利用)。
-  // 親パネルから渡される `initialImport.html` を初期値とし、AI 分析でのみ参照する。
-  const [htmlContent] = useState<string | null>(initialImport?.html ?? null);
   const [pending, startTransition] = useTransition();
   const router = useRouter();
 
-  // 未保存遷移警告: AI 分析結果があり保存されていない場合のみ beforeunload を発動
-  const isDirty = aiResult !== null && !aiPersisted;
-  useBeforeUnload(isDirty);
+  // task 4.2 (PR3a): AiAnalysisPanel 撤去に伴い、AI 結果 state / useBeforeUnload 連動を削除。
+  // 営業資産生成は登録後に店舗詳細の SalesAssetsGenerator から実行する設計に統一。
 
   const set = useCallback(
     <K extends keyof FormState>(key: K, value: FormState[K]) => {
@@ -221,67 +194,13 @@ export function StoreNewForm({
   const bgFor = (key: ConfidenceKey): string | undefined =>
     confidenceToBg(deferredConfidence[key]);
 
-  // ----- AI Analysis Panel callbacks -----
-
-  /** Panel 押下時に呼ばれる関数。`form` / `htmlContent` の最新値を返す。
-   * useCallback で包まないことで毎レンダ最新の閉包を生成し、stale closure を防ぐ。 */
-  const getFormSnapshot = (): AiAnalysisFormSnapshot => ({
-    name: form.name,
-    prefecture: form.prefecture,
-    city: form.city,
-    address: form.address,
-    genre: form.genre,
-    phone: form.phone,
-    site_url: form.site_url,
-    instagram_url: form.instagram_url,
-    map_url: form.map_url,
-    review_avg: form.review_avg,
-    review_count: form.review_count,
-    memo: form.memo,
-    operator_type: form.operator_type,
-    operator_name: form.operator_name,
-    htmlContent,
-    // AI 分析プロンプトには表示名(display_name)を渡す。user_id を引いて解決し、
-    // 未割当 / 解決失敗時は空文字。
-    assignedSales:
-      profiles.find((p) => p.id === form.assigned_sales_user_id)?.display_name ?? "",
-  });
-
-  const onAiResult = (result: AiAnalysisResult) => {
-    setAiResult(result);
-    setAiConfidence(result.confidence);
-    setAiPersisted(false);
-  };
-
-  const onAiFieldEdit = (field: ConfidenceFieldKey) => {
-    setAiConfidence((prev) => {
-      if (!(field in prev)) return prev;
-      const next = { ...prev };
-      delete next[field];
-      return next;
-    });
-  };
-
-  const onAiResultFieldChange = (
-    field: keyof Omit<AiAnalysisResult, "confidence">,
-    value: string,
-  ) => {
-    setAiResult((prev) => {
-      if (!prev) return prev;
-      return { ...prev, [field]: value };
-    });
-  };
-
   const submit = (formData: FormData) => {
     // operator は form action 内の Select / Input で送信されるので追加不要。
-    // ai_analysis_result は state 由来なので明示的に詰める。
-    if (aiResult) {
-      formData.set("ai_analysis_result", JSON.stringify(aiResult));
-    }
+    // ai_analysis_result は task 4.2 (PR3a) で AiAnalysisPanel を撤去したため
+    // 新規登録フォームからは送信せず、登録後に店舗詳細で生成する設計に統一。
     startTransition(async () => {
       const result = await createStoreAction(null, formData);
       if (result.ok) {
-        setAiPersisted(true);
         toast.success(result.message ?? "登録しました");
         router.push(`/stores/${result.data.id}`);
       } else {
@@ -548,20 +467,7 @@ export function StoreNewForm({
         </Card.Body>
       </Card>
 
-      <AiAnalysisPanel
-        getFormSnapshot={getFormSnapshot}
-        initialResult={null}
-        onResult={onAiResult}
-        onFieldEdit={onAiFieldEdit}
-        isApiKeyConfigured={isApiKeyConfigured}
-        currentResult={aiResult}
-        confidence={aiConfidence}
-        onResultFieldChange={onAiResultFieldChange}
-        storeId={null}
-        promptTemplates={promptTemplates}
-      />
-
-      {/* Submit footer: 既存の Card.Footer 構造から切り出して AI Panel の下に配置。 */}
+      {/* Submit footer (task 4.2 PR3a で AI Panel 撤去、本フォームは基本情報の登録のみ)。 */}
       <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border bg-muted/30 rounded-md">
         <Button
           type="button"

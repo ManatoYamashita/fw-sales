@@ -17,7 +17,6 @@ import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils/cn";
 import { StoreNewForm } from "./store-new-form";
-import type { PromptTemplateOption } from "./ai-analysis-panel";
 import {
   AreaSearchPanel,
   ManualStartPanel,
@@ -34,16 +33,12 @@ export type RegistrationMode = "manual" | "url" | "area";
 export interface StoreRegistrationTabsProps {
   /** SSR で `searchParams.mode` を正規化した初期モード */
   initialMode: RegistrationMode;
-  /** GEMINI_API_KEY 設定済み boolean (URL/手動 タブの AI 分析パネルで使用) */
-  isApiKeyConfigured: boolean;
   /** GOOGLE_PLACES_API_KEY 設定済み boolean (エリア検索タブで使用) */
   isPlacesApiConfigured: boolean;
   /** 担当者選択肢 (URL/手動 タブの単店舗フォームで使用) */
   profiles: readonly Profile[];
   /** 現在ログイン中の profile.id (デフォルト担当者として使用) */
   currentProfileId: string | null;
-  /** SSR で取得したプロンプトテンプレート一覧(Issue #42 Phase 4-D) */
-  promptTemplates: readonly PromptTemplateOption[];
 }
 
 function normalizeMode(raw: string | null | undefined): RegistrationMode {
@@ -71,11 +66,9 @@ function normalizeMode(raw: string | null | undefined): RegistrationMode {
  */
 export function StoreRegistrationTabs({
   initialMode,
-  isApiKeyConfigured,
   isPlacesApiConfigured,
   profiles,
   currentProfileId,
-  promptTemplates,
 }: StoreRegistrationTabsProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -221,11 +214,9 @@ export function StoreRegistrationTabs({
             {mode === "manual" && (
               <StoreNewForm
                 key={manualStoreName}
-                isApiKeyConfigured={isApiKeyConfigured}
                 profiles={profiles}
                 currentProfileId={currentProfileId}
                 initialName={manualStoreName}
-                promptTemplates={promptTemplates}
               />
             )}
             {mode === "url" && urlImport && (
@@ -238,14 +229,12 @@ export function StoreRegistrationTabs({
                   storeName={urlImport.suggested.name}
                 />
                 <StoreNewForm
-                  isApiKeyConfigured={isApiKeyConfigured}
                   profiles={profiles}
                   currentProfileId={currentProfileId}
                   initialImport={{
                     suggested: urlImport.suggested,
                     html: urlImport.html,
                   }}
-                  promptTemplates={promptTemplates}
                 />
               </>
             )}

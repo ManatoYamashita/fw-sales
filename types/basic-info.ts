@@ -1,14 +1,14 @@
 /**
  * store-basic-info ドメイン型 (Issue #114 / #121)
  *
- * 各店舗が「8 カテゴリ 51 項目の基本情報 (`basic_info`)」を単一の構造化セットとして
+ * 各店舗が「8 カテゴリ 50 項目の基本情報 (`basic_info`)」を単一の構造化セットとして
  * 保持するための型を定義する。1 項目分の値とメタ (`BasicInfoField`)、店舗の基本情報
  * セット全体 (`BasicInfo`)、各項目を充填した取得ソース種別 (`FillSource`) からなる。
  *
  * 充填ソースは Places / 手動の 2 系統 (#121 で Stage 2 構造化を生成経路から撤去したため
  * `ai` は廃止)。本ファイルは純粋な型定義のみを持ち、ランタイム挙動を持たない。
- * 51 項目の定義表 (`BASIC_INFO_ITEMS`) は別ファイル (`lib/domain/basic-info-items.ts`)
- * が単一の真実として所有する。
+ * 項目の定義表 (`BASIC_INFO_ITEMS`) は別ファイル (`lib/domain/basic-info-items.ts`)
+ * が単一の真実として所有する (原典 Issue #43 §2 と一致した実体 50 項目、task 4.2 で表記整合済)。
  *
  * 関連: design.md §Data Models / Logical Data Model, requirements.md §2.1
  */

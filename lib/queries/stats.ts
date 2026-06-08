@@ -66,27 +66,26 @@ export async function getNavBadgeCounts(): Promise<NavBadgeCounts> {
     ),
   );
 
-  // `research` バッジは deep-research-pipeline (Issue #43) で意味変更:
-  // 旧: stages == "調査待ち" の store 数
-  // 新: in-flight (queued + researching + structuring) の DeepResearchJob 数
+  // task 4.2 (PR3a): deep-research-pipeline 撤去に伴い `research` バッジを
+  // stage="未調査" の store 数 (手動貼付経路のキュー) に戻す (#121 整合)。
   const needsStores =
-    enabledBadgeKeys.has("stores") || enabledBadgeKeys.has("pipeline");
+    enabledBadgeKeys.has("stores") ||
+    enabledBadgeKeys.has("pipeline") ||
+    enabledBadgeKeys.has("research");
   const needsDeals = enabledBadgeKeys.has("deals");
   const needsHandoffs = enabledBadgeKeys.has("handoffs");
-  const needsResearchInFlight = enabledBadgeKeys.has("research");
 
-  const [stores, deals, handoffs, researchInFlight] = await Promise.all([
-    needsStores ? repos.store.list() : Promise.resolve([]),
-    needsDeals ? repos.deal.list() : Promise.resolve([]),
-    needsHandoffs ? repos.handoff.list() : Promise.resolve([]),
-    needsResearchInFlight
-      ? repos.deepResearch.countPending()
-      : Promise.resolve(0),
+  const [stores, deals, handoffs] = await Promise.all([
+    needsStores ? repos.store.list() : Promise.resolve([] as Awaited<ReturnType<typeof repos.store.list>>),
+    needsDeals ? repos.deal.list() : Promise.resolve([] as Awaited<ReturnType<typeof repos.deal.list>>),
+    needsHandoffs ? repos.handoff.list() : Promise.resolve([] as Awaited<ReturnType<typeof repos.handoff.list>>),
   ]);
 
   return {
     stores: enabledBadgeKeys.has("stores") ? stores.length : 0,
-    research: researchInFlight,
+    research: enabledBadgeKeys.has("research")
+      ? stores.filter((s) => s.stage === "未調査").length
+      : 0,
     pipeline: enabledBadgeKeys.has("pipeline")
       ? stores.filter((s) => s.stage !== "架電済み").length
       : 0,
