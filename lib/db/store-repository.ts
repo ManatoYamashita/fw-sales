@@ -33,9 +33,10 @@ import {
   type StoreFilter,
 } from "@/types/store";
 import type { AiAnalysisResult } from "@/types/ai-analysis";
-import type { BasicInfo } from "@/types/basic-info";
+import type { BasicInfo, FillSource } from "@/types/basic-info";
 import type { StoreRepository } from "@/lib/repositories/store-repository";
 import { validateAiAnalysis } from "@/lib/ai/validate";
+import { mergeBasicInfo as mergeBasicInfoPure } from "@/lib/domain/basic-info-merge";
 import { generateId } from "@/lib/utils/id";
 import { today } from "@/lib/utils/date";
 
@@ -229,6 +230,42 @@ export function makeStoreRepo(executor: DbClient | Tx): StoreRepository {
         .where(inArray(stores.id, ids))
         .returning({ id: stores.id });
       return deleted.length;
+    },
+
+    async mergeBasicInfo(id, incoming, source: FillSource) {
+      // 既存 `update` と同じ read-merge-write 原子性パターン:
+      // 現在値 read → mergeBasicInfo 純関数で 1 ソース分のマージ → write を
+      // 1 文脈で実行する(last-write-wins、design.md §Persistence)。
+      const current = await executor
+        .select()
+        .from(stores)
+        .where(eq(stores.id, id))
+        .limit(1);
+      const headRow = current[0];
+      if (!headRow) {
+        // design L298 の戻り型 `Promise<Store>` を尊重し throw。
+        // 呼出側 (Action 層) で ActionResult.failure に変換する。
+        throw new Error(`Store not found: ${id}`);
+      }
+      const head = fromDbRow(headRow);
+
+      // `basic_info` 内の `updated_at` は ISO 8601 (design §Logical Data Model L338)。
+      // 一方 `stores.updated_at` 列は既存規約で `YYYY-MM-DD` (text)。両者は別書式。
+      const fieldNow = new Date().toISOString();
+      const mergedBasicInfo = mergeBasicInfoPure(
+        head.basic_info,
+        incoming,
+        source,
+        fieldNow,
+      );
+
+      const next: Store = {
+        ...head,
+        basic_info: mergedBasicInfo,
+        updated_at: today(),
+      };
+      await executor.update(stores).set(toDbRow(next)).where(eq(stores.id, id));
+      return next;
     },
   };
 }
