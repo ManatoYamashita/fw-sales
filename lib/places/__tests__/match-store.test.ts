@@ -32,6 +32,7 @@ function makeStore(overrides: Partial<Store> = {}): Store {
     lng: 139.6503,
     business_hours: "",
     google_place_id: null,
+    basic_info: {},
     created_at: "2026-01-01",
     updated_at: "2026-01-01",
     ...overrides,

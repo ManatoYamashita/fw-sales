@@ -1,5 +1,6 @@
 import type { StageId } from "./stage";
 import type { AiAnalysisResult } from "./ai-analysis";
+import type { BasicInfo } from "./basic-info";
 
 export type Channel = "DM推奨" | "テレアポ推奨" | "未判定" | "要確認";
 export const CHANNELS: readonly Channel[] = [
@@ -62,6 +63,13 @@ export interface Store {
   business_hours: string;
   /** Google Places ID。エリア検索で追加した店舗のみ格納。手動登録時は null。 */
   google_place_id: string | null;
+  /**
+   * 基本情報 50 項目 (store-basic-info / Issue #114, #121)。
+   * キーは `BASIC_INFO_ITEMS` (`lib/domain/basic-info-items.ts`)、値は `BasicInfoField`。
+   * 未充足項目も含み、Places / 手動で段階充填。新規登録時は `{}` (店舗名のみで登録可)。
+   * 表示は basic_info 優先 + 既存スカラー fallback (PR1 expand 期)。
+   */
+  basic_info: BasicInfo;
   created_at: string; // YYYY-MM-DD
   updated_at: string;
 }

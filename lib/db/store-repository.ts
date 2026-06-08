@@ -33,6 +33,7 @@ import {
   type StoreFilter,
 } from "@/types/store";
 import type { AiAnalysisResult } from "@/types/ai-analysis";
+import type { BasicInfo } from "@/types/basic-info";
 import type { StoreRepository } from "@/lib/repositories/store-repository";
 import { validateAiAnalysis } from "@/lib/ai/validate";
 import { generateId } from "@/lib/utils/id";
@@ -85,6 +86,20 @@ function parseStoredAiAnalysis(raw: string | null): AiAnalysisResult | null {
 }
 
 /**
+ * jsonb 列の `basic_info` を `BasicInfo` に復元する。
+ *
+ * drizzle が jsonb を自動 parse するため通常はオブジェクトが渡るが、本番 DB に
+ * 破損データ(string / array / null)が混入した場合は空オブジェクトにフェイルセーフし
+ * UI/マージ層が空状態として扱えるようにする。本格的な項目別キー検証は task 2.x
+ * (`mergeBasicInfo` 周辺)に集約する。
+ */
+function parseStoredBasicInfo(raw: unknown): BasicInfo {
+  if (raw === null || raw === undefined) return {};
+  if (typeof raw !== "object" || Array.isArray(raw)) return {};
+  return raw as BasicInfo;
+}
+
+/**
  * DB row を `Store` 型 (オブジェクト) に変換する。
  *
  * `priority` / `stage` / `channel` / `has_contact_form` は schema 上 text 列のため
@@ -96,6 +111,7 @@ function fromDbRow(row: StoreSelectRow): Store {
     ...row,
     operator_type: asOperatorType(row.operator_type),
     ai_analysis_result: parseStoredAiAnalysis(row.ai_analysis_result),
+    basic_info: parseStoredBasicInfo(row.basic_info),
   } as Store;
 }
 

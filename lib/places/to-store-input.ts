@@ -98,5 +98,8 @@ export function placeResultToStoreInput(place: PlaceResult): StoreInput {
     lng: place.lng,
     business_hours: "",
     google_place_id: place.placeId,
+    // basic_info はエリア検索登録時には空で初期化する。Places 由来の項目への充填は
+    // task 2.2 (placeResultToBasicInfo) + task 3.1 (mergeBasicInfo 経由) が担う。
+    basic_info: {},
   };
 }
