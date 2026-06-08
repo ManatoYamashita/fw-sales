@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "seed": "NODE_OPTIONS='--conditions=react-server' tsx scripts/seed.ts",
+    "db:backfill-basic-info": "NODE_OPTIONS='--conditions=react-server' tsx scripts/backfill-basic-info.ts",
     "db:migrate": "node --env-file-if-exists=.env.local ./node_modules/drizzle-kit/bin.cjs migrate",
     "db:generate": "node --env-file-if-exists=.env.local ./node_modules/drizzle-kit/bin.cjs generate",
     "db:studio": "node --env-file-if-exists=.env.local ./node_modules/drizzle-kit/bin.cjs studio",
