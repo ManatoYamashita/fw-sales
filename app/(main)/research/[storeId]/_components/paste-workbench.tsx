@@ -1,30 +1,33 @@
 "use client";
 
+/**
+ * 調査結果貼付ワークベンチ (store-basic-info / task 3.6, PR2 単線化)
+ *
+ * 旧 STEP1 (構造化保存) / STEP2 (51 項目プレビュー) を撤去し、「貼付 → 生成 → 編集 → 保存」
+ * の単線フローに簡素化 (#121)。生成は `generateSalesAssetsAction` を呼び、basic_info +
+ * 貼付テキスト経路で AiAnalysisResult を作って保存する。Stage 2 構造化 (`structurer`) を
+ * 一切経由しない (R7.3)。
+ *
+ * 旧 `structureFromPastedMarkdownAction` / `generateCallScriptFromMarkdownAction` /
+ * `DeepResearchReportView` の利用は本コンポーネントから外したが、関数 / コンポーネント
+ * 自体の物理削除は task 4.2 (PR3) で実施する (#110 連動)。
+ *
+ * 関連: design.md §UI / paste-workbench, §Migration Strategy PR2, requirements.md §4.1 §4.2 §7.3 §7.4 §7.5
+ */
+
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Copy } from "lucide-react";
+import { Copy, Sparkles, Save } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/toast";
-import { DeepResearchReportView } from "@/app/(main)/stores/[id]/_components/deep-research-report-view";
-import {
-  structureFromPastedMarkdownAction,
-  generateCallScriptFromMarkdownAction,
-} from "@/lib/actions/research-paste-actions";
+import { generateSalesAssetsAction } from "@/lib/actions/sales-assets-actions";
 import { updateStorePatchAction } from "@/lib/actions/store-actions";
 import type { Store } from "@/types/store";
-import type { DeepResearchReport } from "@/types/deep-research";
 import type { AiAnalysisResult } from "@/lib/ai/schema";
 
-interface PasteWorkbenchProps {
-  store: Store;
-  /** 既存の最新レポート(再訪時のプレビューと貼付欄の初期値に使う)。 */
-  initialReport: DeepResearchReport | null;
-}
-
-/** STEP 3 で編集する 5 つのテキストフィールド(confidence は別管理)。 */
 type ScriptFieldKey = keyof Omit<AiAnalysisResult, "confidence">;
 const SCRIPT_FIELDS: ReadonlyArray<{
   key: ScriptFieldKey;
@@ -38,52 +41,43 @@ const SCRIPT_FIELDS: ReadonlyArray<{
   { key: "call_script", label: "架電スクリプト", rows: 10 },
 ];
 
-/**
- * 貼付ワークベンチ。Gemini の DeepResearch 結果 Markdown を貼り付け、
- * STEP 1(構造化)・STEP 2(51 項目プレビュー)・STEP 3(架電生成)を行う。
- * 構造化と架電生成は独立しており、構造化に失敗しても架電生成は実行できる。
- */
-export function PasteWorkbench({ store, initialReport }: PasteWorkbenchProps) {
+interface PasteWorkbenchProps {
+  store: Store;
+}
+
+export function PasteWorkbench({ store }: PasteWorkbenchProps) {
   const router = useRouter();
-  // 再訪時は保存済み原文を初期値に。構造化後も入力は保持され、そのまま架電生成に使える。
-  const [markdown, setMarkdown] = useState(initialReport?.full_markdown ?? "");
+  const [markdown, setMarkdown] = useState<string>("");
   const [aiResult, setAiResult] = useState<AiAnalysisResult | null>(
     store.ai_analysis_result,
   );
-  const [structuring, startStructuring] = useTransition();
+  const [persisted, setPersisted] = useState<boolean>(true);
   const [generating, startGenerating] = useTransition();
   const [saving, startSaving] = useTransition();
 
-  const trimmed = markdown.trim();
-  const busy = structuring || generating || saving;
-
-  const onStructure = () => {
-    if (trimmed === "") {
-      toast.error("DeepResearch の結果 Markdown を貼り付けてください");
-      return;
-    }
-    startStructuring(async () => {
-      const res = await structureFromPastedMarkdownAction(store.id, markdown);
-      if (res.ok) {
-        toast.success(res.message ?? "構造化して保存しました");
-        // STEP 2 プレビューを最新化(サーバーで report を再取得)。
-        router.refresh();
-      } else {
-        toast.error(res.error);
-      }
-    });
-  };
+  const busy = generating || saving;
 
   const onGenerate = () => {
-    if (trimmed === "") {
-      toast.error("DeepResearch の結果 Markdown を貼り付けてください");
-      return;
-    }
     startGenerating(async () => {
-      const res = await generateCallScriptFromMarkdownAction(store.id, markdown);
+      const res = await generateSalesAssetsAction(store.id, markdown);
       if (res.ok) {
         setAiResult(res.data);
-        toast.success("強み・弱み・架電スクリプトを生成しました");
+        setPersisted(true); // generateSalesAssetsAction 内で ai_analysis_result 保存済
+        toast.success(res.message ?? "営業資産を生成しました");
+
+        // 既に「架電済み」の店舗は降格させない。それ以外は調査完了として stage 更新。
+        const nextStage =
+          store.stage === "架電済み" ? "架電済み" : "DeepResearch済み";
+        if (store.stage !== nextStage) {
+          const stageRes = await updateStorePatchAction(store.id, {
+            stage: nextStage,
+          });
+          if (!stageRes.ok) {
+            // stage 更新失敗は警告のみで生成成功は保持
+            toast.error(`stage 更新失敗: ${stageRes.error}`);
+          }
+        }
+        router.refresh();
       } else {
         toast.error(res.error);
       }
@@ -92,6 +86,7 @@ export function PasteWorkbench({ store, initialReport }: PasteWorkbenchProps) {
 
   const onFieldChange = (key: ScriptFieldKey, value: string) => {
     setAiResult((prev) => (prev ? { ...prev, [key]: value } : prev));
+    setPersisted(false);
   };
 
   const onCopy = async (text: string) => {
@@ -106,14 +101,12 @@ export function PasteWorkbench({ store, initialReport }: PasteWorkbenchProps) {
   const onSave = () => {
     if (!aiResult) return;
     startSaving(async () => {
-      // 既に「架電済み」の店舗は降格させない (structureFromPastedMarkdownAction と同ロジック)。
-      const nextStage = store.stage === "架電済み" ? "架電済み" : "DeepResearch済み";
       const res = await updateStorePatchAction(store.id, {
         ai_analysis_result: aiResult,
-        stage: nextStage,
       });
       if (res.ok) {
         toast.success("店舗に保存しました");
+        setPersisted(true);
         router.push(`/stores/${store.id}`);
       } else {
         toast.error(res.error);
@@ -134,62 +127,42 @@ export function PasteWorkbench({ store, initialReport }: PasteWorkbenchProps) {
           {store.name}
         </h2>
         <p className="text-sm text-muted-foreground mt-1">
-          Gemini の DeepResearch 結果を貼り付け、構造化と架電スクリプト生成を行います。
+          調査結果テキストを貼り付けて、店舗の基本情報と合わせて強み・弱み・架電スクリプトを生成します。
+          貼付欄が空でも基本情報のみで生成可能です。
         </p>
       </div>
 
-      {/* STEP 1: 貼付・構造化 */}
       <Card>
         <Card.Header>
-          <Card.Title>STEP 1 ・ DeepResearch 結果を貼付して構造化</Card.Title>
+          <Card.Title>調査結果から営業資産を生成</Card.Title>
         </Card.Header>
-        <Card.Body className="space-y-3">
-          <Textarea
-            value={markdown}
-            onChange={(e) => setMarkdown(e.target.value)}
-            rows={12}
-            placeholder="Gemini の DeepResearch 結果 Markdown をここに貼り付けてください"
-            aria-label="DeepResearch 結果 Markdown"
-          />
+        <Card.Body className="space-y-4">
+          <div className="space-y-1.5">
+            <label
+              htmlFor="paste-markdown"
+              className="text-sm font-medium text-foreground"
+            >
+              調査結果テキスト (任意・構造化されません)
+            </label>
+            <Textarea
+              id="paste-markdown"
+              value={markdown}
+              onChange={(e) => setMarkdown(e.target.value)}
+              rows={12}
+              placeholder="Gemini UI で実施した DeepResearch の結果テキスト等をここに貼り付けてください"
+              aria-label="調査結果テキスト"
+              disabled={busy}
+            />
+          </div>
+
           <div className="flex justify-end">
             <Button
               type="button"
               variant="primary"
-              disabled={busy || trimmed === ""}
-              onClick={onStructure}
-            >
-              {structuring ? "構造化中…" : "構造化して保存"}
-            </Button>
-          </div>
-        </Card.Body>
-      </Card>
-
-      {/* STEP 2: 51 項目プレビュー */}
-      {initialReport ? (
-        <DeepResearchReportView report={initialReport} />
-      ) : (
-        <Card>
-          <Card.Body>
-            <p className="text-sm text-muted-foreground">
-              STEP 1 で構造化すると、ここに 51 項目(8 カテゴリ)のプレビューが表示されます。
-            </p>
-          </Card.Body>
-        </Card>
-      )}
-
-      {/* STEP 3: 架電生成 */}
-      <Card>
-        <Card.Header>
-          <Card.Title>STEP 3 ・ 強み / 弱み / 架電スクリプト</Card.Title>
-        </Card.Header>
-        <Card.Body className="space-y-4">
-          <div className="flex justify-end">
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={busy || trimmed === ""}
               onClick={onGenerate}
+              disabled={busy}
             >
+              <Sparkles className="h-3.5 w-3.5" />
               {generating
                 ? "生成中…"
                 : aiResult
@@ -199,7 +172,7 @@ export function PasteWorkbench({ store, initialReport }: PasteWorkbenchProps) {
           </div>
 
           {aiResult ? (
-            <>
+            <div className="space-y-4 border-t border-border pt-4">
               {SCRIPT_FIELDS.map((f) => (
                 <div key={f.key} className="space-y-1.5">
                   <div className="flex items-center justify-between">
@@ -223,23 +196,30 @@ export function PasteWorkbench({ store, initialReport }: PasteWorkbenchProps) {
                     value={aiResult[f.key]}
                     onChange={(e) => onFieldChange(f.key, e.target.value)}
                     rows={f.rows}
+                    disabled={busy}
                   />
                 </div>
               ))}
-              <div className="flex justify-end">
+              <div className="flex items-center justify-end gap-2">
+                {!persisted && (
+                  <span className="text-xs text-warning">
+                    未保存の変更があります
+                  </span>
+                )}
                 <Button
                   type="button"
                   variant="primary"
-                  disabled={busy}
                   onClick={onSave}
+                  disabled={busy || persisted}
                 >
+                  <Save className="h-3.5 w-3.5" />
                   {saving ? "保存中…" : "保存して店舗へ"}
                 </Button>
               </div>
-            </>
+            </div>
           ) : (
             <p className="text-sm text-muted-foreground">
-              生成すると、編集可能な強み・弱み・架電スクリプトが表示されます。構造化に失敗していても生成できます。
+              生成すると、編集可能な強み・弱み・架電スクリプトがここに表示されます。
             </p>
           )}
         </Card.Body>

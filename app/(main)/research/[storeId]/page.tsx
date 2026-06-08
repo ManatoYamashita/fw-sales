@@ -2,7 +2,6 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { PasteWorkbench } from "./_components/paste-workbench";
 import { getStoreCached } from "@/lib/queries/stores";
-import { getDeepResearchReport } from "@/lib/queries/deep-research";
 
 type Params = Promise<{ storeId: string }>;
 
@@ -24,11 +23,9 @@ export default async function ResearchDetailPage({
   params: Params;
 }) {
   const { storeId } = await params;
-  const [store, report] = await Promise.all([
-    getStoreCached(storeId),
-    getDeepResearchReport(storeId),
-  ]);
+  const store = await getStoreCached(storeId);
   if (!store) notFound();
-
-  return <PasteWorkbench store={store} initialReport={report} />;
+  // task 3.6 (PR2): 旧 51 項目プレビュー (DeepResearchReportView) を撤去したため
+  // initialReport / getDeepResearchReport は本ページでは不要 (#121)。
+  return <PasteWorkbench store={store} />;
 }

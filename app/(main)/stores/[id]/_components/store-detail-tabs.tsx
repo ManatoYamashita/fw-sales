@@ -120,7 +120,7 @@ export function StoreDetailTabs({
 
       <TabsPanel value="basic" className="space-y-4">
         <BasicInfoCard store={store} profiles={profiles} />
-        <BasicInfoFieldsCard basicInfo={store.basic_info} />
+        <BasicInfoFieldsCard storeId={store.id} basicInfo={store.basic_info} />
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <MapEmbedCard store={store} />
           <WebAssetCard store={store} />
