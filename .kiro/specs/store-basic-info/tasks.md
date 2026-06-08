@@ -3,7 +3,7 @@
 > #121 整合・縮小版(D1/D2/D3/D5/D6/D8 を採用、D4/D7 撤去)。移行は expand-contract: Foundation/Core/一部 Integration = PR1(expand)、生成統合・UI 編集・ワークベンチ単線化 = PR2(migrate)、スカラー DROP・構造化資産撤去 = PR3(contract)。
 
 - [ ] 1. Foundation: basic_info 基盤の型とスキーマ (PR1 expand)
-- [ ] 1.1 基本情報フィールドの型を定義する
+- [x] 1.1 基本情報フィールドの型を定義する
   - 1 項目分の値とメタ(取得値・取得区分・確信度・出典・出典抜粋・ヒアリング質問・取得ソース・更新時刻)を表す型と、店舗の基本情報セット全体の型、取得ソース種別(エリア検索 / 手動)を定義する
   - 完了条件: 型が export され `pnpm typecheck` が通過する
   - _Requirements: 2.1_
