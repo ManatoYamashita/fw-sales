@@ -8,6 +8,7 @@ import { Tabs, TabsList, TabsTrigger, TabsPanel } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils/cn";
 import { BasicInfoCard } from "./basic-info-card";
+import { BasicInfoFieldsCard } from "./basic-info-fields-card";
 import { MapEmbedCard } from "./map-embed-card";
 import { WebAssetCard } from "./web-asset-card";
 import { MemoCard } from "./memo-card";
@@ -119,6 +120,7 @@ export function StoreDetailTabs({
 
       <TabsPanel value="basic" className="space-y-4">
         <BasicInfoCard store={store} profiles={profiles} />
+        <BasicInfoFieldsCard basicInfo={store.basic_info} />
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <MapEmbedCard store={store} />
           <WebAssetCard store={store} />
