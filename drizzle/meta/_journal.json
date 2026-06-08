@@ -113,6 +113,13 @@
       "when": 1780756054580,
       "tag": "0015_store_cascade_delete",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1780926098512,
+      "tag": "0016_add_store_basic_info",
+      "breakpoints": true
     }
   ]
 }

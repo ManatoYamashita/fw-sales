@@ -1,0 +1,1 @@
+ALTER TABLE "stores" ADD COLUMN "basic_info" jsonb DEFAULT '{}'::jsonb NOT NULL;

@@ -12,6 +12,8 @@ import {
   boolean,
 } from "drizzle-orm/pg-core";
 
+import type { BasicInfo } from "@/types/basic-info";
+
 /**
  * profiles テーブル (auth-and-notifications spec, Issue #16)
  *
@@ -126,6 +128,13 @@ export const stores = pgTable("stores", {
   business_hours: text("business_hours").notNull().default(""),
   /** Google Places ID。エリア検索経由で登録した店舗のみ格納。手動登録時は NULL。 */
   google_place_id: text("google_place_id"),
+  /**
+   * 基本情報 50 項目 (store-basic-info / Issue #114, #121)。
+   * キーは `BASIC_INFO_ITEMS` (`lib/domain/basic-info-items.ts`)、値は `BasicInfoField`。
+   * 未充足項目も枠として保持し、Places / 手動で段階充填する。既定は空オブジェクト
+   * (店舗名のみで登録可)。読み取りは basic_info 優先 + 既存スカラー fallback (PR1)。
+   */
+  basic_info: jsonb("basic_info").$type<BasicInfo>().notNull().default({}),
   created_at: text("created_at").notNull(),
   updated_at: text("updated_at").notNull(),
 }, (table) => [
