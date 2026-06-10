@@ -6,18 +6,41 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { toast } from "@/components/ui/toast";
 import { PlaceResultList } from "./place-result-list";
-import { bulkAddStoresFromPlacesAction } from "@/lib/actions/area-search-actions";
+import {
+  bulkAddStoresFromPlacesAction,
+  searchPlacesWithMatchesAction,
+} from "@/lib/actions/area-search-actions";
+import { mergeUniquePlaces } from "@/lib/places/bulk-utils";
 import type { PlaceWithMatch } from "@/lib/places/types";
 
 export interface AreaSearchResultsProps {
   results: readonly PlaceWithMatch[];
+  /** 初回検索の `nextPageToken`。次ページが無い場合は null。 */
+  nextPageToken: string | null;
+  /** 「もっと読み込む」で同じ条件を再送するための初回検索キーワード。 */
+  keyword: string;
+  /** 「もっと読み込む」で同じ条件を再送するための初回検索エリア。 */
+  area: string;
 }
 
 /**
  * エリア検索結果の一覧 + 一括登録コントロール。
- * 親の `AreaSearchPanel` から検索結果を受け取り、選択/登録の状態は内部で完結する。
+ * 親の `AreaSearchPanel` から検索結果を受け取り、選択/登録/追加ページ読込の状態は
+ * 内部で完結する。再検索のたびに親側で `key` を変えて再マウントする想定 (state は
+ * 初回 props のみを初期値として持ち、以後は内部で更新する)。
  */
-export function AreaSearchResults({ results }: AreaSearchResultsProps) {
+export function AreaSearchResults({
+  results,
+  nextPageToken: initialNextPageToken,
+  keyword,
+  area,
+}: AreaSearchResultsProps) {
+  const [allResults, setAllResults] = useState<readonly PlaceWithMatch[]>(results);
+  const [nextPageToken, setNextPageToken] = useState<string | null>(
+    initialNextPageToken,
+  );
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
+  const [isLoadingMore, startLoadMoreTransition] = useTransition();
   const [addedIds, setAddedIds] = useState<ReadonlySet<string>>(new Set());
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
   const [showUnregisteredOnly, setShowUnregisteredOnly] = useState(false);
@@ -26,6 +49,24 @@ export function AreaSearchResults({ results }: AreaSearchResultsProps) {
   const [error, setError] = useState<string | null>(null);
   const [isBulkPending, startBulkTransition] = useTransition();
   const router = useRouter();
+
+  const handleLoadMore = () => {
+    if (!nextPageToken) return;
+    setLoadMoreError(null);
+    startLoadMoreTransition(async () => {
+      const result = await searchPlacesWithMatchesAction(
+        keyword,
+        area,
+        nextPageToken,
+      );
+      if (!result.ok) {
+        setLoadMoreError(result.error);
+        return;
+      }
+      setAllResults((prev) => mergeUniquePlaces(prev, result.data.places));
+      setNextPageToken(result.data.nextPageToken);
+    });
+  };
 
   const handleAdded = (placeId: string) => {
     setAddedIds((prev) => new Set([...prev, placeId]));
@@ -49,7 +90,7 @@ export function AreaSearchResults({ results }: AreaSearchResultsProps) {
   };
 
   const handleSelectAll = () => {
-    const eligible = results
+    const eligible = allResults
       .filter(
         ({ place, matchedStore }) =>
           matchedStore === null && !addedIds.has(place.placeId),
@@ -94,7 +135,7 @@ export function AreaSearchResults({ results }: AreaSearchResultsProps) {
 
   const showBar = selectedIds.size >= 1;
   // 上部「全選択」導線を出すか: 登録可能 (DB 未登録 かつ 未追加) な候補が残っている場合のみ。
-  const eligibleCount = results.filter(
+  const eligibleCount = allResults.filter(
     ({ place, matchedStore }) =>
       matchedStore === null && !addedIds.has(place.placeId),
   ).length;
@@ -105,12 +146,12 @@ export function AreaSearchResults({ results }: AreaSearchResultsProps) {
   // 「DB照合時点では未登録だった」という意味で文言上は問題ない。
   // 登録済み店舗はもともと選択不可のため、選択状態 (selectedIds/addedIds) には影響しない。
   const displayedResults = showUnregisteredOnly
-    ? results.filter(({ matchedStore }) => matchedStore === null)
-    : results;
+    ? allResults.filter(({ matchedStore }) => matchedStore === null)
+    : allResults;
 
   return (
     <div className="space-y-4">
-      {results.length > 0 && (
+      {allResults.length > 0 && (
         <label className="flex w-fit items-center gap-2 text-sm text-foreground cursor-pointer">
           <input
             type="checkbox"
@@ -171,6 +212,34 @@ export function AreaSearchResults({ results }: AreaSearchResultsProps) {
           />
         )}
       </div>
+
+      {/* 「もっと読み込む」: nextPageToken が存在する場合のみ表示。
+          コスト管理のため自動取得は行わず、ユーザー操作時のみ追加 API 呼び出しを行う。 */}
+      {nextPageToken && (
+        <div className="flex flex-col items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleLoadMore}
+            disabled={isLoadingMore}
+            className="gap-1.5"
+          >
+            {isLoadingMore ? (
+              <>
+                <Spinner />
+                読み込み中…
+              </>
+            ) : (
+              "もっと読み込む"
+            )}
+          </Button>
+          {loadMoreError && (
+            <p role="alert" className="text-sm text-destructive">
+              {loadMoreError}
+            </p>
+          )}
+        </div>
+      )}
 
       {/* 下部固定バー: 1 件以上選択時のみ表示。
           sticky にすることでメインのコンテンツ幅に追従し、サイドバー折りたたみ (#106) でも

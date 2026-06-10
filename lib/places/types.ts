@@ -11,6 +11,21 @@ export type PlaceWithMatch = {
   matchedStore: MatchedStoreSummary | null;
 };
 
+/**
+ * Google Places Text Search 1ページ分の結果。
+ * `nextPageToken` は次ページが存在する場合のトークン、存在しない場合は null。
+ */
+export interface PlaceSearchPage {
+  places: PlaceResult[];
+  nextPageToken: string | null;
+}
+
+/** エリア検索Action (`searchPlacesWithMatchesAction`) の戻り値データ部。 */
+export interface AreaSearchResultPayload {
+  places: PlaceWithMatch[];
+  nextPageToken: string | null;
+}
+
 /** Google Places API New (v2) Text Search の検索結果 1件分 */
 export interface PlaceResult {
   /** places.id (例: "ChIJ...") */

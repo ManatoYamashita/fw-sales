@@ -3,12 +3,15 @@
 import { revalidateTag } from "next/cache";
 import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
-import { searchPlaces, getPlaceById } from "@/lib/places/google";
+import { searchPlaces, searchPlacesPage, getPlaceById } from "@/lib/places/google";
 import { placeResultToStoreInput } from "@/lib/places/to-store-input";
 import { placeResultToBasicInfo } from "@/lib/places/to-basic-info";
 import { attachStoreMatches } from "@/lib/places/match-store";
 import { deduplicatePlaceIds } from "@/lib/places/bulk-utils";
-import type { PlaceResult, PlaceWithMatch } from "@/lib/places/types";
+import type {
+  AreaSearchResultPayload,
+  PlaceResult,
+} from "@/lib/places/types";
 import { success, failure, type ActionResult } from "./_helpers";
 
 /**
@@ -43,20 +46,25 @@ async function createStoreFromPlaceTx(
  * Google Places 検索 + 既存DB照合を1回のServer Actionで行う。
  * 各検索結果に matchedStore (DB登録済み情報) を付与して返す。
  * 既存の searchPlacesAction は壊さず維持する。
+ *
+ * `pageToken` を指定すると、前回呼び出しで返した `nextPageToken` を使って次ページを
+ * 取得する (「もっと読み込む」用)。`keyword`/`area` は前回と同じ値を渡すこと
+ * (Google Places 側の仕様で検索条件を変えると `pageToken` が無効になる場合がある)。
  */
 export async function searchPlacesWithMatchesAction(
   keyword: string,
   area: string,
-): Promise<ActionResult<PlaceWithMatch[]>> {
+  pageToken?: string,
+): Promise<ActionResult<AreaSearchResultPayload>> {
   if (!keyword.trim()) {
     return failure("キーワードを入力してください");
   }
   try {
-    const [places, stores] = await Promise.all([
-      searchPlaces(keyword, area),
+    const [{ places, nextPageToken }, stores] = await Promise.all([
+      searchPlacesPage(keyword, area, pageToken ? { pageToken } : undefined),
       repos.store.list(),
     ]);
-    return success(attachStoreMatches(places, stores));
+    return success({ places: attachStoreMatches(places, stores), nextPageToken });
   } catch (e) {
     return failure(e instanceof Error ? e.message : "検索に失敗しました");
   }

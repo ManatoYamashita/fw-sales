@@ -1,10 +1,11 @@
 import "server-only";
-import type { PlaceResult } from "./types";
+import type { PlaceResult, PlaceSearchPage } from "./types";
 
 const SEARCH_ENDPOINT = "https://places.googleapis.com/v1/places:searchText";
 const DETAILS_ENDPOINT = "https://places.googleapis.com/v1/places";
 
-// Text Search のフィールドマスクは "places.<field>" 形式
+// Text Search のフィールドマスクは "places.<field>" 形式。
+// nextPageToken のみレスポンス直下のフィールドのため "places." プレフィックス無し。
 const SEARCH_FIELD_MASK = [
   "places.id",
   "places.displayName",
@@ -15,6 +16,7 @@ const SEARCH_FIELD_MASK = [
   "places.userRatingCount",
   "places.types",
   "places.googleMapsUri",
+  "nextPageToken",
 ].join(",");
 
 // Place Details のフィールドマスクは "places." プレフィックスなし
@@ -54,6 +56,7 @@ interface RawPlace {
 
 interface PlacesResponse {
   places?: RawPlace[];
+  nextPageToken?: string;
 }
 
 const FOOD_TYPES: ReadonlySet<string> = new Set([
@@ -104,16 +107,40 @@ function toPlaceResult(raw: RawPlace): PlaceResult | null {
   };
 }
 
-export async function searchPlaces(
+export interface SearchPlacesPageOptions {
+  /** 1ページあたりの最大件数 (1-20)。未指定時は20。 */
+  pageSize?: number;
+  /** 前ページのレスポンスで返された `nextPageToken`。未指定時は1ページ目を取得する。 */
+  pageToken?: string;
+}
+
+/**
+ * Google Places API (New) Text Search を1ページ分呼び出す。
+ *
+ * ページングする場合、`textQuery` 等の検索条件は前回と同一のまま `pageToken` のみを
+ * 追加してリクエストする (Google側の仕様)。`pageSize`/`pageToken` 以外の条件を変えると
+ * `nextPageToken` が無効になる場合があるため、呼び出し側でも検索条件を変えないこと。
+ */
+export async function searchPlacesPage(
   keyword: string,
   area: string,
-): Promise<PlaceResult[]> {
+  options?: SearchPlacesPageOptions,
+): Promise<PlaceSearchPage> {
   const apiKey = process.env.GOOGLE_PLACES_API_KEY;
   if (!apiKey) {
     throw new Error("GOOGLE_PLACES_API_KEY が設定されていません");
   }
 
   const textQuery = [keyword.trim(), area.trim()].filter(Boolean).join(" ");
+
+  const body: Record<string, unknown> = {
+    textQuery,
+    languageCode: "ja",
+    pageSize: options?.pageSize ?? 20,
+  };
+  if (options?.pageToken) {
+    body.pageToken = options.pageToken;
+  }
 
   const response = await fetch(SEARCH_ENDPOINT, {
     method: "POST",
@@ -122,7 +149,7 @@ export async function searchPlaces(
       "X-Goog-Api-Key": apiKey,
       "X-Goog-FieldMask": SEARCH_FIELD_MASK,
     },
-    body: JSON.stringify({ textQuery, languageCode: "ja" }),
+    body: JSON.stringify(body),
     cache: "no-store",
   });
 
@@ -132,14 +159,26 @@ export async function searchPlaces(
   }
 
   const data = (await response.json()) as PlacesResponse;
-  const results: PlaceResult[] = [];
+  const places: PlaceResult[] = [];
   for (const raw of data.places ?? []) {
     const place = toPlaceResult(raw);
     if (place && isFoodPlace(place.types)) {
-      results.push(place);
+      places.push(place);
     }
   }
-  return results;
+  return { places, nextPageToken: data.nextPageToken ?? null };
+}
+
+/**
+ * Google Places API (New) Text Search の1ページ目を呼び出し、`PlaceResult[]` のみを返す。
+ * pagination 非対応の既存呼び出し元 (`places-fallback` 等) 向けの後方互換ラッパー。
+ */
+export async function searchPlaces(
+  keyword: string,
+  area: string,
+): Promise<PlaceResult[]> {
+  const { places } = await searchPlacesPage(keyword, area);
+  return places;
 }
 
 /**

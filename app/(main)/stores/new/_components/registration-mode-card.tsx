@@ -269,8 +269,16 @@ export function UrlSearchPanel({ onLoaded }: UrlSearchPanelProps) {
 
 // ---- Area -----------------------------------------------------------------
 
+/** エリア検索1回分の結果。「もっと読み込む」で再検索する際に keyword/area を引き継ぐ。 */
+export interface AreaSearchSessionResult {
+  places: readonly PlaceWithMatch[];
+  nextPageToken: string | null;
+  keyword: string;
+  area: string;
+}
+
 export interface AreaSearchPanelProps {
-  onSearched: (results: readonly PlaceWithMatch[]) => void;
+  onSearched: (result: AreaSearchSessionResult) => void;
   isPlacesApiConfigured: boolean;
 }
 
@@ -289,14 +297,13 @@ export function AreaSearchPanel({
     startTransition(async () => {
       const result = await searchPlacesWithMatchesAction(keyword, area);
       if (result.ok) {
-        if (result.data.length === 0) {
+        const { places, nextPageToken } = result.data;
+        if (places.length === 0) {
           setError(
             "該当する店舗が見つかりませんでした。条件を変えて再検索してください。",
           );
-          onSearched([]);
-        } else {
-          onSearched(result.data);
         }
+        onSearched({ places, nextPageToken, keyword, area });
       } else {
         setError(result.error);
       }

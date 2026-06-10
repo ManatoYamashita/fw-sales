@@ -1,5 +1,24 @@
 import { describe, expect, it } from "vitest";
-import { deduplicatePlaceIds } from "../bulk-utils";
+import { deduplicatePlaceIds, mergeUniquePlaces } from "../bulk-utils";
+import type { PlaceWithMatch } from "../types";
+
+function makePlace(placeId: string, name = placeId): PlaceWithMatch {
+  return {
+    place: {
+      placeId,
+      name,
+      formattedAddress: "",
+      lat: 0,
+      lng: 0,
+      phone: "",
+      rating: null,
+      userRatingsTotal: null,
+      types: [],
+      googleMapsUri: null,
+    },
+    matchedStore: null,
+  };
+}
 
 describe("deduplicatePlaceIds", () => {
   it("空配列は空配列を返す", () => {
@@ -24,5 +43,32 @@ describe("deduplicatePlaceIds", () => {
 
   it("入力順を維持する (最初に出現した位置を保持)", () => {
     expect(deduplicatePlaceIds(["b", "a", "b", "c", "a"])).toEqual(["b", "a", "c"]);
+  });
+});
+
+describe("mergeUniquePlaces", () => {
+  it("重複がない場合は current の後ろに incoming を連結する", () => {
+    const current = [makePlace("a"), makePlace("b")];
+    const incoming = [makePlace("c"), makePlace("d")];
+    expect(mergeUniquePlaces(current, incoming)).toEqual([...current, ...incoming]);
+  });
+
+  it("incoming 側の重複 placeId は破棄する", () => {
+    const current = [makePlace("a"), makePlace("b")];
+    const incoming = [makePlace("b"), makePlace("c")];
+    expect(mergeUniquePlaces(current, incoming)).toEqual([
+      ...current,
+      makePlace("c"),
+    ]);
+  });
+
+  it("incoming が空配列の場合は current をそのまま返す", () => {
+    const current = [makePlace("a")];
+    expect(mergeUniquePlaces(current, [])).toEqual(current);
+  });
+
+  it("current が空配列の場合は incoming をそのまま返す", () => {
+    const incoming = [makePlace("a"), makePlace("b")];
+    expect(mergeUniquePlaces([], incoming)).toEqual(incoming);
   });
 });
