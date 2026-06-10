@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { MapPin, Phone } from "lucide-react";
+import { ExternalLink, MapPin, Phone } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { StarRating } from "@/components/ui/star-rating";
 import { AddStoreButton } from "./add-store-button";
+import { mapGenre } from "@/lib/places/to-store-input";
 import type { PlaceWithMatch } from "@/lib/places/types";
 
 interface PlaceResultListProps {
@@ -34,6 +35,7 @@ export function PlaceResultList({
           const isAdded = addedIds.has(place.placeId);
           const isEligible = matchedStore === null && !isAdded;
           const isSelected = selectedIds.has(place.placeId);
+          const genre = mapGenre(place.types);
 
           return (
             <li key={place.placeId}>
@@ -54,9 +56,12 @@ export function PlaceResultList({
 
                   {/* 店舗情報 */}
                   <div className="min-w-0 flex-1 space-y-1">
-                    <p className="font-semibold text-foreground leading-snug">
-                      {place.name}
-                    </p>
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <p className="font-semibold text-foreground leading-snug">
+                        {place.name}
+                      </p>
+                      {genre && <Badge tone="secondary">{genre}</Badge>}
+                    </div>
 
                     {place.formattedAddress && (
                       <p className="flex items-start gap-1 text-sm text-muted-foreground">
@@ -81,6 +86,18 @@ export function PlaceResultList({
                           </span>
                         )}
                       </span>
+                    )}
+
+                    {place.googleMapsUri && (
+                      <a
+                        href={place.googleMapsUri}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1 text-sm text-info hover:underline w-fit"
+                      >
+                        <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+                        Google Mapsで見る
+                      </a>
                     )}
                   </div>
 

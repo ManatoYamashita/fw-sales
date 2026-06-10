@@ -20,6 +20,7 @@ export interface AreaSearchResultsProps {
 export function AreaSearchResults({ results }: AreaSearchResultsProps) {
   const [addedIds, setAddedIds] = useState<ReadonlySet<string>>(new Set());
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
+  const [showUnregisteredOnly, setShowUnregisteredOnly] = useState(false);
   // bulkResult は全件失敗 (added === 0) のときだけ set される失敗専用の結果。
   const [bulkResult, setBulkResult] = useState<{ failed: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -98,8 +99,29 @@ export function AreaSearchResults({ results }: AreaSearchResultsProps) {
       matchedStore === null && !addedIds.has(place.placeId),
   ).length;
 
+  // 「DB未登録のみ表示」トグル: DB登録済み (matchedStore !== null) を一覧から除外する。
+  // matchedStore は検索時点のDB照合結果のスナップショットのため、画面内で追加済み
+  // (addedIds) になった店舗は matchedStore === null のまま表示され続けるが、
+  // 「DB照合時点では未登録だった」という意味で文言上は問題ない。
+  // 登録済み店舗はもともと選択不可のため、選択状態 (selectedIds/addedIds) には影響しない。
+  const displayedResults = showUnregisteredOnly
+    ? results.filter(({ matchedStore }) => matchedStore === null)
+    : results;
+
   return (
     <div className="space-y-4">
+      {results.length > 0 && (
+        <label className="flex w-fit items-center gap-2 text-sm text-foreground cursor-pointer">
+          <input
+            type="checkbox"
+            checked={showUnregisteredOnly}
+            onChange={(e) => setShowUnregisteredOnly(e.target.checked)}
+            className="h-4 w-4 cursor-pointer accent-primary"
+          />
+          DB未登録のみ表示
+        </label>
+      )}
+
       {/* 0 件選択時のみ: 最初の一括選択への導線をリスト上部に残す (Option B)。
           下部バーは選択中のみ出るため、これが無いと最初に全選択する手段が消える。 */}
       {!showBar && eligibleCount > 0 && (
@@ -135,13 +157,19 @@ export function AreaSearchResults({ results }: AreaSearchResultsProps) {
       {/* バー表示中はリスト末尾に下部余白を足し、最後の数件が sticky バーの
           下に隠れてクリック/確認しづらくなるのを防ぐ。バー高さ + 余白の目安。 */}
       <div className={showBar ? "pb-20" : undefined}>
-        <PlaceResultList
-          results={results}
-          addedIds={addedIds}
-          selectedIds={selectedIds}
-          onAdded={handleAdded}
-          onToggle={handleToggle}
-        />
+        {displayedResults.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            DB未登録の店舗が見つかりませんでした。トグルを解除すると登録済みの店舗も表示されます。
+          </p>
+        ) : (
+          <PlaceResultList
+            results={displayedResults}
+            addedIds={addedIds}
+            selectedIds={selectedIds}
+            onAdded={handleAdded}
+            onToggle={handleToggle}
+          />
+        )}
       </div>
 
       {/* 下部固定バー: 1 件以上選択時のみ表示。
