@@ -134,6 +134,14 @@ export function AreaSearchResults({
   };
 
   const showBar = selectedIds.size >= 1;
+  // 件数サマリー (営業担当が「取りこぼしていないか」を把握するための指標)。
+  const loadedCount = allResults.length;
+  const registeredCount = allResults.filter(
+    ({ matchedStore }) => matchedStore !== null,
+  ).length;
+  const addedCount = allResults.filter(({ place }) =>
+    addedIds.has(place.placeId),
+  ).length;
   // 上部「全選択」導線を出すか: 登録可能 (DB 未登録 かつ 未追加) な候補が残っている場合のみ。
   const eligibleCount = allResults.filter(
     ({ place, matchedStore }) =>
@@ -151,28 +159,63 @@ export function AreaSearchResults({
 
   return (
     <div className="space-y-4">
+      {/* 検索条件・取得状況・件数サマリー: 「どこまで取得済みか」「取りこぼしていないか」の不安を減らす */}
+      <div className="rounded-md border border-border bg-muted/30 px-4 py-3 text-sm space-y-1">
+        <p className="text-foreground">
+          検索条件: <span className="font-medium">{keyword}</span>
+          {area.trim() && (
+            <>
+              {" "}
+              / <span className="font-medium">{area}</span>
+            </>
+          )}
+        </p>
+        <p className="text-muted-foreground">
+          Google Placesの検索結果から、読み込み済み {loadedCount}件を表示しています。
+        </p>
+        <p className="text-muted-foreground">
+          登録候補 {eligibleCount}件 / DB登録済み {registeredCount}件 / 追加済み{" "}
+          {addedCount}件
+        </p>
+        <p className="text-xs text-muted-foreground">
+          ※ この検索はGoogle Placesのテキスト検索結果です。厳密な半径検索や距離順ではありません。
+        </p>
+      </div>
+
       {allResults.length > 0 && (
-        <label className="flex w-fit items-center gap-2 text-sm text-foreground cursor-pointer">
-          <input
-            type="checkbox"
-            checked={showUnregisteredOnly}
-            onChange={(e) => setShowUnregisteredOnly(e.target.checked)}
-            className="h-4 w-4 cursor-pointer accent-primary"
-          />
-          DB未登録のみ表示
-        </label>
+        <div className="space-y-1">
+          <label className="flex w-fit items-center gap-2 text-sm text-foreground cursor-pointer">
+            <input
+              type="checkbox"
+              checked={showUnregisteredOnly}
+              onChange={(e) => setShowUnregisteredOnly(e.target.checked)}
+              className="h-4 w-4 cursor-pointer accent-primary"
+            />
+            DB未登録のみ表示
+          </label>
+          {showUnregisteredOnly && registeredCount > 0 && (
+            <p className="text-xs text-muted-foreground">
+              DB登録済み {registeredCount}件を非表示にしています。
+            </p>
+          )}
+        </div>
       )}
 
       {/* 0 件選択時のみ: 最初の一括選択への導線をリスト上部に残す (Option B)。
           下部バーは選択中のみ出るため、これが無いと最初に全選択する手段が消える。 */}
       {!showBar && eligibleCount > 0 && (
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={handleSelectAll}>
-            全選択
-          </Button>
-          <span className="text-sm text-muted-foreground">
-            登録したい店舗にチェックを入れてください
-          </span>
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={handleSelectAll}>
+              登録候補を全選択
+            </Button>
+            <span className="text-sm text-muted-foreground">
+              登録したい店舗にチェックを入れてください
+            </span>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            まだ読み込んでいない候補は対象外です。
+          </p>
         </div>
       )}
 
@@ -200,7 +243,23 @@ export function AreaSearchResults({
       <div className={showBar ? "pb-20" : undefined}>
         {displayedResults.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            DB未登録の店舗が見つかりませんでした。トグルを解除すると登録済みの店舗も表示されます。
+            {showUnregisteredOnly ? (
+              nextPageToken ? (
+                <>
+                  読み込み済みの結果には、DB未登録の店舗がありません。
+                  <br />
+                  さらに候補を探すには「さらに候補を読み込む」を押してください。
+                </>
+              ) : (
+                <>
+                  DB未登録の店舗は見つかりませんでした。
+                  <br />
+                  条件を変えて再検索してください。
+                </>
+              )
+            ) : (
+              "該当する店舗が見つかりませんでした。"
+            )}
           </p>
         ) : (
           <PlaceResultList
@@ -213,10 +272,13 @@ export function AreaSearchResults({
         )}
       </div>
 
-      {/* 「もっと読み込む」: nextPageToken が存在する場合のみ表示。
+      {/* 「さらに候補を読み込む」: nextPageToken が存在する場合のみ表示。
           コスト管理のため自動取得は行わず、ユーザー操作時のみ追加 API 呼び出しを行う。 */}
       {nextPageToken && (
         <div className="flex flex-col items-center gap-2">
+          <p className="text-sm text-muted-foreground">
+            さらにGoogle Placesの候補があります。追加で読み込めます。
+          </p>
           <Button
             variant="outline"
             size="sm"
@@ -230,7 +292,7 @@ export function AreaSearchResults({
                 読み込み中…
               </>
             ) : (
-              "もっと読み込む"
+              "さらに候補を読み込む"
             )}
           </Button>
           {loadMoreError && (
@@ -251,7 +313,7 @@ export function AreaSearchResults({
           className="sticky bottom-0 z-30 flex flex-wrap items-center gap-2 border-t border-border bg-background/80 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-md"
         >
           <Button variant="outline" size="sm" onClick={handleSelectAll}>
-            全選択
+            登録候補を全選択
           </Button>
           <Button variant="ghost" size="sm" onClick={handleDeselectAll}>
             選択を解除
