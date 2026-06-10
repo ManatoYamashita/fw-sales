@@ -110,7 +110,7 @@ export function PlaceResultList({
                           href={`/stores/${matchedStore.id}`}
                           className={buttonVariants({ variant: "outline", size: "sm" })}
                         >
-                          編集
+                          既存店舗を確認
                         </Link>
                       </>
                     ) : (

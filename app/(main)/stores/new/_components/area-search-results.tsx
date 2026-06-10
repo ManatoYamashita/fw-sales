@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "@/components/ui/toast";
 import { PlaceResultList } from "./place-result-list";
 import {
@@ -12,6 +13,20 @@ import {
 } from "@/lib/actions/area-search-actions";
 import { mergeUniquePlaces } from "@/lib/places/bulk-utils";
 import type { PlaceWithMatch } from "@/lib/places/types";
+
+/**
+ * 一覧の絞り込み区分。
+ * - `all`: 読み込み済み全件 (デフォルト)
+ * - `eligible`: 一括追加対象になる「登録候補」(DB未登録 かつ 未追加)のみ
+ * - `registered`: DB登録済みの店舗のみ
+ */
+type ResultFilter = "all" | "eligible" | "registered";
+
+const RESULT_FILTER_LABELS: Record<ResultFilter, string> = {
+  all: "すべて",
+  eligible: "登録候補のみ",
+  registered: "DB登録済み",
+};
 
 export interface AreaSearchResultsProps {
   results: readonly PlaceWithMatch[];
@@ -43,7 +58,7 @@ export function AreaSearchResults({
   const [isLoadingMore, startLoadMoreTransition] = useTransition();
   const [addedIds, setAddedIds] = useState<ReadonlySet<string>>(new Set());
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
-  const [showUnregisteredOnly, setShowUnregisteredOnly] = useState(false);
+  const [resultFilter, setResultFilter] = useState<ResultFilter>("all");
   // bulkResult は全件失敗 (added === 0) のときだけ set される失敗専用の結果。
   const [bulkResult, setBulkResult] = useState<{ failed: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -148,14 +163,20 @@ export function AreaSearchResults({
       matchedStore === null && !addedIds.has(place.placeId),
   ).length;
 
-  // 「DB未登録のみ表示」トグル: DB登録済み (matchedStore !== null) を一覧から除外する。
-  // matchedStore は検索時点のDB照合結果のスナップショットのため、画面内で追加済み
-  // (addedIds) になった店舗は matchedStore === null のまま表示され続けるが、
-  // 「DB照合時点では未登録だった」という意味で文言上は問題ない。
-  // 登録済み店舗はもともと選択不可のため、選択状態 (selectedIds/addedIds) には影響しない。
-  const displayedResults = showUnregisteredOnly
-    ? allResults.filter(({ matchedStore }) => matchedStore === null)
-    : allResults;
+  // 一覧の絞り込み。matchedStore は検索時点のDB照合結果のスナップショットのため、
+  // 画面内で追加済み (addedIds) になった店舗も matchedStore === null のままだが、
+  // 「DB照合時点では未登録だった」という意味で「登録候補のみ」からは除外する
+  // (addedIds.has で判定)。登録済み店舗はもともと選択不可のため、
+  // 選択状態 (selectedIds/addedIds) には影響しない。
+  const displayedResults =
+    resultFilter === "eligible"
+      ? allResults.filter(
+          ({ place, matchedStore }) =>
+            matchedStore === null && !addedIds.has(place.placeId),
+        )
+      : resultFilter === "registered"
+        ? allResults.filter(({ matchedStore }) => matchedStore !== null)
+        : allResults;
 
   return (
     <div className="space-y-4">
@@ -184,26 +205,28 @@ export function AreaSearchResults({
 
       {allResults.length > 0 && (
         <div className="space-y-1">
-          <label className="flex w-fit items-center gap-2 text-sm text-foreground cursor-pointer">
-            <input
-              type="checkbox"
-              checked={showUnregisteredOnly}
-              onChange={(e) => setShowUnregisteredOnly(e.target.checked)}
-              className="h-4 w-4 cursor-pointer accent-primary"
-            />
-            DB未登録のみ表示
-          </label>
-          {showUnregisteredOnly && registeredCount > 0 && (
-            <p className="text-xs text-muted-foreground">
-              DB登録済み {registeredCount}件を非表示にしています。
-            </p>
-          )}
+          <Tabs
+            value={resultFilter}
+            onValueChange={(next) => setResultFilter(next as ResultFilter)}
+            defaultValue="all"
+            variant="pill"
+          >
+            <TabsList>
+              <TabsTrigger value="all">すべて</TabsTrigger>
+              <TabsTrigger value="eligible">登録候補のみ</TabsTrigger>
+              <TabsTrigger value="registered">DB登録済み</TabsTrigger>
+            </TabsList>
+          </Tabs>
+          <p className="text-xs text-muted-foreground">
+            現在の表示: {RESULT_FILTER_LABELS[resultFilter]} {displayedResults.length}件
+          </p>
         </div>
       )}
 
       {/* 0 件選択時のみ: 最初の一括選択への導線をリスト上部に残す (Option B)。
-          下部バーは選択中のみ出るため、これが無いと最初に全選択する手段が消える。 */}
-      {!showBar && eligibleCount > 0 && (
+          下部バーは選択中のみ出るため、これが無いと最初に全選択する手段が消える。
+          「DB登録済み」フィルタ表示中は一括追加対象が無いため出さない。 */}
+      {!showBar && resultFilter !== "registered" && eligibleCount > 0 && (
         <div className="space-y-1">
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={handleSelectAll}>
@@ -214,7 +237,7 @@ export function AreaSearchResults({
             </span>
           </div>
           <p className="text-xs text-muted-foreground">
-            まだ読み込んでいない候補は対象外です。
+            読み込み済みの登録候補が対象です。まだ読み込んでいない候補は対象外です。
           </p>
         </div>
       )}
@@ -243,20 +266,24 @@ export function AreaSearchResults({
       <div className={showBar ? "pb-20" : undefined}>
         {displayedResults.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            {showUnregisteredOnly ? (
+            {resultFilter === "eligible" ? (
               nextPageToken ? (
                 <>
-                  読み込み済みの結果には、DB未登録の店舗がありません。
+                  読み込み済み{loadedCount}件の中には、追加できる登録候補がありません。
                   <br />
-                  さらに候補を探すには「さらに候補を読み込む」を押してください。
+                  DB登録済みの店舗が{registeredCount}件あります。
+                  <br />
+                  さらに未登録候補を探すには「さらに候補を読み込む」を押してください。
                 </>
               ) : (
                 <>
-                  DB未登録の店舗は見つかりませんでした。
+                  読み込み済みの結果には、追加できる登録候補がありません。
                   <br />
                   条件を変えて再検索してください。
                 </>
               )
+            ) : resultFilter === "registered" ? (
+              "読み込み済みの結果には、DB登録済みの店舗はありません。"
             ) : (
               "該当する店舗が見つかりませんでした。"
             )}
@@ -277,7 +304,9 @@ export function AreaSearchResults({
       {nextPageToken && (
         <div className="flex flex-col items-center gap-2">
           <p className="text-sm text-muted-foreground">
-            さらにGoogle Placesの候補があります。追加で読み込めます。
+            {eligibleCount === 0 && registeredCount > 0
+              ? "読み込み済み分は登録済みが中心です。未登録候補を探すには、さらに候補を読み込んでください。"
+              : "読み込み済みの中に登録候補が少ない場合は、さらに候補を読み込んで確認できます。"}
           </p>
           <Button
             variant="outline"
