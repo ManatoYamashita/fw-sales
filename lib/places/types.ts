@@ -20,10 +20,32 @@ export interface PlaceSearchPage {
   nextPageToken: string | null;
 }
 
+/** エリア検索の中心地点 (緯度経度)。`resolveSearchCenter` で解決した結果。 */
+export interface SearchCenter {
+  lat: number;
+  lng: number;
+}
+
+/**
+ * エリア検索結果1件分の表示用ViewModel。
+ * `PlaceWithMatch` に、中心地点からの距離・半径内外判定を付与したもの。
+ * DB保存用の型 (`PlaceResult`/`PlaceWithMatch`) には混ぜず、表示専用として扱う。
+ */
+export type AreaSearchPlaceViewModel = PlaceWithMatch & {
+  /** 中心地点からの距離 (メートル) */
+  distanceMeters: number;
+  /** 中心地点から指定半径内かどうか (`distanceMeters <= radiusMeters`) */
+  isWithinRadius: boolean;
+};
+
 /** エリア検索Action (`searchPlacesWithMatchesAction`) の戻り値データ部。 */
 export interface AreaSearchResultPayload {
-  places: PlaceWithMatch[];
+  places: AreaSearchPlaceViewModel[];
   nextPageToken: string | null;
+  /** 検索に使用した中心地点 (「もっと読み込む」時に再利用する) */
+  center: SearchCenter;
+  /** 検索に使用した半径 (メートル) */
+  radiusMeters: number;
 }
 
 /** Google Places API New (v2) Text Search の検索結果 1件分 */

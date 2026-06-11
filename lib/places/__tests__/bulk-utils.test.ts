@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { deduplicatePlaceIds, mergeUniquePlaces } from "../bulk-utils";
+import {
+  deduplicatePlaceIds,
+  mergeUniquePlaces,
+  mergeUniquePlacesWithStats,
+} from "../bulk-utils";
 import type { PlaceWithMatch } from "../types";
 
 function makePlace(placeId: string, name = placeId): PlaceWithMatch {
@@ -70,5 +74,33 @@ describe("mergeUniquePlaces", () => {
   it("current が空配列の場合は incoming をそのまま返す", () => {
     const incoming = [makePlace("a"), makePlace("b")];
     expect(mergeUniquePlaces([], incoming)).toEqual(incoming);
+  });
+});
+
+describe("mergeUniquePlacesWithStats", () => {
+  it("重複がない場合は addedCount=incoming件数, duplicateCount=0", () => {
+    const current = [makePlace("a"), makePlace("b")];
+    const incoming = [makePlace("c"), makePlace("d")];
+    const result = mergeUniquePlacesWithStats(current, incoming);
+    expect(result.merged).toEqual([...current, ...incoming]);
+    expect(result.addedCount).toBe(2);
+    expect(result.duplicateCount).toBe(0);
+  });
+
+  it("incoming 側の重複 placeId は除外しつつ件数を集計する", () => {
+    const current = [makePlace("a"), makePlace("b")];
+    const incoming = [makePlace("b"), makePlace("c"), makePlace("a")];
+    const result = mergeUniquePlacesWithStats(current, incoming);
+    expect(result.merged).toEqual([...current, makePlace("c")]);
+    expect(result.addedCount).toBe(1);
+    expect(result.duplicateCount).toBe(2);
+  });
+
+  it("incoming が空配列の場合は current をそのまま返し件数は0", () => {
+    const current = [makePlace("a")];
+    const result = mergeUniquePlacesWithStats(current, []);
+    expect(result.merged).toEqual(current);
+    expect(result.addedCount).toBe(0);
+    expect(result.duplicateCount).toBe(0);
   });
 });

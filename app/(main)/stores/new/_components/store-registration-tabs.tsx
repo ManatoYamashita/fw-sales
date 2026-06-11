@@ -261,6 +261,8 @@ export function StoreRegistrationTabs({
                 nextPageToken={areaResults.nextPageToken}
                 keyword={areaResults.keyword}
                 area={areaResults.area}
+                center={areaResults.center}
+                radiusMeters={areaResults.radiusMeters}
               />
             )}
           </div>

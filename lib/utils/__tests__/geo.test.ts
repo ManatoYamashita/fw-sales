@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { distanceMeters } from "../geo";
+import { distanceMeters, formatDistanceMeters } from "../geo";
 
 describe("distanceMeters", () => {
   it("同一座標の距離は0に近い", () => {
@@ -27,5 +27,23 @@ describe("distanceMeters", () => {
   it("北緯・東経を跨ぐ計算でも正の値を返す", () => {
     const d = distanceMeters(35.0, 139.0, 35.001, 139.001);
     expect(d).toBeGreaterThan(0);
+  });
+});
+
+describe("formatDistanceMeters", () => {
+  it("1000m未満は整数メートルで表示する", () => {
+    expect(formatDistanceMeters(320)).toBe("320m");
+    expect(formatDistanceMeters(0)).toBe("0m");
+    expect(formatDistanceMeters(999.6)).toBe("1000m");
+  });
+
+  it("1000mちょうどは小数なしのkm表示にする", () => {
+    expect(formatDistanceMeters(1000)).toBe("1km");
+    expect(formatDistanceMeters(3000)).toBe("3km");
+  });
+
+  it("1000m超は小数第1位までのkm表示にする", () => {
+    expect(formatDistanceMeters(1200)).toBe("1.2km");
+    expect(formatDistanceMeters(1850)).toBe("1.9km");
   });
 });

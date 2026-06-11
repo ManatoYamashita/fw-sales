@@ -8,13 +8,14 @@ import { FormField } from "@/components/ui/form-field";
 import { Spinner } from "@/components/ui/spinner";
 import { toast } from "@/components/ui/toast";
 import { importFromUrlAction } from "@/lib/actions/url-parse-actions";
+import { Select } from "@/components/ui/select";
 import { searchPlacesWithMatchesAction } from "@/lib/actions/area-search-actions";
 import type {
   AppliedField,
   ApplyResult,
   ParsedSource,
 } from "@/lib/url-parser/types";
-import type { PlaceWithMatch } from "@/lib/places/types";
+import type { AreaSearchPlaceViewModel, SearchCenter } from "@/lib/places/types";
 import {
   ManualFallbackModal,
   type ManualFallbackReason,
@@ -269,12 +270,27 @@ export function UrlSearchPanel({ onLoaded }: UrlSearchPanelProps) {
 
 // ---- Area -----------------------------------------------------------------
 
-/** エリア検索1回分の結果。「もっと読み込む」で再検索する際に keyword/area を引き継ぐ。 */
+/** 半径選択肢 (メートル)。初期値は1km。 */
+const RADIUS_OPTIONS = [
+  { value: 500, label: "500m" },
+  { value: 1000, label: "1km" },
+  { value: 2000, label: "2km" },
+  { value: 3000, label: "3km" },
+] as const;
+
+const DEFAULT_RADIUS_METERS = 1000;
+
+/** エリア検索1回分の結果。「もっと読み込む」で再検索する際に keyword/area/center/radius を引き継ぐ。 */
 export interface AreaSearchSessionResult {
-  places: readonly PlaceWithMatch[];
+  places: readonly AreaSearchPlaceViewModel[];
   nextPageToken: string | null;
   keyword: string;
+  /** 中心地点入力値 (駅名・住所など)。互換のためプロパティ名は `area` のまま。 */
   area: string;
+  /** `area` を解決した緯度経度。 */
+  center: SearchCenter;
+  /** 検索半径 (メートル)。 */
+  radiusMeters: number;
 }
 
 export interface AreaSearchPanelProps {
@@ -288,6 +304,7 @@ export function AreaSearchPanel({
 }: AreaSearchPanelProps) {
   const [keyword, setKeyword] = useState("");
   const [area, setArea] = useState("");
+  const [radiusMeters, setRadiusMeters] = useState<number>(DEFAULT_RADIUS_METERS);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -295,15 +312,19 @@ export function AreaSearchPanel({
     if (!isPlacesApiConfigured) return;
     setError(null);
     startTransition(async () => {
-      const result = await searchPlacesWithMatchesAction(keyword, area);
+      const result = await searchPlacesWithMatchesAction(
+        keyword,
+        area,
+        radiusMeters,
+      );
       if (result.ok) {
-        const { places, nextPageToken } = result.data;
+        const { places, nextPageToken, center } = result.data;
         if (places.length === 0) {
           setError(
             "該当する店舗が見つかりませんでした。条件を変えて再検索してください。",
           );
         }
-        onSearched({ places, nextPageToken, keyword, area });
+        onSearched({ places, nextPageToken, keyword, area, center, radiusMeters });
       } else {
         setError(result.error);
       }
@@ -344,7 +365,7 @@ export function AreaSearchPanel({
           </p>
         </div>
       )}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <FormField
           label="キーワード"
           htmlFor="keyword"
@@ -356,20 +377,38 @@ export function AreaSearchPanel({
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="例: 居酒屋、ラーメン、焼肉"
+            placeholder="例: 居酒屋、カフェ、焼肉、ラーメン"
             disabled={!isPlacesApiConfigured}
           />
         </FormField>
-        <FormField label="エリア" htmlFor="area" hint="都市名・駅名など">
+        <FormField
+          label="中心地点"
+          htmlFor="area"
+          hint="駅名・住所など(必須)"
+        >
           <Input
             id="area"
             type="text"
             value={area}
             onChange={(e) => setArea(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="例: 渋谷、横浜駅周辺"
+            placeholder="例: 渋谷駅、新宿駅、赤坂見附駅"
             disabled={!isPlacesApiConfigured}
           />
+        </FormField>
+        <FormField label="半径" htmlFor="radius" hint="中心地点からの目安距離">
+          <Select
+            id="radius"
+            value={radiusMeters}
+            onChange={(e) => setRadiusMeters(Number(e.target.value))}
+            disabled={!isPlacesApiConfigured}
+          >
+            {RADIUS_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </Select>
         </FormField>
       </div>
       <div className="flex justify-end">

@@ -8,12 +8,20 @@ import { buttonVariants } from "@/components/ui/button";
 import { StarRating } from "@/components/ui/star-rating";
 import { AddStoreButton } from "./add-store-button";
 import { mapGenre } from "@/lib/places/to-store-input";
-import type { PlaceWithMatch } from "@/lib/places/types";
+import { formatDistanceMeters } from "@/lib/utils/geo";
+import { cn } from "@/lib/utils/cn";
+import type { AreaSearchPlaceViewModel } from "@/lib/places/types";
 
 interface PlaceResultListProps {
-  results: readonly PlaceWithMatch[];
+  results: readonly AreaSearchPlaceViewModel[];
   addedIds: ReadonlySet<string>;
   selectedIds: ReadonlySet<string>;
+  /** 距離表示の起点ラベル (例: "渋谷駅")。中心地点の入力値をそのまま使う。 */
+  centerLabel: string;
+  /** 地図と連動して強調表示する placeId。 */
+  activePlaceId: string | null;
+  /** カードのホバー/クリックで地図側のピンを強調するための通知。 */
+  onActivatePlace: (placeId: string | null) => void;
   onAdded: (placeId: string) => void;
   onToggle: (placeId: string) => void;
 }
@@ -22,6 +30,9 @@ export function PlaceResultList({
   results,
   addedIds,
   selectedIds,
+  centerLabel,
+  activePlaceId,
+  onActivatePlace,
   onAdded,
   onToggle,
 }: PlaceResultListProps) {
@@ -31,15 +42,27 @@ export function PlaceResultList({
         {results.length} 件の店舗が見つかりました
       </p>
       <ul className="space-y-2">
-        {results.map(({ place, matchedStore }) => {
+        {results.map(({ place, matchedStore, distanceMeters, isWithinRadius }) => {
           const isAdded = addedIds.has(place.placeId);
           const isEligible = matchedStore === null && !isAdded;
           const isSelected = selectedIds.has(place.placeId);
+          const isActive = activePlaceId === place.placeId;
           const genre = mapGenre(place.types);
 
           return (
-            <li key={place.placeId}>
-              <Card>
+            <li
+              key={place.placeId}
+              onMouseEnter={() => onActivatePlace(place.placeId)}
+              onMouseLeave={() => onActivatePlace(null)}
+              onClick={() => onActivatePlace(place.placeId)}
+            >
+              <Card
+                className={cn(
+                  "transition-[box-shadow,opacity]",
+                  isActive && "ring-2 ring-primary",
+                  !isWithinRadius && "opacity-60",
+                )}
+              >
                 <Card.Body className="flex items-start gap-3 py-4">
                   {/* チェックボックス列: 選択可能な店舗のみ表示、幅を固定して揃える */}
                   <div className="pt-0.5 shrink-0 w-4">
@@ -61,7 +84,12 @@ export function PlaceResultList({
                         {place.name}
                       </p>
                       {genre && <Badge tone="secondary">{genre}</Badge>}
+                      {!isWithinRadius && <Badge tone="outline">範囲外</Badge>}
                     </div>
+
+                    <p className="text-xs text-muted-foreground">
+                      {centerLabel}から {formatDistanceMeters(distanceMeters)}
+                    </p>
 
                     {place.formattedAddress && (
                       <p className="flex items-start gap-1 text-sm text-muted-foreground">
