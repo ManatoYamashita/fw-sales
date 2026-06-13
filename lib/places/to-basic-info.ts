@@ -6,10 +6,13 @@
  * 用途で残置する。本ファイルは `basic_info` (jsonb 50 項目) の **primary="places" 項目**
  * のうち、PlaceResult API から直接取得できるものだけを `Partial<BasicInfo>` として返す。
  *
- * primary="places" の項目は計 7 つだが、PlaceResult が直接供給できるのは現状 3 項目:
+ * primary="places" の項目は計 10 つ。PlaceResult が直接供給できるのは現状 6 項目:
  * - store_name              ← place.name
  * - address                 ← normalizeFormattedAddress(place.formattedAddress)
  * - cuisine_genre           ← mapGenre(place.types)
+ * - phone                   ← place.phone (#134)
+ * - review_avg              ← place.rating.toFixed(1) (#134、未評価は省略)
+ * - review_count            ← String(place.userRatingsTotal) (#134、未評価は省略)
  *
  * 以下 4 項目は PlaceResult に対応するフィールドがないため本関数では返さず未充足のまま:
  * business_hours_holidays / official_site / location_feature / nearest_station
@@ -83,6 +86,22 @@ export function placeResultToBasicInfo(
     if (genre !== "") {
       partial.cuisine_genre = makePlacesField(genre, "A", now);
     }
+  }
+
+  // phone (tier A, primary=places) — 公開電話番号。食べログ 050 番号判定の材料(#134)。
+  if (typeof place.phone === "string" && place.phone.trim() !== "") {
+    partial.phone = makePlacesField(place.phone.trim(), "A", now);
+  }
+
+  // review_avg (tier A, primary=places) — Google 口コミ評価平均。未評価(null/0)は省略し、
+  // "0.0" がプロンプトに混入して AI を誤誘導しないようにする。数値は小数第 1 位で文字列化。
+  if (typeof place.rating === "number" && place.rating > 0) {
+    partial.review_avg = makePlacesField(place.rating.toFixed(1), "A", now);
+  }
+
+  // review_count (tier A, primary=places) — Google 口コミ件数。未評価(null/0)は省略。
+  if (typeof place.userRatingsTotal === "number" && place.userRatingsTotal > 0) {
+    partial.review_count = makePlacesField(String(place.userRatingsTotal), "A", now);
   }
 
   return partial;

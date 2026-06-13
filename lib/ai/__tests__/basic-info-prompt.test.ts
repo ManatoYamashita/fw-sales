@@ -120,6 +120,19 @@ describe("buildBasicInfoBlock - 充足項目のみ整形", () => {
     expect(block).not.toContain("出典:");
     expect(block).not.toContain("抜粋");
   });
+
+  it("phone / review を一級市民として出力に含める (#134 リグレッション回帰防止)", () => {
+    const basic: BasicInfo = {
+      phone: field("03-1234-5678", "A", "places"),
+      review_avg: field("4.0", "A", "places"),
+      review_count: field("50", "A", "places"),
+    };
+    const block = buildBasicInfoBlock(basic);
+    // #134: これらが落ちると営業資産生成の入力から電話・口コミが消える
+    expect(block).toContain("電話番号: 03-1234-5678");
+    expect(block).toContain("Google 口コミ評価(平均): 4.0");
+    expect(block).toContain("Google 口コミ件数: 50");
+  });
 });
 
 // ---- buildSalesAssetsPrompt ----------------------------------------------
