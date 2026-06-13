@@ -14,10 +14,12 @@ import { PlaceResultList } from "./place-result-list";
 import { AreaSearchMap } from "./area-search-map";
 import {
   bulkAddStoresFromPlacesAction,
+  getPlaceDetailsForAreaSearchAction,
   searchNearbyPlacesWithMatchesAction,
   searchPlacesWithMatchesAction,
 } from "@/lib/actions/area-search-actions";
 import { mergeUniquePlaces, mergeUniquePlacesWithStats } from "@/lib/places/bulk-utils";
+import { mergePlaceDetailsIntoAreaSearchResult } from "@/lib/places/details";
 import {
   FEW_ELIGIBLE_THRESHOLD,
   SEARCH_RESULT_SOFT_LIMIT,
@@ -206,6 +208,14 @@ export function AreaSearchResults({
   );
   const [explorationError, setExplorationError] = useState<string | null>(null);
   const [, startExplorationTransition] = useTransition();
+  // Place Detailsオンデマンド取得 (Issue #104 follow-up): カード単位の取得中/取得済み/エラー状態。
+  const [detailsLoadingPlaceIds, setDetailsLoadingPlaceIds] = useState<ReadonlySet<string>>(
+    new Set(),
+  );
+  const [detailsLoadedPlaceIds, setDetailsLoadedPlaceIds] = useState<ReadonlySet<string>>(
+    new Set(),
+  );
+  const [detailsErrors, setDetailsErrors] = useState<Record<string, string>>({});
   // 連打や StrictMode の二重実行でも同一条件を重複実行しないよう、
   // state 反映を待たずに即時ロックする ref。
   const pendingExplorationRunIdsRef = useRef<Set<string>>(new Set());
@@ -481,6 +491,60 @@ export function AreaSearchResults({
         setExplorationPendingId(null);
       }
     });
+  };
+
+  /**
+   * 「詳細取得」: カード単位でPlace Detailsをオンデマンド取得する (Issue #104 follow-up)。
+   * 一覧の全店舗へ一括実行することはなく、ユーザーが押した1店舗分のみ取得する。
+   * 取得中・取得済みの場合は連打しても二重実行しない。
+   */
+  const handleFetchDetails = (placeId: string) => {
+    if (!placeId) return;
+    if (detailsLoadingPlaceIds.has(placeId) || detailsLoadedPlaceIds.has(placeId)) {
+      return;
+    }
+
+    setDetailsLoadingPlaceIds((prev) => new Set([...prev, placeId]));
+    setDetailsErrors((prev) => {
+      if (!(placeId in prev)) return prev;
+      const next = { ...prev };
+      delete next[placeId];
+      return next;
+    });
+
+    void (async () => {
+      try {
+        const result = await getPlaceDetailsForAreaSearchAction(placeId);
+        if (!result.ok) {
+          setDetailsErrors((prev) => ({ ...prev, [placeId]: result.error }));
+          return;
+        }
+
+        setAllResults((prev) =>
+          prev.map((vm) => mergePlaceDetailsIntoAreaSearchResult(vm, result.data)),
+        );
+        setDetailsLoadedPlaceIds((prev) => new Set([...prev, placeId]));
+        setSearchMeta((prev) =>
+          buildTextSearchMeta({
+            loadedCount: prev.loadedCount,
+            hasNextPage: prev.hasNextPage,
+            currentPageCount: prev.currentPageCount,
+            apiCallEstimate: prev.apiCallEstimate + 1,
+          }),
+        );
+      } catch (e) {
+        setDetailsErrors((prev) => ({
+          ...prev,
+          [placeId]: e instanceof Error ? e.message : "詳細情報の取得に失敗しました",
+        }));
+      } finally {
+        setDetailsLoadingPlaceIds((prev) => {
+          const next = new Set(prev);
+          next.delete(placeId);
+          return next;
+        });
+      }
+    })();
   };
 
   const handleAdded = (placeId: string) => {
@@ -986,6 +1050,10 @@ export function AreaSearchResults({
                 onActivatePlace={setActivePlaceId}
                 onAdded={handleAdded}
                 onToggle={handleToggle}
+                detailsLoadingPlaceIds={detailsLoadingPlaceIds}
+                detailsLoadedPlaceIds={detailsLoadedPlaceIds}
+                detailsErrors={detailsErrors}
+                onFetchDetails={handleFetchDetails}
               />
             )}
           </div>

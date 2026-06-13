@@ -4,7 +4,8 @@ import Link from "next/link";
 import { ExternalLink, MapPin, Phone } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { buttonVariants } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import { StarRating } from "@/components/ui/star-rating";
 import { AddStoreButton } from "./add-store-button";
 import { mapGenre } from "@/lib/places/to-store-input";
@@ -27,6 +28,14 @@ interface PlaceResultListProps {
   onActivatePlace: (placeId: string | null) => void;
   onAdded: (placeId: string) => void;
   onToggle: (placeId: string) => void;
+  /** Place Detailsオンデマンド取得が実行中の placeId 一覧。 */
+  detailsLoadingPlaceIds: ReadonlySet<string>;
+  /** Place Detailsオンデマンド取得が完了済みの placeId 一覧。 */
+  detailsLoadedPlaceIds: ReadonlySet<string>;
+  /** Place Detailsオンデマンド取得が失敗した placeId ごとのエラーメッセージ。 */
+  detailsErrors: Record<string, string>;
+  /** 「詳細取得」ボタン押下時の通知 (placeId を渡す)。 */
+  onFetchDetails: (placeId: string) => void;
 }
 
 export function PlaceResultList({
@@ -39,6 +48,10 @@ export function PlaceResultList({
   onActivatePlace,
   onAdded,
   onToggle,
+  detailsLoadingPlaceIds,
+  detailsLoadedPlaceIds,
+  detailsErrors,
+  onFetchDetails,
 }: PlaceResultListProps) {
   return (
     <div className="space-y-3">
@@ -55,6 +68,9 @@ export function PlaceResultList({
           const isPinClicked = pinClickedPlaceId === place.placeId;
           const genre = mapGenre(place.types);
           const rankingReasons = getAreaSearchRankingReasons(result, addedIds);
+          const isDetailsLoading = detailsLoadingPlaceIds.has(place.placeId);
+          const isDetailsLoaded = detailsLoadedPlaceIds.has(place.placeId);
+          const detailsError = detailsErrors[place.placeId];
 
           return (
             <li
@@ -140,6 +156,19 @@ export function PlaceResultList({
                         Google Mapsで見る
                       </a>
                     )}
+
+                    {isDetailsLoaded && (
+                      <p className="text-xs text-muted-foreground">
+                        Webサイト: {result.websiteUri ? "あり" : "なし"}
+                        {result.businessStatus && ` / 営業状態: ${result.businessStatus}`}
+                      </p>
+                    )}
+
+                    {detailsError && (
+                      <p role="alert" className="text-xs text-destructive">
+                        {detailsError}
+                      </p>
+                    )}
                   </div>
 
                   {/* アクション列 */}
@@ -161,6 +190,37 @@ export function PlaceResultList({
                         isAdded={isAdded}
                         onAdded={onAdded}
                       />
+                    )}
+
+                    {place.placeId && (
+                      <div className="flex flex-col items-end gap-0.5">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onFetchDetails(place.placeId);
+                          }}
+                          disabled={isDetailsLoading || isDetailsLoaded}
+                          className="gap-1.5"
+                        >
+                          {isDetailsLoading ? (
+                            <>
+                              <Spinner className="h-3 w-3" />
+                              取得中…
+                            </>
+                          ) : isDetailsLoaded ? (
+                            "詳細取得済み"
+                          ) : (
+                            "詳細取得"
+                          )}
+                        </Button>
+                        {!isDetailsLoaded && (
+                          <p className="text-[10px] text-muted-foreground">
+                            電話番号・Webサイト・評価を取得（API目安 +1回）
+                          </p>
+                        )}
+                      </div>
                     )}
                   </div>
                 </Card.Body>

@@ -20,6 +20,7 @@ const {
   mockSearchNearbyPlaces,
   mockResolveSearchCenter,
   mockGetPlaceById,
+  mockGetPlaceDetails,
   mockStoreList,
   mockTransaction,
   mockRevalidateTag,
@@ -28,6 +29,7 @@ const {
   mockSearchNearbyPlaces: vi.fn(),
   mockResolveSearchCenter: vi.fn(),
   mockGetPlaceById: vi.fn(),
+  mockGetPlaceDetails: vi.fn(),
   mockStoreList: vi.fn(),
   mockTransaction: vi.fn(),
   mockRevalidateTag: vi.fn(),
@@ -38,6 +40,7 @@ vi.mock("@/lib/places/google", () => ({
   searchNearbyPlaces: mockSearchNearbyPlaces,
   resolveSearchCenter: mockResolveSearchCenter,
   getPlaceById: mockGetPlaceById,
+  getPlaceDetails: mockGetPlaceDetails,
   searchPlaces: vi.fn(),
 }));
 
@@ -56,6 +59,7 @@ const {
   searchPlacesWithMatchesAction,
   searchNearbyPlacesWithMatchesAction,
   bulkAddStoresFromPlacesAction,
+  getPlaceDetailsForAreaSearchAction,
 } = await import("../area-search-actions");
 
 const CENTER: SearchCenter = { lat: 35.658, lng: 139.7016 };
@@ -516,5 +520,55 @@ describe("bulkAddStoresFromPlacesAction", () => {
     await bulkAddStoresFromPlacesAction(["ChIJok"]);
 
     expect(mockRevalidateTag).toHaveBeenCalled();
+  });
+});
+
+describe("getPlaceDetailsForAreaSearchAction", () => {
+  const DETAILS = {
+    placeId: "ChIJdetail",
+    name: "詳細店舗",
+    address: "東京都渋谷区テスト1-1-1",
+    lat: 35.6595,
+    lng: 139.7005,
+    googleMapsUri: "https://maps.google.com/?cid=123",
+    types: ["restaurant", "food"],
+    phone: "03-1234-5678",
+    rating: 4.1,
+    userRatingsTotal: 120,
+    websiteUri: "https://example.com",
+    businessStatus: "OPERATIONAL",
+  };
+
+  it("getPlaceDetails を呼ぶ", async () => {
+    mockGetPlaceDetails.mockResolvedValue(DETAILS);
+
+    await getPlaceDetailsForAreaSearchAction("ChIJdetail");
+
+    expect(mockGetPlaceDetails).toHaveBeenCalledWith("ChIJdetail");
+  });
+
+  it("成功時に details を返す", async () => {
+    mockGetPlaceDetails.mockResolvedValue(DETAILS);
+
+    const result = await getPlaceDetailsForAreaSearchAction("ChIJdetail");
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data).toEqual(DETAILS);
+  });
+
+  it("placeId が空文字の場合は failure を返す", async () => {
+    const result = await getPlaceDetailsForAreaSearchAction("");
+
+    expect(result.ok).toBe(false);
+    expect(mockGetPlaceDetails).not.toHaveBeenCalled();
+  });
+
+  it("getPlaceDetails が例外を投げた場合は failure を返す", async () => {
+    mockGetPlaceDetails.mockRejectedValue(new Error("Places API エラー (404): not found"));
+
+    const result = await getPlaceDetailsForAreaSearchAction("ChIJdetail");
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("Places API エラー (404)");
   });
 });

@@ -8,6 +8,7 @@ import {
   searchPlacesPage,
   searchNearbyPlaces,
   getPlaceById,
+  getPlaceDetails,
   resolveSearchCenter,
 } from "@/lib/places/google";
 import { placeResultToStoreInput } from "@/lib/places/to-store-input";
@@ -21,6 +22,7 @@ import type {
   AreaSearchDiscoverySource,
   AreaSearchPlaceViewModel,
   AreaSearchResultPayload,
+  PlaceDetailsResult,
   PlaceResult,
   SearchCenter,
 } from "@/lib/places/types";
@@ -201,6 +203,27 @@ export async function searchNearbyPlacesWithMatchesAction(
     return success({ places: viewModels, nextPageToken: null, center, radiusMeters, meta });
   } catch (e) {
     return failure(e instanceof Error ? e.message : "Nearby検索に失敗しました");
+  }
+}
+
+/**
+ * Place Detailsのオンデマンド取得 (Issue #104 follow-up)。
+ *
+ * 一覧検索やNearby Searchでは取得しない電話番号・Webサイト・評価・口コミ数・営業状態を、
+ * ユーザーがカードの「詳細取得」を押した1店舗分だけ取得する。検索ではなく補完処理のため、
+ * DB照合 (`repos.store.list()` / `attachStoreMatches`) や discovery source の更新は行わない。
+ */
+export async function getPlaceDetailsForAreaSearchAction(
+  placeId: string,
+): Promise<ActionResult<PlaceDetailsResult>> {
+  if (!placeId || typeof placeId !== "string") {
+    return failure("placeId が不正です");
+  }
+  try {
+    const details = await getPlaceDetails(placeId);
+    return success(details);
+  } catch (e) {
+    return failure(e instanceof Error ? e.message : "詳細情報の取得に失敗しました");
   }
 }
 

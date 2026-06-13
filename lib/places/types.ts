@@ -68,6 +68,10 @@ export type AreaSearchPlaceViewModel = PlaceWithMatch & {
   isWithinRadius: boolean;
   /** この店舗が見つかった探索ソース情報。 */
   discovery: AreaSearchDiscoveryInfo;
+  /** Place Detailsオンデマンド取得で得たWebサイトURL。未取得の場合は undefined。 */
+  websiteUri?: string | null;
+  /** Place Detailsオンデマンド取得で得た営業状態 (例: "OPERATIONAL")。未取得の場合は undefined。 */
+  businessStatus?: string | null;
 };
 
 /**
@@ -114,6 +118,37 @@ export interface AreaSearchResultPayload {
   radiusMeters: number;
   /** この呼び出しに関するメタ情報 (取得元・上限件数・API回数目安など) */
   meta: AreaSearchMeta;
+}
+
+/**
+ * Place Details のオンデマンド取得結果1件分。
+ * Nearby Search等では取得しない電話番号・Webサイト・評価・口コミ数・営業状態を含む。
+ */
+export interface PlaceDetailsResult {
+  /** places.id (例: "ChIJ...") */
+  placeId: string;
+  /** places.displayName.text */
+  name: string;
+  /** places.formattedAddress (日本語住所フル形式) */
+  address: string;
+  /** places.location.latitude */
+  lat: number;
+  /** places.location.longitude */
+  lng: number;
+  /** places.googleMapsUri。取得できない場合は空文字。 */
+  googleMapsUri: string;
+  /** places.types (英語タグ配列)。例: ["restaurant", "food", "establishment"] */
+  types: string[];
+  /** places.nationalPhoneNumber。未取得時は空文字。 */
+  phone: string;
+  /** places.rating。未評価の場合は null。 */
+  rating: number | null;
+  /** places.userRatingCount。未評価の場合は null。 */
+  userRatingsTotal: number | null;
+  /** places.websiteUri。取得できない場合は null。 */
+  websiteUri: string | null;
+  /** places.businessStatus (例: "OPERATIONAL")。取得できない場合は null。 */
+  businessStatus: string | null;
 }
 
 /** Google Places API New (v2) Text Search の検索結果 1件分 */
