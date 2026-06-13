@@ -178,6 +178,10 @@ export function AreaSearchResults({
   );
   const [explorationError, setExplorationError] = useState<string | null>(null);
   const [, startExplorationTransition] = useTransition();
+  // 連打や StrictMode の二重実行でも同一条件を重複実行しないよう、
+  // state 反映を待たずに即時ロックする ref。
+  const pendingExplorationRunIdsRef = useRef<Set<string>>(new Set());
+  const exploredRunIdsRef = useRef<Set<string>>(new Set());
   const router = useRouter();
 
   const showBar = selectedIds.size >= 1;
@@ -252,76 +256,89 @@ export function AreaSearchResults({
     const explCenterQuery = kind === "center" ? String(value) : area;
     const explRadius = kind === "radius" ? Number(value) : mainRadiusMeters;
     const runId = buildExplorationRunId(kind, explKeyword, explCenterQuery, explRadius);
-    if (explorationPendingId || exploredRunIds.has(runId)) return;
+    if (
+      explorationPendingId ||
+      pendingExplorationRunIdsRef.current.has(runId) ||
+      exploredRunIdsRef.current.has(runId)
+    ) {
+      return;
+    }
 
     setExplorationError(null);
+    pendingExplorationRunIdsRef.current.add(runId);
     setExplorationPendingId(runId);
     // center 探索のみ中心地点を未指定にし、新たに resolveSearchCenter させる。
     // keyword/radius 探索はメイン中心地点をそのまま使い回す。
     const options = kind === "center" ? undefined : { center };
 
     startExplorationTransition(async () => {
-      const result = await searchPlacesWithMatchesAction(
-        explKeyword,
-        explCenterQuery,
-        explRadius,
-        options,
-      );
-      setExplorationPendingId(null);
-      setExploredRunIds((prev) => new Set([...prev, runId]));
+      try {
+        const result = await searchPlacesWithMatchesAction(
+          explKeyword,
+          explCenterQuery,
+          explRadius,
+          options,
+        );
 
-      if (!result.ok) {
-        setExplorationError(result.error);
-        return;
-      }
+        if (!result.ok) {
+          setExplorationError(result.error);
+          return;
+        }
 
-      const fetchedCount = result.data.places.length;
-      const recomputed = result.data.places.map((vm) =>
-        recomputeViewModel(vm, center, explRadius),
-      );
+        exploredRunIdsRef.current.add(runId);
+        setExploredRunIds(new Set(exploredRunIdsRef.current));
 
-      setAllResults((prev) => {
+        const fetchedCount = result.data.places.length;
+        const recomputed = result.data.places.map((vm) =>
+          recomputeViewModel(vm, center, explRadius),
+        );
+
         // 半径拡大時は、既存結果も新半径基準で範囲内/範囲外を判定し直す。
         const base =
           kind === "radius"
-            ? prev.map((vm) => recomputeViewModel(vm, center, explRadius))
-            : prev;
+            ? allResults.map((vm) => recomputeViewModel(vm, center, explRadius))
+            : allResults;
         const { merged, addedCount, duplicateCount } = mergeUniquePlacesWithStats(
           base,
           recomputed,
         );
         const newlyAdded = merged.slice(merged.length - addedCount);
+
+        setAllResults(merged);
+
+        const newRun: ExplorationRun = {
+          id: runId,
+          kind,
+          keyword: explKeyword,
+          centerQuery: explCenterQuery,
+          radiusMeters: explRadius,
+          fetchedCount,
+          addedUniqueCount: addedCount,
+          duplicateCount,
+          eligibleCount: newlyAdded.filter((vm) => isEligiblePlace(vm, addedIds)).length,
+          registeredCount: newlyAdded.filter((vm) => vm.matchedStore !== null).length,
+        };
         setExplorationRuns((runs) =>
-          [
-            {
-              id: runId,
-              kind,
-              keyword: explKeyword,
-              centerQuery: explCenterQuery,
-              radiusMeters: explRadius,
-              fetchedCount,
-              addedUniqueCount: addedCount,
-              duplicateCount,
-              eligibleCount: newlyAdded.filter((vm) => isEligiblePlace(vm, addedIds))
-                .length,
-              registeredCount: newlyAdded.filter((vm) => vm.matchedStore !== null)
-                .length,
-            },
-            ...runs,
-          ].slice(0, EXPLORATION_HISTORY_LIMIT),
+          [newRun, ...runs.filter((run) => run.id !== runId)].slice(
+            0,
+            EXPLORATION_HISTORY_LIMIT,
+          ),
         );
+
         // 新規取得を toast で即時フィードバック(営業担当の認知補助)。
         if (addedCount > 0) {
           toast.info(`追加探索: 新規${addedCount}件 (重複${duplicateCount}件)`);
         } else {
           toast.info(`追加探索: 新規はありません (重複${duplicateCount}件)`);
         }
-        return merged;
-      });
 
-      if (kind === "radius") {
-        setMainRadiusMeters(explRadius);
-        setNextPageToken(result.data.nextPageToken);
+        if (kind === "radius") {
+          setMainRadiusMeters(explRadius);
+          setNextPageToken(result.data.nextPageToken);
+        }
+      } finally {
+        pendingExplorationRunIdsRef.current.delete(runId);
+        setExplorationPendingId(null);
       }
     });
   };
@@ -407,6 +424,7 @@ export function AreaSearchResults({
   const keywordChips = suggestExplorationKeywords(keyword);
   const centerChips = suggestExplorationCenters(area);
   const radiusChips = suggestLargerRadii(mainRadiusMeters);
+  const widerRadius = radiusChips[0];
 
   return (
     <div className="space-y-4">
@@ -733,19 +751,18 @@ export function AreaSearchResults({
                         ? `範囲外の店舗が${outOfRangeCount}件あります。${nextPageToken ? "さらに候補を読み込むと範囲内の店舗が見つかる場合があります。" : "中心地点・半径・キーワードを変えて再検索してください。"}`
                         : "キーワード・中心地点・半径を変えて再検索してください。"
                 }
-                action={(() => {
-                  const wider = radiusChips[0];
-                  return resultFilter === "all" && wider !== undefined ? (
+                action={
+                  resultFilter === "all" && widerRadius !== undefined ? (
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => handleExplore("radius", wider)}
+                      onClick={() => handleExplore("radius", widerRadius)}
                       disabled={explorationPendingId !== null}
                     >
-                      半径を{formatDistanceMeters(wider)}に広げて再検索
+                      半径を{formatDistanceMeters(widerRadius)}に広げて再検索
                     </Button>
-                  ) : undefined;
-                })()}
+                  ) : undefined
+                }
               />
             ) : (
               <PlaceResultList
