@@ -143,16 +143,46 @@ describe("placeResultToBasicInfo - 空値項目は返さない", () => {
   });
 });
 
-// ---- PlaceResult のスカラー専用フィールドは basic_info に射影しない ------
+// ---- phone / review を一級市民として射影 (#134) ------
 
-describe("placeResultToBasicInfo - スカラー専用フィールドは射影しない", () => {
-  it("phone / rating / userRatingsTotal / lat / lng / googleMapsUri / placeId は basic_info に含めない", () => {
+describe("placeResultToBasicInfo - phone / review を射影 (#134)", () => {
+  it("phone / rating / userRatingsTotal が phone / review_avg / review_count に射影される", () => {
+    const place = makePlace({
+      phone: "03-1234-5678",
+      rating: 4.0,
+      userRatingsTotal: 50,
+    });
+
+    const result = placeResultToBasicInfo(place, NOW);
+
+    expect(result.phone?.value).toBe("03-1234-5678");
+    expect(result.review_avg?.value).toBe("4.0");
+    expect(result.review_count?.value).toBe("50");
+  });
+
+  it("未評価 (rating=null / userRatingsTotal=0) は review を射影しない", () => {
+    const place = makePlace({ rating: null, userRatingsTotal: 0 });
+
+    const result = placeResultToBasicInfo(place, NOW);
+
+    expect(result.review_avg).toBeUndefined();
+    expect(result.review_count).toBeUndefined();
+  });
+
+  it("phone が空文字なら phone を射影しない", () => {
+    const place = makePlace({ phone: "" });
+
+    const result = placeResultToBasicInfo(place, NOW);
+
+    expect(result.phone).toBeUndefined();
+  });
+
+  it("PlaceResult のフィールド名 (rating/userRatingsTotal/lat/lng/googleMapsUri/placeId) は basic_info キーにしない", () => {
     const place = makePlace();
 
     const result = placeResultToBasicInfo(place, NOW);
     const keys = Object.keys(result);
 
-    expect(keys).not.toContain("phone");
     expect(keys).not.toContain("rating");
     expect(keys).not.toContain("userRatingsTotal");
     expect(keys).not.toContain("lat");

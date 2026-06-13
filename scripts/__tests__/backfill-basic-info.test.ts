@@ -19,6 +19,9 @@ function makeScalars(overrides: Partial<Parameters<typeof scalarToBasicInfo>[0]>
     genre: "和食",
     site_url: "https://example.com",
     instagram_url: "https://instagram.com/sorakutei",
+    phone: "03-1234-5678",
+    review_avg: 4.0,
+    review_count: 50,
     ...overrides,
   };
 }
@@ -55,7 +58,7 @@ describe("scalarToBasicInfo - 射影マッピング", () => {
     );
   });
 
-  it("射影される 5 項目のみ返す (phone/review/lat/lng などは含まない)", () => {
+  it("射影される 8 項目を返す (phone/review を一級市民化 #134。lat/lng は含まない)", () => {
     const partial = scalarToBasicInfo(makeScalars(), NOW);
     const keys = Object.keys(partial).sort();
     expect(keys).toEqual(
@@ -65,8 +68,30 @@ describe("scalarToBasicInfo - 射影マッピング", () => {
         "cuisine_genre",
         "official_site",
         "sns_accounts",
+        "phone",
+        "review_avg",
+        "review_count",
       ].sort(),
     );
+  });
+
+  it("phone → phone、review_avg → 小数第1位文字列、review_count → 整数文字列 (#134)", () => {
+    const partial = scalarToBasicInfo(
+      makeScalars({ phone: "03-1234-5678", review_avg: 4, review_count: 120 }),
+      NOW,
+    );
+    expect(partial.phone?.value).toBe("03-1234-5678");
+    expect(partial.review_avg?.value).toBe("4.0");
+    expect(partial.review_count?.value).toBe("120");
+  });
+
+  it("review_avg / review_count が 0 (未評価) なら射影しない (#134)", () => {
+    const partial = scalarToBasicInfo(
+      makeScalars({ review_avg: 0, review_count: 0 }),
+      NOW,
+    );
+    expect(partial.review_avg).toBeUndefined();
+    expect(partial.review_count).toBeUndefined();
   });
 });
 
@@ -107,6 +132,9 @@ describe("scalarToBasicInfo - 空値防御", () => {
         genre: "",
         site_url: "",
         instagram_url: "",
+        phone: "",
+        review_avg: 0,
+        review_count: 0,
       },
       NOW,
     );

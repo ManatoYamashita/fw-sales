@@ -34,7 +34,7 @@ const NEUTRAL_SALES_PLACEHOLDER = "担当者";
  * 前提とした指示に書き換えている。出力契約 (AiAnalysisSchema) は据置 (#113)。
  */
 const SYSTEM_PROMPT_PREAMBLE = `あなたは飲食店向け WEB 集客の営業支援 AI です。
-飲食店の店舗基本情報(50 項目のうち充足分)と任意の調査結果テキストを分析し、営業判断に直結する以下を構造化出力 (JSON Schema) で生成します:
+飲食店の店舗基本情報(充足分)と任意の調査結果テキストを分析し、営業判断に直結する以下を構造化出力 (JSON Schema) で生成します:
 
 - strengths_markdown: 店舗の強み (Markdown 形式、見出しは ## まで、箇条書きは - を使用、合計 300〜600 字)
 - weaknesses_markdown: 店舗の弱み (Markdown 形式、同上の規約)

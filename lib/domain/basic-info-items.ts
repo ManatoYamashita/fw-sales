@@ -1,15 +1,16 @@
 /**
- * 基本情報 50 項目の定義表 (store-basic-info / Issue #114, #121)
+ * 基本情報 53 項目の定義表 (store-basic-info / Issue #114, #121, #134)
  *
- * 各店舗の `basic_info`(8 カテゴリ・50 項目)の正規化キーマップ。各項目の
+ * 各店舗の `basic_info`(8 カテゴリ・53 項目)の正規化キーマップ。各項目の
  * キー・ラベル・カテゴリ・既定取得区分(tier)・優先ソース(primary)を単一の真実として
  * 保持する。`types/basic-info.ts` の `BasicInfo` のキー集合はここが規定する。
  *
  * 項目数について:
- * - 原典 Issue #43 §2 の 8 カテゴリテーブルを全項目照合した結果、**実体は 50 項目**。
- *   #43 タイトル/見出し/集計の「51」は起票時の集計誤記であり、原典に 51 番目の項目は
- *   存在しない。よって本表は原典準拠の 50 項目で確定する(`TOTAL_BASIC_INFO_ITEMS` は
- *   定義から動的算出するため、表記と実数が乖離しない)。
+ * - 原典 Issue #43 §2 の 8 カテゴリテーブルは **50 項目**(#43 の「51」は集計誤記)。
+ * - #134 で原典外の Places 由来 3 項目(phone / review_avg / review_count)を補助項目として
+ *   追加し、**計 53 項目**とした(生成プロンプトに電話・口コミ評価を供給し、#134 の
+ *   リグレッションと食べログ 050 番号判定の自己矛盾を解消するため)。
+ *   `TOTAL_BASIC_INFO_ITEMS` は定義から動的算出するため、表記と実数が乖離しない。
  *
  * 依存方向について:
  * - `lib/domain` は `lib/ai` を import しない(逆流禁止)。`lib/ai/deep-research/schema.ts`
@@ -55,11 +56,11 @@ export interface BasicInfoItemDef {
 }
 
 /**
- * 8 カテゴリ・50 項目の定義表(原典 #43 §2 と一致)。
+ * 8 カテゴリ・53 項目の定義表(原典 #43 §2 の 50 項目 + #134 の Places 補助 3 項目)。
  *
- * primary="places"(7 項目): Places(公開地図情報)が主ソースとして妥当な
+ * primary="places"(10 項目): Places(公開地図情報)が主ソースとして妥当な
  * store_name / address / cuisine_genre / business_hours_holidays / official_site /
- * location_feature / nearest_station(design.md の Places 直結例示)。残り 43 項目は "manual"。
+ * location_feature / nearest_station / phone / review_avg / review_count。残り 43 項目は "manual"。
  */
 export const BASIC_INFO_ITEMS: readonly BasicInfoItemDef[] = [
   // category_1_basic (13)
@@ -76,6 +77,8 @@ export const BASIC_INFO_ITEMS: readonly BasicInfoItemDef[] = [
   { key: "alacarte_course", label: "アラカルト・コースの特徴", category: "category_1_basic", default_tier: "B", primary: "manual" },
   { key: "main_target", label: "メインターゲット", category: "category_1_basic", default_tier: "B", primary: "manual" },
   { key: "operation_style", label: "オペレーションの特徴", category: "category_1_basic", default_tier: "C", primary: "manual" },
+  // phone: Places 由来の連絡先。生成プロンプトに供給し食べログ 050 番号判定の材料とする(#134)。
+  { key: "phone", label: "電話番号", category: "category_1_basic", default_tier: "A", primary: "places" },
 
   // category_2_owner (6) — 立地環境・商圏データ
   { key: "location_feature", label: "立地の特徴", category: "category_2_owner", default_tier: "A", primary: "places" },
@@ -105,6 +108,9 @@ export const BASIC_INFO_ITEMS: readonly BasicInfoItemDef[] = [
   { key: "strength_message_clarity", label: "特徴・強みの伝わりやすさ", category: "category_5_marketing", default_tier: "B", primary: "manual" },
   { key: "review_tendency", label: "口コミ傾向", category: "category_5_marketing", default_tier: "A", primary: "manual" },
   { key: "negative_reviews", label: "ネガティブ・ギャップのある口コミ", category: "category_5_marketing", default_tier: "A", primary: "manual" },
+  // review_avg / review_count: Places(Google)由来の口コミ評価。媒体取り違え防止のためラベルに「Google」を明記(#134)。
+  { key: "review_avg", label: "Google 口コミ評価(平均)", category: "category_5_marketing", default_tier: "A", primary: "places" },
+  { key: "review_count", label: "Google 口コミ件数", category: "category_5_marketing", default_tier: "A", primary: "places" },
   { key: "usage_concept_gap", label: "使われ方とコンセプトのズレ", category: "category_5_marketing", default_tier: "B", primary: "manual" },
   { key: "appeal_gap", label: "魅力の伝わり方の伸びしろ", category: "category_5_marketing", default_tier: "B", primary: "manual" },
 
