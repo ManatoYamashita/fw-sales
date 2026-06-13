@@ -100,7 +100,9 @@ export const RESEARCH_PHASE_META: Record<
   { badgeLabel: string; badgeTone: "warning" | "info" | "success"; cta: PhaseCta }
 > = {
   untouched: {
-    badgeLabel: "未調査",
+    // 営業ステージ (types/stage.ts) の値 "未調査" との文字列衝突を避け、
+    // かつ実態 (コア基本情報が閾値未満 = 調査の前に情報補完が必要) を表すラベル。
+    badgeLabel: "基本情報待ち",
     badgeTone: "warning",
     cta: {
       label: "基本情報を入力",
