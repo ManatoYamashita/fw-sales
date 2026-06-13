@@ -4,8 +4,9 @@
  *
  * 役割:
  * - 既存 `stores` の調査系スカラー列 (name, prefecture, city, address, genre,
- *   business_hours, site_url, instagram_url) を `BASIC_INFO_ITEMS` の対応キーへ射影し、
+ *   site_url, instagram_url) を `BASIC_INFO_ITEMS` の対応キーへ射影し、
  *   `mergeBasicInfo(..., "manual")` 経由で永続化する。
+ *   (task 4.1 PR3b で business_hours 列 DROP に伴い business_hours_holidays 射影は撤去)
  * - 取得ソースは `"manual"` (既存スカラーは手動編集された可能性が高く、以後の Places
  *   自動充填で破壊されないよう保護する、R8.2 連続性)。
  * - 調査結果テーブル (`research_reports`) は参照しない (#121, design L398)。

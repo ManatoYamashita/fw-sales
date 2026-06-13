@@ -121,8 +121,6 @@ export const stores = pgTable("stores", {
   lat: real("lat"),
   /** 経度。エリア検索 / Google Map 埋め込み用。未取得時は NULL。 */
   lng: real("lng"),
-  /** 営業時間。フリーテキスト(例: "11:00-23:00 / 日休")、未入力時は空文字。 */
-  business_hours: text("business_hours").notNull().default(""),
   /** Google Places ID。エリア検索経由で登録した店舗のみ格納。手動登録時は NULL。 */
   google_place_id: text("google_place_id"),
   /**

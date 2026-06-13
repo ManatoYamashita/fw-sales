@@ -17,12 +17,14 @@ import { BASIC_INFO_ITEM_BY_KEY } from "@/lib/domain/basic-info-items";
  * - name                                    → store_name              (tier A)
  * - prefecture + city + address  (結合)      → address                 (tier A)
  * - genre                                   → cuisine_genre           (tier A)
- * - business_hours                          → business_hours_holidays (tier A)
  * - site_url                                → official_site           (tier A)
  * - instagram_url                           → sns_accounts            (tier A)
  *
  * 以下スカラーは `BASIC_INFO_ITEMS` に対応キーがないため射影しない:
  * phone / review_avg / review_count / lat / lng
+ *
+ * task 4.1 (PR3b, 2026-06-13): `business_hours` スカラー列 DROP に伴い、
+ * `business_hours_holidays` への射影を撤去 (basic_info 側の手動 / Places 充填に一本化)。
  *
  * 空値 (空文字 / 空白のみ) の項目は出力に含めない。
  * filled_by は常に `"manual"` (既存スカラーは手動編集の可能性が高く、以後の Places
@@ -36,7 +38,6 @@ export function scalarToBasicInfo(
     | "city"
     | "address"
     | "genre"
-    | "business_hours"
     | "site_url"
     | "instagram_url"
   >,
@@ -60,7 +61,6 @@ export function scalarToBasicInfo(
   add("store_name", store.name);
   add("address", `${store.prefecture}${store.city}${store.address}`);
   add("cuisine_genre", store.genre);
-  add("business_hours_holidays", store.business_hours);
   add("official_site", store.site_url);
   add("sns_accounts", store.instagram_url);
 

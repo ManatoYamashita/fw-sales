@@ -57,7 +57,6 @@ export function BasicInfoCard({ store, profiles }: BasicInfoCardProps) {
     // Phase 7: text フィールドから user_id 参照へ移行
     assigned_planner_user_id: store.assigned_planner_user_id ?? "",
     assigned_sales_user_id: store.assigned_sales_user_id ?? "",
-    business_hours: store.business_hours,
   });
 
   const set = <K extends keyof typeof form>(
@@ -93,7 +92,6 @@ export function BasicInfoCard({ store, profiles }: BasicInfoCardProps) {
       operator_name: store.operator_name,
       assigned_planner_user_id: store.assigned_planner_user_id ?? "",
       assigned_sales_user_id: store.assigned_sales_user_id ?? "",
-      business_hours: store.business_hours,
     });
   };
 
@@ -179,14 +177,6 @@ export function BasicInfoCard({ store, profiles }: BasicInfoCardProps) {
             </FormField>
             <FormField label="業態" htmlFor="genre">
               <Input id="genre" value={form.genre} onChange={onText("genre")} />
-            </FormField>
-            <FormField label="営業時間" htmlFor="business_hours">
-              <Input
-                id="business_hours"
-                value={form.business_hours}
-                onChange={onText("business_hours")}
-                placeholder="例: 11:00-22:00 / 月休"
-              />
             </FormField>
             <FormField label="問い合わせフォーム" htmlFor="has_contact_form">
               <Select
@@ -277,7 +267,6 @@ export function BasicInfoCard({ store, profiles }: BasicInfoCardProps) {
             </Row>
             <Row label="住所・最寄り">{store.address || "—"}</Row>
             <Row label="業態">{store.genre || "—"}</Row>
-            <Row label="営業時間">{store.business_hours || "—"}</Row>
             <Row label="想定チャネル">
               <ChannelBadge channel={store.channel} />
             </Row>

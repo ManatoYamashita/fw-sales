@@ -59,8 +59,6 @@ export interface Store {
   lat: number | null;
   /** 経度。Google Map 埋め込み用。未取得時は null。 */
   lng: number | null;
-  /** 営業時間 (フリーテキスト)。未設定時は空文字。 */
-  business_hours: string;
   /** Google Places ID。エリア検索で追加した店舗のみ格納。手動登録時は null。 */
   google_place_id: string | null;
   /**

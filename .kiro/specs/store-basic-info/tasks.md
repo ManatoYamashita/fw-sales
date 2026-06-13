@@ -83,9 +83,9 @@
   - _Depends: 3.5_
 
 - [ ] 4. Contraction: 旧資産の撤去 (PR3, #110 連動)
-- [ ] 4.1 調査系スカラー列を DROP する
-  - 全消費者が基本情報参照へ切り替わったことを確認後、調査系スカラー列(住所・業態・営業時間・サイト・口コミ等)を DROP するマイグレーションを作成する。本番直結のため backup 前提・生成 SQL レビュー
-  - 完了条件: 調査系スカラー列が DROP され、店舗参照が基本情報経由で破綻なく動作する
+- [x] 4.1 調査系スカラー列を DROP する (PR3b: business_hours のみに縮小)
+  - **スコープ縮小判断 (2026-06-13)**: 影響範囲調査で `StoreFilter.q` ILIKE 検索 (name/city/prefecture/address/genre/memo) と url-parser 出力経路 (site_url/instagram_url 19 ファイル) という設計上の壁が判明。本タスクは url-parser/検索仕様と無関係な business_hours の 1 列のみ DROP に限定し、basic_info の business_hours_holidays を唯一の保持先にする。残りスカラー (address/genre/prefecture/city/site_url/instagram_url/phone/lat/lng/google_place_id/map_url/review_*) の撤去は「全スカラー撤去 spec」として別途策定。
+  - 完了条件: stores から business_hours 列が DROP され、表示・編集・backfill が basic_info の business_hours_holidays を介して破綻なく動作する
   - _Requirements: 8.1_
   - _Depends: 3.1, 3.2, 3.3, 3.4, 3.5_
 - [x] 4.2 構造化資産を撤去する
