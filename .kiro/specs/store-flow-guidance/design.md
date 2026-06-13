@@ -2,6 +2,13 @@
 
 調査日: 2026-06-08 / 対象: requirements.md R1–R8 / 前提: #121 を真実とし #121 後(Stage2 構造化撤去・ワークベンチ単線化)を設計前提に置く(grill D1–D12 / memory `store_flow_guidance_issue`)。
 
+> **Re-baseline 実装反映 (2026-06-13)**: store-basic-info が #114/#121 を完遂したため、本 design の暫定箇所を現 main へ確定させた。**実装済みの確定仕様**(PR1):
+> - 状態は **3 状態**(`untouched` / `ready` / `generated`)。本文の 4 状態フロー図・`researched` / `hasResearchText` 記述は**廃止**(貼付テキストが永続化されず検出不能)。`getStoreResearchPhase(store)` は引数 1 つ(`Pick<Store,"ai_analysis_result"|"basic_info">`)で、I/O を取らない純関数に確定。
+> - 充足判定は `basic_info` の `filled_by!==null` + value 非空白(`isBasicInfoFieldFilled`)。コアキー = `CORE_BASIC_INFO_KEYS`(primary="places" の 6 項目、`store_name` 除く)。本文の `coreFilledCount`(スカラー "" / 0 判定)は `basic_info` 版へ置換。
+> - 配置: `lib/domain/store-research-phase.ts`(`lib/stores/*` ではない)。バッジ=`ResearchPhaseBadge`、CTA=`NextActionCta`(`buttonVariants`+`Link`、Button は asChild 非対応)。`store-title-section.tsx` に `phase` prop で結線。
+> - 死蔵 CTA 抑止 / 生成集約は store-basic-info 完了済のため**本 spec 対象外(既達)**。
+> - STEP0 のプロンプト(PR2)は新規 `buildBasicInfoSummary` ではなく既存 `buildBasicInfoBlock` を再利用。Gem URL の `app_settings` 設計は維持。
+
 ## Overview
 
 店舗追加後の営業担当者を「追加 → DeepResearch(外部 Gem) → 架電生成」の標準フローに沿って迷わず誘導する。各店舗の**調査フェーズ**(4 状態)を現行スキーマから純関数で導出し、店舗詳細に状態バッジと「今やるべき唯一のアクション」を単一 CTA として提示する。調査開始 CTA は貼付ワークベンチの STEP0(基本情報サマリのコピー + Gem 起動)へ繋がる。Gem URL は設定画面でノーコード管理する。
