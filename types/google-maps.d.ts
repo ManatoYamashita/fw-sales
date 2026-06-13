@@ -76,4 +76,5 @@ declare namespace google {
 
 interface Window {
   google?: typeof google;
+  __areaSearchGoogleMapsLoaded?: () => void;
 }

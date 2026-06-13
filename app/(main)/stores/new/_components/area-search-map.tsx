@@ -17,6 +17,7 @@ export interface AreaSearchMapProps {
 }
 
 const SCRIPT_ID = "area-search-google-maps-script";
+const CALLBACK_NAME = "__areaSearchGoogleMapsLoaded";
 
 const PIN_COLORS = {
   eligible: "#2563eb", // 登録候補: 青
@@ -25,36 +26,43 @@ const PIN_COLORS = {
   outOfRange: "#d1d5db", // 範囲外: 薄いグレー
 } as const;
 
+// 複数の AreaSearchMap インスタンスが同時にマウントされても script タグを
+// 1つだけ追加するよう、モジュールスコープで読み込み Promise を共有する。
+// 読み込み失敗時は null に戻し、再試行できるようにする。
+let googleMapsScriptPromise: Promise<void> | null = null;
+
 function loadGoogleMapsScript(apiKey: string): Promise<void> {
   if (typeof window === "undefined") {
     return Promise.reject(new Error("window is not available"));
   }
-  if (window.google?.maps) {
+  if (window.google?.maps?.Map) {
     return Promise.resolve();
   }
-
-  const existing = document.getElementById(SCRIPT_ID) as HTMLScriptElement | null;
-  if (existing) {
-    if (window.google?.maps) return Promise.resolve();
-    return new Promise((resolve, reject) => {
-      existing.addEventListener("load", () => resolve(), { once: true });
-      existing.addEventListener(
-        "error",
-        () => reject(new Error("Google Mapsの読み込みに失敗しました")),
-        { once: true },
-      );
-    });
+  if (googleMapsScriptPromise) {
+    return googleMapsScriptPromise;
   }
 
-  return new Promise((resolve, reject) => {
+  googleMapsScriptPromise = new Promise<void>((resolve, reject) => {
+    window[CALLBACK_NAME] = () => resolve();
+
     const script = document.createElement("script");
     script.id = SCRIPT_ID;
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&loading=async`;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(
+      apiKey,
+    )}&v=weekly&loading=async&callback=${CALLBACK_NAME}`;
     script.async = true;
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error("Google Mapsの読み込みに失敗しました"));
+    script.onerror = () =>
+      reject(new Error("Google Mapsスクリプトの読み込みに失敗しました"));
     document.head.appendChild(script);
+  }).catch((error) => {
+    // 失敗した script タグと callback を取り除き、次回呼び出しで再試行可能にする。
+    googleMapsScriptPromise = null;
+    document.getElementById(SCRIPT_ID)?.remove();
+    delete window[CALLBACK_NAME];
+    throw error;
   });
+
+  return googleMapsScriptPromise;
 }
 
 /** 半径(m)からおおよそ全体が収まるズームレベルを返す簡易マッピング。 */
@@ -100,6 +108,7 @@ export function AreaSearchMap({
   const circleRef = useRef<google.maps.Circle | null>(null);
   const markersRef = useRef<Map<string, google.maps.Marker>>(new Map());
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // スクリプト読込 + 地図初期化
   useEffect(() => {
@@ -108,16 +117,32 @@ export function AreaSearchMap({
     loadGoogleMapsScript(apiKey)
       .then(() => {
         if (cancelled || !containerRef.current || !window.google) return;
-        mapRef.current = new window.google.maps.Map(containerRef.current, {
-          center,
-          zoom: zoomForRadius(radiusMeters),
-          disableDefaultUI: true,
-          zoomControl: true,
-        });
-        setStatus("ready");
+        try {
+          mapRef.current = new window.google.maps.Map(containerRef.current, {
+            center,
+            zoom: zoomForRadius(radiusMeters),
+            disableDefaultUI: true,
+            zoomControl: true,
+          });
+          setStatus("ready");
+        } catch (error) {
+          console.error("[AreaSearchMap] Google Maps init failed", error);
+          if (!cancelled) {
+            setStatus("error");
+            setErrorMessage(
+              error instanceof Error ? error.message : "Google Mapsの初期化に失敗しました",
+            );
+          }
+        }
       })
-      .catch(() => {
-        if (!cancelled) setStatus("error");
+      .catch((error) => {
+        console.error("[AreaSearchMap] Google Maps load failed", error);
+        if (!cancelled) {
+          setStatus("error");
+          setErrorMessage(
+            error instanceof Error ? error.message : "Google Mapsの読み込みに失敗しました",
+          );
+        }
       });
     return () => {
       cancelled = true;
@@ -241,6 +266,11 @@ export function AreaSearchMap({
       {status === "error" && (
         <p role="alert" className="text-xs text-destructive">
           地図の読み込みに失敗しました。
+          {process.env.NODE_ENV === "development" && errorMessage ? (
+            <span className="block text-[11px] text-muted-foreground">
+              {errorMessage}
+            </span>
+          ) : null}
         </p>
       )}
       <ul className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
