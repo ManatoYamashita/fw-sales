@@ -259,6 +259,42 @@ describe("searchPlacesWithMatchesAction", () => {
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.data.nextPageToken).toBeNull();
   });
+
+  it("初回検索 (centerQuery解決あり) の meta は apiCallEstimate=2", async () => {
+    mockResolveSearchCenter.mockResolvedValue(CENTER);
+    mockSearchPlacesPage.mockResolvedValue(
+      makeSearchPage({ nextPageToken: "page-2" }),
+    );
+
+    const result = await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", 1000);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.meta.apiCallEstimate).toBe(2);
+      expect(result.data.meta.source).toBe("textSearch");
+      expect(result.data.meta.provider).toBe("googlePlaces");
+      expect(result.data.meta.maxResults).toBe(60);
+      expect(result.data.meta.loadedCount).toBe(result.data.places.length);
+      expect(result.data.meta.hasNextPage).toBe(true);
+    }
+  });
+
+  it("options.center 指定 (もっと読み込む) の meta は apiCallEstimate=1, hasNextPage=false (nextPageTokenなし)", async () => {
+    mockSearchPlacesPage.mockResolvedValue(makeSearchPage({ nextPageToken: null }));
+
+    const result = await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", 1000, {
+      center: CENTER,
+      pageToken: "page-2",
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.meta.apiCallEstimate).toBe(1);
+      expect(result.data.meta.hasNextPage).toBe(false);
+      expect(result.data.meta.currentPageCount).toBe(1);
+    }
+    expect(mockResolveSearchCenter).not.toHaveBeenCalled();
+  });
 });
 
 describe("bulkAddStoresFromPlacesAction", () => {

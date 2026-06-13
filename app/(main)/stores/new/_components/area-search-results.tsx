@@ -36,8 +36,13 @@ import {
   sortAreaSearchResults,
   type AreaSearchSortMode,
 } from "@/lib/places/ranking";
+import { buildTextSearchMeta, getAreaSearchMetaMessages } from "@/lib/places/search-meta";
 import { Select } from "@/components/ui/select";
-import type { AreaSearchPlaceViewModel, SearchCenter } from "@/lib/places/types";
+import type {
+  AreaSearchMeta,
+  AreaSearchPlaceViewModel,
+  SearchCenter,
+} from "@/lib/places/types";
 
 /**
  * 一覧の絞り込み区分。
@@ -114,6 +119,8 @@ export interface AreaSearchResultsProps {
   center: SearchCenter;
   /** 検索半径 (メートル)。 */
   radiusMeters: number;
+  /** 初回検索のメタ情報 (取得元・上限件数・API回数目安など)。 */
+  meta: AreaSearchMeta;
 }
 
 /**
@@ -129,12 +136,16 @@ export function AreaSearchResults({
   area,
   center,
   radiusMeters,
+  meta: initialMeta,
 }: AreaSearchResultsProps) {
   const [allResults, setAllResults] =
     useState<readonly AreaSearchPlaceViewModel[]>(results);
   const [nextPageToken, setNextPageToken] = useState<string | null>(
     initialNextPageToken,
   );
+  // 検索状況メタ (取得元・上限件数・もっと読み込み可否・API回数目安)。
+  // 「もっと読み込む」「追加探索」のたびに累積更新する。
+  const [searchMeta, setSearchMeta] = useState<AreaSearchMeta>(initialMeta);
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
   const [isLoadingMore, startLoadMoreTransition] = useTransition();
   const [addedIds, setAddedIds] = useState<ReadonlySet<string>>(new Set());
@@ -247,8 +258,17 @@ export function AreaSearchResults({
         setLoadMoreError(result.error);
         return;
       }
-      setAllResults((prev) => mergeUniquePlaces(prev, result.data.places));
+      const merged = mergeUniquePlaces(allResults, result.data.places);
+      setAllResults(merged);
       setNextPageToken(result.data.nextPageToken);
+      setSearchMeta((prev) =>
+        buildTextSearchMeta({
+          loadedCount: merged.length,
+          hasNextPage: result.data.meta.hasNextPage,
+          currentPageCount: prev.currentPageCount + result.data.meta.currentPageCount,
+          apiCallEstimate: prev.apiCallEstimate + result.data.meta.apiCallEstimate,
+        }),
+      );
     });
   };
 
@@ -316,6 +336,15 @@ export function AreaSearchResults({
         const newlyAdded = merged.slice(merged.length - addedCount);
 
         setAllResults(merged);
+        setSearchMeta((prev) =>
+          buildTextSearchMeta({
+            loadedCount: merged.length,
+            hasNextPage:
+              kind === "radius" ? result.data.meta.hasNextPage : prev.hasNextPage,
+            currentPageCount: prev.currentPageCount + result.data.meta.currentPageCount,
+            apiCallEstimate: prev.apiCallEstimate + result.data.meta.apiCallEstimate,
+          }),
+        );
 
         const newRun: ExplorationRun = {
           id: runId,
@@ -437,6 +466,10 @@ export function AreaSearchResults({
   const radiusChips = suggestLargerRadii(mainRadiusMeters);
   const widerRadius = radiusChips[0];
 
+  // 検索状況メタ (取得元・上限件数・もっと読み込み可否・API回数目安) の表示文言。
+  // loadedCount は常に最新の読み込み済み件数 (allResults.length) を反映する。
+  const metaMessages = getAreaSearchMetaMessages({ ...searchMeta, loadedCount });
+
   return (
     <div className="space-y-4">
       {/* 結果ヘッダー: 検索条件チップ + 件数メトリクス。
@@ -478,6 +511,17 @@ export function AreaSearchResults({
             )}
           </p>
         )}
+        {/* 検索状況メタ: 「探索の説明責任」のための小さな説明文 (Issue #129 follow-up)。
+            取得元・上限件数・もっと読み込み可否・API回数目安・locationBiasの注意点を表示する。 */}
+        <ul className="border-t border-border pt-2 space-y-0.5 text-xs text-muted-foreground">
+          {metaMessages.map((message) => (
+            <li key={message}>{message}</li>
+          ))}
+          <li>
+            表示中の候補: {displayedResults.length.toLocaleString()}件
+            {explorationRuns.length > 0 && " (追加探索の結果を含みます)"}
+          </li>
+        </ul>
       </div>
 
       {/* 探索コントロール: 「さらに候補を読み込む」(同一条件の次ページ) と

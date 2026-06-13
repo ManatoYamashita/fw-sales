@@ -13,6 +13,7 @@ import { placeResultToStoreInput } from "@/lib/places/to-store-input";
 import { placeResultToBasicInfo } from "@/lib/places/to-basic-info";
 import { attachStoreMatches } from "@/lib/places/match-store";
 import { deduplicatePlaceIds } from "@/lib/places/bulk-utils";
+import { buildTextSearchMeta } from "@/lib/places/search-meta";
 import { distanceMeters } from "@/lib/utils/geo";
 import type {
   AreaSearchPlaceViewModel,
@@ -121,7 +122,16 @@ export async function searchPlacesWithMatchesAction(
       };
     });
 
-    return success({ places: viewModels, nextPageToken, center, radiusMeters });
+    // resolveSearchCenter を呼んだ場合 (=options.center 未指定) は +1 回分とする。
+    const apiCallEstimate = options?.center ? 1 : 2;
+    const meta = buildTextSearchMeta({
+      loadedCount: viewModels.length,
+      hasNextPage: nextPageToken !== null,
+      currentPageCount: 1,
+      apiCallEstimate,
+    });
+
+    return success({ places: viewModels, nextPageToken, center, radiusMeters, meta });
   } catch (e) {
     return failure(e instanceof Error ? e.message : "検索に失敗しました");
   }

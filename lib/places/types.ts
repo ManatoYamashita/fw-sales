@@ -38,6 +38,40 @@ export type AreaSearchPlaceViewModel = PlaceWithMatch & {
   isWithinRadius: boolean;
 };
 
+/**
+ * エリア検索1回の呼び出し (Text Search 1ページ分) に関するメタ情報。
+ * 「探索の説明責任」と「コスト管理の土台」用 (Issue #129 follow-up)。
+ * UI側はこれを使って「取得元」「上限件数」「もっと読み込み可否」「API回数目安」等を表示する。
+ */
+export interface AreaSearchMeta {
+  /** 検索結果の取得方法。現状は Text Search のみ。 */
+  source: "textSearch";
+  /** 検索プロバイダ。現状は Google Places のみ。 */
+  provider: "googlePlaces";
+  /** Text Search 1ページあたりのリクエスト件数 (`pageSize`)。 */
+  requestedPageSize: number;
+  /** `maxResults / requestedPageSize` のページ数上限。 */
+  maxPages: number;
+  /** Text Search で取得可能な最大件数 (= `SEARCH_RESULT_SOFT_LIMIT`)。 */
+  maxResults: number;
+  /** この呼び出しで取得したページ数 (常に1)。 */
+  currentPageCount: number;
+  /** この呼び出し時点での読み込み済み件数。 */
+  loadedCount: number;
+  /** 次ページが存在するか (`nextPageToken !== null`)。 */
+  hasNextPage: boolean;
+  /**
+   * この呼び出しでAPIを呼ぶ想定回数の目安 (厳密な課金額ではない)。
+   * 初回検索: resolveSearchCenter + searchPlacesPage = 2、
+   * `options.center` 指定の「もっと読み込む」: searchPlacesPage のみ = 1。
+   */
+  apiCallEstimate: number;
+  /** 並び順の基準。Text Search のデフォルトは関連度順 (距離順ではない)。 */
+  rankBasis: "googleTextRelevance";
+  /** 範囲指定の方式。`locationBias` は厳密な範囲制限ではないため範囲外候補を含み得る。 */
+  locationMode: "locationBias";
+}
+
 /** エリア検索Action (`searchPlacesWithMatchesAction`) の戻り値データ部。 */
 export interface AreaSearchResultPayload {
   places: AreaSearchPlaceViewModel[];
@@ -46,6 +80,8 @@ export interface AreaSearchResultPayload {
   center: SearchCenter;
   /** 検索に使用した半径 (メートル) */
   radiusMeters: number;
+  /** この呼び出しに関するメタ情報 (取得元・上限件数・API回数目安など) */
+  meta: AreaSearchMeta;
 }
 
 /** Google Places API New (v2) Text Search の検索結果 1件分 */
