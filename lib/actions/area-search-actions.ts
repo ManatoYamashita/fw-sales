@@ -3,12 +3,23 @@
 import { revalidateTag } from "next/cache";
 import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
-import { searchPlaces, getPlaceById } from "@/lib/places/google";
+import {
+  searchPlaces,
+  searchPlacesPage,
+  getPlaceById,
+  resolveSearchCenter,
+} from "@/lib/places/google";
 import { placeResultToStoreInput } from "@/lib/places/to-store-input";
 import { placeResultToBasicInfo } from "@/lib/places/to-basic-info";
 import { attachStoreMatches } from "@/lib/places/match-store";
 import { deduplicatePlaceIds } from "@/lib/places/bulk-utils";
-import type { PlaceResult, PlaceWithMatch } from "@/lib/places/types";
+import { distanceMeters } from "@/lib/utils/geo";
+import type {
+  AreaSearchPlaceViewModel,
+  AreaSearchResultPayload,
+  PlaceResult,
+  SearchCenter,
+} from "@/lib/places/types";
 import { success, failure, type ActionResult } from "./_helpers";
 
 /**
@@ -39,24 +50,78 @@ async function createStoreFromPlaceTx(
   });
 }
 
+export interface SearchPlacesWithMatchesOptions {
+  /** 前ページのレスポンスで返された `nextPageToken` (「もっと読み込む」用)。 */
+  pageToken?: string;
+  /**
+   * 初回検索で解決済みの中心地点。「もっと読み込む」時にこれを渡すことで、
+   * `centerQuery` の再解決 (=Places API呼び出し) を省略し、初回と同じ
+   * `locationBias` を使い回す (pageToken のパラメータ不一致を防ぐ)。
+   */
+  center?: SearchCenter;
+}
+
 /**
  * Google Places 検索 + 既存DB照合を1回のServer Actionで行う。
- * 各検索結果に matchedStore (DB登録済み情報) を付与して返す。
- * 既存の searchPlacesAction は壊さず維持する。
+ * 各検索結果に matchedStore (DB登録済み情報)・中心地点からの距離・半径内外判定を
+ * 付与して返す。既存の searchPlacesAction は壊さず維持する。
+ *
+ * `centerQuery` (中心地点の駅名・住所など) は初回検索時に `resolveSearchCenter` で
+ * 緯度経度に解決し、`radiusMeters` とあわせて Places Text Search の `locationBias` に
+ * 渡す (`locationBias` は厳密な範囲制限ではないため、範囲外の候補も含まれ得る。
+ * 各候補の `isWithinRadius` で範囲内/範囲外を判定する)。
+ *
+ * `options.pageToken` を指定すると、前回呼び出しで返した `nextPageToken` を使って
+ * 次ページを取得する (「もっと読み込む」用)。`keyword`/`centerQuery`/`radiusMeters` は
+ * 前回と同じ値を渡し、`options.center` には初回で解決した中心地点を渡すこと
+ * (Google Places 側の仕様で検索条件を変えると `pageToken` が無効になる場合がある)。
  */
 export async function searchPlacesWithMatchesAction(
   keyword: string,
-  area: string,
-): Promise<ActionResult<PlaceWithMatch[]>> {
+  centerQuery: string,
+  radiusMeters: number,
+  options?: SearchPlacesWithMatchesOptions,
+): Promise<ActionResult<AreaSearchResultPayload>> {
   if (!keyword.trim()) {
     return failure("キーワードを入力してください");
   }
+  if (!centerQuery.trim()) {
+    return failure("中心地点を入力してください");
+  }
   try {
-    const [places, stores] = await Promise.all([
-      searchPlaces(keyword, area),
+    const center = options?.center ?? (await resolveSearchCenter(centerQuery));
+    if (!center) {
+      return failure(
+        `中心地点「${centerQuery}」が見つかりませんでした。駅名や住所を少し具体的に入力してください。`,
+      );
+    }
+
+    const [{ places, nextPageToken }, stores] = await Promise.all([
+      searchPlacesPage(keyword, centerQuery, {
+        pageToken: options?.pageToken,
+        locationBias: { center, radiusMeters },
+      }),
       repos.store.list(),
     ]);
-    return success(attachStoreMatches(places, stores));
+
+    const viewModels: AreaSearchPlaceViewModel[] = attachStoreMatches(
+      places,
+      stores,
+    ).map((item) => {
+      const distance = distanceMeters(
+        center.lat,
+        center.lng,
+        item.place.lat,
+        item.place.lng,
+      );
+      return {
+        ...item,
+        distanceMeters: distance,
+        isWithinRadius: distance <= radiusMeters,
+      };
+    });
+
+    return success({ places: viewModels, nextPageToken, center, radiusMeters });
   } catch (e) {
     return failure(e instanceof Error ? e.message : "検索に失敗しました");
   }

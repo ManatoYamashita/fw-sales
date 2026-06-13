@@ -1,0 +1,187 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resolveSearchCenter, searchPlacesPage } from "../google";
+
+const SEARCH_ENDPOINT = "https://places.googleapis.com/v1/places:searchText";
+
+function jsonResponse(body: unknown, ok = true, status = 200): Response {
+  return {
+    ok,
+    status,
+    json: async () => body,
+    text: async () => JSON.stringify(body),
+  } as unknown as Response;
+}
+
+interface FetchInit {
+  headers: Record<string, string>;
+  body?: string;
+}
+
+/** `vi.fn()` でモックした fetch の N 回目の呼び出し引数を取得する。 */
+function getFetchCall(
+  fetchMock: ReturnType<typeof vi.fn>,
+  index = 0,
+): [string, FetchInit] {
+  const call = fetchMock.mock.calls[index];
+  if (!call) throw new Error(`fetch was not called (call index: ${index})`);
+  return call as [string, FetchInit];
+}
+
+function getRequestBody(
+  fetchMock: ReturnType<typeof vi.fn>,
+  index = 0,
+): Record<string, unknown> {
+  const [, init] = getFetchCall(fetchMock, index);
+  return JSON.parse(init.body ?? "{}") as Record<string, unknown>;
+}
+
+const FOOD_PLACE = {
+  id: "ChIJfood",
+  displayName: { text: "テスト居酒屋" },
+  formattedAddress: "東京都渋谷区テスト1-1-1",
+  location: { latitude: 35.6595, longitude: 139.7005 },
+  types: ["restaurant", "food"],
+};
+
+describe("searchPlacesPage", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.stubEnv("GOOGLE_PLACES_API_KEY", "test-api-key");
+    fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ places: [FOOD_PLACE], nextPageToken: "next-token" }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("locationBias.circle に center (latitude/longitude) と radius を正しく設定する", async () => {
+    await searchPlacesPage("居酒屋", "渋谷駅", {
+      locationBias: { center: { lat: 35.6595, lng: 139.7005 }, radiusMeters: 1000 },
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = getFetchCall(fetchMock);
+    expect(url).toBe(SEARCH_ENDPOINT);
+    const body = getRequestBody(fetchMock);
+    expect(body.locationBias).toEqual({
+      circle: {
+        center: { latitude: 35.6595, longitude: 139.7005 },
+        radius: 1000,
+      },
+    });
+    expect(body.pageSize).toBe(20);
+    expect(body.textQuery).toBe("居酒屋 渋谷駅");
+    expect(init.headers["X-Goog-FieldMask"]).toContain("places.location");
+    expect(init.headers["X-Goog-FieldMask"]).toContain("nextPageToken");
+  });
+
+  it("pageToken 指定時も同じ textQuery/locationBias/pageSize を送る (条件不一致によるINVALID_ARGUMENT回避)", async () => {
+    const center = { lat: 35.6595, lng: 139.7005 };
+
+    await searchPlacesPage("居酒屋", "渋谷駅", {
+      locationBias: { center, radiusMeters: 1000 },
+    });
+    const firstBody = getRequestBody(fetchMock, 0);
+
+    await searchPlacesPage("居酒屋", "渋谷駅", {
+      pageToken: "next-token",
+      locationBias: { center, radiusMeters: 1000 },
+    });
+    const secondBody = getRequestBody(fetchMock, 1);
+
+    // pageToken 以外は完全に同一であること
+    expect(secondBody.pageToken).toBe("next-token");
+    expect(firstBody.pageToken).toBeUndefined();
+    const firstRest = { ...firstBody };
+    const secondRest = { ...secondBody };
+    delete firstRest.pageToken;
+    delete secondRest.pageToken;
+    expect(secondRest).toEqual(firstRest);
+  });
+
+  it("locationBias 未指定時はリクエストボディに含めない", async () => {
+    await searchPlacesPage("居酒屋", "渋谷駅");
+    const body = getRequestBody(fetchMock);
+    expect(body.locationBias).toBeUndefined();
+  });
+});
+
+describe("resolveSearchCenter", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.stubEnv("GOOGLE_PLACES_API_KEY", "test-api-key");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("空文字の場合は fetch を呼ばずに null を返す", async () => {
+    fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await resolveSearchCenter("")).toBeNull();
+    expect(await resolveSearchCenter("   ")).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("最初の候補の location を中心地点として返す (pageSize:1, fieldMask: places.location)", async () => {
+    fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        places: [{ location: { latitude: 35.658, longitude: 139.7016 } }],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const center = await resolveSearchCenter("渋谷駅");
+    expect(center).toEqual({ lat: 35.658, lng: 139.7016 });
+
+    const [url, init] = getFetchCall(fetchMock);
+    expect(url).toBe(SEARCH_ENDPOINT);
+    expect(init.headers["X-Goog-FieldMask"]).toBe("places.location");
+    const body = getRequestBody(fetchMock);
+    expect(body.pageSize).toBe(1);
+    expect(body.textQuery).toBe("渋谷駅");
+    expect(body.regionCode).toBe("JP");
+  });
+
+  it("候補が0件の場合は null を返す", async () => {
+    fetchMock = vi.fn().mockResolvedValue(jsonResponse({ places: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await resolveSearchCenter("存在しない場所xyz")).toBeNull();
+  });
+
+  it("places フィールド自体が無い場合も null を返す", async () => {
+    fetchMock = vi.fn().mockResolvedValue(jsonResponse({}));
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await resolveSearchCenter("存在しない場所xyz")).toBeNull();
+  });
+
+  it("APIエラー時は例外を投げる", async () => {
+    fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ error: "invalid" }, false, 400),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(resolveSearchCenter("渋谷駅")).rejects.toThrow(/Places API エラー \(400\)/);
+  });
+
+  it("GOOGLE_PLACES_API_KEY が未設定の場合は例外を投げる", async () => {
+    vi.unstubAllEnvs();
+    fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(resolveSearchCenter("渋谷駅")).rejects.toThrow(
+      "GOOGLE_PLACES_API_KEY が設定されていません",
+    );
+  });
+});

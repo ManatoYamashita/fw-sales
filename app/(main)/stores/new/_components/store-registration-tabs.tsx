@@ -21,12 +21,12 @@ import {
   AreaSearchPanel,
   ManualStartPanel,
   UrlSearchPanel,
+  type AreaSearchSessionResult,
   type UrlLoadPayload,
 } from "./registration-mode-card";
 import { UrlImportSummary } from "./url-import-summary";
 import { AreaSearchResults } from "./area-search-results";
 import type { Profile } from "@/types/profile";
-import type { PlaceWithMatch } from "@/lib/places/types";
 
 export type RegistrationMode = "manual" | "url" | "area";
 
@@ -88,9 +88,13 @@ export function StoreRegistrationTabs({
 
   const [stepUnlocked, setStepUnlocked] = useState(false);
   const [urlImport, setUrlImport] = useState<UrlLoadPayload | null>(null);
-  const [areaResults, setAreaResults] = useState<
-    readonly PlaceWithMatch[] | null
-  >(null);
+  const [areaResults, setAreaResults] = useState<AreaSearchSessionResult | null>(
+    null,
+  );
+  // 検索1回ごとにインクリメントし、AreaSearchResults の key として使う。
+  // 再検索のたびに新しいコンポーネントとしてマウントし直すことで、選択状態・
+  // 追加ページ読込状態 (allResults/nextPageToken 等) を確実にリセットする。
+  const [areaSearchSeq, setAreaSearchSeq] = useState(0);
   const [manualStoreName, setManualStoreName] = useState("");
 
   // mode 変化 (URL 変化) を検知して下部 state をリセットする。
@@ -130,14 +134,15 @@ export function StoreRegistrationTabs({
     });
   };
 
-  const handleAreaSearched = (results: readonly PlaceWithMatch[]) => {
-    if (results.length === 0) {
+  const handleAreaSearched = (result: AreaSearchSessionResult) => {
+    if (result.places.length === 0) {
       // 0 件はエラー扱い(子パネルで alert 表示)。step は開かない。
-      setAreaResults(results);
+      setAreaResults(result);
       return;
     }
     startTransition(() => {
-      setAreaResults(results);
+      setAreaResults(result);
+      setAreaSearchSeq((seq) => seq + 1);
       setStepUnlocked(true);
     });
   };
@@ -238,8 +243,16 @@ export function StoreRegistrationTabs({
                 />
               </>
             )}
-            {mode === "area" && areaResults && (
-              <AreaSearchResults results={areaResults} />
+            {mode === "area" && areaResults && areaResults.places.length > 0 && (
+              <AreaSearchResults
+                key={areaSearchSeq}
+                results={areaResults.places}
+                nextPageToken={areaResults.nextPageToken}
+                keyword={areaResults.keyword}
+                area={areaResults.area}
+                center={areaResults.center}
+                radiusMeters={areaResults.radiusMeters}
+              />
             )}
           </div>
         </ViewTransition>
