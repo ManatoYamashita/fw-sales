@@ -1,0 +1,105 @@
+# Implementation Plan
+
+> 加筆のみ・既存画面に配線(D7)。#121 を真実とし #121 後(ワークベンチ単線化・Stage2 撤去)を前提に乗せる。PR 分割案: 動線可視化(純関数 + バッジ + CTA)= PR1、Gem 連携(app_settings + STEP0 + 設定 UI)= PR2、#121 整合(信号差替え検証)= PR3(#121 着地連動)。自動テスト未導入のため完了条件は typecheck/lint/build + 手動 E2E + 純関数の vitest(承認下)。
+
+- [ ] 1. Foundation: 状態導出と純関数 (PR1)
+- [ ] 1.1 (P) 調査フェーズ型と充足率の純関数を実装する
+  - `ResearchPhase`(`untouched` / `ready` / `researched` / `generated`)を定義し、コア 5 項目(`address` / `genre` / `phone` / `business_hours` / `review_count`)の充足数を返す純関数を実装する。`""` および `review_count===0` を未充足とする(NOT NULL default "" / 0 のため NULL 判定不可)
+  - 完了条件: `coreFilledCount` が 0..5 を返し、空文字・0 を未充足とする境界が入出力で確認できる。`pnpm typecheck` 通過
+  - _Requirements: 4.1, 4.2_
+  - _Boundary: research-phase(coreFilledCount)_
+- [ ] 1.2 状態導出の純関数を実装する
+  - `store`(コア列 + `ai_analysis_result`)と `hasResearchText: boolean` から調査フェーズを導出する純関数を実装する。優先順 `generated > researched > ready > untouched`。`hasResearchText` は呼出側(server)が query で算出して渡し、純関数を I/O から隔離する
+  - 完了条件: 4 状態の境界(ai 有/無 × 貼付有/無 × コア 3 前後)が単体で確認でき、`ai_analysis_result` 非空で必ず `generated` になる
+  - _Requirements: 1.1, 1.4, 1.5, 3.1, 3.3, 4.3, 4.4, 7.1, 7.2_
+  - _Boundary: research-phase(getStoreResearchPhase)_
+  - _Depends: 1.1_
+- [ ] 1.3 (P) 状態別の次アクション定義を整備する
+  - `RESEARCH_PHASE_CTA`: 各状態にラベル・遷移先 href・主従(primary/secondary)を定義する。untouched→「基本情報を補う」(`/stores/[id]/edit`) / ready→「調査を開始」(`/research/[storeId]#step0`) / researched→「営業資産を生成」(`/research/[storeId]#generate`) / generated→「結果を確認・再生成」(`/stores/[id]?tab=ai`)
+  - 完了条件: 全 4 状態に遷移先が定義され(網羅性が型で保証され)、`pnpm typecheck` 通過
+  - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5_
+  - _Boundary: research-phase(RESEARCH_PHASE_CTA)_
+- [ ] 1.4 (P) 基本情報サマリ生成の純関数を実装する
+  - `buildBasicInfoSummary(store)`: 充足済み項目のみ(空文字は省略)を Markdown 整形で返す。51 項目の調査指示・出典規則は含めない(Gem が保持 / D6)。既存 `deep-research/prompt.ts` の Stage1 は流用しない。将来 #114 `buildBasicInfoBlock` に吸収される署名に寄せる
+  - 完了条件: 空文字項目が出力されず、充足項目のみが Markdown 化される境界が確認できる
+  - _Requirements: 5.2, 5.3_
+  - _Boundary: basic-info-summary_
+
+- [ ] 2. 店舗詳細への状態提示 (PR1)
+- [ ] 2.1 (P) 調査フェーズバッジを実装する
+  - 4 状態のラベル・配色を持つ `ResearchPhaseBadge` を実装する。cron ジョブ状態用の既存 `research-status-badge` とは意味が異なるため流用せず別物として作る
+  - 完了条件: 4 状態それぞれが区別可能なバッジとして描画される
+  - _Requirements: 1.2_
+  - _Boundary: ResearchPhaseBadge_
+  - _Depends: 1.2_
+- [ ] 2.2 (P) 状態別単一 CTA を実装する
+  - `NextActionCta`: `RESEARCH_PHASE_CTA[phase]` を Link ボタンとして描画する。営業ステージ(`stage`)とは独立した提示にする
+  - 完了条件: 現在の状態に対応する単一の主アクションが描画され、遷移先が正しい
+  - _Requirements: 2.1, 1.3_
+  - _Boundary: NextActionCta_
+  - _Depends: 1.3_
+- [ ] 2.3 店舗詳細でフェーズを算出し提示を結線する
+  - `stores/[id]/page.tsx` で `hasResearchText`(暫定: `deepResearchReport?.full_markdown` が非空)を算出し `getStoreResearchPhase` を呼び、`StoreTitleSection` にフェーズを渡して `ResearchPhaseBadge` + `NextActionCta` をマウントする。追加 query は発生させない(既存取得を流用)
+  - 完了条件: 店舗詳細にバッジと単一 CTA が表示され、状態が現行データから正しく導出される
+  - _Requirements: 1.1, 1.2, 2.1, 3.1, 3.2_
+  - _Boundary: store-title-section, stores/[id]/page_
+  - _Depends: 2.1, 2.2_
+- [ ] 2.4 死蔵 cron CTA の表示を抑止する
+  - 新 CTA 常在により二重提示となる `deep-research-enqueue-button` を `deep-research-section` の条件レンダリングで非表示にする。レポート閲覧(`DeepResearchReportView`)・構造化資産の物理削除は本 spec の対象外(#110 / #121)
+  - 完了条件: 店舗詳細で「Deep Research を実行」の死蔵 CTA が表示されず、次アクションが新 CTA に一本化される
+  - _Requirements: 2.1_
+  - _Boundary: deep-research-section(呼び出し側のみ)_
+  - _Depends: 2.3_
+
+- [ ] 3. Gem URL 永続化基盤 (PR2)
+- [ ] 3.1 app_settings テーブルを追加する
+  - key-value 設定テーブル(`key` PK / `value` NOT NULL / `updated_at`)を `lib/db/schema.ts` に定義し `0016` マイグレーションを作成する。既存列は汚さず独立テーブルとする。生成 SQL は孤児マイグレ混入を避けるため目視レビューし純粋差分に手修正、CI で適用する
+  - 完了条件: マイグレーションが CI で適用され `app_settings` テーブルが存在する
+  - _Requirements: 8.1_
+  - _Boundary: app_settings(schema)_
+- [ ] 3.2 app_settings リポジトリを実装する
+  - `get(key)` / `set(key, value)`(upsert: `onConflictDoUpdate`)を持つリポジトリを実装し `repos.appSettings` に登録する。予約キー `deep_research_gem_url`
+  - 完了条件: get/set の往復で値が永続化され、同一キーの再保存が upsert される
+  - _Requirements: 8.1_
+  - _Boundary: app-settings-repository_
+  - _Depends: 3.1_
+- [ ] 3.3 Gem URL の query と action を実装する
+  - `getGemUrlCached(): Promise<string | null>`(`'use cache'` + `CACHE_TAGS.appSettings` 新設、既存 `lib/cache.ts` 規約に追従)と `setGemUrlAction(url): ActionResult`(認証必須 / http(s) 形式の最小検証 / 保存後 `revalidateTag`)を実装する
+  - 完了条件: query で保存値が読め、action で保存・再検証され、不正 URL は失敗で返り既存値を変えない
+  - _Requirements: 8.1, 8.2_
+  - _Boundary: getGemUrlCached, setGemUrlAction_
+  - _Depends: 3.2_
+
+- [ ] 4. STEP0 と設定 UI の結線 (PR2)
+- [ ] 4.1 設定画面に Gem URL カードを追加する
+  - `GemUrlCard`(入力 + 保存 = `setGemUrlAction`)を実装し `settings/page.tsx` にマウントする。既存 `ai-prompt-templates-card` の隣に配置
+  - 完了条件: 設定画面で Gem URL を保存・変更でき、再訪時に保存値が表示される
+  - _Requirements: 8.1, 8.2_
+  - _Boundary: GemUrlCard, settings/page_
+  - _Depends: 3.3_
+- [ ] 4.2 ワークベンチに STEP0 を前置する
+  - `ResearchPromptStep`(基本情報サマリ表示 + 「プロンプトをコピー」= 既存 `onCopy` 流用 + 「Gem を開く」= `gemUrl` を新規タブ)を実装し、`paste-workbench.tsx` の先頭(貼付の手前)に**非破壊**でマウントする。`gemUrl` 未設定時は注記し、コピー等の他操作を妨げない
+  - 完了条件: STEP0 でサマリがコピーでき、設定済み Gem URL が開く。既存の貼付・生成が損なわれない。Gem URL 未設定でもコピーは可能
+  - _Requirements: 5.1, 5.2, 5.3, 5.4, 6.1, 6.2, 8.3_
+  - _Boundary: ResearchPromptStep, paste-workbench(前置のみ)_
+  - _Depends: 1.4, 3.3_
+- [ ] 4.3 ワークベンチページで Gem URL とサマリを供給する
+  - `research/[storeId]/page.tsx` で `getGemUrlCached()` を取得し、`buildBasicInfoSummary(store)` の結果と共に `PasteWorkbench` へ渡す。CTA からの `#step0` / `#generate` アンカー遷移が機能するよう該当セクションに id を付与する
+  - 完了条件: STEP0 に正しいサマリと Gem URL が供給され、店舗詳細 CTA からのアンカー遷移が該当ステップに着地する
+  - _Requirements: 5.1, 5.5, 6.1_
+  - _Boundary: research/[storeId]/page_
+  - _Depends: 4.2_
+
+- [ ] 5. #121 整合ゲート (PR3 / #121 着地連動 ― 着地まで未着手)
+- [ ] 5.1 貼付原文の信号 query を #121 の保存先へ差し替える
+  - #121 着地後、`hasResearchText` の出所(暫定 `getDeepResearchReport().full_markdown`)を #121 が定める貼付原文の保存先へ差し替える。`getStoreResearchPhase` 本体は不変であることを確認する(D12 の核 / 単一差替え点)
+  - 完了条件: 信号 query のみの変更で状態導出が #121 後も正しく動作し、純関数に差分が出ない
+  - _Requirements: 3.1, 3.2_
+  - _Boundary: hasResearchText query_
+  - _Depends: 1.2_
+- [ ] 5.2 researched 状態の存続を判定し必要なら縮退する
+  - #121 が「貼付=生成」を密結合化した場合、`researched`(貼付済・未生成)が短命/消滅しうる。存続可否を判定し、消滅するなら 3 状態へ縮退する分岐を `getStoreResearchPhase` 内に吸収する(影響は本関数 + バッジ + CTA に限定)
+  - 完了条件: #121 後の実データで `researched` の出現可否が確認され、状態集合とバッジ/CTA が整合する
+  - _Requirements: 1.1, 1.5, 2.4_
+  - _Boundary: research-phase, ResearchPhaseBadge, NextActionCta_
+  - _Depends: 5.1_
