@@ -1,4 +1,5 @@
 import { formatDistanceMeters } from "@/lib/utils/geo";
+import { formatDiscoverySources } from "./discovery";
 import type { AreaSearchPlaceViewModel } from "./types";
 
 /**
@@ -116,6 +117,9 @@ function combineComparators(...comparators: Comparator[]): Comparator {
   };
 }
 
+// `combineComparators` の比較関数を1つ追加するだけで、`discovery.sourceCount`
+// (複数探索で見つかった候補を優先するルール) を将来 salesCandidate 等に組み込める。
+// 今回はデフォルトの並び順を変えないため未追加。
 function comparatorForMode(
   mode: AreaSearchSortMode,
   addedIds: ReadonlySet<string>,
@@ -213,6 +217,9 @@ export function getAreaSearchRankingReasons(
   if (result.place.userRatingsTotal !== null) {
     reasons.push(`口コミ${result.place.userRatingsTotal.toLocaleString()}件`);
   }
+
+  // 取得元 (どの探索で見つかったか)。例: "メイン検索" / "メイン検索 + 追加キーワード"。
+  reasons.push(formatDiscoverySources(result.discovery));
 
   return reasons;
 }

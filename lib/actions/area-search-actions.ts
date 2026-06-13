@@ -13,9 +13,11 @@ import { placeResultToStoreInput } from "@/lib/places/to-store-input";
 import { placeResultToBasicInfo } from "@/lib/places/to-basic-info";
 import { attachStoreMatches } from "@/lib/places/match-store";
 import { deduplicatePlaceIds } from "@/lib/places/bulk-utils";
+import { createDiscoveryInfo } from "@/lib/places/discovery";
 import { buildTextSearchMeta } from "@/lib/places/search-meta";
 import { distanceMeters } from "@/lib/utils/geo";
 import type {
+  AreaSearchDiscoverySource,
   AreaSearchPlaceViewModel,
   AreaSearchResultPayload,
   PlaceResult,
@@ -60,6 +62,14 @@ export interface SearchPlacesWithMatchesOptions {
    * `locationBias` を使い回す (pageToken のパラメータ不一致を防ぐ)。
    */
   center?: SearchCenter;
+  /**
+   * この呼び出しで見つかった店舗に付与する探索ソース。
+   * 省略時は `pageToken` の有無から自動判定する
+   * (`pageToken` あり = "loadMore"、なし = "mainTextSearch")。
+   * 追加探索 (`area-search-results.tsx` の handleExplore) では
+   * `keywordExploration`/`centerExploration`/`radiusExploration` を明示的に指定する。
+   */
+  discoverySource?: AreaSearchDiscoverySource;
 }
 
 /**
@@ -105,6 +115,9 @@ export async function searchPlacesWithMatchesAction(
       repos.store.list(),
     ]);
 
+    const discoverySource: AreaSearchDiscoverySource =
+      options?.discoverySource ?? (options?.pageToken ? "loadMore" : "mainTextSearch");
+
     const viewModels: AreaSearchPlaceViewModel[] = attachStoreMatches(
       places,
       stores,
@@ -119,6 +132,7 @@ export async function searchPlacesWithMatchesAction(
         ...item,
         distanceMeters: distance,
         isWithinRadius: distance <= radiusMeters,
+        discovery: createDiscoveryInfo(discoverySource),
       };
     });
 

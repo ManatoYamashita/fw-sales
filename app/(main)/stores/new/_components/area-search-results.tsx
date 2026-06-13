@@ -39,6 +39,7 @@ import {
 import { buildTextSearchMeta, getAreaSearchMetaMessages } from "@/lib/places/search-meta";
 import { Select } from "@/components/ui/select";
 import type {
+  AreaSearchDiscoverySource,
   AreaSearchMeta,
   AreaSearchPlaceViewModel,
   SearchCenter,
@@ -74,6 +75,13 @@ const EXPLORATION_KIND_LABELS: Record<ExplorationKind, string> = {
   keyword: "別キーワード",
   center: "周辺地点",
   radius: "半径拡大",
+};
+
+/** 追加探索の種別ごとの discovery source。 */
+const EXPLORATION_DISCOVERY_SOURCES: Record<ExplorationKind, AreaSearchDiscoverySource> = {
+  keyword: "keywordExploration",
+  center: "centerExploration",
+  radius: "radiusExploration",
 };
 
 /** 結果ヘッダーの件数表示。Stat primitive はオーバースペックなので軽量版。 */
@@ -300,7 +308,10 @@ export function AreaSearchResults({
     setExplorationPendingId(runId);
     // center 探索のみ中心地点を未指定にし、新たに resolveSearchCenter させる。
     // keyword/radius 探索はメイン中心地点をそのまま使い回す。
-    const options = kind === "center" ? undefined : { center };
+    const options = {
+      ...(kind === "center" ? {} : { center }),
+      discoverySource: EXPLORATION_DISCOVERY_SOURCES[kind],
+    };
 
     startExplorationTransition(async () => {
       try {

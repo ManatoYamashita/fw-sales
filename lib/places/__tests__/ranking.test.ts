@@ -3,7 +3,17 @@ import {
   getAreaSearchRankingReasons,
   sortAreaSearchResults,
 } from "../ranking";
-import type { AreaSearchPlaceViewModel, MatchedStoreSummary } from "../types";
+import type {
+  AreaSearchDiscoveryInfo,
+  AreaSearchPlaceViewModel,
+  MatchedStoreSummary,
+} from "../types";
+
+const MAIN_TEXT_SEARCH_DISCOVERY: AreaSearchDiscoveryInfo = {
+  sources: ["mainTextSearch"],
+  firstSource: "mainTextSearch",
+  sourceCount: 1,
+};
 
 function makePlace(
   overrides: Partial<AreaSearchPlaceViewModel> = {},
@@ -26,6 +36,7 @@ function makePlace(
     matchedStore: null,
     distanceMeters: 100,
     isWithinRadius: true,
+    discovery: MAIN_TEXT_SEARCH_DISCOVERY,
     ...rest,
   };
 }
@@ -192,6 +203,7 @@ describe("getAreaSearchRankingReasons", () => {
       "320m",
       "評価4.1",
       "口コミ120件",
+      "メイン検索",
     ]);
 
     const registered = makePlace({ matchedStore: REGISTERED });
@@ -216,5 +228,23 @@ describe("getAreaSearchRankingReasons", () => {
     const reasons = getAreaSearchRankingReasons(noRatingNoReviews, NO_ADDED);
     expect(reasons.some((r) => r.startsWith("評価"))).toBe(false);
     expect(reasons.some((r) => r.startsWith("口コミ"))).toBe(false);
+  });
+
+  it("探索ソースを表示理由として含む (複数ソースは + で連結)", () => {
+    const mainOnly = makePlace();
+    expect(getAreaSearchRankingReasons(mainOnly, NO_ADDED)).toEqual(
+      expect.arrayContaining(["メイン検索"]),
+    );
+
+    const multiSource = makePlace({
+      discovery: {
+        sources: ["mainTextSearch", "keywordExploration"],
+        firstSource: "mainTextSearch",
+        sourceCount: 2,
+      },
+    });
+    expect(getAreaSearchRankingReasons(multiSource, NO_ADDED)).toEqual(
+      expect.arrayContaining(["メイン検索 + 追加キーワード"]),
+    );
   });
 });

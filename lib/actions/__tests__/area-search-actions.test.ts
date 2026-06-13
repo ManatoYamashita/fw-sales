@@ -295,6 +295,57 @@ describe("searchPlacesWithMatchesAction", () => {
     }
     expect(mockResolveSearchCenter).not.toHaveBeenCalled();
   });
+
+  it("初回検索 (pageToken/discoverySourceともに未指定) は discovery.sources=['mainTextSearch']", async () => {
+    mockResolveSearchCenter.mockResolvedValue(CENTER);
+    mockSearchPlacesPage.mockResolvedValue(makeSearchPage());
+
+    const result = await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", 1000);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const [vm] = result.data.places;
+      expect(vm?.discovery).toEqual({
+        sources: ["mainTextSearch"],
+        firstSource: "mainTextSearch",
+        sourceCount: 1,
+      });
+    }
+  });
+
+  it("options.pageToken 指定 (もっと読み込む) は discovery.sources=['loadMore']", async () => {
+    mockSearchPlacesPage.mockResolvedValue(makeSearchPage());
+
+    const result = await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", 1000, {
+      center: CENTER,
+      pageToken: "page-2",
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const [vm] = result.data.places;
+      expect(vm?.discovery.firstSource).toBe("loadMore");
+    }
+  });
+
+  it("options.discoverySource を指定すると追加探索のソースが付与される", async () => {
+    mockSearchPlacesPage.mockResolvedValue(makeSearchPage());
+
+    const result = await searchPlacesWithMatchesAction("酒場", "渋谷駅", 1000, {
+      center: CENTER,
+      discoverySource: "keywordExploration",
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const [vm] = result.data.places;
+      expect(vm?.discovery).toEqual({
+        sources: ["keywordExploration"],
+        firstSource: "keywordExploration",
+        sourceCount: 1,
+      });
+    }
+  });
 });
 
 describe("bulkAddStoresFromPlacesAction", () => {

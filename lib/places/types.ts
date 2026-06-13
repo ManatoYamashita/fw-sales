@@ -27,8 +27,36 @@ export interface SearchCenter {
 }
 
 /**
+ * 店舗が見つかった探索の種類。
+ * - `mainTextSearch`: 初回検索 (Text Search 1ページ目)
+ * - `loadMore`: 「もっと読み込む」(同条件の次ページ)
+ * - `keywordExploration`: 別キーワードでの追加探索
+ * - `centerExploration`: 周辺地点での追加探索
+ * - `radiusExploration`: 半径拡大での追加探索
+ */
+export type AreaSearchDiscoverySource =
+  | "mainTextSearch"
+  | "loadMore"
+  | "keywordExploration"
+  | "centerExploration"
+  | "radiusExploration";
+
+/**
+ * 店舗ごとの探索ソース情報。
+ * 同じ店舗が複数の探索で見つかった場合は `sources` に統合される。
+ */
+export interface AreaSearchDiscoveryInfo {
+  /** この店舗が見つかった探索の一覧 (重複なし、見つかった順)。 */
+  sources: AreaSearchDiscoverySource[];
+  /** 最初に見つかった探索。 */
+  firstSource: AreaSearchDiscoverySource;
+  /** `sources.length` (見つかった探索の種類数)。 */
+  sourceCount: number;
+}
+
+/**
  * エリア検索結果1件分の表示用ViewModel。
- * `PlaceWithMatch` に、中心地点からの距離・半径内外判定を付与したもの。
+ * `PlaceWithMatch` に、中心地点からの距離・半径内外判定・探索ソース情報を付与したもの。
  * DB保存用の型 (`PlaceResult`/`PlaceWithMatch`) には混ぜず、表示専用として扱う。
  */
 export type AreaSearchPlaceViewModel = PlaceWithMatch & {
@@ -36,6 +64,8 @@ export type AreaSearchPlaceViewModel = PlaceWithMatch & {
   distanceMeters: number;
   /** 中心地点から指定半径内かどうか (`distanceMeters <= radiusMeters`) */
   isWithinRadius: boolean;
+  /** この店舗が見つかった探索ソース情報。 */
+  discovery: AreaSearchDiscoveryInfo;
 };
 
 /**

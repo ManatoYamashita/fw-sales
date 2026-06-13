@@ -1,4 +1,5 @@
-import type { PlaceWithMatch } from "./types";
+import { mergeDiscoveryInfo } from "./discovery";
+import type { AreaSearchDiscoveryInfo, PlaceWithMatch } from "./types";
 
 /**
  * placeId 配列から重複・空文字を除いた配列を返す純関数。
@@ -27,30 +28,58 @@ export interface MergePlacesStats<T> {
   duplicateCount: number;
 }
 
+type MaybeWithDiscovery = { discovery?: AreaSearchDiscoveryInfo };
+
+/**
+ * 重複時に `existing` 側の `discovery.sources` へ `incoming` 側の新規ソースを統合する。
+ * 両方に `discovery` が無い型 (`AreaSearchPlaceViewModel` を含まない `PlaceWithMatch`)
+ * の場合は `existing` をそのまま返す。
+ */
+function mergeDiscoveryIntoExisting<T extends PlaceWithMatch>(existing: T, incoming: T): T {
+  const existingDiscovery = (existing as T & MaybeWithDiscovery).discovery;
+  const incomingDiscovery = (incoming as T & MaybeWithDiscovery).discovery;
+  if (!existingDiscovery || !incomingDiscovery) {
+    return existing;
+  }
+  const merged = mergeDiscoveryInfo(existingDiscovery, incomingDiscovery);
+  if (merged === existingDiscovery) {
+    return existing;
+  }
+  return { ...existing, discovery: merged } as T;
+}
+
 /**
  * 既存の検索結果 (`current`) に、追加取得結果 (`incoming`) を
  * `place.placeId` ベースで重複除去しながら追記し、追加件数・重複件数も返す純関数。
  *
  * 「もっと読み込む」「追加探索」のいずれでも、既に表示中の店舗と同じ `placeId` が
  * 含まれる場合に重複表示・重複選択を防ぐ。`current` 側を優先し、`incoming` 側の
- * 重複分は破棄する。
+ * 重複分は破棄するが、`discovery.sources` (どの探索で見つかったか) は
+ * `current` 側に統合する。
  */
 export function mergeUniquePlacesWithStats<T extends PlaceWithMatch>(
   current: readonly T[],
   incoming: readonly T[],
 ): MergePlacesStats<T> {
-  const seen = new Set(current.map(({ place }) => place.placeId));
+  const indexByPlaceId = new Map<string, number>();
+  current.forEach((item, index) => indexByPlaceId.set(item.place.placeId, index));
+
+  const merged = [...current];
   const newOnes: T[] = [];
   let duplicateCount = 0;
+
   for (const item of incoming) {
-    if (seen.has(item.place.placeId)) {
+    const existingIndex = indexByPlaceId.get(item.place.placeId);
+    if (existingIndex !== undefined) {
       duplicateCount++;
+      const existing = merged[existingIndex] as T;
+      merged[existingIndex] = mergeDiscoveryIntoExisting(existing, item);
       continue;
     }
-    seen.add(item.place.placeId);
     newOnes.push(item);
   }
-  return { merged: [...current, ...newOnes], addedCount: newOnes.length, duplicateCount };
+
+  return { merged: [...merged, ...newOnes], addedCount: newOnes.length, duplicateCount };
 }
 
 /**
