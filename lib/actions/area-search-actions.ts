@@ -16,6 +16,7 @@ import { placeResultToBasicInfo } from "@/lib/places/to-basic-info";
 import { attachStoreMatches } from "@/lib/places/match-store";
 import { deduplicatePlaceIds } from "@/lib/places/bulk-utils";
 import { createDiscoveryInfo } from "@/lib/places/discovery";
+import { attachCandidateInfo } from "@/lib/places/candidate-info";
 import { buildTextSearchMeta } from "@/lib/places/search-meta";
 import { distanceMeters } from "@/lib/utils/geo";
 import type {
@@ -52,6 +53,28 @@ async function persistAreaSearchCandidates(
   } catch (e) {
     console.error("[area-search] 候補DB保存に失敗しました", e);
     return undefined;
+  }
+}
+
+/**
+ * `place_candidates` を `google_place_id` (= `place.placeId`) で再取得し、
+ * 各 `viewModels` 要素に `candidateInfo` を付与する (候補DB照合 / Issue #129 follow-up)。
+ *
+ * - 保存 (`persistAreaSearchCandidates`) の後に呼ぶことで、保存直後の最新の
+ *   `seenCount`/`lastSeenAt` を反映できる
+ * - 保存が失敗した場合でも、既存の候補DBレコードとの照合は試みる
+ * - 取得自体に失敗しても検索を失敗させない (ログのみ残し、全件 `candidateInfo: null` のまま返す)
+ */
+async function attachAreaSearchCandidateInfo(
+  viewModels: AreaSearchPlaceViewModel[],
+): Promise<AreaSearchPlaceViewModel[]> {
+  const placeIds = viewModels.map((vm) => vm.place.placeId).filter((id) => id !== "");
+  try {
+    const candidates = await repos.placeCandidate.findByGooglePlaceIds(placeIds);
+    return attachCandidateInfo(viewModels, candidates);
+  } catch (e) {
+    console.error("[area-search] 候補DB照合に失敗しました", e);
+    return viewModels;
   }
 }
 
@@ -163,6 +186,7 @@ export async function searchPlacesWithMatchesAction(
         distanceMeters: distance,
         isWithinRadius: distance <= radiusMeters,
         discovery: createDiscoveryInfo(discoverySource),
+        candidateInfo: null,
       };
     });
 
@@ -183,8 +207,10 @@ export async function searchPlacesWithMatchesAction(
       radiusMeters,
     );
 
+    const placesWithCandidateInfo = await attachAreaSearchCandidateInfo(viewModels);
+
     return success({
-      places: viewModels,
+      places: placesWithCandidateInfo,
       nextPageToken,
       center,
       radiusMeters,
@@ -232,6 +258,7 @@ export async function searchNearbyPlacesWithMatchesAction(
         distanceMeters: distance,
         isWithinRadius: distance <= radiusMeters,
         discovery: createDiscoveryInfo("nearbyExploration"),
+        candidateInfo: null,
       };
     });
 
@@ -250,8 +277,10 @@ export async function searchNearbyPlacesWithMatchesAction(
       radiusMeters,
     );
 
+    const placesWithCandidateInfo = await attachAreaSearchCandidateInfo(viewModels);
+
     return success({
-      places: viewModels,
+      places: placesWithCandidateInfo,
       nextPageToken: null,
       center,
       radiusMeters,

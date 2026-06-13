@@ -17,14 +17,14 @@
 
 import "server-only";
 
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { db, type DbClient, type Tx } from "./client";
 import { placeCandidates } from "./schema";
 import type {
   PlaceCandidateRepository,
   UpsertPlaceCandidatesFromAreaSearchResult,
 } from "@/lib/repositories/place-candidate-repository";
-import type { PlaceCandidateStatus } from "@/types/place-candidate";
+import type { PlaceCandidate, PlaceCandidateStatus } from "@/types/place-candidate";
 import { today } from "@/lib/utils/date";
 import { generateId } from "@/lib/utils/id";
 
@@ -117,6 +117,17 @@ export function makePlaceCandidateRepo(
       }
 
       return { insertedCount, updatedCount, skippedCount };
+    },
+
+    async findByGooglePlaceIds(googlePlaceIds) {
+      const dedupedIds = Array.from(new Set(googlePlaceIds));
+      if (dedupedIds.length === 0) return [];
+
+      const rows = await executor
+        .select()
+        .from(placeCandidates)
+        .where(inArray(placeCandidates.google_place_id, dedupedIds));
+      return rows as PlaceCandidate[];
     },
   };
 }

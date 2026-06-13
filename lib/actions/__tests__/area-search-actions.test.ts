@@ -12,6 +12,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PlaceResult, PlaceSearchPage, SearchCenter } from "@/lib/places/types";
 import type { Store } from "@/types/store";
+import type { PlaceCandidate } from "@/types/place-candidate";
 
 vi.mock("server-only", () => ({}));
 
@@ -25,6 +26,7 @@ const {
   mockTransaction,
   mockRevalidateTag,
   mockUpsertPlaceCandidates,
+  mockFindByGooglePlaceIds,
 } = vi.hoisted(() => ({
   mockSearchPlacesPage: vi.fn(),
   mockSearchNearbyPlaces: vi.fn(),
@@ -35,6 +37,7 @@ const {
   mockTransaction: vi.fn(),
   mockRevalidateTag: vi.fn(),
   mockUpsertPlaceCandidates: vi.fn(),
+  mockFindByGooglePlaceIds: vi.fn(),
 }));
 
 vi.mock("@/lib/places/google", () => ({
@@ -49,7 +52,10 @@ vi.mock("@/lib/places/google", () => ({
 vi.mock("@/lib/repositories", () => ({
   repos: {
     store: { list: mockStoreList },
-    placeCandidate: { upsertFromAreaSearch: mockUpsertPlaceCandidates },
+    placeCandidate: {
+      upsertFromAreaSearch: mockUpsertPlaceCandidates,
+      findByGooglePlaceIds: mockFindByGooglePlaceIds,
+    },
     transaction: mockTransaction,
   },
 }));
@@ -110,7 +116,31 @@ beforeEach(() => {
     updatedCount: 0,
     skippedCount: 0,
   });
+  mockFindByGooglePlaceIds.mockResolvedValue([]);
 });
+
+function makePlaceCandidate(overrides: Partial<PlaceCandidate> = {}): PlaceCandidate {
+  return {
+    id: "place_candidate_1",
+    google_place_id: "ChIJtest1",
+    status: "candidate",
+    first_seen_at: "2026-06-01",
+    last_seen_at: "2026-06-14",
+    seen_count: 1,
+    discovery_sources: ["mainTextSearch"],
+    last_searched_keyword: "居酒屋",
+    last_searched_area: "渋谷駅",
+    last_center_lat: CENTER.lat,
+    last_center_lng: CENTER.lng,
+    last_radius_meters: 1000,
+    last_distance_meters: 100,
+    last_is_within_radius: true,
+    matched_store_id: null,
+    created_at: "2026-06-01",
+    updated_at: "2026-06-14",
+    ...overrides,
+  };
+}
 
 describe("searchPlacesWithMatchesAction", () => {
   it("keyword が空の場合は failure を返す", async () => {
@@ -430,6 +460,84 @@ describe("searchPlacesWithMatchesAction", () => {
       });
     }
   });
+
+  it("検索結果にcandidateInfoが付与される", async () => {
+    mockSearchPlacesPage.mockResolvedValue(makeSearchPage({ places: [makePlace({ placeId: "ChIJtest1" })] }));
+    mockFindByGooglePlaceIds.mockResolvedValue([makePlaceCandidate({ google_place_id: "ChIJtest1" })]);
+
+    const result = await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", 1000, {
+      center: CENTER,
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const [vm] = result.data.places;
+      expect(vm?.candidateInfo).toEqual({
+        status: "candidate",
+        seenCount: 1,
+        firstSeenAt: "2026-06-01",
+        lastSeenAt: "2026-06-14",
+        discoverySources: ["mainTextSearch"],
+      });
+      expect(mockFindByGooglePlaceIds).toHaveBeenCalledWith(["ChIJtest1"]);
+    }
+  });
+
+  it("候補が見つからない場合は candidateInfo: null", async () => {
+    mockSearchPlacesPage.mockResolvedValue(makeSearchPage({ places: [makePlace({ placeId: "ChIJtest1" })] }));
+    mockFindByGooglePlaceIds.mockResolvedValue([]);
+
+    const result = await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", 1000, {
+      center: CENTER,
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const [vm] = result.data.places;
+      expect(vm?.candidateInfo).toBeNull();
+    }
+  });
+
+  it("保存後に再取得された最新のseenCountがcandidateInfoに反映される", async () => {
+    mockSearchPlacesPage.mockResolvedValue(makeSearchPage({ places: [makePlace({ placeId: "ChIJtest1" })] }));
+    mockUpsertPlaceCandidates.mockResolvedValue({
+      insertedCount: 0,
+      updatedCount: 1,
+      skippedCount: 0,
+    });
+    mockFindByGooglePlaceIds.mockResolvedValue([
+      makePlaceCandidate({ google_place_id: "ChIJtest1", seen_count: 5 }),
+    ]);
+
+    const result = await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", 1000, {
+      center: CENTER,
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const [vm] = result.data.places;
+      expect(vm?.candidateInfo?.seenCount).toBe(5);
+    }
+
+    const upsertOrder = mockUpsertPlaceCandidates.mock.invocationCallOrder[0]!;
+    const findOrder = mockFindByGooglePlaceIds.mock.invocationCallOrder[0]!;
+    expect(upsertOrder).toBeLessThan(findOrder);
+  });
+
+  it("candidateInfo取得 (findByGooglePlaceIds) 失敗時も検索自体は成功する", async () => {
+    mockSearchPlacesPage.mockResolvedValue(makeSearchPage({ places: [makePlace({ placeId: "ChIJtest1" })] }));
+    mockFindByGooglePlaceIds.mockRejectedValue(new Error("DB接続エラー"));
+
+    const result = await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", 1000, {
+      center: CENTER,
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const [vm] = result.data.places;
+      expect(vm?.candidateInfo).toBeNull();
+    }
+  });
 });
 
 describe("searchNearbyPlacesWithMatchesAction", () => {
@@ -530,6 +638,25 @@ describe("searchNearbyPlacesWithMatchesAction", () => {
         radiusMeters: 1000,
       }),
     );
+  });
+
+  it("Nearby検索結果にもcandidateInfoが付与される", async () => {
+    mockSearchNearbyPlaces.mockResolvedValue([makePlace({ placeId: "ChIJtest1" })]);
+    mockFindByGooglePlaceIds.mockResolvedValue([makePlaceCandidate({ google_place_id: "ChIJtest1" })]);
+
+    const result = await searchNearbyPlacesWithMatchesAction(CENTER, 1000);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const [vm] = result.data.places;
+      expect(vm?.candidateInfo).toEqual({
+        status: "candidate",
+        seenCount: 1,
+        firstSeenAt: "2026-06-01",
+        lastSeenAt: "2026-06-14",
+        discoverySources: ["mainTextSearch"],
+      });
+    }
   });
 });
 

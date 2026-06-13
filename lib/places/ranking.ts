@@ -1,6 +1,6 @@
 import { formatDistanceMeters } from "@/lib/utils/geo";
 import { formatDiscoverySources } from "./discovery";
-import type { AreaSearchPlaceViewModel } from "./types";
+import type { AreaSearchCandidateInfo, AreaSearchPlaceViewModel } from "./types";
 
 /**
  * エリア検索結果一覧の表示順。
@@ -190,6 +190,32 @@ export function sortAreaSearchResults(
 }
 
 /**
+ * 候補DB照合結果 (`candidateInfo`) から表示理由を返す。
+ * `candidateInfo === null` (候補DB未登録 or 今回が初回発見) の場合は空配列。
+ *
+ * 将来的に `seenCount` や `status` を `salesCandidate` 等のスコアに組み込む場合は、
+ * この関数の戻り値ではなく `candidateInfo` を直接参照する比較関数を
+ * `comparatorForMode` に追加する。
+ */
+function getCandidateInfoReasons(candidateInfo: AreaSearchCandidateInfo | null): string[] {
+  if (!candidateInfo) return [];
+
+  switch (candidateInfo.status) {
+    case "ignored":
+      return ["過去に除外済み"];
+    case "added":
+      return ["候補DB: 追加済み"];
+    case "stale":
+      return ["候補DB: 期限切れ"];
+    case "candidate":
+      if (candidateInfo.seenCount <= 1) {
+        return ["候補DB保存済み"];
+      }
+      return ["過去発見済み", `発見${candidateInfo.seenCount}回`];
+  }
+}
+
+/**
  * 店舗カードに表示する「上位理由」を返す。
  * 登録状況・追加状況・範囲内外・距離・評価・口コミ数を、表示順に応じた優先度に
  * かかわらず一定の順序で並べる。
@@ -220,6 +246,9 @@ export function getAreaSearchRankingReasons(
 
   // 取得元 (どの探索で見つかったか)。例: "メイン検索" / "メイン検索 + 追加キーワード"。
   reasons.push(formatDiscoverySources(result.discovery));
+
+  // 候補DB照合結果 (過去発見済み / 発見N回 / 除外済み / 候補DB追加済み)。
+  reasons.push(...getCandidateInfoReasons(result.candidateInfo));
 
   return reasons;
 }

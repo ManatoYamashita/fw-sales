@@ -23,6 +23,7 @@ function makeViewModel(
     distanceMeters: 100,
     isWithinRadius: true,
     discovery: createDiscoveryInfo("mainTextSearch"),
+    candidateInfo: null,
     ...overrides,
   };
 }

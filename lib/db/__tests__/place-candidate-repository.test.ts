@@ -103,6 +103,7 @@ function makePlaceViewModel(
     distanceMeters: 100,
     isWithinRadius: true,
     discovery: createDiscoveryInfo("mainTextSearch"),
+    candidateInfo: null,
     ...overrides,
   };
 }
@@ -283,5 +284,51 @@ describe("makePlaceCandidateRepo.upsertFromAreaSearch", () => {
     expect(result.updatedCount).toBe(0);
     expect(executor.select).not.toHaveBeenCalled();
     expect(executor.inserted).toHaveLength(0);
+  });
+});
+
+describe("makePlaceCandidateRepo.findByGooglePlaceIds", () => {
+  let executor: ReturnType<typeof makeMockExecutor>;
+
+  beforeEach(() => {
+    executor = makeMockExecutor();
+  });
+
+  it("該当する候補を返す", async () => {
+    const row = makeExistingRow({ google_place_id: "ChIJtarget" });
+    executor = makeMockExecutor([row]);
+    const repo = makePlaceCandidateRepo(executor as unknown as DbClient);
+
+    const result = await repo.findByGooglePlaceIds(["ChIJtarget"]);
+
+    expect(result).toEqual([row]);
+  });
+
+  it("空配列ならDB queryせず [] を返す", async () => {
+    const repo = makePlaceCandidateRepo(executor as unknown as DbClient);
+
+    const result = await repo.findByGooglePlaceIds([]);
+
+    expect(result).toEqual([]);
+    expect(executor.select).not.toHaveBeenCalled();
+  });
+
+  it("重複placeIdを渡しても問題なく返る", async () => {
+    const row = makeExistingRow({ google_place_id: "ChIJtarget" });
+    executor = makeMockExecutor([row]);
+    const repo = makePlaceCandidateRepo(executor as unknown as DbClient);
+
+    const result = await repo.findByGooglePlaceIds(["ChIJtarget", "ChIJtarget"]);
+
+    expect(result).toEqual([row]);
+  });
+
+  it("存在しないplaceIdは返らない", async () => {
+    executor = makeMockExecutor([]);
+    const repo = makePlaceCandidateRepo(executor as unknown as DbClient);
+
+    const result = await repo.findByGooglePlaceIds(["ChIJnotfound"]);
+
+    expect(result).toEqual([]);
   });
 });

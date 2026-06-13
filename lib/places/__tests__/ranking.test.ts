@@ -4,6 +4,7 @@ import {
   sortAreaSearchResults,
 } from "../ranking";
 import type {
+  AreaSearchCandidateInfo,
   AreaSearchDiscoveryInfo,
   AreaSearchPlaceViewModel,
   MatchedStoreSummary,
@@ -37,6 +38,7 @@ function makePlace(
     distanceMeters: 100,
     isWithinRadius: true,
     discovery: MAIN_TEXT_SEARCH_DISCOVERY,
+    candidateInfo: null,
     ...rest,
   };
 }
@@ -245,6 +247,68 @@ describe("getAreaSearchRankingReasons", () => {
     });
     expect(getAreaSearchRankingReasons(multiSource, NO_ADDED)).toEqual(
       expect.arrayContaining(["メイン検索 + 追加キーワード"]),
+    );
+  });
+
+  function makeCandidateInfo(
+    overrides: Partial<AreaSearchCandidateInfo> = {},
+  ): AreaSearchCandidateInfo {
+    return {
+      status: "candidate",
+      seenCount: 1,
+      firstSeenAt: "2026-06-01",
+      lastSeenAt: "2026-06-14",
+      discoverySources: ["mainTextSearch"],
+      ...overrides,
+    };
+  }
+
+  it("seenCount === 1 の candidate は「候補DB保存済み」になる", () => {
+    const place = makePlace({ candidateInfo: makeCandidateInfo({ seenCount: 1 }) });
+    expect(getAreaSearchRankingReasons(place, NO_ADDED)).toEqual(
+      expect.arrayContaining(["候補DB保存済み"]),
+    );
+  });
+
+  it("seenCount === 1 では「過去発見済み」を含まない", () => {
+    const place = makePlace({ candidateInfo: makeCandidateInfo({ seenCount: 1 }) });
+    expect(getAreaSearchRankingReasons(place, NO_ADDED)).toEqual(
+      expect.not.arrayContaining(["過去発見済み"]),
+    );
+  });
+
+  it("seenCountが2以上なら「過去発見済み」「発見N回」を含む", () => {
+    const place = makePlace({ candidateInfo: makeCandidateInfo({ seenCount: 3 }) });
+    expect(getAreaSearchRankingReasons(place, NO_ADDED)).toEqual(
+      expect.arrayContaining(["過去発見済み", "発見3回"]),
+    );
+  });
+
+  it("status が ignored なら seenCount に関係なく「過去に除外済み」を含む", () => {
+    const place = makePlace({
+      candidateInfo: makeCandidateInfo({ status: "ignored", seenCount: 5 }),
+    });
+    expect(getAreaSearchRankingReasons(place, NO_ADDED)).toEqual(
+      expect.arrayContaining(["過去に除外済み"]),
+    );
+  });
+
+  it("status が added なら seenCount に関係なく「候補DB: 追加済み」を含む", () => {
+    const place = makePlace({
+      candidateInfo: makeCandidateInfo({ status: "added", seenCount: 5 }),
+    });
+    expect(getAreaSearchRankingReasons(place, NO_ADDED)).toEqual(
+      expect.arrayContaining(["候補DB: 追加済み"]),
+    );
+  });
+
+  it("candidateInfoがnullなら従来通り (候補DB由来の理由を含まない)", () => {
+    const place = makePlace({ candidateInfo: null });
+    const reasons = getAreaSearchRankingReasons(place, NO_ADDED);
+    expect(reasons).not.toEqual(expect.arrayContaining(["過去発見済み"]));
+    expect(reasons.some((r) => r.startsWith("発見"))).toBe(false);
+    expect(reasons).not.toEqual(
+      expect.arrayContaining(["候補DB保存済み", "過去に除外済み", "候補DB: 追加済み"]),
     );
   });
 });

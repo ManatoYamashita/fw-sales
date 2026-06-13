@@ -34,6 +34,7 @@ function makeViewModel(
     distanceMeters: 0,
     isWithinRadius: true,
     discovery: createDiscoveryInfo(source),
+    candidateInfo: null,
   };
 }
 

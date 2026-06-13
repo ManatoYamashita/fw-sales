@@ -1,3 +1,5 @@
+import type { PlaceCandidateStatus } from "@/types/place-candidate";
+
 /** DBに既存の店舗が見つかった場合に返す最小限の情報 */
 export type MatchedStoreSummary = {
   id: string;
@@ -57,9 +59,26 @@ export interface AreaSearchDiscoveryInfo {
 }
 
 /**
+ * `place_candidates` との照合結果 (Issue #129 follow-up, 候補DB照合)。
+ * 該当する候補が無い場合は `null` (= 候補DB未登録、または今回が初回発見)。
+ */
+export interface AreaSearchCandidateInfo {
+  /** 候補の状態 (`'candidate' | 'added' | 'ignored' | 'stale'`)。 */
+  status: PlaceCandidateStatus;
+  /** 見つかった回数 (`place_candidates.seen_count`)。 */
+  seenCount: number;
+  /** 初回に見つかった日 (YYYY-MM-DD)。 */
+  firstSeenAt: string;
+  /** 最後に見つかった日 (YYYY-MM-DD)。 */
+  lastSeenAt: string;
+  /** DB側に蓄積された探索ソースの集合 (今回の検索分も含む)。 */
+  discoverySources: AreaSearchDiscoverySource[];
+}
+
+/**
  * エリア検索結果1件分の表示用ViewModel。
- * `PlaceWithMatch` に、中心地点からの距離・半径内外判定・探索ソース情報を付与したもの。
- * DB保存用の型 (`PlaceResult`/`PlaceWithMatch`) には混ぜず、表示専用として扱う。
+ * `PlaceWithMatch` に、中心地点からの距離・半径内外判定・探索ソース情報・候補DB照合結果を
+ * 付与したもの。DB保存用の型 (`PlaceResult`/`PlaceWithMatch`) には混ぜず、表示専用として扱う。
  */
 export type AreaSearchPlaceViewModel = PlaceWithMatch & {
   /** 中心地点からの距離 (メートル) */
@@ -72,6 +91,11 @@ export type AreaSearchPlaceViewModel = PlaceWithMatch & {
   websiteUri?: string | null;
   /** Place Detailsオンデマンド取得で得た営業状態 (例: "OPERATIONAL")。未取得の場合は undefined。 */
   businessStatus?: string | null;
+  /**
+   * `place_candidates` との照合結果。該当候補が無い場合は `null`。
+   * 表示はカードの小さな補足情報・上位理由 (`getAreaSearchRankingReasons`) に使う。
+   */
+  candidateInfo: AreaSearchCandidateInfo | null;
 };
 
 /**

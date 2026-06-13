@@ -15,6 +15,7 @@
  */
 
 import type { AreaSearchPlaceViewModel, SearchCenter } from "@/lib/places/types";
+import type { PlaceCandidate } from "@/types/place-candidate";
 
 export interface UpsertPlaceCandidatesFromAreaSearchParams {
   places: readonly AreaSearchPlaceViewModel[];
@@ -45,4 +46,13 @@ export interface PlaceCandidateRepository {
   upsertFromAreaSearch(
     params: UpsertPlaceCandidatesFromAreaSearchParams,
   ): Promise<UpsertPlaceCandidatesFromAreaSearchResult>;
+
+  /**
+   * `google_place_id` の配列から候補レコードを取得する (候補DB照合 / Issue #129 follow-up)。
+   *
+   * - 空配列を渡した場合はDBに問い合わせず `[]` を返す
+   * - 重複した `googlePlaceId` は内部で dedupe する
+   * - 一致するレコードのみ返す (見つからない `googlePlaceId` は結果に含まれない)
+   */
+  findByGooglePlaceIds(googlePlaceIds: readonly string[]): Promise<PlaceCandidate[]>;
 }

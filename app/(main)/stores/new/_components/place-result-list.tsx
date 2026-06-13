@@ -10,6 +10,7 @@ import { StarRating } from "@/components/ui/star-rating";
 import { AddStoreButton } from "./add-store-button";
 import { mapGenre } from "@/lib/places/to-store-input";
 import { getAreaSearchRankingReasons } from "@/lib/places/ranking";
+import { formatCandidateInfoLine } from "@/lib/places/candidate-info";
 import { formatDistanceMeters } from "@/lib/utils/geo";
 import { cn } from "@/lib/utils/cn";
 import type { AreaSearchPlaceViewModel } from "@/lib/places/types";
@@ -68,6 +69,7 @@ export function PlaceResultList({
           const isPinClicked = pinClickedPlaceId === place.placeId;
           const genre = mapGenre(place.types);
           const rankingReasons = getAreaSearchRankingReasons(result, addedIds);
+          const candidateInfoLine = formatCandidateInfoLine(result.candidateInfo);
           const isDetailsLoading = detailsLoadingPlaceIds.has(place.placeId);
           const isDetailsLoaded = detailsLoadedPlaceIds.has(place.placeId);
           const detailsError = detailsErrors[place.placeId];
@@ -119,6 +121,12 @@ export function PlaceResultList({
                     <p className="text-[11px] text-muted-foreground">
                       {rankingReasons.join(" / ")}
                     </p>
+
+                    {candidateInfoLine && (
+                      <p className="text-[11px] text-muted-foreground">
+                        {candidateInfoLine}
+                      </p>
+                    )}
 
                     {place.formattedAddress && (
                       <p className="flex items-start gap-1 text-sm text-muted-foreground">
