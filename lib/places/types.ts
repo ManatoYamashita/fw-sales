@@ -33,13 +33,15 @@ export interface SearchCenter {
  * - `keywordExploration`: 別キーワードでの追加探索
  * - `centerExploration`: 周辺地点での追加探索
  * - `radiusExploration`: 半径拡大での追加探索
+ * - `nearbyExploration`: Nearby Searchによる手動の深掘り探索
  */
 export type AreaSearchDiscoverySource =
   | "mainTextSearch"
   | "loadMore"
   | "keywordExploration"
   | "centerExploration"
-  | "radiusExploration";
+  | "radiusExploration"
+  | "nearbyExploration";
 
 /**
  * 店舗ごとの探索ソース情報。

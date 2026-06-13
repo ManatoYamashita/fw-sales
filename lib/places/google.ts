@@ -2,6 +2,7 @@ import "server-only";
 import type { PlaceResult, PlaceSearchPage, SearchCenter } from "./types";
 
 const SEARCH_ENDPOINT = "https://places.googleapis.com/v1/places:searchText";
+const NEARBY_SEARCH_ENDPOINT = "https://places.googleapis.com/v1/places:searchNearby";
 const DETAILS_ENDPOINT = "https://places.googleapis.com/v1/places";
 
 // Text Search のフィールドマスクは "places.<field>" 形式。
@@ -18,6 +19,20 @@ const SEARCH_FIELD_MASK = [
   "places.googleMapsUri",
   "nextPageToken",
 ].join(",");
+
+// Nearby Search のフィールドマスクは "places.<field>" 形式。
+// 手動の深掘り探索用のため、電話番号・評価・営業時間・レビュー等は取得しない (最小限)。
+const NEARBY_FIELD_MASK = [
+  "places.id",
+  "places.displayName",
+  "places.formattedAddress",
+  "places.location",
+  "places.types",
+  "places.googleMapsUri",
+].join(",");
+
+const NEARBY_DEFAULT_INCLUDED_TYPES = ["restaurant", "bar", "cafe"];
+const NEARBY_DEFAULT_MAX_RESULT_COUNT = 20;
 
 // Place Details のフィールドマスクは "places." プレフィックスなし
 const DETAILS_FIELD_MASK = [
@@ -200,6 +215,77 @@ export async function searchPlaces(
   area: string,
 ): Promise<PlaceResult[]> {
   const { places } = await searchPlacesPage(keyword, area);
+  return places;
+}
+
+export interface SearchNearbyPlacesOptions {
+  /** 検索の中心地点。 */
+  center: SearchCenter;
+  /** 検索半径 (メートル)。`locationRestriction.circle.radius` に渡す。 */
+  radiusMeters: number;
+  /** 対象とする Place Type。未指定時は飲食店系のデフォルト3種。 */
+  includedTypes?: string[];
+  /** 取得件数の上限 (1-20)。未指定時は20。 */
+  maxResultCount?: number;
+  /** 並び順。未指定時は距離順 (`DISTANCE`)。 */
+  rankPreference?: "DISTANCE" | "POPULARITY";
+}
+
+/**
+ * Google Places API (New) Nearby Search を1回呼び出す (手動の深掘り探索用)。
+ *
+ * `locationRestriction.circle` で指定した範囲に厳密に絞り込む (Text Search の
+ * `locationBias` とは異なり範囲外の候補は返らない)。フィールドマスクは最小限
+ * (id/displayName/formattedAddress/location/types/googleMapsUri) のみとし、
+ * 電話番号・評価・営業時間・レビュー等は取得しない。
+ */
+export async function searchNearbyPlaces(
+  options: SearchNearbyPlacesOptions,
+): Promise<PlaceResult[]> {
+  const apiKey = process.env.GOOGLE_PLACES_API_KEY;
+  if (!apiKey) {
+    throw new Error("GOOGLE_PLACES_API_KEY が設定されていません");
+  }
+
+  const body = {
+    includedTypes: options.includedTypes ?? NEARBY_DEFAULT_INCLUDED_TYPES,
+    maxResultCount: options.maxResultCount ?? NEARBY_DEFAULT_MAX_RESULT_COUNT,
+    rankPreference: options.rankPreference ?? "DISTANCE",
+    locationRestriction: {
+      circle: {
+        center: {
+          latitude: options.center.lat,
+          longitude: options.center.lng,
+        },
+        radius: options.radiusMeters,
+      },
+    },
+  };
+
+  const response = await fetch(NEARBY_SEARCH_ENDPOINT, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Goog-Api-Key": apiKey,
+      "X-Goog-FieldMask": NEARBY_FIELD_MASK,
+    },
+    body: JSON.stringify(body),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`Places API エラー (${response.status}): ${text}`);
+  }
+
+  const data = (await response.json()) as PlacesResponse;
+  const places: PlaceResult[] = [];
+  for (const raw of data.places ?? []) {
+    const place = toPlaceResult(raw);
+    if (place && isFoodPlace(place.types)) {
+      places.push(place);
+    }
+  }
   return places;
 }
 

@@ -14,6 +14,7 @@ import { PlaceResultList } from "./place-result-list";
 import { AreaSearchMap } from "./area-search-map";
 import {
   bulkAddStoresFromPlacesAction,
+  searchNearbyPlacesWithMatchesAction,
   searchPlacesWithMatchesAction,
 } from "@/lib/actions/area-search-actions";
 import { mergeUniquePlaces, mergeUniquePlacesWithStats } from "@/lib/places/bulk-utils";
@@ -54,10 +55,13 @@ import type {
  */
 type ResultFilter = "all" | "eligible" | "registered" | "inRange";
 
+/** 探索履歴の種別。`ExplorationKind` (条件を変えて探す) + `nearby` (Nearby深掘り探索)。 */
+type ExplorationRunKind = ExplorationKind | "nearby";
+
 /** 「追加探索」1回分の実行記録 (画面内 state のみ。DB保存しない)。 */
 interface ExplorationRun {
   id: string;
-  kind: ExplorationKind;
+  kind: ExplorationRunKind;
   keyword: string;
   centerQuery: string;
   radiusMeters: number;
@@ -71,10 +75,11 @@ interface ExplorationRun {
 /** 探索履歴に保持する最大件数。 */
 const EXPLORATION_HISTORY_LIMIT = 5;
 
-const EXPLORATION_KIND_LABELS: Record<ExplorationKind, string> = {
+const EXPLORATION_KIND_LABELS: Record<ExplorationRunKind, string> = {
   keyword: "別キーワード",
   center: "周辺地点",
   radius: "半径拡大",
+  nearby: "Nearby深掘り",
 };
 
 /** 追加探索の種別ごとの discovery source。 */
@@ -394,6 +399,90 @@ export function AreaSearchResults({
     });
   };
 
+  /**
+   * 「Nearby深掘り探索」: ボタン押下時のみ実行する (自動実行はしない)。
+   * メイン中心地点・メイン半径で Nearby Search を1回呼び出し、結果を既存結果に
+   * `placeId` ベースでマージする (重複分は discovery.sources のみ統合)。
+   * 同じ条件 (中心地点・半径) では再実行しない。
+   */
+  const handleNearbyExplore = () => {
+    const runId = `nearby:${center.lat}:${center.lng}:${mainRadiusMeters}`;
+    if (
+      explorationPendingId ||
+      pendingExplorationRunIdsRef.current.has(runId) ||
+      exploredRunIdsRef.current.has(runId)
+    ) {
+      return;
+    }
+
+    setExplorationError(null);
+    pendingExplorationRunIdsRef.current.add(runId);
+    setExplorationPendingId(runId);
+
+    startExplorationTransition(async () => {
+      try {
+        const result = await searchNearbyPlacesWithMatchesAction(center, mainRadiusMeters);
+
+        if (!result.ok) {
+          setExplorationError(result.error);
+          return;
+        }
+
+        exploredRunIdsRef.current.add(runId);
+        setExploredRunIds(new Set(exploredRunIdsRef.current));
+
+        const fetchedCount = result.data.places.length;
+        const recomputed = result.data.places.map((vm) =>
+          recomputeViewModel(vm, center, mainRadiusMeters),
+        );
+
+        const { merged, addedCount, duplicateCount } = mergeUniquePlacesWithStats(
+          allResults,
+          recomputed,
+        );
+        const newlyAdded = merged.slice(merged.length - addedCount);
+
+        setAllResults(merged);
+        setSearchMeta((prev) =>
+          buildTextSearchMeta({
+            loadedCount: merged.length,
+            hasNextPage: prev.hasNextPage,
+            currentPageCount: result.data.places.length,
+            apiCallEstimate: prev.apiCallEstimate + result.data.meta.apiCallEstimate,
+          }),
+        );
+
+        const newRun: ExplorationRun = {
+          id: runId,
+          kind: "nearby",
+          keyword,
+          centerQuery: area,
+          radiusMeters: mainRadiusMeters,
+          fetchedCount,
+          addedUniqueCount: addedCount,
+          duplicateCount,
+          eligibleCount: newlyAdded.filter((vm) => isEligiblePlace(vm, addedIds)).length,
+          registeredCount: newlyAdded.filter((vm) => vm.matchedStore !== null).length,
+        };
+        setExplorationRuns((runs) =>
+          [newRun, ...runs.filter((run) => run.id !== runId)].slice(
+            0,
+            EXPLORATION_HISTORY_LIMIT,
+          ),
+        );
+
+        if (addedCount > 0) {
+          toast.info(`Nearby深掘り: 新規${addedCount}件 (重複${duplicateCount}件)`);
+        } else {
+          toast.info(`Nearby深掘り: 新規はありません (重複${duplicateCount}件)`);
+        }
+      } finally {
+        pendingExplorationRunIdsRef.current.delete(runId);
+        setExplorationPendingId(null);
+      }
+    });
+  };
+
   const handleAdded = (placeId: string) => {
     setAddedIds((prev) => new Set([...prev, placeId]));
     setSelectedIds((prev) => {
@@ -472,6 +561,9 @@ export function AreaSearchResults({
     0,
   );
 
+  const nearbyRunId = `nearby:${center.lat}:${center.lng}:${mainRadiusMeters}`;
+  const hasNearbyRun = explorationRuns.some((run) => run.kind === "nearby");
+
   const keywordChips = suggestExplorationKeywords(keyword);
   const centerChips = suggestExplorationCenters(area);
   const radiusChips = suggestLargerRadii(mainRadiusMeters);
@@ -530,9 +622,48 @@ export function AreaSearchResults({
           ))}
           <li>
             表示中の候補: {displayedResults.length.toLocaleString()}件
-            {explorationRuns.length > 0 && " (追加探索の結果を含みます)"}
+            {explorationRuns.length > 0 &&
+              (hasNearbyRun
+                ? " (追加探索・Nearby深掘りの結果を含みます)"
+                : " (追加探索の結果を含みます)")}
           </li>
         </ul>
+      </div>
+
+      {/* Nearby深掘り探索: メイン中心地点・メイン半径で Nearby Search を1回呼び出し、
+          既存結果に placeId ベースでマージする (ボタン押下時のみ実行、自動実行はしない)。 */}
+      <div className="rounded-lg border border-border bg-card px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="space-y-0.5">
+            <p className="text-sm font-medium text-foreground">Nearby深掘り探索</p>
+            <p className="text-xs text-muted-foreground">
+              近い飲食店をNearby Searchで追加取得します（API目安 +1回）
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleNearbyExplore}
+            disabled={explorationPendingId !== null || exploredRunIds.has(nearbyRunId)}
+            className="gap-1.5 shrink-0"
+          >
+            {explorationPendingId === nearbyRunId ? (
+              <>
+                <Spinner className="h-3 w-3" />
+                探索中…
+              </>
+            ) : exploredRunIds.has(nearbyRunId) ? (
+              "Nearby深掘り探索済み"
+            ) : (
+              "Nearby深掘り探索"
+            )}
+          </Button>
+        </div>
+        {explorationError && (
+          <p role="alert" className="mt-2 text-sm text-destructive">
+            {explorationError}
+          </p>
+        )}
       </div>
 
       {/* 探索コントロール: 「さらに候補を読み込む」(同一条件の次ページ) と
@@ -691,12 +822,6 @@ export function AreaSearchResults({
                 })}
               </div>
             </div>
-          )}
-
-          {explorationError && (
-            <p role="alert" className="text-sm text-destructive">
-              {explorationError}
-            </p>
           )}
           </div>
           )}

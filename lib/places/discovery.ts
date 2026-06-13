@@ -7,6 +7,7 @@ export const AREA_SEARCH_DISCOVERY_SOURCE_LABELS: Record<AreaSearchDiscoverySour
   keywordExploration: "追加キーワード",
   centerExploration: "周辺地点探索",
   radiusExploration: "半径拡大",
+  nearbyExploration: "Nearby深掘り",
 };
 
 /** 単一の探索ソースから discovery 情報を作成する。 */

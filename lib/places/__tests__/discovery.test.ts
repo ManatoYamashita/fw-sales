@@ -97,4 +97,10 @@ describe("formatDiscoverySources", () => {
     };
     expect(formatDiscoverySources(discovery)).toBe("追加キーワード + 半径拡大");
   });
+
+  it("nearbyExploration は「Nearby深掘り」を返す", () => {
+    expect(formatDiscoverySources(createDiscoveryInfo("nearbyExploration"))).toBe(
+      "Nearby深掘り",
+    );
+  });
 });

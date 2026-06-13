@@ -17,6 +17,7 @@ vi.mock("server-only", () => ({}));
 
 const {
   mockSearchPlacesPage,
+  mockSearchNearbyPlaces,
   mockResolveSearchCenter,
   mockGetPlaceById,
   mockStoreList,
@@ -24,6 +25,7 @@ const {
   mockRevalidateTag,
 } = vi.hoisted(() => ({
   mockSearchPlacesPage: vi.fn(),
+  mockSearchNearbyPlaces: vi.fn(),
   mockResolveSearchCenter: vi.fn(),
   mockGetPlaceById: vi.fn(),
   mockStoreList: vi.fn(),
@@ -33,6 +35,7 @@ const {
 
 vi.mock("@/lib/places/google", () => ({
   searchPlacesPage: mockSearchPlacesPage,
+  searchNearbyPlaces: mockSearchNearbyPlaces,
   resolveSearchCenter: mockResolveSearchCenter,
   getPlaceById: mockGetPlaceById,
   searchPlaces: vi.fn(),
@@ -49,9 +52,11 @@ vi.mock("next/cache", () => ({
   revalidateTag: mockRevalidateTag,
 }));
 
-const { searchPlacesWithMatchesAction, bulkAddStoresFromPlacesAction } = await import(
-  "../area-search-actions"
-);
+const {
+  searchPlacesWithMatchesAction,
+  searchNearbyPlacesWithMatchesAction,
+  bulkAddStoresFromPlacesAction,
+} = await import("../area-search-actions");
 
 const CENTER: SearchCenter = { lat: 35.658, lng: 139.7016 };
 
@@ -345,6 +350,92 @@ describe("searchPlacesWithMatchesAction", () => {
         sourceCount: 1,
       });
     }
+  });
+});
+
+describe("searchNearbyPlacesWithMatchesAction", () => {
+  it("searchNearbyPlaces を center/radiusMeters で呼び出す", async () => {
+    mockSearchNearbyPlaces.mockResolvedValue([makePlace()]);
+
+    await searchNearbyPlacesWithMatchesAction(CENTER, 1000);
+
+    expect(mockSearchNearbyPlaces).toHaveBeenCalledWith({
+      center: CENTER,
+      radiusMeters: 1000,
+    });
+  });
+
+  it("repos.store.list / attachStoreMatches の結果が matchedStore に反映される", async () => {
+    mockSearchNearbyPlaces.mockResolvedValue([
+      makePlace({ placeId: "ChIJregistered", name: "登録済み店舗" }),
+      makePlace({ placeId: "ChIJnew", name: "未登録店舗" }),
+    ]);
+    mockStoreList.mockResolvedValue([
+      makeStore({ id: "store-1", name: "登録済み店舗", google_place_id: "ChIJregistered" }),
+    ]);
+
+    const result = await searchNearbyPlacesWithMatchesAction(CENTER, 1000);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const registered = result.data.places.find((p) => p.place.placeId === "ChIJregistered");
+      const notRegistered = result.data.places.find((p) => p.place.placeId === "ChIJnew");
+      expect(registered?.matchedStore).toEqual({ id: "store-1", name: "登録済み店舗" });
+      expect(notRegistered?.matchedStore).toBeNull();
+    }
+  });
+
+  it("distanceMeters / isWithinRadius が付与される", async () => {
+    mockSearchNearbyPlaces.mockResolvedValue([
+      makePlace({ lat: CENTER.lat, lng: CENTER.lng }),
+    ]);
+
+    const result = await searchNearbyPlacesWithMatchesAction(CENTER, 1000);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const [vm] = result.data.places;
+      expect(vm?.distanceMeters).toBe(0);
+      expect(vm?.isWithinRadius).toBe(true);
+    }
+  });
+
+  it("discovery.source が nearbyExploration になる", async () => {
+    mockSearchNearbyPlaces.mockResolvedValue([makePlace()]);
+
+    const result = await searchNearbyPlacesWithMatchesAction(CENTER, 1000);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const [vm] = result.data.places;
+      expect(vm?.discovery).toEqual({
+        sources: ["nearbyExploration"],
+        firstSource: "nearbyExploration",
+        sourceCount: 1,
+      });
+    }
+  });
+
+  it("meta.apiCallEstimate が1になる", async () => {
+    mockSearchNearbyPlaces.mockResolvedValue([makePlace()]);
+
+    const result = await searchNearbyPlacesWithMatchesAction(CENTER, 1000);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.meta.apiCallEstimate).toBe(1);
+      expect(result.data.meta.source).toBe("textSearch");
+      expect(result.data.nextPageToken).toBeNull();
+    }
+  });
+
+  it("searchNearbyPlaces が throw した場合は failure に変換される", async () => {
+    mockSearchNearbyPlaces.mockRejectedValue(new Error("Places API エラー (500): boom"));
+
+    const result = await searchNearbyPlacesWithMatchesAction(CENTER, 1000);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBe("Places API エラー (500): boom");
   });
 });
 

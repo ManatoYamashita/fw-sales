@@ -162,6 +162,22 @@ describe("mergeUniquePlacesWithStats", () => {
     expect(result.duplicateCount).toBe(1);
   });
 
+  it("mainTextSearch + nearbyExploration の重複merge時にdiscovery.sourcesが両方残る (sourceCount=2)", () => {
+    const current = [makeViewModel("a", "mainTextSearch")];
+    const incoming = [makeViewModel("a", "nearbyExploration")];
+
+    const result = mergeUniquePlacesWithStats(current, incoming);
+
+    expect(result.merged).toHaveLength(1);
+    expect(result.merged[0]?.discovery).toEqual({
+      sources: ["mainTextSearch", "nearbyExploration"],
+      firstSource: "mainTextSearch",
+      sourceCount: 2,
+    });
+    expect(result.duplicateCount).toBe(1);
+    expect(result.addedCount).toBe(0);
+  });
+
   it("元配列(current/incoming)を破壊しない", () => {
     const current = [makeViewModel("a", "mainTextSearch")];
     const incoming = [makeViewModel("a", "keywordExploration")];
