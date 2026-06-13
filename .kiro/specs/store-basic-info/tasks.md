@@ -95,9 +95,14 @@
   - _Depends: 3.5, 3.6_
 
 - [ ] 5. Validation
-- [ ] 5.1 (P)* 純関数の単体検証
+- [x] 5.1 (P)* 純関数の単体検証
   - マージ規則・エリア検索変換・プロンプト断片構築の入出力を受け入れ基準に沿って検証する(手動不可侵・優先ソース上書き・空欄補完・取得ソース付与・未充足省略・構造化非呼出)。自動テスト基盤は未導入のため本機を機に導入を検討、当面は型検査 + 手動確認で代替
   - 完了条件: 各純関数が受け入れ基準どおりの入出力を返すことを確認できる
+  - **検証結果 (2026-06-13)**: vitest 自動テスト基盤を導入済、3 純関数の単体検証を実装し全 pass:
+    - `mergeBasicInfo`: `lib/domain/__tests__/basic-info-merge.test.ts` 16 件 pass (手動不可侵・優先ソース上書き・空欄補完の 3 規則、places ソース挙動 6 件含む)
+    - `placeResultToBasicInfo`: `lib/places/__tests__/to-basic-info.test.ts` 13 件 pass (取得ソース=エリア検索付与、住所正規化、未充足省略)
+    - `basic-info-prompt`: `lib/ai/__tests__/basic-info-prompt.test.ts` 25 件 pass (充足項目のみのテキスト整形、構造化非呼出、貼付テキスト別パート、発信者名注入)
+  - 合計 54 件(5.1 直接対象)、vitest 全体 393/393 件 green、task 5.2 / 5.3 でも本テスト群を根拠に採用済。
   - _Requirements: 5.1, 5.2, 5.3, 3.1, 3.2, 4.2, 7.3_
   - _Boundary: mergeBasicInfo, placeResultToBasicInfo, basic-info-prompt_
 - [x] 5.2 クリティカルパスの E2E 検証 (PR2 完了時)
