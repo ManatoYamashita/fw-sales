@@ -11,6 +11,9 @@ export interface AreaSearchMapProps {
   addedIds: ReadonlySet<string>;
   activePlaceId: string | null;
   onActivatePlace: (placeId: string | null) => void;
+  /** ピン明示クリック時に発火 (ホバー連動とは別経路)。
+      一覧側で対応カードへスクロール+ハイライトするのに使う。 */
+  onPinClick?: (placeId: string) => void;
 }
 
 const SCRIPT_ID = "area-search-google-maps-script";
@@ -88,6 +91,7 @@ export function AreaSearchMap({
   addedIds,
   activePlaceId,
   onActivatePlace,
+  onPinClick,
 }: AreaSearchMapProps) {
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -197,7 +201,10 @@ export function AreaSearchMap({
           map,
           title: vm.place.name,
         });
-        marker.addListener("click", () => onActivatePlace(placeId));
+        marker.addListener("click", () => {
+          onActivatePlace(placeId);
+          onPinClick?.(placeId);
+        });
         markers.set(placeId, marker);
       }
       marker.setIcon(icon);
@@ -210,22 +217,13 @@ export function AreaSearchMap({
         markers.delete(placeId);
       }
     }
-  }, [places, addedIds, activePlaceId, status, onActivatePlace]);
+  }, [places, addedIds, activePlaceId, status, onActivatePlace, onPinClick]);
 
   if (!apiKey) {
-    return (
-      <div className="rounded-md border border-border bg-muted/30 px-4 py-3 text-sm space-y-1">
-        <p className="font-medium text-foreground">地図は表示されていません</p>
-        <p className="text-muted-foreground">
-          地図を表示するには Google Maps JavaScript API
-          キーの設定が必要です(環境変数{" "}
-          <code className="font-mono text-xs bg-background rounded border border-border px-1 py-0.5">
-            NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
-          </code>
-          )。一覧検索はこのまま利用できます。
-        </p>
-      </div>
-    );
+    // NEXT_PUBLIC_GOOGLE_MAPS_API_KEY が未設定の場合は地図エリア自体を出さない。
+    // Places API キー (=エリア検索の前提) は別変数 (GOOGLE_PLACES_API_KEY) で、
+    // そちらの未設定警告は AreaSearchPanel 側で EmptyState として 1 箇所に集約している。
+    return null;
   }
 
   return (

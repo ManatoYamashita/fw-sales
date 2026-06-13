@@ -18,8 +18,10 @@ interface PlaceResultListProps {
   selectedIds: ReadonlySet<string>;
   /** 距離表示の起点ラベル (例: "渋谷駅")。中心地点の入力値をそのまま使う。 */
   centerLabel: string;
-  /** 地図と連動して強調表示する placeId。 */
+  /** 地図と連動して強調表示する placeId (ホバー連動)。 */
   activePlaceId: string | null;
+  /** マップピン明示クリック直後にハイライトする placeId。2秒後に null に戻る。 */
+  pinClickedPlaceId?: string | null;
   /** カードのホバー/クリックで地図側のピンを強調するための通知。 */
   onActivatePlace: (placeId: string | null) => void;
   onAdded: (placeId: string) => void;
@@ -32,6 +34,7 @@ export function PlaceResultList({
   selectedIds,
   centerLabel,
   activePlaceId,
+  pinClickedPlaceId,
   onActivatePlace,
   onAdded,
   onToggle,
@@ -47,19 +50,22 @@ export function PlaceResultList({
           const isEligible = matchedStore === null && !isAdded;
           const isSelected = selectedIds.has(place.placeId);
           const isActive = activePlaceId === place.placeId;
+          const isPinClicked = pinClickedPlaceId === place.placeId;
           const genre = mapGenre(place.types);
 
           return (
             <li
               key={place.placeId}
+              data-place-id={place.placeId}
               onMouseEnter={() => onActivatePlace(place.placeId)}
               onMouseLeave={() => onActivatePlace(null)}
               onClick={() => onActivatePlace(place.placeId)}
             >
               <Card
                 className={cn(
-                  "transition-[box-shadow,opacity]",
+                  "transition-[box-shadow,opacity,ring]",
                   isActive && "ring-2 ring-primary",
+                  isPinClicked && "ring-2 ring-info shadow-lg",
                   !isWithinRadius && "opacity-60",
                 )}
               >

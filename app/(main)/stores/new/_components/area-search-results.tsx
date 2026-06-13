@@ -1,8 +1,12 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useCallback, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { Compass, MapPin, Search, SearchX } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "@/components/ui/toast";
@@ -35,13 +39,6 @@ import type { AreaSearchPlaceViewModel, SearchCenter } from "@/lib/places/types"
  */
 type ResultFilter = "all" | "eligible" | "registered" | "inRange";
 
-const RESULT_FILTER_LABELS: Record<ResultFilter, string> = {
-  all: "すべて",
-  eligible: "登録候補のみ",
-  registered: "DB登録済み",
-  inRange: "範囲内のみ",
-};
-
 /** 一括追加対象 (登録候補): DB未登録 かつ まだ追加していない店舗 */
 function isEligiblePlace(
   { place, matchedStore }: AreaSearchPlaceViewModel,
@@ -72,6 +69,37 @@ const EXPLORATION_KIND_LABELS: Record<ExplorationKind, string> = {
   center: "周辺地点",
   radius: "半径拡大",
 };
+
+/** 結果ヘッダーの件数表示。Stat primitive はオーバースペックなので軽量版。 */
+function MetricPill({
+  label,
+  value,
+  tone = "default",
+}: {
+  label: string;
+  value: number;
+  tone?: "default" | "primary" | "muted" | "success";
+}) {
+  const toneClass = {
+    default: "bg-muted/40 text-foreground",
+    primary: "bg-info-soft text-info",
+    muted: "bg-muted/40 text-muted-foreground",
+    success: "bg-success-soft text-success",
+  }[tone];
+  return (
+    <div className="flex flex-col gap-0.5 rounded-md border border-border px-3 py-1.5">
+      <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+        {label}
+      </span>
+      <span
+        className={`inline-flex w-fit items-baseline gap-0.5 rounded px-1.5 py-0.5 text-sm font-semibold tabular-nums ${toneClass}`}
+      >
+        {value.toLocaleString()}
+        <span className="text-[10px] font-normal opacity-70">件</span>
+      </span>
+    </div>
+  );
+}
 
 export interface AreaSearchResultsProps {
   results: readonly AreaSearchPlaceViewModel[];
@@ -113,6 +141,26 @@ export function AreaSearchResults({
   const [resultFilter, setResultFilter] = useState<ResultFilter>("all");
   // 一覧カードのホバー/クリック、地図ピンのクリックで連動して強調する placeId。
   const [activePlaceId, setActivePlaceId] = useState<string | null>(null);
+  // マップピン明示クリック時のみ、対応カードへスクロール + 2秒ハイライト。
+  // カードホバーで毎回スクロールしないよう、active とは別の state で管理する。
+  const [pinClickedPlaceId, setPinClickedPlaceId] = useState<string | null>(null);
+  const pinClickClearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handlePinClick = useCallback((placeId: string) => {
+    setActivePlaceId(placeId);
+    setPinClickedPlaceId(placeId);
+    // DOM 反映後にスクロール (Suspense/初回マウントでも query が解決できるよう requestAnimationFrame)。
+    requestAnimationFrame(() => {
+      const el = document.querySelector<HTMLElement>(
+        `[data-place-id="${CSS.escape(placeId)}"]`,
+      );
+      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+    if (pinClickClearTimer.current) clearTimeout(pinClickClearTimer.current);
+    pinClickClearTimer.current = setTimeout(() => {
+      setPinClickedPlaceId(null);
+    }, 2000);
+  }, []);
   // bulkResult は全件失敗 (added === 0) のときだけ set される失敗専用の結果。
   const [bulkResult, setBulkResult] = useState<{ failed: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -262,6 +310,12 @@ export function AreaSearchResults({
             ...runs,
           ].slice(0, EXPLORATION_HISTORY_LIMIT),
         );
+        // 新規取得を toast で即時フィードバック(営業担当の認知補助)。
+        if (addedCount > 0) {
+          toast.info(`追加探索: 新規${addedCount}件 (重複${duplicateCount}件)`);
+        } else {
+          toast.info(`追加探索: 新規はありません (重複${duplicateCount}件)`);
+        }
         return merged;
       });
 
@@ -356,65 +410,104 @@ export function AreaSearchResults({
 
   return (
     <div className="space-y-4">
-      {/* 検索条件・取得状況・件数サマリー: 「どこまで取得済みか」「取りこぼしていないか」の不安を減らす */}
-      <div className="rounded-md border border-border bg-muted/30 px-4 py-3 text-sm space-y-1">
-        <p className="text-foreground">
-          検索条件: <span className="font-medium">{keyword}</span> /{" "}
-          <span className="font-medium">{area}</span> / 半径
-          <span className="font-medium">{radiusLabel}</span>
-        </p>
-        <p className="text-muted-foreground">
-          読み込み済み {loadedCount}件 (範囲内 {inRangeCount}件 / 範囲外{" "}
-          {outOfRangeCount}件)
-        </p>
-        <p className="text-muted-foreground">
-          登録候補 {eligibleCount}件 / DB登録済み {registeredCount}件 / 追加済み{" "}
-          {addedCount}件
-        </p>
-        {explorationRuns.length > 0 && (
-          <p className="text-muted-foreground">
-            統合結果: 読み込み済み {loadedCount}件 / 登録候補 {eligibleCount}件 /
-            DB登録済み {registeredCount}件 / 重複除外 {totalDuplicateCount}件
+      {/* 結果ヘッダー: 検索条件チップ + 件数メトリクス。
+          「何を検索したか」「どれくらい取得して、何件が登録候補か」を一目で把握できる構成。 */}
+      <div className="rounded-lg border border-border bg-card px-4 py-3 space-y-3">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm">
+          <span className="text-xs text-muted-foreground">検索条件</span>
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-0.5 text-xs">
+            <Search className="h-3 w-3 text-muted-foreground" />
+            <span className="font-medium text-foreground">{keyword}</span>
+          </span>
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-0.5 text-xs">
+            <MapPin className="h-3 w-3 text-muted-foreground" />
+            <span className="font-medium text-foreground">{area}</span>
+          </span>
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-0.5 text-xs">
+            <Compass className="h-3 w-3 text-muted-foreground" />
+            <span className="font-medium text-foreground">{radiusLabel}</span>
+          </span>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <MetricPill label="読み込み済み" value={loadedCount} />
+          <MetricPill label="登録候補" value={eligibleCount} tone="primary" />
+          <MetricPill label="DB登録済み" value={registeredCount} tone="muted" />
+          <MetricPill label="追加済み" value={addedCount} tone="success" />
+        </div>
+        {(isSearchLimitReached || hasFewEligibleResults || explorationRuns.length > 0) && (
+          <p className="text-xs text-muted-foreground border-t border-border pt-2">
+            {isSearchLimitReached && (
+              <>この条件は最大件数まで読み込み済みです。全店舗を保証するものではないため、条件を変えて追加探索してください。</>
+            )}
+            {!isSearchLimitReached && hasFewEligibleResults && (
+              <>読み込み済みの登録候補が少なめです。下の「追加探索」で条件を変えて探してみてください。</>
+            )}
+            {explorationRuns.length > 0 && (
+              <>
+                {" "}重複除外 {totalDuplicateCount} 件。
+              </>
+            )}
           </p>
         )}
-        <p className="text-xs text-muted-foreground">
-          Google
-          Placesの検索結果に対して、中心地点からの距離を計算し範囲内/範囲外を判定しています。範囲外の候補は一覧・地図に薄く表示されます。
-        </p>
       </div>
 
-      {/* 検索条件の上限到達・登録候補が少ない場合の案内。
-          「渋谷の居酒屋を全件取得した」と誤解させないため、上限到達時は必ず
-          「全店舗を保証するものではない」旨を明示する。 */}
-      {(isSearchLimitReached || hasFewEligibleResults) && (
-        <div className="rounded-md border border-border bg-muted/30 px-4 py-3 text-sm space-y-1">
-          {isSearchLimitReached && (
-            <p className="text-foreground">
-              この条件では最大件数まで読み込み済みです。Google
-              Placesの検索結果であり、この範囲内の全店舗を保証するものではありません。未登録候補をさらに探すには条件を変えて探索してください。
-            </p>
-          )}
-          {hasFewEligibleResults && (
-            <p className="text-muted-foreground">
-              読み込み済み結果では登録候補が少なめです。未登録店舗をさらに探すには、下記の「追加探索」でキーワード・中心地点・半径を変えて探索してください。
-            </p>
-          )}
-        </div>
-      )}
-
-      {/* 追加探索: 「さらに候補を読み込む」(同一条件の次ページ取得) とは異なり、
-          条件 (キーワード/中心地点/半径) を変えて別の候補集合を探す。
+      {/* 探索コントロール: 「さらに候補を読み込む」(同一条件の次ページ) と
+          「追加探索」(条件を変えて別集合を探す) を 1 つの Card に統合し、
+          Separator で区切って「結果の続き」と「条件を変えて探す」を明示する。
           チップ押下時のみ API を呼び出し、自動では実行しない。 */}
-      {(keywordChips.length > 0 || centerChips.length > 0 || radiusChips.length > 0) && (
-        <div className="rounded-md border border-border px-4 py-3 text-sm space-y-3">
+      {(nextPageToken ||
+        keywordChips.length > 0 ||
+        centerChips.length > 0 ||
+        radiusChips.length > 0) && (
+        <Card>
+          <Card.Body className="space-y-3">
+          {nextPageToken && (
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="space-y-0.5">
+                  <p className="text-sm font-medium text-foreground">結果の続き</p>
+                  <p className="text-xs text-muted-foreground">
+                    同じ条件 ({keyword} / {area} / 半径{radiusLabel}) で次の検索結果を取得します。
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleLoadMore}
+                  disabled={isLoadingMore}
+                  className="gap-1.5 shrink-0"
+                >
+                  {isLoadingMore ? (
+                    <>
+                      <Spinner />
+                      読み込み中…
+                    </>
+                  ) : (
+                    "さらに候補を読み込む"
+                  )}
+                </Button>
+              </div>
+              {loadMoreError && (
+                <p role="alert" className="text-sm text-destructive">
+                  {loadMoreError}
+                </p>
+              )}
+            </div>
+          )}
+
+          {nextPageToken &&
+            (keywordChips.length > 0 ||
+              centerChips.length > 0 ||
+              radiusChips.length > 0) && <Separator />}
+
+          {(keywordChips.length > 0 ||
+            centerChips.length > 0 ||
+            radiusChips.length > 0) && (
+          <div className="space-y-3">
           <div className="space-y-1">
-            <p className="font-medium text-foreground">追加探索</p>
+            <p className="text-sm font-medium text-foreground">条件を変えて探す</p>
             <p className="text-xs text-muted-foreground">
-              キーワードや中心地点・半径を変えて、別の候補集合を探します。範囲内/範囲外の判定は中心地点「
-              {area}」・半径{radiusLabel}基準のまま再計算されます。
-            </p>
-            <p className="text-xs text-muted-foreground">
-              追加探索はクリック時のみ実行されます。API使用回数を抑えるため、自動では実行しません。
+              キーワード・中心地点・半径を変えて別の候補集合を取得します。範囲内/範囲外の判定は「{area}」・半径{radiusLabel}基準のまま再計算されます。
             </p>
           </div>
 
@@ -521,11 +614,15 @@ export function AreaSearchResults({
               {explorationError}
             </p>
           )}
+          </div>
+          )}
 
           {explorationRuns.length > 0 && (
-            <div className="space-y-1 border-t border-border pt-2">
-              <p className="text-xs font-medium text-foreground">探索履歴</p>
-              <ul className="space-y-0.5 text-xs text-muted-foreground">
+            <details className="group rounded-md bg-muted/30 px-3 py-2">
+              <summary className="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground">
+                探索履歴 ({explorationRuns.length})
+              </summary>
+              <ul className="mt-2 space-y-0.5 text-xs text-muted-foreground">
                 {explorationRuns.map((run) => (
                   <li key={run.id}>
                     [{EXPLORATION_KIND_LABELS[run.kind]}] {run.keyword} /{" "}
@@ -536,12 +633,13 @@ export function AreaSearchResults({
                   </li>
                 ))}
               </ul>
-            </div>
+            </details>
           )}
-        </div>
+          </Card.Body>
+        </Card>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-4 lg:items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_400px] gap-4 lg:items-start">
         {/* 地図: スマホでは一覧の上、PCでは右側に sticky 表示 */}
         <div className="order-1 lg:order-2 lg:sticky lg:top-4">
           <AreaSearchMap
@@ -551,31 +649,26 @@ export function AreaSearchResults({
             addedIds={addedIds}
             activePlaceId={activePlaceId}
             onActivatePlace={setActivePlaceId}
+            onPinClick={handlePinClick}
           />
         </div>
 
         {/* 一覧 + 操作系: スマホでは地図の下、PCでは左側 */}
         <div className="order-2 lg:order-1 space-y-4">
           {allResults.length > 0 && (
-            <div className="space-y-1">
-              <Tabs
-                value={resultFilter}
-                onValueChange={(next) => setResultFilter(next as ResultFilter)}
-                defaultValue="all"
-                variant="pill"
-              >
-                <TabsList>
-                  <TabsTrigger value="all">すべて</TabsTrigger>
-                  <TabsTrigger value="eligible">登録候補のみ</TabsTrigger>
-                  <TabsTrigger value="registered">DB登録済み</TabsTrigger>
-                  <TabsTrigger value="inRange">範囲内のみ</TabsTrigger>
-                </TabsList>
-              </Tabs>
-              <p className="text-xs text-muted-foreground">
-                現在の表示: {RESULT_FILTER_LABELS[resultFilter]}{" "}
-                {displayedResults.length}件
-              </p>
-            </div>
+            <Tabs
+              value={resultFilter}
+              onValueChange={(next) => setResultFilter(next as ResultFilter)}
+              defaultValue="all"
+              variant="pill"
+            >
+              <TabsList>
+                <TabsTrigger value="all">すべて ({loadedCount})</TabsTrigger>
+                <TabsTrigger value="eligible">候補 ({eligibleCount})</TabsTrigger>
+                <TabsTrigger value="registered">登録済 ({registeredCount})</TabsTrigger>
+                <TabsTrigger value="inRange">範囲内 ({inRangeCount})</TabsTrigger>
+              </TabsList>
+            </Tabs>
           )}
 
           {/* 0 件選択時のみ: 最初の一括選択への導線をリスト上部に残す (Option B)。
@@ -618,46 +711,42 @@ export function AreaSearchResults({
               下に隠れてクリック/確認しづらくなるのを防ぐ。バー高さ + 余白の目安。 */}
           <div className={showBar ? "pb-20" : undefined}>
             {displayedResults.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                {resultFilter === "eligible" ? (
-                  nextPageToken ? (
-                    <>
-                      読み込み済み{loadedCount}件の中には、追加できる登録候補がありません。
-                      <br />
-                      DB登録済みの店舗が{registeredCount}件あります。
-                      <br />
-                      さらに未登録候補を探すには「さらに候補を読み込む」を押してください。
-                    </>
-                  ) : (
-                    <>
-                      読み込み済みの結果には、追加できる登録候補がありません。
-                      <br />
-                      条件を変えて再検索してください。
-                    </>
-                  )
-                ) : resultFilter === "registered" ? (
-                  "読み込み済みの結果には、DB登録済みの店舗はありません。"
-                ) : resultFilter === "inRange" ? (
-                  nextPageToken ? (
-                    <>
-                      読み込み済み{loadedCount}件の中には、半径{radiusLabel}
-                      以内の店舗がありません。
-                      <br />
-                      範囲外の店舗が{outOfRangeCount}件あります。
-                      <br />
-                      さらに候補を読み込むと、範囲内の店舗が見つかる場合があります。
-                    </>
-                  ) : (
-                    <>
-                      読み込み済みの結果には、半径{radiusLabel}以内の店舗がありません。
-                      <br />
-                      中心地点・半径・キーワードを変えて再検索してください。
-                    </>
-                  )
-                ) : (
-                  "該当する店舗が見つかりませんでした。"
-                )}
-              </p>
+              <EmptyState
+                icon={<SearchX />}
+                title={
+                  resultFilter === "eligible"
+                    ? "追加できる登録候補がありません"
+                    : resultFilter === "registered"
+                      ? "DB登録済みの店舗はありません"
+                      : resultFilter === "inRange"
+                        ? `半径${radiusLabel}以内の店舗がありません`
+                        : "該当する店舗が見つかりませんでした"
+                }
+                description={
+                  resultFilter === "eligible"
+                    ? nextPageToken
+                      ? `読み込み済み${loadedCount}件のうちDB登録済が${registeredCount}件あります。さらに未登録候補を探すには「さらに候補を読み込む」を押してください。`
+                      : "条件を変えて再検索するか、上の追加探索チップでキーワード/中心地点/半径を変えてください。"
+                    : resultFilter === "registered"
+                      ? "読み込み済みの結果にはDB登録済みの店舗はありません。"
+                      : resultFilter === "inRange"
+                        ? `範囲外の店舗が${outOfRangeCount}件あります。${nextPageToken ? "さらに候補を読み込むと範囲内の店舗が見つかる場合があります。" : "中心地点・半径・キーワードを変えて再検索してください。"}`
+                        : "キーワード・中心地点・半径を変えて再検索してください。"
+                }
+                action={(() => {
+                  const wider = radiusChips[0];
+                  return resultFilter === "all" && wider !== undefined ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleExplore("radius", wider)}
+                      disabled={explorationPendingId !== null}
+                    >
+                      半径を{formatDistanceMeters(wider)}に広げて再検索
+                    </Button>
+                  ) : undefined;
+                })()}
+              />
             ) : (
               <PlaceResultList
                 results={displayedResults}
@@ -665,51 +754,13 @@ export function AreaSearchResults({
                 selectedIds={selectedIds}
                 centerLabel={area}
                 activePlaceId={activePlaceId}
+                pinClickedPlaceId={pinClickedPlaceId}
                 onActivatePlace={setActivePlaceId}
                 onAdded={handleAdded}
                 onToggle={handleToggle}
               />
             )}
           </div>
-
-          {/* 「さらに候補を読み込む」: nextPageToken が存在する場合のみ表示。
-              コスト管理のため自動取得は行わず、ユーザー操作時のみ追加 API 呼び出しを行う。
-              取得分にも距離計算・範囲内外判定・DB登録済み判定・重複除去・地図ピン追加が
-              同じ action (searchPlacesWithMatchesAction) 経由で適用される。 */}
-          {nextPageToken && (
-            <div className="flex flex-col items-center gap-2">
-              <p className="text-sm text-muted-foreground">
-                {eligibleCount === 0 && registeredCount > 0
-                  ? "読み込み済み分は登録済みが中心です。未登録候補を探すには、さらに候補を読み込んで地図上でも確認してください。"
-                  : "読み込み済みの中に登録候補が少ない場合は、さらに候補を読み込んで地図上でも確認できます。"}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                「さらに候補を読み込む」は同じ条件 ({keyword} / {area} / 半径
-                {radiusLabel}) で次の検索結果を取得します。条件を変えて探すには上の「追加探索」を使ってください。
-              </p>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleLoadMore}
-                disabled={isLoadingMore}
-                className="gap-1.5"
-              >
-                {isLoadingMore ? (
-                  <>
-                    <Spinner />
-                    読み込み中…
-                  </>
-                ) : (
-                  "さらに候補を読み込む"
-                )}
-              </Button>
-              {loadMoreError && (
-                <p role="alert" className="text-sm text-destructive">
-                  {loadMoreError}
-                </p>
-              )}
-            </div>
-          )}
 
           {/* 下部固定バー: 1 件以上選択時のみ表示。
               sticky にすることでメインのコンテンツ幅に追従し、サイドバー折りたたみ (#106) でも
