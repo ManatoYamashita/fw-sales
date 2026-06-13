@@ -105,8 +105,9 @@
   - 完了条件: クリティカルパスが通しで動作し、生成が構造化を経由しない
   - _Requirements: 1.1, 3.1, 5.1, 6.2, 4.1, 7.1, 7.3_
   - _Depends: 3.5, 3.6_
-- [ ] 5.3 撤去後の回帰確認 (PR3 完了後)
+- [x] 5.3 撤去後の回帰確認 (PR3 完了後)
   - 調査系スカラー DROP・構造化資産撤去の後も、基本情報の表示・充填・営業資産生成が破綻しないことを確認する
   - 完了条件: スカラー DROP と構造化撤去の後もクリティカルパスが動作する
+  - **検証結果 (2026-06-13)**: business_hours 列 DROP (PR #128 / 0018) 後の静的回帰確認を完了。typecheck/lint clean、vitest 全 393 件 pass、business_hours スカラー残骸ゼロ、CP①〜⑤ 静的トレース全通過、Vercel CI の Apply Migrations success で本番 Supabase 適用済。structurer 非呼出は task 4.2 で実証済。実機 E2E は task 5.2 (PR2 完了時のクリティカルパス E2E) のスコープに残存。
   - _Requirements: 7.3, 8.1_
   - _Depends: 4.1, 4.2_
