@@ -2,12 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getPlaceDetails,
   resolveSearchCenter,
-  searchNearbyPlaces,
   searchPlacesPage,
 } from "../google";
 
 const SEARCH_ENDPOINT = "https://places.googleapis.com/v1/places:searchText";
-const NEARBY_SEARCH_ENDPOINT = "https://places.googleapis.com/v1/places:searchNearby";
 const DETAILS_ENDPOINT = "https://places.googleapis.com/v1/places";
 
 function jsonResponse(body: unknown, ok = true, status = 200): Response {
@@ -239,150 +237,6 @@ describe("searchPlacesPage レスポンス解釈", () => {
     await expect(searchPlacesPage("居酒屋", "渋谷駅")).rejects.toThrow(
       "GOOGLE_PLACES_API_KEY が設定されていません",
     );
-  });
-});
-
-describe("searchNearbyPlaces", () => {
-  let fetchMock: ReturnType<typeof vi.fn>;
-  const CENTER = { lat: 35.6595, lng: 139.7005 };
-
-  beforeEach(() => {
-    vi.stubEnv("GOOGLE_PLACES_API_KEY", "test-api-key");
-    fetchMock = vi.fn().mockResolvedValue(jsonResponse({ places: [FOOD_PLACE] }));
-    vi.stubGlobal("fetch", fetchMock);
-  });
-
-  afterEach(() => {
-    vi.unstubAllEnvs();
-    vi.unstubAllGlobals();
-  });
-
-  it("places:searchNearby に POST する", async () => {
-    await searchNearbyPlaces({ center: CENTER, radiusMeters: 1000 });
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url] = getFetchCall(fetchMock);
-    expect(url).toBe(NEARBY_SEARCH_ENDPOINT);
-  });
-
-  it("includedTypes/maxResultCount/rankPreference/locationRestriction.circle をボディに設定する", async () => {
-    await searchNearbyPlaces({ center: CENTER, radiusMeters: 1000 });
-
-    const body = getRequestBody(fetchMock);
-    expect(body.includedTypes).toEqual(["restaurant", "bar", "cafe"]);
-    expect(body.maxResultCount).toBe(20);
-    expect(body.rankPreference).toBe("DISTANCE");
-    expect(body.locationRestriction).toEqual({
-      circle: {
-        center: { latitude: CENTER.lat, longitude: CENTER.lng },
-        radius: 1000,
-      },
-    });
-  });
-
-  it("X-Goog-FieldMask は最小限のフィールドのみ含む", async () => {
-    await searchNearbyPlaces({ center: CENTER, radiusMeters: 1000 });
-
-    const [, init] = getFetchCall(fetchMock);
-    const fieldMask = init.headers["X-Goog-FieldMask"];
-    expect(fieldMask).toBe(
-      "places.id,places.displayName,places.formattedAddress,places.location,places.types,places.googleMapsUri",
-    );
-    expect(fieldMask).not.toContain("nationalPhoneNumber");
-    expect(fieldMask).not.toContain("rating");
-    expect(fieldMask).not.toContain("userRatingCount");
-    expect(fieldMask).not.toContain("websiteUri");
-    expect(fieldMask).not.toContain("currentOpeningHours");
-    expect(fieldMask).not.toContain("reviews");
-  });
-
-  it("response.ok=false の場合は例外を投げる", async () => {
-    fetchMock = vi.fn().mockResolvedValue(jsonResponse({ error: "invalid" }, false, 400));
-    vi.stubGlobal("fetch", fetchMock);
-
-    await expect(
-      searchNearbyPlaces({ center: CENTER, radiusMeters: 1000 }),
-    ).rejects.toThrow(/Places API エラー \(400\)/);
-  });
-
-  it("GOOGLE_PLACES_API_KEY が未設定の場合は例外を投げる", async () => {
-    vi.unstubAllEnvs();
-    fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-
-    await expect(
-      searchNearbyPlaces({ center: CENTER, radiusMeters: 1000 }),
-    ).rejects.toThrow("GOOGLE_PLACES_API_KEY が設定されていません");
-  });
-
-  it("必須フィールドが欠落した raw place はスキップされる", async () => {
-    const NO_LOCATION = {
-      id: "ChIJnoLocation",
-      displayName: { text: "位置情報無し店舗" },
-      formattedAddress: "東京都渋谷区テスト5-5-5",
-      types: ["restaurant"],
-    };
-    fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse({ places: [NO_LOCATION, FOOD_PLACE] }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    const places = await searchNearbyPlaces({ center: CENTER, radiusMeters: 1000 });
-
-    expect(places).toHaveLength(1);
-    expect(places[0]?.placeId).toBe("ChIJfood");
-  });
-
-  it("food系typesのみ戻り値に含まれる (lodgingなどは除外)", async () => {
-    const LODGING_PLACE = {
-      id: "ChIJhotel",
-      displayName: { text: "テストホテル" },
-      formattedAddress: "東京都渋谷区テスト2-2-2",
-      location: { latitude: 35.66, longitude: 139.701 },
-      types: ["lodging", "point_of_interest"],
-    };
-    fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse({ places: [FOOD_PLACE, LODGING_PLACE] }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    const places = await searchNearbyPlaces({ center: CENTER, radiusMeters: 1000 });
-
-    expect(places).toHaveLength(1);
-    expect(places[0]?.placeId).toBe("ChIJfood");
-  });
-
-  it("rating/userRatingCountを取得しないため rating=null, userRatingsTotal=null になる", async () => {
-    const places = await searchNearbyPlaces({ center: CENTER, radiusMeters: 1000 });
-
-    expect(places[0]?.rating).toBeNull();
-    expect(places[0]?.userRatingsTotal).toBeNull();
-    expect(places[0]?.phone).toBe("");
-  });
-
-  it("location が正しく PlaceResult の lat/lng にマッピングされる", async () => {
-    const places = await searchNearbyPlaces({ center: CENTER, radiusMeters: 1000 });
-
-    expect(places[0]?.lat).toBe(FOOD_PLACE.location.latitude);
-    expect(places[0]?.lng).toBe(FOOD_PLACE.location.longitude);
-  });
-
-  it("types が無い raw place は food判定できないためスキップされる", async () => {
-    const NO_TYPES = {
-      id: "ChIJnoTypes",
-      displayName: { text: "種別無し店舗" },
-      formattedAddress: "東京都渋谷区テスト6-6-6",
-      location: { latitude: 35.66, longitude: 139.701 },
-    };
-    fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse({ places: [NO_TYPES, FOOD_PLACE] }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    const places = await searchNearbyPlaces({ center: CENTER, radiusMeters: 1000 });
-
-    expect(places).toHaveLength(1);
-    expect(places[0]?.placeId).toBe("ChIJfood");
   });
 });
 

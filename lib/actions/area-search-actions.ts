@@ -6,7 +6,6 @@ import { CACHE_TAGS } from "@/lib/cache";
 import {
   searchPlaces,
   searchPlacesPage,
-  searchNearbyPlaces,
   getPlaceById,
   getPlaceDetails,
   resolveSearchCenter,
@@ -219,76 +218,6 @@ export async function searchPlacesWithMatchesAction(
     });
   } catch (e) {
     return failure(e instanceof Error ? e.message : "検索に失敗しました");
-  }
-}
-
-/**
- * Nearby Search による手動の深掘り探索 (Issue #104 follow-up)。
- *
- * メイン検索 (Text Search, 最大60件) を補完するため、ユーザーが明示的にボタンを
- * 押した場合のみ、中心地点・半径を指定して Nearby Search を1回呼び出す。
- * 取得した候補は常に `discoverySource = "nearbyExploration"` として返す
- * (UI側で既存結果と `placeId` ベースでマージし、`discovery.sources` を統合する)。
- */
-export async function searchNearbyPlacesWithMatchesAction(
-  center: SearchCenter,
-  radiusMeters: number,
-): Promise<ActionResult<AreaSearchResultPayload>> {
-  if (radiusMeters <= 0) {
-    return failure("検索半径が不正です");
-  }
-  try {
-    const [places, stores] = await Promise.all([
-      searchNearbyPlaces({ center, radiusMeters }),
-      repos.store.list(),
-    ]);
-
-    const viewModels: AreaSearchPlaceViewModel[] = attachStoreMatches(
-      places,
-      stores,
-    ).map((item) => {
-      const distance = distanceMeters(
-        center.lat,
-        center.lng,
-        item.place.lat,
-        item.place.lng,
-      );
-      return {
-        ...item,
-        distanceMeters: distance,
-        isWithinRadius: distance <= radiusMeters,
-        discovery: createDiscoveryInfo("nearbyExploration"),
-        candidateInfo: null,
-      };
-    });
-
-    const meta = buildTextSearchMeta({
-      loadedCount: viewModels.length,
-      hasNextPage: false,
-      currentPageCount: 1,
-      apiCallEstimate: 1,
-    });
-
-    const candidatePersistence = await persistAreaSearchCandidates(
-      viewModels,
-      "",
-      "",
-      center,
-      radiusMeters,
-    );
-
-    const placesWithCandidateInfo = await attachAreaSearchCandidateInfo(viewModels);
-
-    return success({
-      places: placesWithCandidateInfo,
-      nextPageToken: null,
-      center,
-      radiusMeters,
-      meta,
-      candidatePersistence,
-    });
-  } catch (e) {
-    return failure(e instanceof Error ? e.message : "Nearby検索に失敗しました");
   }
 }
 

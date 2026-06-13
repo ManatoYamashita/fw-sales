@@ -5,10 +5,10 @@ import type { AreaSearchCandidateInfo, AreaSearchPlaceViewModel } from "./types"
 /**
  * エリア検索結果一覧の表示順。
  * - `salesCandidate`: 営業候補順 (デフォルト)
- * - `google`: Googleおすすめ順 (Text Search の返却順)
+ * - `google`: Google関連度順 (Text Search の返却順)
  * - `distance`: 距離が近い順
  * - `unregistered`: 未登録優先
- * - `rating`: 評価が高い順
+ * - `rating`: 口コミ評価順
  * - `reviews`: 口コミ数が多い順
  */
 export type AreaSearchSortMode =
@@ -21,10 +21,10 @@ export type AreaSearchSortMode =
 
 export const AREA_SEARCH_SORT_MODE_LABELS: Record<AreaSearchSortMode, string> = {
   salesCandidate: "営業候補順",
-  google: "Googleおすすめ順",
+  google: "Google関連度順",
   distance: "距離が近い順",
   unregistered: "未登録優先",
-  rating: "評価が高い順",
+  rating: "口コミ評価順",
   reviews: "口コミ数が多い順",
 };
 

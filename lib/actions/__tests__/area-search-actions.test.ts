@@ -18,7 +18,6 @@ vi.mock("server-only", () => ({}));
 
 const {
   mockSearchPlacesPage,
-  mockSearchNearbyPlaces,
   mockResolveSearchCenter,
   mockGetPlaceById,
   mockGetPlaceDetails,
@@ -29,7 +28,6 @@ const {
   mockFindByGooglePlaceIds,
 } = vi.hoisted(() => ({
   mockSearchPlacesPage: vi.fn(),
-  mockSearchNearbyPlaces: vi.fn(),
   mockResolveSearchCenter: vi.fn(),
   mockGetPlaceById: vi.fn(),
   mockGetPlaceDetails: vi.fn(),
@@ -42,7 +40,6 @@ const {
 
 vi.mock("@/lib/places/google", () => ({
   searchPlacesPage: mockSearchPlacesPage,
-  searchNearbyPlaces: mockSearchNearbyPlaces,
   resolveSearchCenter: mockResolveSearchCenter,
   getPlaceById: mockGetPlaceById,
   getPlaceDetails: mockGetPlaceDetails,
@@ -66,7 +63,6 @@ vi.mock("next/cache", () => ({
 
 const {
   searchPlacesWithMatchesAction,
-  searchNearbyPlacesWithMatchesAction,
   bulkAddStoresFromPlacesAction,
   getPlaceDetailsForAreaSearchAction,
 } = await import("../area-search-actions");
@@ -536,126 +532,6 @@ describe("searchPlacesWithMatchesAction", () => {
     if (result.ok) {
       const [vm] = result.data.places;
       expect(vm?.candidateInfo).toBeNull();
-    }
-  });
-});
-
-describe("searchNearbyPlacesWithMatchesAction", () => {
-  it("searchNearbyPlaces を center/radiusMeters で呼び出す", async () => {
-    mockSearchNearbyPlaces.mockResolvedValue([makePlace()]);
-
-    await searchNearbyPlacesWithMatchesAction(CENTER, 1000);
-
-    expect(mockSearchNearbyPlaces).toHaveBeenCalledWith({
-      center: CENTER,
-      radiusMeters: 1000,
-    });
-  });
-
-  it("repos.store.list / attachStoreMatches の結果が matchedStore に反映される", async () => {
-    mockSearchNearbyPlaces.mockResolvedValue([
-      makePlace({ placeId: "ChIJregistered", name: "登録済み店舗" }),
-      makePlace({ placeId: "ChIJnew", name: "未登録店舗" }),
-    ]);
-    mockStoreList.mockResolvedValue([
-      makeStore({ id: "store-1", name: "登録済み店舗", google_place_id: "ChIJregistered" }),
-    ]);
-
-    const result = await searchNearbyPlacesWithMatchesAction(CENTER, 1000);
-
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      const registered = result.data.places.find((p) => p.place.placeId === "ChIJregistered");
-      const notRegistered = result.data.places.find((p) => p.place.placeId === "ChIJnew");
-      expect(registered?.matchedStore).toEqual({ id: "store-1", name: "登録済み店舗" });
-      expect(notRegistered?.matchedStore).toBeNull();
-    }
-  });
-
-  it("distanceMeters / isWithinRadius が付与される", async () => {
-    mockSearchNearbyPlaces.mockResolvedValue([
-      makePlace({ lat: CENTER.lat, lng: CENTER.lng }),
-    ]);
-
-    const result = await searchNearbyPlacesWithMatchesAction(CENTER, 1000);
-
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      const [vm] = result.data.places;
-      expect(vm?.distanceMeters).toBe(0);
-      expect(vm?.isWithinRadius).toBe(true);
-    }
-  });
-
-  it("discovery.source が nearbyExploration になる", async () => {
-    mockSearchNearbyPlaces.mockResolvedValue([makePlace()]);
-
-    const result = await searchNearbyPlacesWithMatchesAction(CENTER, 1000);
-
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      const [vm] = result.data.places;
-      expect(vm?.discovery).toEqual({
-        sources: ["nearbyExploration"],
-        firstSource: "nearbyExploration",
-        sourceCount: 1,
-      });
-    }
-  });
-
-  it("meta.apiCallEstimate が1になる", async () => {
-    mockSearchNearbyPlaces.mockResolvedValue([makePlace()]);
-
-    const result = await searchNearbyPlacesWithMatchesAction(CENTER, 1000);
-
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.data.meta.apiCallEstimate).toBe(1);
-      expect(result.data.meta.source).toBe("textSearch");
-      expect(result.data.nextPageToken).toBeNull();
-    }
-  });
-
-  it("searchNearbyPlaces が throw した場合は failure に変換される", async () => {
-    mockSearchNearbyPlaces.mockRejectedValue(new Error("Places API エラー (500): boom"));
-
-    const result = await searchNearbyPlacesWithMatchesAction(CENTER, 1000);
-
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toBe("Places API エラー (500): boom");
-  });
-
-  it("Nearby深掘り成功時に候補保存repositoryが呼ばれる", async () => {
-    mockSearchNearbyPlaces.mockResolvedValue([makePlace()]);
-
-    const result = await searchNearbyPlacesWithMatchesAction(CENTER, 1000);
-
-    expect(result.ok).toBe(true);
-    expect(mockUpsertPlaceCandidates).toHaveBeenCalledTimes(1);
-    expect(mockUpsertPlaceCandidates).toHaveBeenCalledWith(
-      expect.objectContaining({
-        center: CENTER,
-        radiusMeters: 1000,
-      }),
-    );
-  });
-
-  it("Nearby検索結果にもcandidateInfoが付与される", async () => {
-    mockSearchNearbyPlaces.mockResolvedValue([makePlace({ placeId: "ChIJtest1" })]);
-    mockFindByGooglePlaceIds.mockResolvedValue([makePlaceCandidate({ google_place_id: "ChIJtest1" })]);
-
-    const result = await searchNearbyPlacesWithMatchesAction(CENTER, 1000);
-
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      const [vm] = result.data.places;
-      expect(vm?.candidateInfo).toEqual({
-        status: "candidate",
-        seenCount: 1,
-        firstSeenAt: "2026-06-01",
-        lastSeenAt: "2026-06-14",
-        discoverySources: ["mainTextSearch"],
-      });
     }
   });
 });
