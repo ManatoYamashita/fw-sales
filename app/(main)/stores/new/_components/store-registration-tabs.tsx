@@ -42,7 +42,7 @@ export interface StoreRegistrationTabsProps {
 }
 
 function normalizeMode(raw: string | null | undefined): RegistrationMode {
-  return raw === "manual" || raw === "area" ? raw : "url";
+  return raw === "manual" || raw === "url" ? raw : "area";
 }
 
 /**
@@ -167,8 +167,8 @@ export function StoreRegistrationTabs({
             <div className="relative flex justify-center">
               <TabsList>
                 <TabsTrigger value="manual">手動</TabsTrigger>
-                <TabsTrigger value="url">URL 貼付</TabsTrigger>
                 <TabsTrigger value="area">エリア検索</TabsTrigger>
+                <TabsTrigger value="url">URL 貼付</TabsTrigger>
               </TabsList>
               {isPending && (
                 <Spinner
