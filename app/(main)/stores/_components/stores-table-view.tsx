@@ -13,7 +13,6 @@ import { StageBadge } from "@/components/feature/stage-badge";
 import { ChannelBadge } from "@/components/feature/channel-badge";
 import { IndividualStoreBadge } from "@/components/feature/individual-store-badge";
 import { StarRating } from "@/components/ui/star-rating";
-import { resolveDisplayState } from "@/types/stage";
 import { formatDate } from "@/lib/utils/date";
 import { toast } from "@/components/ui/toast";
 import type { Store } from "@/types/store";
@@ -28,16 +27,11 @@ export interface StoresTableViewProps {
    * シリアライズ挙動に依存せず、明示的にプレーンな配列で渡す。
    */
   profileEntries: ReadonlyArray<readonly [string, string]>;
-  /**
-   * Deep Research がアクティブな (queued/researching/structuring) 店舗 ID 配列。
-   * Server 側は `Set<string>` で扱うが、RSC 境界では配列にして渡す。
-   */
-  activeDrStoreIds: readonly string[];
+  // task 4.2 (PR3a): activeDrStoreIds props 撤去 (#121 / #110 連動)。
 }
 
 function buildColumns(
   profileMap: Map<string, string>,
-  activeDrStoreIds: Set<string>,
 ): ColumnDef<Store>[] {
   const resolveAssignedSales = (s: Store): string =>
     s.assigned_sales_user_id
@@ -92,13 +86,7 @@ function buildColumns(
     {
       key: "stage",
       header: "状態",
-      cell: (s) => {
-        const displayState = resolveDisplayState(
-          s.stage,
-          activeDrStoreIds.has(s.id),
-        );
-        return <StageBadge stage={displayState} />;
-      },
+      cell: (s) => <StageBadge stage={s.stage} />,
     },
     {
       key: "channel",
@@ -139,12 +127,10 @@ function buildColumns(
 export function StoresTableView({
   stores,
   profileEntries,
-  activeDrStoreIds,
 }: StoresTableViewProps) {
   const router = useRouter();
   const profileMap = new Map(profileEntries);
-  const activeSet = new Set(activeDrStoreIds);
-  const columns = buildColumns(profileMap, activeSet);
+  const columns = buildColumns(profileMap);
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkOpen, setBulkOpen] = useState(false);

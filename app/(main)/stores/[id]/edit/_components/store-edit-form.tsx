@@ -9,11 +9,6 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { ServiceCheckboxGroup } from "@/app/(main)/stores/new/_components/service-checkbox-group";
-import {
-  AiAnalysisPanel,
-  type AiAnalysisFormSnapshot,
-  type PromptTemplateOption,
-} from "@/app/(main)/stores/new/_components/ai-analysis-panel";
 import { updateStoreAction } from "@/lib/actions/store-actions";
 import { decideChannel } from "@/lib/domain/channel";
 import {
@@ -22,30 +17,18 @@ import {
   CHANNELS,
 } from "@/types/store";
 import { toast } from "@/components/ui/toast";
-import { useBeforeUnload } from "@/lib/hooks/use-before-unload";
 import type { Store } from "@/types/store";
 import type { Profile } from "@/types/profile";
-import type {
-  AiAnalysisResult,
-  AiAnalysisConfidence,
-  ConfidenceFieldKey,
-} from "@/types/ai-analysis";
 
 export interface StoreEditFormProps {
   store: Store;
-  /** SSR で取得した GEMINI_API_KEY 設定済み boolean(Req 2.7) */
-  isApiKeyConfigured: boolean;
   /** 担当者選択肢 (Phase 7: profiles に基づく Select オプション) */
   profiles: readonly Profile[];
-  /** SSR で取得したプロンプトテンプレート一覧(Issue #42 Phase 4-D) */
-  promptTemplates: readonly PromptTemplateOption[];
 }
 
 export function StoreEditForm({
   store,
-  isApiKeyConfigured,
   profiles,
-  promptTemplates,
 }: StoreEditFormProps) {
   const [form, setForm] = useState({
     name: store.name,
@@ -70,21 +53,10 @@ export function StoreEditForm({
     operator_type: store.operator_type,
     operator_name: store.operator_name,
   });
-  // 編集モードでは store.ai_analysis_result が初期値(復元、Req 5.2 / 5.4)
-  const [aiResult, setAiResult] = useState<AiAnalysisResult | null>(
-    store.ai_analysis_result,
-  );
-  // 復元時の confidence も初期値として保持(背景色が初期表示される)
-  const [aiConfidence, setAiConfidence] = useState<
-    Partial<AiAnalysisConfidence>
-  >(() => store.ai_analysis_result?.confidence ?? {});
-  // AI 結果が未保存(=編集中)かどうか。store と同期している間は true。
-  const [aiPersisted, setAiPersisted] = useState<boolean>(true);
+  // task 4.2 (PR3a): AiAnalysisPanel 撤去に伴い AI 関連 state / useBeforeUnload 連動を削除。
+  // 営業資産生成は店舗詳細の SalesAssetsGenerator に集約。本フォームは基本情報の編集のみ。
   const [pending, startTransition] = useTransition();
   const router = useRouter();
-
-  // 未保存遷移警告(Req 6.4): AI 結果が編集された未保存状態のときのみ
-  useBeforeUnload(!aiPersisted);
 
   const set = <K extends keyof typeof form>(
     key: K,
@@ -104,66 +76,13 @@ export function StoreEditForm({
     (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
       set(key, e.target.value as (typeof form)[K]);
 
-  // ----- AI Analysis Panel callbacks -----
-
-  const getFormSnapshot = (): AiAnalysisFormSnapshot => ({
-    name: form.name,
-    prefecture: form.prefecture,
-    city: form.city,
-    address: form.address,
-    genre: form.genre,
-    phone: form.phone,
-    site_url: form.site_url,
-    instagram_url: form.instagram_url,
-    map_url: form.map_url,
-    review_avg: form.review_avg,
-    review_count: form.review_count,
-    memo: form.memo,
-    operator_type: form.operator_type,
-    operator_name: form.operator_name,
-    htmlContent: null, // 編集画面では URL 再取得していないため null
-    // Phase 7: user_id → display_name に解決して AI プロンプトに渡す。
-    // 未割当 / 解決失敗時は空文字。
-    assignedSales:
-      profiles.find((p) => p.id === form.assigned_sales_user_id)?.display_name ?? "",
-  });
-
-  const onAiResult = (result: AiAnalysisResult) => {
-    setAiResult(result);
-    setAiConfidence(result.confidence);
-    setAiPersisted(false);
-  };
-
-  const onAiFieldEdit = (field: ConfidenceFieldKey) => {
-    setAiPersisted(false);
-    setAiConfidence((prev) => {
-      if (!(field in prev)) return prev;
-      const next = { ...prev };
-      delete next[field];
-      return next;
-    });
-  };
-
-  const onAiResultFieldChange = (
-    field: keyof Omit<AiAnalysisResult, "confidence">,
-    value: string,
-  ) => {
-    setAiResult((prev) => {
-      if (!prev) return prev;
-      return { ...prev, [field]: value };
-    });
-  };
-
   const submit = (formData: FormData) => {
-    if (aiResult) {
-      formData.set("ai_analysis_result", JSON.stringify(aiResult));
-    } else {
-      formData.set("ai_analysis_result", "");
-    }
+    // task 4.2 (PR3a): AiAnalysisPanel 撤去に伴い ai_analysis_result の編集経路はここから除去。
+    // 既存値の上書き保護のため formData に明示空文字を入れず、updateStoreAction の
+    // readNullableAiAnalysis が FormData から欠落キーを既存値維持として扱う既存挙動に委ねる。
     startTransition(async () => {
       const result = await updateStoreAction(store.id, null, formData);
       if (result.ok) {
-        setAiPersisted(true);
         toast.success(result.message ?? "更新しました");
         router.push(`/stores/${store.id}`);
       } else {
@@ -429,20 +348,7 @@ export function StoreEditForm({
         </Card.Body>
       </Card>
 
-      <AiAnalysisPanel
-        getFormSnapshot={getFormSnapshot}
-        initialResult={store.ai_analysis_result}
-        onResult={onAiResult}
-        onFieldEdit={onAiFieldEdit}
-        isApiKeyConfigured={isApiKeyConfigured}
-        currentResult={aiResult}
-        confidence={aiConfidence}
-        onResultFieldChange={onAiResultFieldChange}
-        storeId={store.id}
-        promptTemplates={promptTemplates}
-      />
-
-      {/* Submit footer: AI Panel の下に独立配置 */}
+      {/* Submit footer (task 4.2 PR3a で AI Panel 撤去、本フォームは基本情報の編集のみ) */}
       <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border bg-muted/30 rounded-md">
         <Button type="button" variant="ghost" onClick={() => router.back()}>
           キャンセル

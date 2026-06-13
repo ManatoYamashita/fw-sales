@@ -28,7 +28,6 @@ import type { ResearchRepository } from "./research-repository";
 import type { HandoffRepository } from "./handoff-repository";
 import type { ProfileRepository } from "./profile-repository";
 import type { NotificationRepository } from "./notification-repository";
-import type { DeepResearchRepository } from "./deep-research-repository";
 import type { PromptTemplateRepository } from "./prompt-template-repository";
 
 export type {
@@ -38,7 +37,6 @@ export type {
   HandoffRepository,
   ProfileRepository,
   NotificationRepository,
-  DeepResearchRepository,
   PromptTemplateRepository,
 };
 
@@ -58,10 +56,9 @@ export interface TxRepos {
   handoff: HandoffRepository;
   profile: ProfileRepository;
   notification: NotificationRepository;
-  /** deep-research-pipeline spec (Issue #43) で追加。 */
-  deepResearch: DeepResearchRepository;
   /** AI プロンプトテンプレート (Issue #42) で追加。 */
   promptTemplate: PromptTemplateRepository;
+  // task 4.2 (PR3a): deepResearch を撤去 (#121 / #110 連動)。
 }
 
 /**
@@ -74,8 +71,6 @@ export interface Repos {
   handoff: HandoffRepository;
   profile: ProfileRepository;
   notification: NotificationRepository;
-  /** deep-research-pipeline spec (Issue #43) で追加。 */
-  deepResearch: DeepResearchRepository;
   /** AI プロンプトテンプレート (Issue #42) で追加。 */
   promptTemplate: PromptTemplateRepository;
   /**
@@ -96,7 +91,6 @@ async function buildRepos(): Promise<Repos> {
     dbHandoffRepo,
     dbProfileRepo,
     dbNotificationRepo,
-    dbDeepResearchRepo,
     dbPromptTemplateRepo,
     makeDealRepo,
     makeStoreRepo,
@@ -104,7 +98,6 @@ async function buildRepos(): Promise<Repos> {
     makeHandoffRepo,
     makeProfileRepo,
     makeNotificationRepo,
-    makeDeepResearchRepo,
     makePromptTemplateRepo,
   } = dbModule;
 
@@ -115,7 +108,6 @@ async function buildRepos(): Promise<Repos> {
     handoff: dbHandoffRepo,
     profile: dbProfileRepo,
     notification: dbNotificationRepo,
-    deepResearch: dbDeepResearchRepo,
     promptTemplate: dbPromptTemplateRepo,
     transaction: <T>(fn: (tx: TxRepos) => Promise<T>): Promise<T> =>
       db.transaction(async (tx) =>
@@ -126,7 +118,6 @@ async function buildRepos(): Promise<Repos> {
           handoff: makeHandoffRepo(tx),
           profile: makeProfileRepo(tx),
           notification: makeNotificationRepo(tx),
-          deepResearch: makeDeepResearchRepo(tx),
           promptTemplate: makePromptTemplateRepo(tx),
         }),
       ),

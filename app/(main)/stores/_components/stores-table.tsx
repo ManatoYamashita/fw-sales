@@ -1,6 +1,5 @@
 import { listStores } from "@/lib/queries/stores";
 import { getAllProfiles } from "@/lib/queries/profiles";
-import { listActiveDeepResearchStoreIds } from "@/lib/queries/deep-research";
 import type { StoreFilter, StoreSort } from "@/types/store";
 import { StoresTableView } from "./stores-table-view";
 
@@ -12,6 +11,8 @@ import { StoresTableView } from "./stores-table-view";
  * (Next.js 16 / React 19 の serialization 制約)。
  * 本コンポーネントはデータ取得のみを担い、レンダリングは
  * `StoresTableView` (`"use client"`) に委譲する。
+ *
+ * task 4.2 (PR3a): listActiveDeepResearchStoreIds 撤去 (#121 / #110 連動)。
  */
 export async function StoresTable({
   filter,
@@ -20,10 +21,9 @@ export async function StoresTable({
   filter: StoreFilter;
   sort?: StoreSort;
 }) {
-  const [stores, profiles, activeDrStoreIds] = await Promise.all([
+  const [stores, profiles] = await Promise.all([
     listStores(filter, sort),
     getAllProfiles({ excludePlaceholders: false }),
-    listActiveDeepResearchStoreIds(),
   ]);
 
   // Map / Set を RSC 境界用にプレーン配列へ変換 (依存しない方が安全)
@@ -32,10 +32,6 @@ export async function StoresTable({
   );
 
   return (
-    <StoresTableView
-      stores={stores}
-      profileEntries={profileEntries}
-      activeDrStoreIds={[...activeDrStoreIds]}
-    />
+    <StoresTableView stores={stores} profileEntries={profileEntries} />
   );
 }

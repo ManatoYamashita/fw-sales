@@ -1,10 +1,8 @@
 import type { Metadata } from "next";
 import { StoreRegistrationTabs } from "./_components/store-registration-tabs";
-import { isApiKeyConfigured, isPlacesApiKeyConfigured } from "@/lib/env";
+import { isPlacesApiKeyConfigured } from "@/lib/env";
 import { getAllProfiles } from "@/lib/queries/profiles";
 import { getCurrentProfile } from "@/lib/supabase/server";
-import { listPromptTemplatesCached } from "@/lib/queries/prompt-templates";
-import type { PromptTemplateOption } from "./_components/ai-analysis-panel";
 
 export const metadata: Metadata = {
   title: "店舗登録",
@@ -25,9 +23,9 @@ export default async function NewStorePage({
 }: {
   searchParams: SearchParams;
 }) {
-  // GEMINI_API_KEY / GOOGLE_PLACES_API_KEY の有無を SSR で判定し、Client へ boolean のみで渡す。
-  // 値そのものは渡さず、AI 分析ボタン / エリア検索ボタンの disabled 制御にのみ使う。
-  const apiKeyConfigured = isApiKeyConfigured();
+  // GOOGLE_PLACES_API_KEY の有無を SSR で判定し、Client へ boolean のみで渡す。
+  // (旧 GEMINI_API_KEY 用 isApiKeyConfigured / プロンプトテンプレート取得は task 4.2 / PR3a で
+  // AiAnalysisPanel 撤去に伴い不要になった。営業資産生成は店舗詳細の SalesAssetsGenerator に統一。)
   const placesApiConfigured = isPlacesApiKeyConfigured();
   // 担当者選択肢 + 現在ログイン中ユーザを SSR で取得し props 経由で渡す (Phase 7.3)。
   const [profiles, currentProfile, sp] = await Promise.all([
@@ -36,12 +34,6 @@ export default async function NewStorePage({
     searchParams,
   ]);
   const initialMode = normalizeMode(sp.mode);
-  // プロンプトテンプレート一覧: id/name/is_default のみに絞ってクライアントへ渡す (Issue #42 Phase 4-D)
-  const promptTemplates: PromptTemplateOption[] = currentProfile
-    ? (await listPromptTemplatesCached(currentProfile.id)).map(
-        ({ id, name, is_default }) => ({ id, name, is_default }),
-      )
-    : [];
 
   return (
     <div className="space-y-4 max-w-4xl mx-auto">
@@ -55,11 +47,9 @@ export default async function NewStorePage({
       </div>
       <StoreRegistrationTabs
         initialMode={initialMode}
-        isApiKeyConfigured={apiKeyConfigured}
         isPlacesApiConfigured={placesApiConfigured}
         profiles={profiles}
         currentProfileId={currentProfile?.id ?? null}
-        promptTemplates={promptTemplates}
       />
     </div>
   );
