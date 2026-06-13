@@ -29,6 +29,7 @@ import type { HandoffRepository } from "./handoff-repository";
 import type { ProfileRepository } from "./profile-repository";
 import type { NotificationRepository } from "./notification-repository";
 import type { PromptTemplateRepository } from "./prompt-template-repository";
+import type { AppSettingsRepository } from "./app-settings-repository";
 
 export type {
   DealRepository,
@@ -38,6 +39,7 @@ export type {
   ProfileRepository,
   NotificationRepository,
   PromptTemplateRepository,
+  AppSettingsRepository,
 };
 
 /**
@@ -58,6 +60,8 @@ export interface TxRepos {
   notification: NotificationRepository;
   /** AI プロンプトテンプレート (Issue #42) で追加。 */
   promptTemplate: PromptTemplateRepository;
+  /** アプリ全体設定 key-value (Issue #122) で追加。 */
+  appSettings: AppSettingsRepository;
   // task 4.2 (PR3a): deepResearch を撤去 (#121 / #110 連動)。
 }
 
@@ -73,6 +77,8 @@ export interface Repos {
   notification: NotificationRepository;
   /** AI プロンプトテンプレート (Issue #42) で追加。 */
   promptTemplate: PromptTemplateRepository;
+  /** アプリ全体設定 key-value (Issue #122) で追加。 */
+  appSettings: AppSettingsRepository;
   /**
    * 複数リポジトリ書込みを 1 トランザクションで実行する。
    * `db.transaction` で BEGIN/COMMIT/ROLLBACK を自動制御。
@@ -92,6 +98,7 @@ async function buildRepos(): Promise<Repos> {
     dbProfileRepo,
     dbNotificationRepo,
     dbPromptTemplateRepo,
+    dbAppSettingsRepo,
     makeDealRepo,
     makeStoreRepo,
     makeResearchRepo,
@@ -99,6 +106,7 @@ async function buildRepos(): Promise<Repos> {
     makeProfileRepo,
     makeNotificationRepo,
     makePromptTemplateRepo,
+    makeAppSettingsRepo,
   } = dbModule;
 
   return Object.freeze({
@@ -109,6 +117,7 @@ async function buildRepos(): Promise<Repos> {
     profile: dbProfileRepo,
     notification: dbNotificationRepo,
     promptTemplate: dbPromptTemplateRepo,
+    appSettings: dbAppSettingsRepo,
     transaction: <T>(fn: (tx: TxRepos) => Promise<T>): Promise<T> =>
       db.transaction(async (tx) =>
         fn({
@@ -119,6 +128,7 @@ async function buildRepos(): Promise<Repos> {
           profile: makeProfileRepo(tx),
           notification: makeNotificationRepo(tx),
           promptTemplate: makePromptTemplateRepo(tx),
+          appSettings: makeAppSettingsRepo(tx),
         }),
       ),
   }) satisfies Repos;

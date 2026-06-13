@@ -25,6 +25,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/toast";
 import { generateSalesAssetsAction } from "@/lib/actions/sales-assets-actions";
 import { updateStorePatchAction } from "@/lib/actions/store-actions";
+import { ResearchPromptStep } from "./research-prompt-step";
 import type { Store } from "@/types/store";
 import type { AiAnalysisResult } from "@/lib/ai/schema";
 
@@ -43,9 +44,17 @@ const SCRIPT_FIELDS: ReadonlyArray<{
 
 interface PasteWorkbenchProps {
   store: Store;
+  /** STEP0: 外部 Gem へ渡す調査プロンプト (server で buildBasicInfoBlock 算出済)。 */
+  researchPrompt: string;
+  /** STEP0「Gem を開く」が開く URL。未設定なら null。 */
+  gemUrl: string | null;
 }
 
-export function PasteWorkbench({ store }: PasteWorkbenchProps) {
+export function PasteWorkbench({
+  store,
+  researchPrompt,
+  gemUrl,
+}: PasteWorkbenchProps) {
   const router = useRouter();
   const [markdown, setMarkdown] = useState<string>("");
   const [aiResult, setAiResult] = useState<AiAnalysisResult | null>(
@@ -131,6 +140,8 @@ export function PasteWorkbench({ store }: PasteWorkbenchProps) {
           貼付欄が空でも基本情報のみで生成可能です。
         </p>
       </div>
+
+      <ResearchPromptStep researchPrompt={researchPrompt} gemUrl={gemUrl} />
 
       <Card>
         <Card.Header>

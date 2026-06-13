@@ -43,39 +43,39 @@
 - [x] 2.4 ~~死蔵 cron CTA の表示抑止~~ → **削除(不要)**
   - store-basic-info task 4.2(PR3a)で `DeepResearchSection` / `deep-research-enqueue-button` / `getDeepResearchReport` が既に撤去済。店舗詳細は `StoreTitleSection + StoreDetailTabs` のクリーン構成で、抑止対象が存在しない
 
-- [ ] 3. Gem URL 永続化基盤 (PR2)
-- [ ] 3.1 app_settings テーブルを追加する
-  - key-value 設定テーブル(`key` PK / `value` NOT NULL / `updated_at`)を `lib/db/schema.ts` に定義し次番号(現 main の最新 idx を確認の上)マイグレーションを作成。既存列は汚さず独立テーブル。生成 SQL は孤児マイグレ混入を避け目視レビュー・純粋差分に手修正、CI で適用
-  - 完了条件: マイグレーションが CI で適用され `app_settings` が存在する
+- [x] 3. Gem URL 永続化基盤 (PR2)
+- [x] 3.1 app_settings テーブルを追加する
+  - `lib/db/schema.ts` に `appSettings` 定義 + `drizzle/0019_add_app_settings.sql`(db:generate→純粋差分確認済・自動名を記述名へ rename + journal tag 更新)。既存列は汚さず独立テーブル
+  - 完了条件: マイグレーション作成済・純粋差分確認済。**CI 適用待ち**(ローカル migrate は本番直結のため未実行)
   - _Requirements: 8.1_
   - _Boundary: app_settings(schema)_
-- [ ] 3.2 app_settings リポジトリを実装する
+- [x] 3.2 app_settings リポジトリを実装する
   - `get(key)` / `set(key,value)`(upsert)を実装し `repos.appSettings` に登録。予約キー `deep_research_gem_url`
   - 完了条件: get/set 往復で永続化され、再保存が upsert される
   - _Requirements: 8.1_
   - _Boundary: app-settings-repository_
   - _Depends: 3.1_
-- [ ] 3.3 Gem URL の query と action を実装する
+- [x] 3.3 Gem URL の query と action を実装する
   - `getGemUrlCached()`(`'use cache'` + 新設 `CACHE_TAGS.appSettings`、`lib/cache.ts` 規約準拠)と `setGemUrlAction(url)`(認証必須 / http(s) 最小検証 / 保存後 `revalidateTag`)
   - 完了条件: query で保存値が読め、action で保存・再検証、不正 URL は失敗で既存値不変
   - _Requirements: 8.1, 8.2_
   - _Boundary: getGemUrlCached, setGemUrlAction_
   - _Depends: 3.2_
 
-- [ ] 4. STEP0 と設定 UI の結線 (PR2)
-- [ ] 4.1 設定画面に Gem URL カードを追加する
+- [x] 4. STEP0 と設定 UI の結線 (PR2)
+- [x] 4.1 設定画面に Gem URL カードを追加する
   - `GemUrlCard`(入力 + 保存 = `setGemUrlAction`)を `settings/page.tsx` の `AiPromptTemplatesCard` 隣にマウント
   - 完了条件: 設定で Gem URL を保存・変更でき、再訪時に保存値が表示される
   - _Requirements: 8.1, 8.2_
   - _Boundary: GemUrlCard, settings/page_
   - _Depends: 3.3_
-- [ ] 4.2 ワークベンチに STEP0 を前置する
+- [x] 4.2 ワークベンチに STEP0 を前置する
   - `ResearchPromptStep`(調査プロンプト表示 = 既存 `buildBasicInfoBlock(store.basic_info)` を再利用 + 「プロンプトをコピー」= 既存 `onCopy` + 「Gem を開く」= `gemUrl` を新規タブ)を `paste-workbench.tsx` の貼付欄の手前に**非破壊**でマウント。`gemUrl` 未設定時は注記しコピーは可能
   - 完了条件: STEP0 でプロンプトがコピーでき設定済み Gem URL が開く。既存の貼付→生成が損なわれない。未設定でもコピー可
   - _Requirements: 5.1, 5.2, 5.3, 5.4, 6.1, 6.2, 8.3_
   - _Boundary: ResearchPromptStep, paste-workbench(前置のみ)_
   - _Depends: 3.3_
-- [ ] 4.3 ワークベンチページで Gem URL を供給する
+- [x] 4.3 ワークベンチページで Gem URL を供給する
   - `research/[storeId]/page.tsx` で `getGemUrlCached()` を取得し `PasteWorkbench` へ `gemUrl` を渡す。`buildBasicInfoBlock` は store.basic_info から算出して供給
   - 完了条件: STEP0 に正しいプロンプトと Gem URL が供給される
   - _Requirements: 5.1, 5.5, 6.1_

@@ -28,4 +28,6 @@ export const CACHE_TAGS = {
   // (#121 / #110 連動)。
   // AI プロンプトテンプレート (Issue #42)
   promptTemplates: "prompt-templates",
+  // アプリ全体設定 key-value (store-flow-guidance / Issue #122)
+  appSettings: "app-settings",
 } as const;
