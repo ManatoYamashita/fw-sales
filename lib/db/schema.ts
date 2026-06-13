@@ -288,3 +288,21 @@ export const aiPromptTemplates = pgTable(
     // partial unique index (WHERE is_default = true) は migration 0009 に raw SQL で追加
   ],
 );
+
+/**
+ * app_settings テーブル (store-flow-guidance / Issue #122)
+ *
+ * アプリ全体の設定をキー・バリュー形式で保持する汎用テーブル。現状の利用は
+ * 調査用 Gem (Gemini GUI) へのリンク URL (`deep_research_gem_url`) のみ。
+ *
+ * - `key` は設定キー (PK)。`value` は文字列値 (URL 等)。
+ * - `updated_at` は既存規約に従い `YYYY-MM-DD` 形式 text。
+ * - 全社共通の単一値を想定 (user 別ではない)。user/組織別が必要になればキー設計を拡張。
+ *
+ * 関連: Issue #122, drizzle/0019_add_app_settings.sql
+ */
+export const appSettings = pgTable("app_settings", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  updated_at: text("updated_at").notNull(),
+});

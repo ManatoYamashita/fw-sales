@@ -8,10 +8,19 @@ import { Input } from "@/components/ui/input";
 import { FormField } from "@/components/ui/form-field";
 import { toast } from "@/components/ui/toast";
 import { IndividualStoreBadge } from "@/components/feature/individual-store-badge";
+import { ResearchPhaseBadge } from "./research-phase-badge";
+import { NextActionCta } from "./next-action-cta";
 import { updateStorePatchAction } from "@/lib/actions/store-actions";
+import type { ResearchPhase } from "@/lib/domain/store-research-phase";
 import type { Store, StorePatch } from "@/types/store";
 
-export function StoreTitleSection({ store }: { store: Store }) {
+export function StoreTitleSection({
+  store,
+  phase,
+}: {
+  store: Store;
+  phase: ResearchPhase;
+}) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -95,6 +104,7 @@ export function StoreTitleSection({ store }: { store: Store }) {
       <h2 className="text-xl md:text-2xl font-bold text-foreground inline-flex items-center gap-2 flex-wrap">
         {store.name}
         <IndividualStoreBadge operatorType={store.operator_type} />
+        <ResearchPhaseBadge phase={phase} />
         <Button
           type="button"
           variant="ghost"
@@ -111,6 +121,9 @@ export function StoreTitleSection({ store }: { store: Store }) {
           .filter(Boolean)
           .join(" / ") || "—"}
       </p>
+      <div className="mt-3">
+        <NextActionCta phase={phase} storeId={store.id} />
+      </div>
     </div>
   );
 }

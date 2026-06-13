@@ -7,6 +7,7 @@ import { getStoreCached } from "@/lib/queries/stores";
 import { listDealsByStoreCached } from "@/lib/queries/deals";
 import { getAllProfiles } from "@/lib/queries/profiles";
 import { isApiKeyConfigured } from "@/lib/env";
+import { getStoreResearchPhase } from "@/lib/domain/store-research-phase";
 
 type Params = Promise<{ id: string }>;
 
@@ -39,6 +40,8 @@ export default async function StoreDetailPage({
   const deals = await listDealsByStoreCached(store.id);
   const dealCount = deals.length;
   const apiKeyConfigured = isApiKeyConfigured();
+  // 調査フェーズ (未調査 / 調査可 / 生成済み) を現行スキーマから純粋に導出する。
+  const researchPhase = getStoreResearchPhase(store);
 
   return (
     <div className="space-y-4">
@@ -49,7 +52,7 @@ export default async function StoreDetailPage({
         >
           ← 店舗一覧
         </Link>
-        <StoreTitleSection store={store} />
+        <StoreTitleSection store={store} phase={researchPhase} />
       </div>
 
       <StoreDetailTabs

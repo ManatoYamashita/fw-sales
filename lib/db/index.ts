@@ -36,3 +36,7 @@ export {
   makePromptTemplateRepo,
   dbPromptTemplateRepo,
 } from "./prompt-template-repository";
+export {
+  makeAppSettingsRepo,
+  dbAppSettingsRepo,
+} from "./app-settings-repository";
