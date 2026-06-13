@@ -2,7 +2,8 @@
 
 > **Re-baseline 注記 (2026-06-13)**: 本書策定後、兄弟 spec `store-basic-info` が #114(`basic_info` jsonb 一本化)/ #121(ワークベンチ単線化・Stage2 構造化撤去・生成集約)を**完遂**した。これに伴い以下を現 main へ再整合する(詳細は tasks.md 冒頭):
 > - **状態は 4→3**(`未調査` / `調査可` / `生成済`)。`調査取込済` は貼付テキストが永続化されない(生成時に瞬間的に渡すのみ)ため検出信号が無く**縮退**。R1 の状態集合・R2 の状態別 CTA はこの 3 状態で読む。
-> - **状態信号**は `basic_info` の充足(`filled_by!==null`)+ `ai_analysis_result` の有無。旧 `full_markdown` / `research_reports` 信号は撤去済。R4 のコア充足は `basic_info` のコアキー(primary="places" の 6 項目)で評価し、旧スカラー列の空文字 sentinel は不要。
+> - **状態信号**は `basic_info` の充足(`filled_by!==null`)+ `ai_analysis_result` の有無。旧 `full_markdown` / `research_reports` 信号は撤去済。R4 のコア充足は `basic_info` のコアキー(primary="places" から `store_name` を除く 6 項目: address/cuisine_genre/business_hours_holidays/official_site/location_feature/nearest_station)で評価し、旧スカラー列の空文字 sentinel は不要。
+> - **R4 の充足閾値は「過半(3/5)」→「コア 2 項目」へ是正**(E2E 実測)。エリア検索の自動充填が埋めるコアは `address`+`cuisine_genre` の 2 項目のため、閾値 3 では標準フロー「エリア検索→調査可」が成立しない。R4.3/4.4 の「3 項目以上/過半」は本注記の「2 項目以上」で読み替える。
 > - **生成集約・死蔵 cron CTA 撤去は store-basic-info が完了済**。本 spec の該当言及(#114 非依存 / 死蔵 CTA 抑止)は「既達」として読む。
 > - **STEP0 の調査プロンプト**は新規ヘルパを起こさず既存 `buildBasicInfoBlock`(`lib/ai/basic-info-prompt.ts`)を再利用。
 

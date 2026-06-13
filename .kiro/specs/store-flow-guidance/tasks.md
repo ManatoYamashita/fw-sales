@@ -10,7 +10,7 @@
   - _Requirements: 4.1, 4.2_
   - _Boundary: store-research-phase(filledCoreCount)_
 - [x] 1.2 状態導出の純関数を実装する
-  - `getStoreResearchPhase(store)`: `ai_analysis_result` 非 null → `generated` / `filledCoreCount >= READY_CORE_THRESHOLD(3)` → `ready` / else → `untouched`。`Pick<Store, "ai_analysis_result"|"basic_info">` を受ける純関数。登録経路に依らず同一信号で判定
+  - `getStoreResearchPhase(store)`: `ai_analysis_result` 非 null → `generated` / `filledCoreCount >= READY_CORE_THRESHOLD(2)` → `ready` / else → `untouched`。`Pick<Store, "ai_analysis_result"|"basic_info">` を受ける純関数。登録経路に依らず同一信号で判定。**閾値は E2E 実測で 3→2 に是正**(エリア検索の `placeResultToBasicInfo` が埋めるコアは `address`+`cuisine_genre` の 2 項目のみ。閾値 3 だと標準フローで誰も「調査可」に到達せず状態機械が潰れるため)
   - 完了条件: 3 状態の境界(ai 有/無 × コア 3 前後)が vitest で確認でき、`ai_analysis_result` 非 null で必ず `generated`
   - _Requirements: 1.1, 1.4, 1.5, 3.1, 3.3, 4.3, 4.4, 7.1, 7.2_
   - _Boundary: store-research-phase(getStoreResearchPhase)_

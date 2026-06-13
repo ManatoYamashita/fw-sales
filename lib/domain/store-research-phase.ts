@@ -40,8 +40,15 @@ export const CORE_BASIC_INFO_KEYS = [
   "nearest_station",
 ] as const;
 
-/** 「調査可」へ昇格するために必要なコア項目の充足数 (過半相当)。 */
-export const READY_CORE_THRESHOLD = 3;
+/**
+ * 「調査可」へ昇格するために必要なコア項目の充足数。
+ *
+ * エリア検索の自動充填 (`placeResultToBasicInfo`) が埋めるコアは実測で
+ * `address` + `cuisine_genre` の 2 項目 (`store_name` はコア外)。標準フロー
+ * 「エリア検索で追加 → 調査」を成立させるため閾値は **2**。これにより
+ * エリア検索由来の店舗は「調査可」、店名のみの手動店舗は「未調査」になる。
+ */
+export const READY_CORE_THRESHOLD = 2;
 
 /**
  * 基本情報 1 項目が充填済みかを判定する。
