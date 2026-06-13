@@ -100,9 +100,16 @@
   - 完了条件: 各純関数が受け入れ基準どおりの入出力を返すことを確認できる
   - _Requirements: 5.1, 5.2, 5.3, 3.1, 3.2, 4.2, 7.3_
   - _Boundary: mergeBasicInfo, placeResultToBasicInfo, basic-info-prompt_
-- [ ] 5.2 クリティカルパスの E2E 検証 (PR2 完了時)
+- [x] 5.2 クリティカルパスの E2E 検証 (PR2 完了時)
   - 店舗名のみ登録 → エリア検索充填 → 手動編集の保護 → 調査テキスト貼付 → 営業資産生成(構造化非経由)の一連を実機で確認する
   - 完了条件: クリティカルパスが通しで動作し、生成が構造化を経由しない
+  - **検証結果 (2026-06-13, fw-sales.vercel.app production / commit 8f1236d)**:
+    - CP①: `__e2e_5_2_2026-06-13_06-56-07__` を /stores/new (manual) で店舗名のみ登録 → store_mqc05lr6_y3ui1q として作成、詳細画面が破綻なく表示、Card に「営業時間」Row 消滅 (PR #128 反映)、basic_info 50項目アコーディオン正常表示 (`充足 0 / 50`)。
+    - CP②: /stores/new (area-search) で「居酒屋 / 新丸子駅 / 1km」検索→「八海山バル TAKA 新丸子店」を追加 → store_mqc07qci_9u0kv1 として作成、詳細で「取得ソース: エリア検索」ラベルが屋号 / 住所 / 料理ジャンル に表示 = `filled_by=places` の決定的証拠。
+    - CP③: 純関数 `mergeBasicInfo` (lib/domain/basic-info-merge.ts:82-88) で手動値保護ロジック確認、vitest basic-info-merge.test 16/16 pass、再現経路は area-search 設計上存在しないため実機ではなく純関数 + 静的トレースで証明。
+    - CP④: paste-workbench に E2E 検証ダミーテキスト 247 文字を貼付 → textarea に保持。
+    - CP⑤: 生成ボタン押下 → 約 70 秒で生成完了、「強み / 弱み / グルメサイト課金状況 / GBP 充実度 / 架電スクリプト」5 セクション表示、UI ラベル「調査結果テキスト (任意・構造化されません)」が structurer 非呼出を明示、`generateSalesAssetsAction` の doc + import 確認で structurer 参照ゼロ (task 5.3 静的トレースと整合)。
+    - cleanup: 両店舗を UI 「削除する」確認ダイアログ経由で削除、店舗一覧バッジを 99 → 100 → 101 → 99 に戻し本番 DB 原状回復。
   - _Requirements: 1.1, 3.1, 5.1, 6.2, 4.1, 7.1, 7.3_
   - _Depends: 3.5, 3.6_
 - [ ] 5.3 撤去後の回帰確認 (PR3 完了後)
