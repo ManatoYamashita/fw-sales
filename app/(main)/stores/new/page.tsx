@@ -14,8 +14,8 @@ function normalizeMode(
   raw: string | string[] | undefined,
 ): "manual" | "url" | "area" {
   const v = Array.isArray(raw) ? raw[0] : raw;
-  if (v === "manual" || v === "area") return v;
-  return "url";
+  if (v === "manual" || v === "url") return v;
+  return "area";
 }
 
 export default async function NewStorePage({
