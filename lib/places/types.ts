@@ -118,6 +118,15 @@ export interface AreaSearchResultPayload {
   radiusMeters: number;
   /** この呼び出しに関するメタ情報 (取得元・上限件数・API回数目安など) */
   meta: AreaSearchMeta;
+  /**
+   * 候補DB保存 (`place_candidates`) の結果件数 (Issue #129 follow-up, 候補DB保存の土台)。
+   * 保存に失敗した場合は undefined (検索自体は成功として扱う)。
+   */
+  candidatePersistence?: {
+    insertedCount: number;
+    updatedCount: number;
+    skippedCount: number;
+  };
 }
 
 /**

@@ -24,6 +24,7 @@ const {
   mockStoreList,
   mockTransaction,
   mockRevalidateTag,
+  mockUpsertPlaceCandidates,
 } = vi.hoisted(() => ({
   mockSearchPlacesPage: vi.fn(),
   mockSearchNearbyPlaces: vi.fn(),
@@ -33,6 +34,7 @@ const {
   mockStoreList: vi.fn(),
   mockTransaction: vi.fn(),
   mockRevalidateTag: vi.fn(),
+  mockUpsertPlaceCandidates: vi.fn(),
 }));
 
 vi.mock("@/lib/places/google", () => ({
@@ -47,6 +49,7 @@ vi.mock("@/lib/places/google", () => ({
 vi.mock("@/lib/repositories", () => ({
   repos: {
     store: { list: mockStoreList },
+    placeCandidate: { upsertFromAreaSearch: mockUpsertPlaceCandidates },
     transaction: mockTransaction,
   },
 }));
@@ -102,6 +105,11 @@ function makeSearchPage(overrides: Partial<PlaceSearchPage> = {}): PlaceSearchPa
 beforeEach(() => {
   vi.resetAllMocks();
   mockStoreList.mockResolvedValue([]);
+  mockUpsertPlaceCandidates.mockResolvedValue({
+    insertedCount: 0,
+    updatedCount: 0,
+    skippedCount: 0,
+  });
 });
 
 describe("searchPlacesWithMatchesAction", () => {
@@ -355,6 +363,73 @@ describe("searchPlacesWithMatchesAction", () => {
       });
     }
   });
+
+  it("初回検索成功時に候補保存repositoryが呼ばれる", async () => {
+    mockSearchPlacesPage.mockResolvedValue(makeSearchPage());
+
+    const result = await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", 1000, {
+      center: CENTER,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(mockUpsertPlaceCandidates).toHaveBeenCalledTimes(1);
+    expect(mockUpsertPlaceCandidates).toHaveBeenCalledWith(
+      expect.objectContaining({
+        keyword: "居酒屋",
+        area: "渋谷駅",
+        center: CENTER,
+        radiusMeters: 1000,
+      }),
+    );
+  });
+
+  it("もっと読み込み成功時に候補保存repositoryが呼ばれる", async () => {
+    mockSearchPlacesPage.mockResolvedValue(makeSearchPage());
+
+    const result = await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", 1000, {
+      center: CENTER,
+      pageToken: "page-2",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(mockUpsertPlaceCandidates).toHaveBeenCalledTimes(1);
+  });
+
+  it("保存に失敗しても検索自体は失敗させない", async () => {
+    mockSearchPlacesPage.mockResolvedValue(makeSearchPage());
+    mockUpsertPlaceCandidates.mockRejectedValue(new Error("DB接続エラー"));
+
+    const result = await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", 1000, {
+      center: CENTER,
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.candidatePersistence).toBeUndefined();
+    }
+  });
+
+  it("candidatePersistence がpayloadに含まれる場合は件数が返る", async () => {
+    mockSearchPlacesPage.mockResolvedValue(makeSearchPage());
+    mockUpsertPlaceCandidates.mockResolvedValue({
+      insertedCount: 1,
+      updatedCount: 0,
+      skippedCount: 0,
+    });
+
+    const result = await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", 1000, {
+      center: CENTER,
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.candidatePersistence).toEqual({
+        insertedCount: 1,
+        updatedCount: 0,
+        skippedCount: 0,
+      });
+    }
+  });
 });
 
 describe("searchNearbyPlacesWithMatchesAction", () => {
@@ -440,6 +515,21 @@ describe("searchNearbyPlacesWithMatchesAction", () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toBe("Places API エラー (500): boom");
+  });
+
+  it("Nearby深掘り成功時に候補保存repositoryが呼ばれる", async () => {
+    mockSearchNearbyPlaces.mockResolvedValue([makePlace()]);
+
+    const result = await searchNearbyPlacesWithMatchesAction(CENTER, 1000);
+
+    expect(result.ok).toBe(true);
+    expect(mockUpsertPlaceCandidates).toHaveBeenCalledTimes(1);
+    expect(mockUpsertPlaceCandidates).toHaveBeenCalledWith(
+      expect.objectContaining({
+        center: CENTER,
+        radiusMeters: 1000,
+      }),
+    );
   });
 });
 

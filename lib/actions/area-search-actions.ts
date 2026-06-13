@@ -29,6 +29,33 @@ import type {
 import { success, failure, type ActionResult } from "./_helpers";
 
 /**
+ * エリア検索結果を `place_candidates` に保存する (候補DB保存の土台 / Issue #129 follow-up)。
+ *
+ * 保存に失敗しても検索自体は失敗させない (ログのみ残す)。`candidatePersistence` は
+ * 保存できた場合のみ payload に含める。
+ */
+async function persistAreaSearchCandidates(
+  places: AreaSearchPlaceViewModel[],
+  keyword: string,
+  area: string,
+  center: SearchCenter,
+  radiusMeters: number,
+): Promise<AreaSearchResultPayload["candidatePersistence"]> {
+  try {
+    return await repos.placeCandidate.upsertFromAreaSearch({
+      places,
+      keyword,
+      area,
+      center,
+      radiusMeters,
+    });
+  } catch (e) {
+    console.error("[area-search] 候補DB保存に失敗しました", e);
+    return undefined;
+  }
+}
+
+/**
  * PlaceResult から 1 店舗を作成し、同 transaction 内で basic_info を充填する
  * (store-basic-info / Issue #114, task 3.1)。
  *
@@ -148,7 +175,22 @@ export async function searchPlacesWithMatchesAction(
       apiCallEstimate,
     });
 
-    return success({ places: viewModels, nextPageToken, center, radiusMeters, meta });
+    const candidatePersistence = await persistAreaSearchCandidates(
+      viewModels,
+      keyword,
+      centerQuery,
+      center,
+      radiusMeters,
+    );
+
+    return success({
+      places: viewModels,
+      nextPageToken,
+      center,
+      radiusMeters,
+      meta,
+      candidatePersistence,
+    });
   } catch (e) {
     return failure(e instanceof Error ? e.message : "検索に失敗しました");
   }
@@ -200,7 +242,22 @@ export async function searchNearbyPlacesWithMatchesAction(
       apiCallEstimate: 1,
     });
 
-    return success({ places: viewModels, nextPageToken: null, center, radiusMeters, meta });
+    const candidatePersistence = await persistAreaSearchCandidates(
+      viewModels,
+      "",
+      "",
+      center,
+      radiusMeters,
+    );
+
+    return success({
+      places: viewModels,
+      nextPageToken: null,
+      center,
+      radiusMeters,
+      meta,
+      candidatePersistence,
+    });
   } catch (e) {
     return failure(e instanceof Error ? e.message : "Nearby検索に失敗しました");
   }
