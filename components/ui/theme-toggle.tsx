@@ -1,8 +1,8 @@
 "use client";
 
-import { useSyncExternalStore } from "react";
 import { Monitor, Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
+import { useMounted } from "@/lib/hooks/use-mounted";
 import { cn } from "@/lib/utils/cn";
 
 const ORDER = ["light", "dark", "system"] as const;
@@ -19,18 +19,6 @@ const LABELS: Record<ThemeMode, string> = {
   dark: "ダーク",
   system: "システム",
 };
-
-const NOOP_SUBSCRIBE = () => () => {};
-const TRUE_SNAPSHOT = () => true;
-const FALSE_SNAPSHOT = () => false;
-
-function useMounted(): boolean {
-  return useSyncExternalStore(
-    NOOP_SUBSCRIBE,
-    TRUE_SNAPSHOT,
-    FALSE_SNAPSHOT,
-  );
-}
 
 interface ThemeToggleProps {
   className?: string;
