@@ -106,7 +106,9 @@ export function AreaSearchMap({
   const mapRef = useRef<google.maps.Map | null>(null);
   const centerMarkerRef = useRef<google.maps.Marker | null>(null);
   const circleRef = useRef<google.maps.Circle | null>(null);
-  const markersRef = useRef<Map<string, google.maps.Marker>>(new Map());
+  const markersRef = useRef<
+    Map<string, { marker: google.maps.Marker; listener: google.maps.MapsEventListener }>
+  >(new Map());
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -219,30 +221,52 @@ export function AreaSearchMap({
         strokeWeight: isActive ? 2 : 1,
       };
 
-      let marker = markers.get(placeId);
-      if (!marker) {
-        marker = new google.maps.Marker({
+      let entry = markers.get(placeId);
+      if (!entry) {
+        const marker = new google.maps.Marker({
           position: { lat: vm.place.lat, lng: vm.place.lng },
           map,
           title: vm.place.name,
         });
-        marker.addListener("click", () => {
+        const listener = marker.addListener("click", () => {
           onActivatePlace(placeId);
           onPinClick?.(placeId);
         });
-        markers.set(placeId, marker);
+        entry = { marker, listener };
+        markers.set(placeId, entry);
       }
-      marker.setIcon(icon);
-      marker.setZIndex(isActive ? 999 : 1);
+      entry.marker.setIcon(icon);
+      entry.marker.setZIndex(isActive ? 999 : 1);
     }
 
-    for (const [placeId, marker] of markers) {
+    for (const [placeId, entry] of markers) {
       if (!seen.has(placeId)) {
-        marker.setMap(null);
+        entry.listener.remove();
+        entry.marker.setMap(null);
         markers.delete(placeId);
       }
     }
   }, [places, addedIds, activePlaceId, status, onActivatePlace, onPinClick]);
+
+  // unmount時のクリーンアップ: map instance / marker / circle / listener を破棄する。
+  // Google Maps script 自体はページ全体で共有するため削除しない。
+  useEffect(() => {
+    const markers = markersRef.current;
+    return () => {
+      for (const { marker, listener } of markers.values()) {
+        listener.remove();
+        marker.setMap(null);
+      }
+      markers.clear();
+
+      centerMarkerRef.current?.setMap(null);
+      circleRef.current?.setMap(null);
+
+      centerMarkerRef.current = null;
+      circleRef.current = null;
+      mapRef.current = null;
+    };
+  }, []);
 
   if (!apiKey) {
     // NEXT_PUBLIC_GOOGLE_MAPS_API_KEY が未設定の場合は地図エリア自体を出さない。

@@ -111,6 +111,129 @@ describe("searchPlacesPage", () => {
   });
 });
 
+describe("searchPlacesPage レスポンス解釈", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.stubEnv("GOOGLE_PLACES_API_KEY", "test-api-key");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("food系 place (例: restaurant) は戻り値に含まれる", async () => {
+    fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ places: [FOOD_PLACE], nextPageToken: null }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { places } = await searchPlacesPage("居酒屋", "渋谷駅");
+
+    expect(places).toHaveLength(1);
+    expect(places[0]?.placeId).toBe("ChIJfood");
+  });
+
+  it("lodging など非food typesのみの place は除外される", async () => {
+    const LODGING_PLACE = {
+      id: "ChIJhotel",
+      displayName: { text: "テストホテル" },
+      formattedAddress: "東京都渋谷区テスト2-2-2",
+      location: { latitude: 35.66, longitude: 139.701 },
+      types: ["lodging", "point_of_interest"],
+    };
+    fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ places: [FOOD_PLACE, LODGING_PLACE], nextPageToken: null }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { places } = await searchPlacesPage("居酒屋", "渋谷駅");
+
+    expect(places).toHaveLength(1);
+    expect(places.find((p) => p.placeId === "ChIJhotel")).toBeUndefined();
+  });
+
+  it("id が欠落した raw place はスキップされる", async () => {
+    const NO_ID_PLACE = {
+      displayName: { text: "ID無し店舗" },
+      formattedAddress: "東京都渋谷区テスト3-3-3",
+      location: { latitude: 35.66, longitude: 139.701 },
+      types: ["restaurant"],
+    };
+    fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ places: [NO_ID_PLACE, FOOD_PLACE], nextPageToken: null }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { places } = await searchPlacesPage("居酒屋", "渋谷駅");
+
+    expect(places).toHaveLength(1);
+    expect(places[0]?.placeId).toBe("ChIJfood");
+  });
+
+  it("displayName / formattedAddress / location のいずれかが欠落した raw place は安全にスキップされる", async () => {
+    const NO_DISPLAY_NAME = {
+      id: "ChIJnoName",
+      formattedAddress: "東京都渋谷区テスト4-4-4",
+      location: { latitude: 35.66, longitude: 139.701 },
+      types: ["restaurant"],
+    };
+    const NO_ADDRESS = {
+      id: "ChIJnoAddress",
+      displayName: { text: "住所無し店舗" },
+      location: { latitude: 35.66, longitude: 139.701 },
+      types: ["restaurant"],
+    };
+    const NO_LOCATION = {
+      id: "ChIJnoLocation",
+      displayName: { text: "位置情報無し店舗" },
+      formattedAddress: "東京都渋谷区テスト5-5-5",
+      types: ["restaurant"],
+    };
+    fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        places: [NO_DISPLAY_NAME, NO_ADDRESS, NO_LOCATION, FOOD_PLACE],
+        nextPageToken: null,
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { places } = await searchPlacesPage("居酒屋", "渋谷駅");
+
+    expect(places).toHaveLength(1);
+    expect(places[0]?.placeId).toBe("ChIJfood");
+  });
+
+  it("nextPageToken がレスポンスに無い場合は null に正規化される", async () => {
+    fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ places: [FOOD_PLACE] }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { nextPageToken } = await searchPlacesPage("居酒屋", "渋谷駅");
+
+    expect(nextPageToken).toBeNull();
+  });
+
+  it("response.ok=false の場合は例外を投げる", async () => {
+    fetchMock = vi.fn().mockResolvedValue(jsonResponse({ error: "invalid" }, false, 400));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(searchPlacesPage("居酒屋", "渋谷駅")).rejects.toThrow(/Places API エラー \(400\)/);
+  });
+
+  it("GOOGLE_PLACES_API_KEY が未設定の場合は例外を投げる", async () => {
+    vi.unstubAllEnvs();
+    fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(searchPlacesPage("居酒屋", "渋谷駅")).rejects.toThrow(
+      "GOOGLE_PLACES_API_KEY が設定されていません",
+    );
+  });
+});
+
 describe("resolveSearchCenter", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 
