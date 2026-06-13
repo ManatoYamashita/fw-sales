@@ -17,7 +17,6 @@ function makeScalars(overrides: Partial<Parameters<typeof scalarToBasicInfo>[0]>
     city: "渋谷区",
     address: "代々木1-2-3",
     genre: "和食",
-    business_hours: "11:00-22:00 / 日休",
     site_url: "https://example.com",
     instagram_url: "https://instagram.com/sorakutei",
     ...overrides,
@@ -44,11 +43,6 @@ describe("scalarToBasicInfo - 射影マッピング", () => {
     expect(partial.cuisine_genre?.value).toBe("和食");
   });
 
-  it("business_hours → business_hours_holidays", () => {
-    const partial = scalarToBasicInfo(makeScalars(), NOW);
-    expect(partial.business_hours_holidays?.value).toBe("11:00-22:00 / 日休");
-  });
-
   it("site_url → official_site", () => {
     const partial = scalarToBasicInfo(makeScalars(), NOW);
     expect(partial.official_site?.value).toBe("https://example.com");
@@ -61,7 +55,7 @@ describe("scalarToBasicInfo - 射影マッピング", () => {
     );
   });
 
-  it("射影される 6 項目のみ返す (phone/review/lat/lng などは含まない)", () => {
+  it("射影される 5 項目のみ返す (phone/review/lat/lng などは含まない)", () => {
     const partial = scalarToBasicInfo(makeScalars(), NOW);
     const keys = Object.keys(partial).sort();
     expect(keys).toEqual(
@@ -69,7 +63,6 @@ describe("scalarToBasicInfo - 射影マッピング", () => {
         "store_name",
         "address",
         "cuisine_genre",
-        "business_hours_holidays",
         "official_site",
         "sns_accounts",
       ].sort(),
@@ -112,7 +105,6 @@ describe("scalarToBasicInfo - 空値防御", () => {
         city: "",
         address: "",
         genre: "",
-        business_hours: "",
         site_url: "",
         instagram_url: "",
       },

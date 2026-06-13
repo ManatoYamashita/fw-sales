@@ -127,6 +127,13 @@
       "when": 1780936035762,
       "tag": "0017_remove_deep_research_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1781332395335,
+      "tag": "0018_remove_store_business_hours",
+      "breakpoints": true
     }
   ]
 }

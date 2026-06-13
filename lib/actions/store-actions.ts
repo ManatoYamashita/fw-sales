@@ -117,7 +117,6 @@ function buildStoreInput(
     ai_analysis_result: readNullableAiAnalysis(formData, "ai_analysis_result"),
     lat: readNullableNumber(formData, "lat"),
     lng: readNullableNumber(formData, "lng"),
-    business_hours: readString(formData, "business_hours"),
   };
 }
 

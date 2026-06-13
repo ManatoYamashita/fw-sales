@@ -1,0 +1,1 @@
+ALTER TABLE "stores" DROP COLUMN "business_hours";
