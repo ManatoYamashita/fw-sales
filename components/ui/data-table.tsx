@@ -145,6 +145,7 @@ export function DataTable<T>({
                 {rowSelection ? (
                   <td
                     data-no-row-click="true"
+                    onClick={(e) => e.stopPropagation()}
                     className={cn(
                       ROW_PADDING[density],
                       "align-middle text-center w-10",
@@ -153,6 +154,7 @@ export function DataTable<T>({
                     <input
                       type="checkbox"
                       checked={selectedSet.has(id)}
+                      onClick={(e) => e.stopPropagation()}
                       onChange={(e) => toggleOneRow(id, e.currentTarget.checked)}
                       aria-label={rowSelection.rowLabel?.(row) ?? "行を選択"}
                       className="h-4 w-4 accent-primary"
