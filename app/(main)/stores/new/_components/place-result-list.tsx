@@ -8,6 +8,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { StarRating } from "@/components/ui/star-rating";
 import { AddStoreButton } from "./add-store-button";
 import { mapGenre } from "@/lib/places/to-store-input";
+import { getAreaSearchRankingReasons } from "@/lib/places/ranking";
 import { formatDistanceMeters } from "@/lib/utils/geo";
 import { cn } from "@/lib/utils/cn";
 import type { AreaSearchPlaceViewModel } from "@/lib/places/types";
@@ -45,13 +46,15 @@ export function PlaceResultList({
         {results.length} 件の店舗が見つかりました
       </p>
       <ul className="space-y-2">
-        {results.map(({ place, matchedStore, distanceMeters, isWithinRadius }) => {
+        {results.map((result) => {
+          const { place, matchedStore, distanceMeters, isWithinRadius } = result;
           const isAdded = addedIds.has(place.placeId);
           const isEligible = matchedStore === null && !isAdded;
           const isSelected = selectedIds.has(place.placeId);
           const isActive = activePlaceId === place.placeId;
           const isPinClicked = pinClickedPlaceId === place.placeId;
           const genre = mapGenre(place.types);
+          const rankingReasons = getAreaSearchRankingReasons(result, addedIds);
 
           return (
             <li
@@ -95,6 +98,10 @@ export function PlaceResultList({
 
                     <p className="text-xs text-muted-foreground">
                       {centerLabel}から {formatDistanceMeters(distanceMeters)}
+                    </p>
+
+                    <p className="text-[11px] text-muted-foreground">
+                      {rankingReasons.join(" / ")}
                     </p>
 
                     {place.formattedAddress && (

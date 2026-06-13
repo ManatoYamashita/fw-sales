@@ -28,6 +28,15 @@ import {
   type ExplorationKind,
 } from "@/lib/places/exploration";
 import { formatDistanceMeters } from "@/lib/utils/geo";
+import {
+  AREA_SEARCH_SORT_MODES,
+  AREA_SEARCH_SORT_MODE_LABELS,
+  DEFAULT_AREA_SEARCH_SORT_MODE,
+  isEligiblePlace,
+  sortAreaSearchResults,
+  type AreaSearchSortMode,
+} from "@/lib/places/ranking";
+import { Select } from "@/components/ui/select";
 import type { AreaSearchPlaceViewModel, SearchCenter } from "@/lib/places/types";
 
 /**
@@ -38,14 +47,6 @@ import type { AreaSearchPlaceViewModel, SearchCenter } from "@/lib/places/types"
  * - `inRange`: 中心地点から半径内の店舗のみ
  */
 type ResultFilter = "all" | "eligible" | "registered" | "inRange";
-
-/** 一括追加対象 (登録候補): DB未登録 かつ まだ追加していない店舗 */
-function isEligiblePlace(
-  { place, matchedStore }: AreaSearchPlaceViewModel,
-  addedIds: ReadonlySet<string>,
-): boolean {
-  return matchedStore === null && !addedIds.has(place.placeId);
-}
 
 /** 「追加探索」1回分の実行記録 (画面内 state のみ。DB保存しない)。 */
 interface ExplorationRun {
@@ -139,6 +140,9 @@ export function AreaSearchResults({
   const [addedIds, setAddedIds] = useState<ReadonlySet<string>>(new Set());
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
   const [resultFilter, setResultFilter] = useState<ResultFilter>("all");
+  const [sortMode, setSortMode] = useState<AreaSearchSortMode>(
+    DEFAULT_AREA_SEARCH_SORT_MODE,
+  );
   // 一覧カードのホバー/クリック、地図ピンのクリックで連動して強調する placeId。
   const [activePlaceId, setActivePlaceId] = useState<string | null>(null);
   // マップピン明示クリック時のみ、対応カードへスクロール + 2秒ハイライト。
@@ -205,7 +209,7 @@ export function AreaSearchResults({
   // 「DB照合時点では未登録だった」という意味で「登録候補のみ」からは除外する
   // (addedIds.has で判定)。登録済み店舗はもともと選択不可のため、
   // 選択状態 (selectedIds/addedIds) には影響しない。
-  const displayedResults =
+  const filteredResults =
     resultFilter === "eligible"
       ? allResults.filter((vm) => isEligiblePlace(vm, addedIds))
       : resultFilter === "registered"
@@ -213,6 +217,13 @@ export function AreaSearchResults({
         : resultFilter === "inRange"
           ? allResults.filter((vm) => vm.isWithinRadius)
           : allResults;
+
+  // 表示順: フィルタ後の結果を sortMode に応じて並び替える (filter → sort)。
+  const displayedResults = sortAreaSearchResults(
+    filteredResults,
+    sortMode,
+    addedIds,
+  );
 
   // 「全選択」の対象は常に「現在のフィルタで表示中の登録候補」。
   // 「範囲内のみ」フィルタ中は範囲内に表示中の登録候補のみが対象になる。
@@ -674,19 +685,39 @@ export function AreaSearchResults({
         {/* 一覧 + 操作系: スマホでは地図の下、PCでは左側 */}
         <div className="order-2 lg:order-1 space-y-4">
           {allResults.length > 0 && (
-            <Tabs
-              value={resultFilter}
-              onValueChange={(next) => setResultFilter(next as ResultFilter)}
-              defaultValue="all"
-              variant="pill"
-            >
-              <TabsList>
-                <TabsTrigger value="all">すべて ({loadedCount})</TabsTrigger>
-                <TabsTrigger value="eligible">候補 ({eligibleCount})</TabsTrigger>
-                <TabsTrigger value="registered">登録済 ({registeredCount})</TabsTrigger>
-                <TabsTrigger value="inRange">範囲内 ({inRangeCount})</TabsTrigger>
-              </TabsList>
-            </Tabs>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Tabs
+                value={resultFilter}
+                onValueChange={(next) => setResultFilter(next as ResultFilter)}
+                defaultValue="all"
+                variant="pill"
+              >
+                <TabsList>
+                  <TabsTrigger value="all">すべて ({loadedCount})</TabsTrigger>
+                  <TabsTrigger value="eligible">候補 ({eligibleCount})</TabsTrigger>
+                  <TabsTrigger value="registered">登録済 ({registeredCount})</TabsTrigger>
+                  <TabsTrigger value="inRange">範囲内 ({inRangeCount})</TabsTrigger>
+                </TabsList>
+              </Tabs>
+
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                表示順
+                <Select
+                  value={sortMode}
+                  onChange={(e) =>
+                    setSortMode(e.target.value as AreaSearchSortMode)
+                  }
+                  className="h-8 w-auto text-xs"
+                  aria-label="表示順を切り替え"
+                >
+                  {AREA_SEARCH_SORT_MODES.map((mode) => (
+                    <option key={mode} value={mode}>
+                      {AREA_SEARCH_SORT_MODE_LABELS[mode]}
+                    </option>
+                  ))}
+                </Select>
+              </label>
+            </div>
           )}
 
           {/* 0 件選択時のみ: 最初の一括選択への導線をリスト上部に残す (Option B)。
