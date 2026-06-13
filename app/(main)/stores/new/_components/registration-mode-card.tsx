@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useTransition, type KeyboardEvent } from "react";
-import { Download, Pencil, Search } from "lucide-react";
+import { Compass, Download, MapPin, MapPinOff, Pencil, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { FormField } from "@/components/ui/form-field";
 import { Spinner } from "@/components/ui/spinner";
@@ -342,34 +343,29 @@ export function AreaSearchPanel({
     }
   };
 
+  if (!isPlacesApiConfigured) {
+    return (
+      <EmptyState
+        icon={<MapPinOff />}
+        title="Google Places APIキーが未設定です"
+        description="エリア検索を利用するには .env.local に GOOGLE_PLACES_API_KEY を設定してください。"
+      />
+    );
+  }
+
   return (
-    <div className="space-y-3">
-      {!isPlacesApiConfigured && (
-        <div
-          role="alert"
-          className="rounded-md border border-border bg-muted/50 px-4 py-3 text-sm space-y-1"
-        >
-          <p className="font-medium text-foreground">
-            Google Places APIキーが未設定です
-          </p>
-          <p className="text-muted-foreground">
-            エリア検索を利用するには{" "}
-            <code className="font-mono text-xs bg-background rounded border border-border px-1 py-0.5">
-              .env.local
-            </code>{" "}
-            に{" "}
-            <code className="font-mono text-xs bg-background rounded border border-border px-1 py-0.5">
-              GOOGLE_PLACES_API_KEY
-            </code>{" "}
-            を設定してください。
-          </p>
-        </div>
-      )}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_140px_auto] gap-3 md:items-start">
         <FormField
-          label="キーワード"
+          required
+          label={
+            <span className="inline-flex items-center gap-1.5">
+              <Search className="h-3.5 w-3.5 text-muted-foreground" />
+              キーワード
+            </span>
+          }
           htmlFor="keyword"
-          hint="業態・店舗名など(必須)"
+          hint="業態や店舗名"
         >
           <Input
             id="keyword"
@@ -377,14 +373,19 @@ export function AreaSearchPanel({
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="例: 居酒屋、カフェ、焼肉、ラーメン"
-            disabled={!isPlacesApiConfigured}
+            placeholder="例: 居酒屋、カフェ、焼肉"
           />
         </FormField>
         <FormField
-          label="中心地点"
+          required
+          label={
+            <span className="inline-flex items-center gap-1.5">
+              <MapPin className="h-3.5 w-3.5 text-muted-foreground" />
+              中心地点
+            </span>
+          }
           htmlFor="area"
-          hint="駅名・住所など(必須)"
+          hint="駅名や住所"
         >
           <Input
             id="area"
@@ -392,16 +393,23 @@ export function AreaSearchPanel({
             value={area}
             onChange={(e) => setArea(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="例: 渋谷駅、新宿駅、赤坂見附駅"
-            disabled={!isPlacesApiConfigured}
+            placeholder="例: 渋谷駅、新宿駅"
           />
         </FormField>
-        <FormField label="半径" htmlFor="radius" hint="中心地点からの目安距離">
+        <FormField
+          label={
+            <span className="inline-flex items-center gap-1.5">
+              <Compass className="h-3.5 w-3.5 text-muted-foreground" />
+              半径
+            </span>
+          }
+          htmlFor="radius"
+          hint="中心からの距離"
+        >
           <Select
             id="radius"
             value={radiusMeters}
             onChange={(e) => setRadiusMeters(Number(e.target.value))}
-            disabled={!isPlacesApiConfigured}
           >
             {RADIUS_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
@@ -410,26 +418,34 @@ export function AreaSearchPanel({
             ))}
           </Select>
         </FormField>
-      </div>
-      <div className="flex justify-end">
-        <Button
-          variant="primary"
-          onClick={handleSearch}
-          disabled={pending || !isPlacesApiConfigured}
-          className="gap-2"
-        >
-          {pending ? (
-            <>
-              <Spinner className="text-primary-foreground" />
-              検索中…
-            </>
-          ) : (
-            <>
-              <Search className="h-4 w-4" />
-              検索する
-            </>
-          )}
-        </Button>
+        {/* ボタン列: ラベル高さ分の透明スペーサーで Input 行に水平整列。
+            モバイル(grid-cols-1)では下に積まれる。 */}
+        <div className="flex flex-col gap-1.5">
+          <span
+            aria-hidden
+            className="hidden md:inline text-xs font-semibold leading-none invisible"
+          >
+            _
+          </span>
+          <Button
+            variant="primary"
+            onClick={handleSearch}
+            disabled={pending}
+            className="gap-2 w-full md:w-auto"
+          >
+            {pending ? (
+              <>
+                <Spinner className="text-primary-foreground" />
+                検索中…
+              </>
+            ) : (
+              <>
+                <Search className="h-4 w-4" />
+                店舗を検索
+              </>
+            )}
+          </Button>
+        </div>
       </div>
       {error && (
         <div
