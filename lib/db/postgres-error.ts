@@ -46,25 +46,39 @@ function pickNonEmptyString(value: unknown): string | undefined {
 }
 
 /**
- * `err` から PostgresError 互換オブジェクトを探す。Drizzle wrapper を含む
- * `cause` チェーンを最大 5 段までさかのぼり、最初に見つかった一つを返す。
+ * `err` から PostgresError 互換 (もしくは `code` を持つ任意のエラー) を探す。
+ * Drizzle wrapper を含む `cause` チェーンを最大 5 段までさかのぼる。
+ *
+ * 2 段検出:
+ * - 第 1 段 (優先): postgres-js `PostgresError` (`name === "PostgresError"` + code 持ち)。
+ *   SQLSTATE 形式 (`23503` 等) の真のサーバーエラー。これを最優先で返す。
+ * - 第 2 段 (fallback): `name` は無関係に `typeof code === "string" && code !== ""` の
+ *   任意のエラー。これにより postgres-js の `generic(code, message)` (例:
+ *   `UNSAFE_TRANSACTION` / `MAX_PARAMETERS_EXCEEDED` 等の client-side エラー) や
+ *   `connection(...)` (例: `ECONNREFUSED`) も検出できる。これらは `name === "Error"`
+ *   のため第 1 段では拾えなかった (PR #144 で本番症状として顕在化)。
+ *
+ * チェーン全体を辿りつつ、PostgresError が見つかれば即返却、見つからなければ
+ * 最初に見つかった「code 持ち」エラーを返す。どちらも無ければ null。
  */
 function unwrapToPostgresError(
   err: unknown,
 ): (Record<string, unknown> & { code: string }) | null {
   let current: unknown = err;
+  let firstWithCode: (Record<string, unknown> & { code: string }) | null = null;
   for (let depth = 0; depth < 5; depth++) {
-    if (!isRecord(current)) return null;
-    if (
-      current.name === "PostgresError" &&
-      typeof current.code === "string" &&
-      current.code !== ""
-    ) {
+    if (!isRecord(current)) break;
+    const hasStringCode =
+      typeof current.code === "string" && current.code !== "";
+    if (current.name === "PostgresError" && hasStringCode) {
       return current as Record<string, unknown> & { code: string };
+    }
+    if (hasStringCode && firstWithCode === null) {
+      firstWithCode = current as Record<string, unknown> & { code: string };
     }
     current = current.cause;
   }
-  return null;
+  return firstWithCode;
 }
 
 /**
@@ -124,10 +138,16 @@ const SQLSTATE_MESSAGES: Record<string, Formatter> = {
   "08001": () => "データベース接続が切断されました。再試行してください。",
 };
 
+/** SQLSTATE 形式 (5 文字数字英大文字) の判定。SQLSTATE_MESSAGES マッピングを適用する条件。 */
+const SQLSTATE_PATTERN = /^[0-9A-Z]{5}$/;
+
 /**
  * `ParsedPgError` (または null) を UI 表示用の日本語メッセージに整形する。
- * - 既知 SQLSTATE → 専用文言。
- * - 未知 SQLSTATE → `[code] message` のフォールバック。
+ * - SQLSTATE 形式 + 既知 code → 専用文言 (例: 23503 → 関連レコード文言)。
+ * - SQLSTATE 形式 + 未知 code → `[code] message` のフォールバック。
+ * - 非 SQLSTATE 形式 (例: `UNSAFE_TRANSACTION` / `ECONNREFUSED`) → 同じく
+ *   `[code] message` のフォールバック (内部スキーマ情報ではなくエラー種別の文字列なので
+ *   UI 表示しても二系統設計に反しない)。
  * - parsed が null → `fallback` をそのまま返す。
  */
 export function formatUserMessage(
@@ -135,8 +155,10 @@ export function formatUserMessage(
   fallback: string,
 ): string {
   if (!parsed) return fallback;
-  const formatter = SQLSTATE_MESSAGES[parsed.code];
-  if (formatter) return formatter(parsed);
+  if (SQLSTATE_PATTERN.test(parsed.code)) {
+    const formatter = SQLSTATE_MESSAGES[parsed.code];
+    if (formatter) return formatter(parsed);
+  }
   const body = parsed.message || fallback;
   return `[${parsed.code}] ${body}`;
 }
