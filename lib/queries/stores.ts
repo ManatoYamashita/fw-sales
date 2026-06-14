@@ -9,6 +9,15 @@ import {
   type StoreSort,
 } from "@/types/store";
 import type { StageId } from "@/types/stage";
+import {
+  applyStoreFilter,
+  applyStoreSort,
+  type StoreSortContext,
+} from "./store-sort";
+
+// pure な filter/sort はサーバ外でも使えるよう再エクスポート
+export { applyStoreFilter, applyStoreSort };
+export type { StoreSortContext };
 
 async function listAllStoresCached() {
   "use cache";
@@ -17,69 +26,13 @@ async function listAllStoresCached() {
   return repos.store.list();
 }
 
-export function applyStoreFilter(
-  stores: readonly Store[],
-  filter: StoreFilter,
-): Store[] {
-  const q = filter.q?.trim().toLowerCase();
-  return stores.filter((s) => {
-    if (filter.stage && s.stage !== filter.stage) return false;
-    if (filter.channel && s.channel !== filter.channel) return false;
-    if (q) {
-      const haystack = [
-        s.name,
-        s.city,
-        s.prefecture,
-        s.address,
-        s.genre,
-        s.memo,
-      ]
-        .join(" ")
-        .toLowerCase();
-      if (!haystack.includes(q)) return false;
-    }
-    return true;
-  });
-}
-
-export function applyStoreSort(
-  stores: readonly Store[],
-  sort: StoreSort = DEFAULT_STORE_SORT,
-): Store[] {
-  const sign = sort.dir === "asc" ? 1 : -1;
-  const rows = [...stores];
-  rows.sort((a, b) => {
-    let diff = 0;
-    switch (sort.key) {
-      case "name":
-        diff = a.name.localeCompare(b.name, "ja");
-        break;
-      case "review_avg":
-        diff = (a.review_avg ?? 0) - (b.review_avg ?? 0);
-        break;
-      case "review_count":
-        diff = (a.review_count ?? 0) - (b.review_count ?? 0);
-        break;
-      case "updated":
-      default:
-        diff = a.updated_at.localeCompare(b.updated_at);
-        break;
-    }
-    if (diff !== 0) return diff * sign;
-    // 安定化: 同点は更新日新しい順 → 名前
-    const u = b.updated_at.localeCompare(a.updated_at);
-    if (u !== 0) return u;
-    return a.name.localeCompare(b.name, "ja");
-  });
-  return rows;
-}
-
 export async function listStores(
   filter: StoreFilter = {},
   sort: StoreSort = DEFAULT_STORE_SORT,
+  ctx: StoreSortContext = {},
 ): Promise<Store[]> {
   const all = await listAllStoresCached();
-  return applyStoreSort(applyStoreFilter(all, filter), sort);
+  return applyStoreSort(applyStoreFilter(all, filter), sort, ctx);
 }
 
 export async function getStoreCached(id: string): Promise<Store | null> {

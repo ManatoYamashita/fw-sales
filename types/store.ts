@@ -91,10 +91,14 @@ export interface StoreFilter {
 /*  並び替え                                                            */
 /* ------------------------------------------------------------------ */
 export type StoreSortKey =
-  | "updated"
   | "name"
-  | "review_avg"
-  | "review_count";
+  | "location"
+  | "genre"
+  | "review"
+  | "stage"
+  | "channel"
+  | "sales"
+  | "updated";
 
 export type SortDirection = "asc" | "desc";
 
@@ -112,13 +116,6 @@ export const SORT_OPTIONS: ReadonlyArray<{
   descLabel: string;
 }> = [
   {
-    key: "updated",
-    label: "更新日",
-    defaultDir: "desc",
-    ascLabel: "古い順",
-    descLabel: "新しい順",
-  },
-  {
     key: "name",
     label: "店舗名",
     defaultDir: "asc",
@@ -126,21 +123,67 @@ export const SORT_OPTIONS: ReadonlyArray<{
     descLabel: "ん→あ",
   },
   {
-    key: "review_avg",
-    label: "口コミ評価",
-    defaultDir: "desc",
-    ascLabel: "低い順",
-    descLabel: "高い順",
+    key: "location",
+    label: "エリア",
+    defaultDir: "asc",
+    ascLabel: "都道府県昇順",
+    descLabel: "都道府県降順",
   },
   {
-    key: "review_count",
-    label: "口コミ件数",
+    key: "genre",
+    label: "業態",
+    defaultDir: "asc",
+    ascLabel: "あ→ん",
+    descLabel: "ん→あ",
+  },
+  {
+    key: "review",
+    label: "口コミ",
     defaultDir: "desc",
-    ascLabel: "少ない順",
-    descLabel: "多い順",
+    ascLabel: "評価低い順",
+    descLabel: "評価高い順",
+  },
+  {
+    key: "stage",
+    label: "状態",
+    defaultDir: "asc",
+    ascLabel: "進行順",
+    descLabel: "完了順",
+  },
+  {
+    key: "channel",
+    label: "チャネル",
+    defaultDir: "asc",
+    ascLabel: "推奨順",
+    descLabel: "未判定順",
+  },
+  {
+    key: "sales",
+    label: "営業担当",
+    defaultDir: "asc",
+    ascLabel: "氏名 昇順",
+    descLabel: "氏名 降順",
+  },
+  {
+    key: "updated",
+    label: "更新",
+    defaultDir: "desc",
+    ascLabel: "古い順",
+    descLabel: "新しい順",
   },
 ];
 
 export const SORT_KEYS = SORT_OPTIONS.map((o) => o.key) as readonly StoreSortKey[];
 
 export const DEFAULT_STORE_SORT: StoreSort = { key: "updated", dir: "desc" };
+
+/**
+ * 旧 URL クエリ (`?sort=review_avg`, `?sort=review_count`) を現行キーに正規化する。
+ * 既存ブックマークや共有リンクの互換性を保つための一方向マッピング。
+ */
+export function normalizeLegacySortKey(raw: string): StoreSortKey | null {
+  if (raw === "review_avg" || raw === "review_count") return "review";
+  return (SORT_KEYS as readonly string[]).includes(raw)
+    ? (raw as StoreSortKey)
+    : null;
+}
