@@ -3,6 +3,7 @@
 import { type ReactNode } from "react";
 import { cn } from "@/lib/utils/cn";
 import { DataTableRow } from "./data-table-row";
+import { SortableHeader, type SortDir } from "./sortable-header";
 
 export interface ColumnDef<T> {
   key: string;
@@ -22,6 +23,16 @@ export interface ColumnDef<T> {
   maxWidth?: string;
   /** truncate 時の native tooltip (title 属性) として表示する全文。 */
   title?: (row: T) => string | undefined;
+  /**
+   * URL クエリ `?sort=<sortKey>` に書き込むキー。
+   * 指定された列ヘッダはクリックでソート切替できる button へ昇格する。
+   * `header` が文字列の場合は自動でラベル化、ReactNode の場合は header をそのまま使う。
+   */
+  sortKey?: string;
+  /** 未選択列クリック時の初期方向 (省略時 `asc`) */
+  sortDefaultDir?: SortDir;
+  /** a11y 用の補助 aria-label */
+  sortAriaLabel?: string;
 }
 
 export type DataTableDensity = "compact" | "normal";
@@ -123,7 +134,16 @@ export function DataTable<T>({
                     : undefined
                 }
               >
-                {col.header}
+                {col.sortKey ? (
+                  <SortableHeader
+                    sortKey={col.sortKey}
+                    defaultDir={col.sortDefaultDir}
+                    label={col.header}
+                    ariaLabel={col.sortAriaLabel}
+                  />
+                ) : (
+                  col.header
+                )}
               </th>
             ))}
           </tr>

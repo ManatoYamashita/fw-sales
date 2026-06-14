@@ -12,10 +12,7 @@ import {
   type ReactNode,
 } from "react";
 import {
-  ArrowDownAZ,
-  ArrowUpAZ,
   Check,
-  ChevronDown,
   ListFilter,
   Loader2,
   Search,
@@ -26,15 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils/cn";
 import { STAGES, type StageId } from "@/types/stage";
-import {
-  CHANNELS,
-  DEFAULT_STORE_SORT,
-  SORT_KEYS,
-  SORT_OPTIONS,
-  type Channel,
-  type SortDirection,
-  type StoreSortKey,
-} from "@/types/store";
+import { CHANNELS, type Channel } from "@/types/store";
 
 /* ------------------------------------------------------------------ */
 /*  小さなポップオーバー (依存ゼロの軽量実装)                          */
@@ -110,19 +99,12 @@ export function StoresFilterBar() {
   const q = params.get("q") ?? "";
   const stage = (params.get("stage") ?? "") as StageId | "";
   const channel = (params.get("channel") ?? "") as Channel | "";
-  const sortKey: StoreSortKey =
-    (SORT_KEYS as readonly string[]).includes(params.get("sort") ?? "")
-      ? (params.get("sort") as StoreSortKey)
-      : DEFAULT_STORE_SORT.key;
-  const sortDir: SortDirection =
-    params.get("dir") === "asc" ? "asc" : "desc";
 
   const filterCount = useMemo(
     () =>
       [stage, channel].filter(Boolean).length, // 検索語(q) は別カウント
     [stage, channel],
   );
-  const sortDefault = sortKey === DEFAULT_STORE_SORT.key && sortDir === DEFAULT_STORE_SORT.dir;
 
   /* --- URL 反映 --- */
   const push = useCallback(
@@ -137,7 +119,7 @@ export function StoresFilterBar() {
     [params, router],
   );
 
-  const setKey = (key: FilterKey | "sort" | "dir", value: string) =>
+  const setKey = (key: FilterKey, value: string) =>
     push((next) => {
       if (value) next.set(key, value);
       else next.delete(key);
@@ -146,6 +128,7 @@ export function StoresFilterBar() {
   const clearAll = () =>
     push((next) => {
       ALL_FILTER_KEYS.forEach((k) => next.delete(k));
+      // 列ヘッダ由来のソートも一緒にリセット
       next.delete("sort");
       next.delete("dir");
     });
@@ -165,18 +148,9 @@ export function StoresFilterBar() {
 
   /* --- ポップオーバー制御 --- */
   const filterAnchor = useRef<HTMLDivElement>(null);
-  const sortAnchor = useRef<HTMLDivElement>(null);
   const [openFilter, setOpenFilter] = useState(false);
-  const [openSort, setOpenSort] = useState(false);
 
   const hasAnyFilter = filterCount > 0 || q.length > 0;
-  const hasAny = hasAnyFilter || !sortDefault;
-
-  /* --- 並び替えラベル --- */
-  const sortMeta = SORT_OPTIONS.find((o) => o.key === sortKey)!;
-  const sortLabel = `${sortMeta.label} · ${
-    sortDir === "asc" ? sortMeta.ascLabel : sortMeta.descLabel
-  }`;
 
   return (
     <div
@@ -220,10 +194,7 @@ export function StoresFilterBar() {
         {/* 絞り込みトリガー */}
         <div ref={filterAnchor} className="relative">
           <TriggerButton
-            onClick={() => {
-              setOpenSort(false);
-              setOpenFilter((v) => !v);
-            }}
+            onClick={() => setOpenFilter((v) => !v)}
             active={filterCount > 0}
             aria-expanded={openFilter}
             aria-haspopup="dialog"
@@ -249,57 +220,10 @@ export function StoresFilterBar() {
             />
           </Popover>
         </div>
-
-        {/* 並び替えトリガー */}
-        <div ref={sortAnchor} className="relative">
-          <TriggerButton
-            onClick={() => {
-              setOpenFilter(false);
-              setOpenSort((v) => !v);
-            }}
-            active={!sortDefault}
-            aria-expanded={openSort}
-            aria-haspopup="dialog"
-            icon={
-              sortDir === "asc" ? (
-                <ArrowUpAZ className="h-4 w-4" />
-              ) : (
-                <ArrowDownAZ className="h-4 w-4" />
-              )
-            }
-            trailing={<ChevronDown className="h-3.5 w-3.5 opacity-60" />}
-          >
-            <span className="hidden md:inline">{sortMeta.label}</span>
-            <span className="md:hidden">並び替え</span>
-          </TriggerButton>
-
-          <Popover
-            open={openSort}
-            onClose={() => setOpenSort(false)}
-            anchorRef={sortAnchor}
-            className="w-[min(92vw,300px)]"
-          >
-            <SortPanel
-              sortKey={sortKey}
-              sortDir={sortDir}
-              onChange={(k, d) => {
-                push((next) => {
-                  if (k === DEFAULT_STORE_SORT.key && d === DEFAULT_STORE_SORT.dir) {
-                    next.delete("sort");
-                    next.delete("dir");
-                  } else {
-                    next.set("sort", k);
-                    next.set("dir", d);
-                  }
-                });
-              }}
-            />
-          </Popover>
-        </div>
       </div>
 
       {/* === アクティブ状態行 (ピル) === */}
-      {hasAny ? (
+      {hasAnyFilter ? (
         <div className="flex items-center gap-2 flex-wrap border-t border-border/80 px-3 py-2.5 bg-muted/30 rounded-b-xl">
           <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
             <ListFilter className="h-3 w-3" /> 適用中
@@ -318,20 +242,6 @@ export function StoresFilterBar() {
           {channel ? (
             <Chip onClear={() => setKey("channel", "")} label="チャネル">
               {channel}
-            </Chip>
-          ) : null}
-          {!sortDefault ? (
-            <Chip
-              onClear={() =>
-                push((next) => {
-                  next.delete("sort");
-                  next.delete("dir");
-                })
-              }
-              label="並び順"
-              tone="muted"
-            >
-              {sortLabel}
             </Chip>
           ) : null}
 
@@ -550,90 +460,6 @@ function ChipGroup({ value, onChange, options, stage }: ChipGroupProps) {
           </button>
         );
       })}
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/*  ソートパネル                                                         */
-/* ------------------------------------------------------------------ */
-
-interface SortPanelProps {
-  sortKey: StoreSortKey;
-  sortDir: SortDirection;
-  onChange: (key: StoreSortKey, dir: SortDirection) => void;
-}
-
-function SortPanel({ sortKey, sortDir, onChange }: SortPanelProps) {
-  return (
-    <div className="flex flex-col">
-      <div className="px-4 py-3 border-b border-border">
-        <h3 className="text-sm font-semibold tracking-tight">並び替え</h3>
-        <p className="mt-0.5 text-[11px] text-muted-foreground">
-          項目をクリックして適用、もう一度押すと方向を反転
-        </p>
-      </div>
-
-      <ul role="radiogroup" className="py-1.5">
-        {SORT_OPTIONS.map((opt) => {
-          const selected = sortKey === opt.key;
-          const effectiveDir = selected ? sortDir : opt.defaultDir;
-          const directionLabel =
-            effectiveDir === "asc" ? opt.ascLabel : opt.descLabel;
-
-          return (
-            <li key={opt.key}>
-              <button
-                type="button"
-                role="radio"
-                aria-checked={selected}
-                onClick={() => {
-                  if (selected) {
-                    onChange(opt.key, sortDir === "asc" ? "desc" : "asc");
-                  } else {
-                    onChange(opt.key, opt.defaultDir);
-                  }
-                }}
-                className={cn(
-                  "group w-full flex items-center justify-between gap-3 px-4 py-2.5 text-left text-sm",
-                  "transition-colors hover:bg-accent",
-                  selected && "bg-accent/60",
-                )}
-              >
-                <span className="flex items-center gap-2.5 min-w-0">
-                  <span
-                    className={cn(
-                      "inline-flex h-5 w-5 items-center justify-center rounded-full border",
-                      selected
-                        ? "border-foreground bg-foreground text-background"
-                        : "border-border text-transparent group-hover:border-foreground/40",
-                    )}
-                  >
-                    <Check className="h-3 w-3" />
-                  </span>
-                  <span className="font-medium text-foreground">{opt.label}</span>
-                </span>
-
-                <span
-                  className={cn(
-                    "inline-flex items-center gap-1 text-xs",
-                    selected
-                      ? "text-foreground"
-                      : "text-muted-foreground",
-                  )}
-                >
-                  {effectiveDir === "asc" ? (
-                    <ArrowUpAZ className="h-3.5 w-3.5" />
-                  ) : (
-                    <ArrowDownAZ className="h-3.5 w-3.5" />
-                  )}
-                  {directionLabel}
-                </span>
-              </button>
-            </li>
-          );
-        })}
-      </ul>
     </div>
   );
 }

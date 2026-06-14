@@ -13,6 +13,9 @@ import { StoresTableView } from "./stores-table-view";
  * `StoresTableView` (`"use client"`) に委譲する。
  *
  * task 4.2 (PR3a): listActiveDeepResearchStoreIds 撤去 (#121 / #110 連動)。
+ *
+ * 営業担当 (sales) ソートは profile.display_name 解決が必要なため、
+ * profile 取得後に id → display_name の Map を `listStores` の ctx に渡す。
  */
 export async function StoresTable({
   filter,
@@ -21,10 +24,10 @@ export async function StoresTable({
   filter: StoreFilter;
   sort?: StoreSort;
 }) {
-  const [stores, profiles] = await Promise.all([
-    listStores(filter, sort),
-    getAllProfiles({ excludePlaceholders: false }),
-  ]);
+  const profiles = await getAllProfiles({ excludePlaceholders: false });
+  const profilesById = new Map(profiles.map((p) => [p.id, p.display_name]));
+
+  const stores = await listStores(filter, sort, { profilesById });
 
   // Map / Set を RSC 境界用にプレーン配列へ変換 (依存しない方が安全)
   const profileEntries = profiles.map(

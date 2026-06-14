@@ -9,12 +9,11 @@ import { STAGE_IDS, type StageId } from "@/types/stage";
 import {
   CHANNELS,
   DEFAULT_STORE_SORT,
-  SORT_KEYS,
+  normalizeLegacySortKey,
   type Channel,
   type SortDirection,
   type StoreFilter,
   type StoreSort,
-  type StoreSortKey,
 } from "@/types/store";
 
 export const metadata: Metadata = {
@@ -48,10 +47,10 @@ function parseFilter(params: Awaited<PageProps["searchParams"]>): StoreFilter {
 }
 
 function parseSort(params: Awaited<PageProps["searchParams"]>): StoreSort {
-  const key =
-    params.sort && (SORT_KEYS as readonly string[]).includes(params.sort)
-      ? (params.sort as StoreSortKey)
-      : DEFAULT_STORE_SORT.key;
+  // 旧 URL クエリ (`?sort=review_avg`, `?sort=review_count`) は `review` に正規化する
+  const key = params.sort
+    ? (normalizeLegacySortKey(params.sort) ?? DEFAULT_STORE_SORT.key)
+    : DEFAULT_STORE_SORT.key;
   const dir: SortDirection = params.dir === "asc" ? "asc" : "desc";
   return { key, dir };
 }

@@ -42,6 +42,8 @@ function buildColumns(
     {
       key: "name",
       header: "店舗名",
+      sortKey: "name",
+      sortDefaultDir: "asc",
       truncate: true,
       maxWidth: "260px",
       title: (s) => s.name,
@@ -57,6 +59,8 @@ function buildColumns(
     {
       key: "location",
       header: "エリア",
+      sortKey: "location",
+      sortDefaultDir: "asc",
       truncate: true,
       maxWidth: "200px",
       title: (s) =>
@@ -67,10 +71,18 @@ function buildColumns(
         </span>
       ),
     },
-    { key: "genre", header: "業態", cell: (s) => s.genre || "—" },
+    {
+      key: "genre",
+      header: "業態",
+      sortKey: "genre",
+      sortDefaultDir: "asc",
+      cell: (s) => s.genre || "—",
+    },
     {
       key: "review",
       header: "口コミ",
+      sortKey: "review",
+      sortDefaultDir: "desc",
       cell: (s) =>
         s.review_count > 0 ? (
           <span className="inline-flex items-center gap-1.5">
@@ -86,16 +98,22 @@ function buildColumns(
     {
       key: "stage",
       header: "状態",
+      sortKey: "stage",
+      sortDefaultDir: "asc",
       cell: (s) => <StageBadge stage={s.stage} />,
     },
     {
       key: "channel",
       header: "チャネル",
+      sortKey: "channel",
+      sortDefaultDir: "asc",
       cell: (s) => <ChannelBadge channel={s.channel} />,
     },
     {
       key: "sales",
       header: "営業担当",
+      sortKey: "sales",
+      sortDefaultDir: "asc",
       truncate: true,
       maxWidth: "140px",
       title: (s) => {
@@ -107,6 +125,8 @@ function buildColumns(
     {
       key: "updated",
       header: "更新",
+      sortKey: "updated",
+      sortDefaultDir: "desc",
       cell: (s) => (
         <span className="text-xs text-muted-foreground whitespace-nowrap">
           {formatDate(s.updated_at)}
