@@ -21,7 +21,7 @@
  */
 
 import "server-only";
-import { eq, desc, and, or, ilike, inArray, type SQL } from "drizzle-orm";
+import { eq, desc, and, or, ilike, inArray, sql, type SQL } from "drizzle-orm";
 import { db, type DbClient, type Tx } from "./client";
 import { stores } from "./schema";
 import {
@@ -222,14 +222,40 @@ export function makeStoreRepo(executor: DbClient | Tx): StoreRepository {
 
     async bulkDelete(ids) {
       if (ids.length === 0) return 0;
-      // 関連テーブル (deals / research / handoffs / research_jobs / research_reports) は
-      // FK の ON DELETE CASCADE (migration 0015) で連鎖削除される。
-      // RETURNING id で実際に削除された件数を確定する。
-      const deleted = await executor
-        .delete(stores)
-        .where(inArray(stores.id, ids))
-        .returning({ id: stores.id });
-      return deleted.length;
+      // 関連テーブル (deals / research / handoffs / handoffs.deal_id) は FK の
+      // ON DELETE CASCADE (migration 0015) で連鎖削除される。CASCADE 連鎖の重さで
+      // Supabase Pooler の既定 statement_timeout を超過するリスクを避けるため、
+      // 1 transaction で囲み `SET LOCAL statement_timeout = '60s'` を明示する
+      // (transaction スコープで自動失効するため pgbouncer transaction mode と整合)。
+      // 全件 atomic: いずれかの行で失敗したら ROLLBACK で何も消えない。
+      return await executor.transaction(async (tx) => {
+        await tx.execute(sql`SET LOCAL statement_timeout = '60s'`);
+        // PR #144 セルフレビュー容疑 B 対応の観測コード。SET LOCAL が Supabase Pooler
+        // (pgbouncer) を素通りして実際に有効になっているか実機ログで確定する。'60s' なら
+        // 想定通り、'8s' 等の短い値が出れば pgbouncer の query_timeout 等で上書きされて
+        // いる。preview / 本番ログでの一度きりの観測が目的のため best-effort で発行する
+        // (失敗しても本処理は止めない)。確認完了後に削除予定の一時コード。
+        try {
+          const setting = (await tx.execute(
+            sql`SHOW statement_timeout`,
+          )) as unknown as Array<{ statement_timeout?: string }>;
+          console.log("[stores.bulkDelete] statement_timeout", {
+            requested: "60s",
+            effective: setting[0]?.statement_timeout,
+            ids_count: ids.length,
+          });
+        } catch (probeErr) {
+          console.warn(
+            "[stores.bulkDelete] failed to read effective timeout",
+            probeErr instanceof Error ? probeErr.message : probeErr,
+          );
+        }
+        const deleted = await tx
+          .delete(stores)
+          .where(inArray(stores.id, ids))
+          .returning({ id: stores.id });
+        return deleted.length;
+      });
     },
 
     async mergeBasicInfo(id, incoming, source: FillSource) {
