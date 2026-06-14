@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
 import { decideChannel } from "@/lib/domain/channel";
+import { parsePostgresError, formatUserMessage } from "@/lib/db/postgres-error";
 import {
   CHANNELS,
   CONTACT_FORMS,
@@ -237,9 +238,18 @@ export async function deleteStoreAction(id: string): Promise<ActionResult> {
     const removed = await repos.store.delete(id);
     if (!removed) return failure("店舗が見つかりませんでした");
   } catch (err) {
-    return failure(
-      err instanceof Error ? err.message : "店舗の削除に失敗しました",
-    );
+    const parsed = parsePostgresError(err);
+    // Vercel logs に SQLSTATE / detail / constraint を必ず残し、UI 用の文言とは分離する
+    console.error("[stores.delete] failed", {
+      id,
+      code: parsed?.code,
+      detail: parsed?.detail,
+      constraint: parsed?.constraint,
+      table: parsed?.table,
+      message:
+        parsed?.message ?? (err instanceof Error ? err.message : String(err)),
+    });
+    return failure(formatUserMessage(parsed, "店舗の削除に失敗しました"));
   }
   // 関連レコード (商談 / 調査 / ハンドオフ) は FK の ON DELETE CASCADE で連鎖削除される。
   // task 4.2 (PR3a): Deep Research タグは撤去 (#121 / #110 連動)。
@@ -280,9 +290,20 @@ export async function bulkDeleteStoresAction(
   try {
     deletedCount = await repos.store.bulkDelete(uniqueIds);
   } catch (err) {
-    return failure(
-      err instanceof Error ? err.message : "店舗の削除に失敗しました",
-    );
+    const parsed = parsePostgresError(err);
+    // Vercel logs に SQLSTATE / detail / constraint を必ず残し、UI 用の文言とは分離する。
+    // sample は ID 全列挙を避けつつ調査の手掛かりに先頭 3 件のみ残す。
+    console.error("[stores.bulkDelete] failed", {
+      requestedCount: uniqueIds.length,
+      sample: uniqueIds.slice(0, 3),
+      code: parsed?.code,
+      detail: parsed?.detail,
+      constraint: parsed?.constraint,
+      table: parsed?.table,
+      message:
+        parsed?.message ?? (err instanceof Error ? err.message : String(err)),
+    });
+    return failure(formatUserMessage(parsed, "店舗の削除に失敗しました"));
   }
 
   // 集合タグを広く revalidate する。
