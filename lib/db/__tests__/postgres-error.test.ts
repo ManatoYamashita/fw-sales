@@ -91,7 +91,7 @@ describe("formatUserMessage", () => {
     expect(msg).toMatch(/タイムアウト/);
   });
 
-  it("23503 (FK 違反) → 制約名を含む文言", () => {
+  it("23503 (FK 違反) → 関連レコード文言。制約名は UI に出さない (容疑 A 対応)", () => {
     const msg = formatUserMessage(
       {
         code: "23503",
@@ -100,17 +100,19 @@ describe("formatUserMessage", () => {
       },
       "fallback",
     );
-    expect(msg).toContain("deals_store_id_fk");
     expect(msg).toMatch(/関連レコード/);
+    // UI には内部スキーマ情報 (制約名) を露出しない。constraint は console.error
+    // 側に渡される構造化ログにのみ残す方針 (PR #144 セルフレビュー容疑 A 対応)。
+    expect(msg).not.toContain("deals_store_id_fk");
   });
 
-  it("23505 (UNIQUE 違反) → 一意制約文言", () => {
+  it("23505 (UNIQUE 違反) → 一意制約文言。制約名は UI に出さない", () => {
     const msg = formatUserMessage(
       { code: "23505", message: "duplicate key", constraint: "stores_pkey" },
       "fallback",
     );
     expect(msg).toMatch(/一意制約/);
-    expect(msg).toContain("stores_pkey");
+    expect(msg).not.toContain("stores_pkey");
   });
 
   it("42501 (権限不足) → 権限文言", () => {

@@ -230,6 +230,26 @@ export function makeStoreRepo(executor: DbClient | Tx): StoreRepository {
       // 全件 atomic: いずれかの行で失敗したら ROLLBACK で何も消えない。
       return await executor.transaction(async (tx) => {
         await tx.execute(sql`SET LOCAL statement_timeout = '60s'`);
+        // PR #144 セルフレビュー容疑 B 対応の観測コード。SET LOCAL が Supabase Pooler
+        // (pgbouncer) を素通りして実際に有効になっているか実機ログで確定する。'60s' なら
+        // 想定通り、'8s' 等の短い値が出れば pgbouncer の query_timeout 等で上書きされて
+        // いる。preview / 本番ログでの一度きりの観測が目的のため best-effort で発行する
+        // (失敗しても本処理は止めない)。確認完了後に削除予定の一時コード。
+        try {
+          const setting = (await tx.execute(
+            sql`SHOW statement_timeout`,
+          )) as unknown as Array<{ statement_timeout?: string }>;
+          console.log("[stores.bulkDelete] statement_timeout", {
+            requested: "60s",
+            effective: setting[0]?.statement_timeout,
+            ids_count: ids.length,
+          });
+        } catch (probeErr) {
+          console.warn(
+            "[stores.bulkDelete] failed to read effective timeout",
+            probeErr instanceof Error ? probeErr.message : probeErr,
+          );
+        }
         const deleted = await tx
           .delete(stores)
           .where(inArray(stores.id, ids))

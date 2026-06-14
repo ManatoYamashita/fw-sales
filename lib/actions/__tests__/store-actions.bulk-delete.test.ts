@@ -83,7 +83,7 @@ describe("bulkDeleteStoresAction エラーハンドリング", () => {
     );
   });
 
-  it("FK 違反 (23503) は constraint 名を含むメッセージを返す", async () => {
+  it("FK 違反 (23503) は UI 文言から制約名を抜き、構造化ログには残す (容疑 A 対応)", async () => {
     mockBulkDelete.mockRejectedValueOnce(
       makePgError("23503", {
         constraint_name: "deals_store_id_stores_id_fk",
@@ -95,8 +95,11 @@ describe("bulkDeleteStoresAction エラーハンドリング", () => {
 
     expect(result.ok).toBe(false);
     if (result.ok === false) {
-      expect(result.error).toContain("deals_store_id_stores_id_fk");
+      // UI 文言には内部スキーマ情報 (制約名) を露出しない
+      expect(result.error).not.toContain("deals_store_id_stores_id_fk");
+      expect(result.error).toMatch(/関連レコード/);
     }
+    // 構造化ログには constraint 名を残し、運用者がログから即座に原因特定できる
     expect(consoleErrorSpy).toHaveBeenCalledWith(
       "[stores.bulkDelete] failed",
       expect.objectContaining({

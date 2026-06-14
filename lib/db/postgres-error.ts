@@ -101,15 +101,12 @@ type Formatter = (parsed: ParsedPgError) => string;
 
 const SQLSTATE_MESSAGES: Record<string, Formatter> = {
   // foreign_key_violation
-  "23503": (p) => {
-    const c = p.constraint ? ` (制約: ${p.constraint})` : "";
-    return `関連レコードに紐づいているため削除できませんでした${c}。スキーマの ON DELETE 設定を確認してください。`;
-  },
+  // constraint 名は内部スキーマ情報のため UI には出さず、構造化ログ
+  // (Action 層の console.error) にのみ残す (PR #144 セルフレビュー容疑 A 対応)。
+  "23503": () =>
+    "関連レコードに紐づいているため削除できませんでした。スキーマの ON DELETE 設定を確認してください。",
   // unique_violation
-  "23505": (p) => {
-    const c = p.constraint ? ` (制約: ${p.constraint})` : "";
-    return `一意制約に違反しました${c}。`;
-  },
+  "23505": () => "一意制約に違反しました。",
   // not_null_violation
   "23502": (p) => {
     const c = p.column ? ` (列: ${p.column})` : "";
