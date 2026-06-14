@@ -21,7 +21,7 @@
  */
 
 import "server-only";
-import { eq, desc, and, or, ilike, inArray, sql, type SQL } from "drizzle-orm";
+import { eq, desc, and, or, ilike, inArray, type SQL } from "drizzle-orm";
 import { db, type DbClient, type Tx } from "./client";
 import { stores } from "./schema";
 import {
@@ -223,39 +223,20 @@ export function makeStoreRepo(executor: DbClient | Tx): StoreRepository {
     async bulkDelete(ids) {
       if (ids.length === 0) return 0;
       // 関連テーブル (deals / research / handoffs / handoffs.deal_id) は FK の
-      // ON DELETE CASCADE (migration 0015) で連鎖削除される。CASCADE 連鎖の重さで
-      // Supabase Pooler の既定 statement_timeout を超過するリスクを避けるため、
-      // 1 transaction で囲み `SET LOCAL statement_timeout = '60s'` を明示する
-      // (transaction スコープで自動失効するため pgbouncer transaction mode と整合)。
-      // 全件 atomic: いずれかの行で失敗したら ROLLBACK で何も消えない。
-      return await executor.transaction(async (tx) => {
-        await tx.execute(sql`SET LOCAL statement_timeout = '60s'`);
-        // PR #144 セルフレビュー容疑 B 対応の観測コード。SET LOCAL が Supabase Pooler
-        // (pgbouncer) を素通りして実際に有効になっているか実機ログで確定する。'60s' なら
-        // 想定通り、'8s' 等の短い値が出れば pgbouncer の query_timeout 等で上書きされて
-        // いる。preview / 本番ログでの一度きりの観測が目的のため best-effort で発行する
-        // (失敗しても本処理は止めない)。確認完了後に削除予定の一時コード。
-        try {
-          const setting = (await tx.execute(
-            sql`SHOW statement_timeout`,
-          )) as unknown as Array<{ statement_timeout?: string }>;
-          console.log("[stores.bulkDelete] statement_timeout", {
-            requested: "60s",
-            effective: setting[0]?.statement_timeout,
-            ids_count: ids.length,
-          });
-        } catch (probeErr) {
-          console.warn(
-            "[stores.bulkDelete] failed to read effective timeout",
-            probeErr instanceof Error ? probeErr.message : probeErr,
-          );
-        }
-        const deleted = await tx
-          .delete(stores)
-          .where(inArray(stores.id, ids))
-          .returning({ id: stores.id });
-        return deleted.length;
-      });
+      // ON DELETE CASCADE (migration 0015) で連鎖削除される。
+      // 単発 DML 文 `DELETE FROM stores WHERE id IN (...)` は PostgreSQL の
+      // 暗黙 transaction で auto-commit され、CASCADE 連鎖含めて全件成功 OR
+      // 全件 rollback の atomic 保証が標準で得られる。
+      // PR #144 で導入した `executor.transaction(...)` wrap は Supabase Transaction
+      // Pooler (pgbouncer transaction mode) と非互換で UNSAFE_TRANSACTION generic
+      // エラーを誘発し UI が fallback 文言になる問題があったため撤回 (PR #144 / #N)。
+      // statement_timeout の制御は別ルート (postgres-js の connection 設定 or
+      // pgbouncer 設定 or chunk 分割) で別 PR で扱う。
+      const deleted = await executor
+        .delete(stores)
+        .where(inArray(stores.id, ids))
+        .returning({ id: stores.id });
+      return deleted.length;
     },
 
     async mergeBasicInfo(id, incoming, source: FillSource) {

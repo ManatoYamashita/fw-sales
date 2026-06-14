@@ -151,6 +151,29 @@ function invalidateAllStoreScopes(id?: string) {
   if (id) revalidateTag(CACHE_TAGS.store(id), "max");
 }
 
+/**
+ * `parsePostgresError` が null を返した場合に raw err の構造を Vercel logs に dump する
+ * 診断ヘルパー。cause チェーン外の不明エラー (Drizzle / postgres-js の独自 wrapper、
+ * fetch / network 系、想定外の generic error 等) を次回以降の障害分析で即特定できる
+ * ようにする二段構え。PR #144 デプロイ後に UI が fallback 文言 ("店舗の削除に失敗しました")
+ * になる症状を受けて追加 (2 段検出でもなお拾えない error 形状の最終手段ログ)。
+ */
+function dumpUnrecognizedErrorShape(scope: string, err: unknown) {
+  const r = err as Record<string, unknown> | null;
+  const cause = r?.cause as Record<string, unknown> | undefined;
+  console.error(`${scope} unrecognized error shape`, {
+    name: r?.name,
+    constructor: (err as { constructor?: { name?: string } })?.constructor
+      ?.name,
+    keys: r ? Object.keys(r) : [],
+    cause_name: cause?.name,
+    cause_code: cause?.code,
+    cause_constructor: (cause as { constructor?: { name?: string } } | undefined)
+      ?.constructor?.name,
+    raw_message: r?.message,
+  });
+}
+
 export async function createStoreAction(
   _prev: ActionResult<{ id: string }> | null,
   formData: FormData,
@@ -249,6 +272,7 @@ export async function deleteStoreAction(id: string): Promise<ActionResult> {
       message:
         parsed?.message ?? (err instanceof Error ? err.message : String(err)),
     });
+    if (parsed === null) dumpUnrecognizedErrorShape("[stores.delete]", err);
     return failure(formatUserMessage(parsed, "店舗の削除に失敗しました"));
   }
   // 関連レコード (商談 / 調査 / ハンドオフ) は FK の ON DELETE CASCADE で連鎖削除される。
@@ -303,6 +327,7 @@ export async function bulkDeleteStoresAction(
       message:
         parsed?.message ?? (err instanceof Error ? err.message : String(err)),
     });
+    if (parsed === null) dumpUnrecognizedErrorShape("[stores.bulkDelete]", err);
     return failure(formatUserMessage(parsed, "店舗の削除に失敗しました"));
   }
 

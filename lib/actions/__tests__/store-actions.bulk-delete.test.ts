@@ -110,7 +110,7 @@ describe("bulkDeleteStoresAction エラーハンドリング", () => {
     );
   });
 
-  it("非 PostgresError (一般 Error) は fallback 文言で failure を返す", async () => {
+  it("code を持たない一般 Error は fallback 文言で failure を返し、raw shape dump も発火", async () => {
     mockBulkDelete.mockRejectedValueOnce(new Error("network blew up"));
 
     const result = await bulkDeleteStoresAction(["store_a"]);
@@ -120,10 +120,44 @@ describe("bulkDeleteStoresAction エラーハンドリング", () => {
       "[stores.bulkDelete] failed",
       expect.objectContaining({
         requestedCount: 1,
-        // code は parsed が null のため undefined のまま渡る
         code: undefined,
         message: "network blew up",
       }),
+    );
+    // 2 段検出でも拾えない (code を持たない) 場合、raw err 構造の dump が二段構えで
+    // 発火し、Vercel logs から真因を即特定できる
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      "[stores.bulkDelete] unrecognized error shape",
+      expect.objectContaining({
+        name: "Error",
+        raw_message: "network blew up",
+      }),
+    );
+  });
+
+  it("generic error (UNSAFE_TRANSACTION) は 2 段検出で UI 文言 [code] ... へ整形される", async () => {
+    // postgres-js の generic(code, message) を再現: name は未設定 ("Error")、code 持ち。
+    // PR #144 の executor.transaction が Supabase Pooler で投げる本番症状の仮説再現。
+    const generic = Object.assign(
+      new Error("UNSAFE_TRANSACTION: SET LOCAL is not safe ..."),
+      { code: "UNSAFE_TRANSACTION" },
+    );
+    mockBulkDelete.mockRejectedValueOnce(generic);
+
+    const result = await bulkDeleteStoresAction(["store_a"]);
+
+    expect(result.ok).toBe(false);
+    if (result.ok === false) {
+      expect(result.error).toContain("[UNSAFE_TRANSACTION]");
+    }
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      "[stores.bulkDelete] failed",
+      expect.objectContaining({ code: "UNSAFE_TRANSACTION" }),
+    );
+    // parsed が non-null になったので raw shape dump は呼ばれない
+    expect(consoleErrorSpy).not.toHaveBeenCalledWith(
+      "[stores.bulkDelete] unrecognized error shape",
+      expect.anything(),
     );
   });
 
