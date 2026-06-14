@@ -45,13 +45,17 @@ declare namespace google {
       zIndex?: number;
     }
 
+    interface MapsEventListener {
+      remove(): void;
+    }
+
     class Marker {
       constructor(opts?: MarkerOptions);
       setMap(map: Map | null): void;
       setPosition(latLng: LatLngLiteral): void;
       setIcon(icon: Symbol): void;
       setZIndex(zIndex: number): void;
-      addListener(eventName: string, handler: () => void): void;
+      addListener(eventName: string, handler: () => void): MapsEventListener;
     }
 
     interface CircleOptions {
