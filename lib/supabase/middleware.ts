@@ -23,6 +23,16 @@ export interface UpdateSessionResult {
   readonly userId: string | null;
 }
 
+/**
+ * Supabase Auth API への fetch を強制中断する上限。
+ *
+ * Vercel Edge Middleware の総上限は 25,000ms。Supabase プロジェクトが pause /
+ * DNS NXDOMAIN / 経路障害でハングした際に MIDDLEWARE_INVOCATION_TIMEOUT (504)
+ * を返さず、`/login` リダイレクトに fall through するため 4 秒で AbortSignal を
+ * 発火させる。通常応答は数百ms に収まるため誤発火しない想定。
+ */
+const AUTH_FETCH_TIMEOUT_MS = 4_000;
+
 let _missingEnvWarned = false;
 
 function readSupabaseEnv(): { url: string; anonKey: string } | null {
@@ -63,6 +73,13 @@ export async function updateSession(
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(env.url, env.anonKey, {
+    global: {
+      fetch: (input: RequestInfo | URL, init?: RequestInit) =>
+        fetch(input, {
+          ...init,
+          signal: AbortSignal.timeout(AUTH_FETCH_TIMEOUT_MS),
+        }),
+    },
     cookies: {
       getAll() {
         return request.cookies.getAll();
@@ -91,7 +108,15 @@ export async function updateSession(
     }
     return { response, isAuthenticated: true, userId: user.id };
   } catch (err) {
-    console.error("[auth] middleware updateSession failed:", err);
+    const isTimeout =
+      err instanceof DOMException && err.name === "TimeoutError";
+    if (isTimeout) {
+      console.warn(
+        `[auth] Supabase auth.getUser() timed out after ${AUTH_FETCH_TIMEOUT_MS}ms — falling through as unauthenticated`,
+      );
+    } else {
+      console.error("[auth] middleware updateSession failed:", err);
+    }
     return { response, isAuthenticated: false, userId: null };
   }
 }
