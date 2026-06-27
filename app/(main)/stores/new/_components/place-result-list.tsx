@@ -78,9 +78,25 @@ export function PlaceResultList({
             <li
               key={place.placeId}
               data-place-id={place.placeId}
+              tabIndex={0}
+              className="focus-visible:outline-none"
               onMouseEnter={() => onActivatePlace(place.placeId)}
               onMouseLeave={() => onActivatePlace(null)}
               onClick={() => onActivatePlace(place.placeId)}
+              onFocus={() => onActivatePlace(place.placeId)}
+              onBlur={(e) => {
+                // フォーカスが li 内の子要素に移動した場合はピン連動を解除しない
+                if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                  onActivatePlace(null);
+                }
+              }}
+              onKeyDown={(e) => {
+                // li 自体がフォーカスを持つとき Enter / Space で地図ピンを連動させる
+                if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) {
+                  e.preventDefault();
+                  onActivatePlace(place.placeId);
+                }
+              }}
             >
               <Card
                 className={cn(
