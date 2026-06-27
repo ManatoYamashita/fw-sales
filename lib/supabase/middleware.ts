@@ -74,10 +74,18 @@ export async function updateSession(
 
   const supabase = createServerClient(env.url, env.anonKey, {
     global: {
+      // signal は `...init` の後に置くと将来 supabase-js が `init.signal` を渡し
+      // 始めた際に黙ってクロバーされるため、`AbortSignal.any` で合成する。
+      // (Node 20 / Edge runtime 両対応)
       fetch: (input: RequestInfo | URL, init?: RequestInit) =>
         fetch(input, {
           ...init,
-          signal: AbortSignal.timeout(AUTH_FETCH_TIMEOUT_MS),
+          signal: init?.signal
+            ? AbortSignal.any([
+                init.signal,
+                AbortSignal.timeout(AUTH_FETCH_TIMEOUT_MS),
+              ])
+            : AbortSignal.timeout(AUTH_FETCH_TIMEOUT_MS),
         }),
     },
     cookies: {
@@ -104,19 +112,23 @@ export async function updateSession(
       error,
     } = await supabase.auth.getUser();
     if (error || !user) {
+      // auth-js は fetch 失敗 (timeout / DNS / network) を `AuthRetryableFetchError`
+      // に wrap して error として return する (throw しない)。よって本番で起きる
+      // Supabase 障害はこの分岐で警告し可視化する。`!user` のみで error が null の
+      // 通常の未認証ケース (cookie 不在等) は静かに fall through する。
+      if (error?.name === "AuthRetryableFetchError") {
+        console.warn(
+          `[auth] Supabase auth.getUser() failed (likely ${AUTH_FETCH_TIMEOUT_MS}ms timeout or network) — falling through as unauthenticated:`,
+          error.message,
+        );
+      }
       return { response, isAuthenticated: false, userId: null };
     }
     return { response, isAuthenticated: true, userId: user.id };
   } catch (err) {
-    const isTimeout =
-      err instanceof DOMException && err.name === "TimeoutError";
-    if (isTimeout) {
-      console.warn(
-        `[auth] Supabase auth.getUser() timed out after ${AUTH_FETCH_TIMEOUT_MS}ms — falling through as unauthenticated`,
-      );
-    } else {
-      console.error("[auth] middleware updateSession failed:", err);
-    }
+    // 防御コード (theoretical) — auth-js が error を return するため通常は到達しない。
+    // 安全網として残置。
+    console.error("[auth] middleware updateSession failed:", err);
     return { response, isAuthenticated: false, userId: null };
   }
 }
