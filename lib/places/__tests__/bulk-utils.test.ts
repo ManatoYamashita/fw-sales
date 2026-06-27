@@ -4,7 +4,8 @@ import {
   mergeUniquePlaces,
   mergeUniquePlacesWithStats,
 } from "../bulk-utils";
-import type { PlaceWithMatch } from "../types";
+import { createDiscoveryInfo } from "../discovery";
+import type { AreaSearchPlaceViewModel, PlaceWithMatch } from "../types";
 
 function makePlace(placeId: string, name = placeId): PlaceWithMatch {
   return {
@@ -21,6 +22,19 @@ function makePlace(placeId: string, name = placeId): PlaceWithMatch {
       googleMapsUri: null,
     },
     matchedStore: null,
+  };
+}
+
+function makeViewModel(
+  placeId: string,
+  source: Parameters<typeof createDiscoveryInfo>[0],
+): AreaSearchPlaceViewModel {
+  return {
+    ...makePlace(placeId),
+    distanceMeters: 0,
+    isWithinRadius: true,
+    discovery: createDiscoveryInfo(source),
+    candidateInfo: null,
   };
 }
 
@@ -102,5 +116,78 @@ describe("mergeUniquePlacesWithStats", () => {
     expect(result.merged).toEqual(current);
     expect(result.addedCount).toBe(0);
     expect(result.duplicateCount).toBe(0);
+  });
+
+  it("同一placeIdの重複merge時にdiscovery.sourcesが統合される", () => {
+    const current = [makeViewModel("a", "mainTextSearch")];
+    const incoming = [makeViewModel("a", "keywordExploration")];
+
+    const result = mergeUniquePlacesWithStats(current, incoming);
+
+    expect(result.merged).toHaveLength(1);
+    expect(result.merged[0]?.discovery).toEqual({
+      sources: ["mainTextSearch", "keywordExploration"],
+      firstSource: "mainTextSearch",
+      sourceCount: 2,
+    });
+    expect(result.duplicateCount).toBe(1);
+    expect(result.addedCount).toBe(0);
+  });
+
+  it("discovery.sourcesは重複しない (同じソースで再度見つかっても増えない)", () => {
+    const current = [makeViewModel("a", "mainTextSearch")];
+    const incoming = [makeViewModel("a", "mainTextSearch")];
+
+    const result = mergeUniquePlacesWithStats(current, incoming);
+
+    expect(result.merged[0]?.discovery.sources).toEqual(["mainTextSearch"]);
+    expect(result.merged[0]?.discovery.sourceCount).toBe(1);
+  });
+
+  it("current側の順番を維持し、incomingの新規placeは後ろに追加される", () => {
+    const current = [
+      makeViewModel("a", "mainTextSearch"),
+      makeViewModel("b", "mainTextSearch"),
+    ];
+    const incoming = [
+      makeViewModel("b", "keywordExploration"),
+      makeViewModel("c", "keywordExploration"),
+    ];
+
+    const result = mergeUniquePlacesWithStats(current, incoming);
+
+    expect(result.merged.map((vm) => vm.place.placeId)).toEqual(["a", "b", "c"]);
+    expect(result.merged[1]?.discovery.sourceCount).toBe(2);
+    expect(result.merged[2]?.discovery).toEqual(createDiscoveryInfo("keywordExploration"));
+    expect(result.addedCount).toBe(1);
+    expect(result.duplicateCount).toBe(1);
+  });
+
+  it("mainTextSearch + nearbyExploration の重複merge時にdiscovery.sourcesが両方残る (sourceCount=2)", () => {
+    const current = [makeViewModel("a", "mainTextSearch")];
+    const incoming = [makeViewModel("a", "nearbyExploration")];
+
+    const result = mergeUniquePlacesWithStats(current, incoming);
+
+    expect(result.merged).toHaveLength(1);
+    expect(result.merged[0]?.discovery).toEqual({
+      sources: ["mainTextSearch", "nearbyExploration"],
+      firstSource: "mainTextSearch",
+      sourceCount: 2,
+    });
+    expect(result.duplicateCount).toBe(1);
+    expect(result.addedCount).toBe(0);
+  });
+
+  it("元配列(current/incoming)を破壊しない", () => {
+    const current = [makeViewModel("a", "mainTextSearch")];
+    const incoming = [makeViewModel("a", "keywordExploration")];
+    const currentSnapshot = JSON.parse(JSON.stringify(current));
+    const incomingSnapshot = JSON.parse(JSON.stringify(incoming));
+
+    mergeUniquePlacesWithStats(current, incoming);
+
+    expect(current).toEqual(currentSnapshot);
+    expect(incoming).toEqual(incomingSnapshot);
   });
 });

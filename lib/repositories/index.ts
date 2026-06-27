@@ -30,6 +30,7 @@ import type { ProfileRepository } from "./profile-repository";
 import type { NotificationRepository } from "./notification-repository";
 import type { PromptTemplateRepository } from "./prompt-template-repository";
 import type { AppSettingsRepository } from "./app-settings-repository";
+import type { PlaceCandidateRepository } from "./place-candidate-repository";
 
 export type {
   DealRepository,
@@ -40,6 +41,7 @@ export type {
   NotificationRepository,
   PromptTemplateRepository,
   AppSettingsRepository,
+  PlaceCandidateRepository,
 };
 
 /**
@@ -62,6 +64,8 @@ export interface TxRepos {
   promptTemplate: PromptTemplateRepository;
   /** アプリ全体設定 key-value (Issue #122) で追加。 */
   appSettings: AppSettingsRepository;
+  /** エリア検索 候補DB保存の土台 (Issue #129 follow-up) で追加。 */
+  placeCandidate: PlaceCandidateRepository;
   // task 4.2 (PR3a): deepResearch を撤去 (#121 / #110 連動)。
 }
 
@@ -79,6 +83,8 @@ export interface Repos {
   promptTemplate: PromptTemplateRepository;
   /** アプリ全体設定 key-value (Issue #122) で追加。 */
   appSettings: AppSettingsRepository;
+  /** エリア検索 候補DB保存の土台 (Issue #129 follow-up) で追加。 */
+  placeCandidate: PlaceCandidateRepository;
   /**
    * 複数リポジトリ書込みを 1 トランザクションで実行する。
    * `db.transaction` で BEGIN/COMMIT/ROLLBACK を自動制御。
@@ -99,6 +105,7 @@ async function buildRepos(): Promise<Repos> {
     dbNotificationRepo,
     dbPromptTemplateRepo,
     dbAppSettingsRepo,
+    dbPlaceCandidateRepo,
     makeDealRepo,
     makeStoreRepo,
     makeResearchRepo,
@@ -107,6 +114,7 @@ async function buildRepos(): Promise<Repos> {
     makeNotificationRepo,
     makePromptTemplateRepo,
     makeAppSettingsRepo,
+    makePlaceCandidateRepo,
   } = dbModule;
 
   return Object.freeze({
@@ -118,6 +126,7 @@ async function buildRepos(): Promise<Repos> {
     notification: dbNotificationRepo,
     promptTemplate: dbPromptTemplateRepo,
     appSettings: dbAppSettingsRepo,
+    placeCandidate: dbPlaceCandidateRepo,
     transaction: <T>(fn: (tx: TxRepos) => Promise<T>): Promise<T> =>
       db.transaction(async (tx) =>
         fn({
@@ -129,6 +138,7 @@ async function buildRepos(): Promise<Repos> {
           notification: makeNotificationRepo(tx),
           promptTemplate: makePromptTemplateRepo(tx),
           appSettings: makeAppSettingsRepo(tx),
+          placeCandidate: makePlaceCandidateRepo(tx),
         }),
       ),
   }) satisfies Repos;

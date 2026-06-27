@@ -7,20 +7,75 @@ import {
   searchPlaces,
   searchPlacesPage,
   getPlaceById,
+  getPlaceDetails,
   resolveSearchCenter,
 } from "@/lib/places/google";
 import { placeResultToStoreInput } from "@/lib/places/to-store-input";
 import { placeResultToBasicInfo } from "@/lib/places/to-basic-info";
 import { attachStoreMatches } from "@/lib/places/match-store";
 import { deduplicatePlaceIds } from "@/lib/places/bulk-utils";
+import { createDiscoveryInfo } from "@/lib/places/discovery";
+import { attachCandidateInfo } from "@/lib/places/candidate-info";
+import { buildTextSearchMeta } from "@/lib/places/search-meta";
 import { distanceMeters } from "@/lib/utils/geo";
 import type {
+  AreaSearchDiscoverySource,
   AreaSearchPlaceViewModel,
   AreaSearchResultPayload,
+  PlaceDetailsResult,
   PlaceResult,
   SearchCenter,
 } from "@/lib/places/types";
 import { success, failure, type ActionResult } from "./_helpers";
+
+/**
+ * エリア検索結果を `place_candidates` に保存する (候補DB保存の土台 / Issue #129 follow-up)。
+ *
+ * 保存に失敗しても検索自体は失敗させない (ログのみ残す)。`candidatePersistence` は
+ * 保存できた場合のみ payload に含める。
+ */
+async function persistAreaSearchCandidates(
+  places: AreaSearchPlaceViewModel[],
+  keyword: string,
+  area: string,
+  center: SearchCenter,
+  radiusMeters: number,
+): Promise<AreaSearchResultPayload["candidatePersistence"]> {
+  try {
+    return await repos.placeCandidate.upsertFromAreaSearch({
+      places,
+      keyword,
+      area,
+      center,
+      radiusMeters,
+    });
+  } catch (e) {
+    console.error("[area-search] 候補DB保存に失敗しました", e);
+    return undefined;
+  }
+}
+
+/**
+ * `place_candidates` を `google_place_id` (= `place.placeId`) で再取得し、
+ * 各 `viewModels` 要素に `candidateInfo` を付与する (候補DB照合 / Issue #129 follow-up)。
+ *
+ * - 保存 (`persistAreaSearchCandidates`) の後に呼ぶことで、保存直後の最新の
+ *   `seenCount`/`lastSeenAt` を反映できる
+ * - 保存が失敗した場合でも、既存の候補DBレコードとの照合は試みる
+ * - 取得自体に失敗しても検索を失敗させない (ログのみ残し、全件 `candidateInfo: null` のまま返す)
+ */
+async function attachAreaSearchCandidateInfo(
+  viewModels: AreaSearchPlaceViewModel[],
+): Promise<AreaSearchPlaceViewModel[]> {
+  const placeIds = viewModels.map((vm) => vm.place.placeId).filter((id) => id !== "");
+  try {
+    const candidates = await repos.placeCandidate.findByGooglePlaceIds(placeIds);
+    return attachCandidateInfo(viewModels, candidates);
+  } catch (e) {
+    console.error("[area-search] 候補DB照合に失敗しました", e);
+    return viewModels;
+  }
+}
 
 /**
  * PlaceResult から 1 店舗を作成し、同 transaction 内で basic_info を充填する
@@ -59,6 +114,14 @@ export interface SearchPlacesWithMatchesOptions {
    * `locationBias` を使い回す (pageToken のパラメータ不一致を防ぐ)。
    */
   center?: SearchCenter;
+  /**
+   * この呼び出しで見つかった店舗に付与する探索ソース。
+   * 省略時は `pageToken` の有無から自動判定する
+   * (`pageToken` あり = "loadMore"、なし = "mainTextSearch")。
+   * 追加探索 (`area-search-results.tsx` の handleExplore) では
+   * `keywordExploration`/`centerExploration`/`radiusExploration` を明示的に指定する。
+   */
+  discoverySource?: AreaSearchDiscoverySource;
 }
 
 /**
@@ -104,6 +167,9 @@ export async function searchPlacesWithMatchesAction(
       repos.store.list(),
     ]);
 
+    const discoverySource: AreaSearchDiscoverySource =
+      options?.discoverySource ?? (options?.pageToken ? "loadMore" : "mainTextSearch");
+
     const viewModels: AreaSearchPlaceViewModel[] = attachStoreMatches(
       places,
       stores,
@@ -118,12 +184,61 @@ export async function searchPlacesWithMatchesAction(
         ...item,
         distanceMeters: distance,
         isWithinRadius: distance <= radiusMeters,
+        discovery: createDiscoveryInfo(discoverySource),
+        candidateInfo: null,
       };
     });
 
-    return success({ places: viewModels, nextPageToken, center, radiusMeters });
+    // resolveSearchCenter を呼んだ場合 (=options.center 未指定) は +1 回分とする。
+    const apiCallEstimate = options?.center ? 1 : 2;
+    const meta = buildTextSearchMeta({
+      loadedCount: viewModels.length,
+      hasNextPage: nextPageToken !== null,
+      currentPageCount: 1,
+      apiCallEstimate,
+    });
+
+    const candidatePersistence = await persistAreaSearchCandidates(
+      viewModels,
+      keyword,
+      centerQuery,
+      center,
+      radiusMeters,
+    );
+
+    const placesWithCandidateInfo = await attachAreaSearchCandidateInfo(viewModels);
+
+    return success({
+      places: placesWithCandidateInfo,
+      nextPageToken,
+      center,
+      radiusMeters,
+      meta,
+      candidatePersistence,
+    });
   } catch (e) {
     return failure(e instanceof Error ? e.message : "検索に失敗しました");
+  }
+}
+
+/**
+ * Place Detailsのオンデマンド取得 (Issue #104 follow-up)。
+ *
+ * 一覧検索やNearby Searchでは取得しない電話番号・Webサイト・評価・口コミ数・営業状態を、
+ * ユーザーがカードの「詳細取得」を押した1店舗分だけ取得する。検索ではなく補完処理のため、
+ * DB照合 (`repos.store.list()` / `attachStoreMatches`) や discovery source の更新は行わない。
+ */
+export async function getPlaceDetailsForAreaSearchAction(
+  placeId: string,
+): Promise<ActionResult<PlaceDetailsResult>> {
+  if (!placeId || typeof placeId !== "string") {
+    return failure("placeId が不正です");
+  }
+  try {
+    const details = await getPlaceDetails(placeId);
+    return success(details);
+  } catch (e) {
+    return failure(e instanceof Error ? e.message : "詳細情報の取得に失敗しました");
   }
 }
 

@@ -4,6 +4,7 @@ import {
   integer,
   real,
   index,
+  uniqueIndex,
   uuid,
   jsonb,
   boolean,
@@ -306,3 +307,49 @@ export const appSettings = pgTable("app_settings", {
   value: text("value").notNull(),
   updated_at: text("updated_at").notNull(),
 });
+
+/**
+ * place_candidates テーブル (エリア検索 候補DB保存の土台 / Issue #129 follow-up)
+ *
+ * エリア検索 (Text Search / もっと読み込み / 追加探索 / Nearby深掘り) で見つかった
+ * 候補を `google_place_id` 単位で蓄積する。将来の「前回候補の再利用」「有力候補判定」
+ * 等の土台であり、本テーブル自体の一覧表示・再利用は別実装とする。
+ *
+ * - `id` は `<entity>_<id>` 形式の text PK (既存規約)
+ * - `google_place_id` は UNIQUE。同じ候補は1レコードに統合し、`seen_count` を加算する
+ * - `status` は `'candidate' | 'added' | 'ignored' | 'stale'` (`PlaceCandidateStatus`)。
+ *   Postgres ENUM 化せず text として保持し、値の妥当性は repository / TS 型で担保する
+ * - `discovery_sources` は `AreaSearchDiscoverySource[]` を jsonb 配列として保持する
+ *   (`basic_info` の jsonb 規約に揃える)
+ * - 規約上の理由 (Google Places利用規約) により、店舗名・住所・評価・電話番号等の
+ *   Google由来コンテンツは保存しない。保存対象は `google_place_id` と探索メタ情報のみ
+ * - `matched_store_id` は `stores.id` への nullable FK (ON DELETE SET NULL)。
+ *   店舗削除時に候補レコード自体は残す
+ * - `first_seen_at` / `last_seen_at` / `created_at` / `updated_at` は既存規約に従い
+ *   `YYYY-MM-DD` 形式の text
+ *
+ * 関連: types/place-candidate.ts, lib/db/place-candidate-repository.ts
+ */
+export const placeCandidates = pgTable("place_candidates", {
+  id: text("id").primaryKey(),
+  google_place_id: text("google_place_id").notNull(),
+  status: text("status").notNull().default("candidate"),
+  first_seen_at: text("first_seen_at").notNull(),
+  last_seen_at: text("last_seen_at").notNull(),
+  seen_count: integer("seen_count").notNull().default(1),
+  discovery_sources: jsonb("discovery_sources").$type<string[]>().notNull().default([]),
+  last_searched_keyword: text("last_searched_keyword"),
+  last_searched_area: text("last_searched_area"),
+  last_center_lat: real("last_center_lat"),
+  last_center_lng: real("last_center_lng"),
+  last_radius_meters: integer("last_radius_meters"),
+  last_distance_meters: real("last_distance_meters"),
+  last_is_within_radius: boolean("last_is_within_radius"),
+  matched_store_id: text("matched_store_id").references(() => stores.id, {
+    onDelete: "set null",
+  }),
+  created_at: text("created_at").notNull(),
+  updated_at: text("updated_at").notNull(),
+}, (table) => [
+  uniqueIndex("place_candidates_google_place_id_idx").on(table.google_place_id),
+]);

@@ -40,3 +40,7 @@ export {
   makeAppSettingsRepo,
   dbAppSettingsRepo,
 } from "./app-settings-repository";
+export {
+  makePlaceCandidateRepo,
+  dbPlaceCandidateRepo,
+} from "./place-candidate-repository";

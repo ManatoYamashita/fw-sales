@@ -1,5 +1,5 @@
 import "server-only";
-import type { PlaceResult, PlaceSearchPage, SearchCenter } from "./types";
+import type { PlaceDetailsResult, PlaceResult, PlaceSearchPage, SearchCenter } from "./types";
 
 const SEARCH_ENDPOINT = "https://places.googleapis.com/v1/places:searchText";
 const DETAILS_ENDPOINT = "https://places.googleapis.com/v1/places";
@@ -32,6 +32,23 @@ const DETAILS_FIELD_MASK = [
   "googleMapsUri",
 ].join(",");
 
+// Place Details オンデマンド取得用のフィールドマスク (Issue #104 follow-up)。
+// 一覧検索やNearby Searchでは取得しない電話番号・Webサイト・評価・口コミ数・営業状態を追加で取得する。
+// reviews/photos/currentOpeningHours/regularOpeningHours等の重いフィールドは含めない。
+const PLACE_DETAILS_FIELD_MASK = [
+  "id",
+  "displayName",
+  "formattedAddress",
+  "location",
+  "types",
+  "googleMapsUri",
+  "nationalPhoneNumber",
+  "rating",
+  "userRatingCount",
+  "websiteUri",
+  "businessStatus",
+].join(",");
+
 interface RawDisplayName {
   text: string;
   languageCode?: string;
@@ -52,6 +69,8 @@ interface RawPlace {
   userRatingCount?: number;
   types?: string[];
   googleMapsUri?: string;
+  websiteUri?: string;
+  businessStatus?: string;
 }
 
 interface PlacesResponse {
@@ -79,26 +98,34 @@ function isFoodPlace(types: string[]): boolean {
 }
 
 /**
+ * RawPlace が PlaceResult/PlaceDetailsResult への変換に必要な必須フィールド
+ * (id / displayName.text / formattedAddress / location) を持っているかを判定する。
+ */
+function hasRequiredPlaceFields(raw: RawPlace): boolean {
+  return (
+    !!raw.id &&
+    !!raw.displayName?.text &&
+    !!raw.formattedAddress &&
+    raw.location?.latitude !== undefined &&
+    raw.location?.longitude !== undefined
+  );
+}
+
+/**
  * 必須フィールドが揃っている RawPlace のみ PlaceResult に変換する。
  * id / displayName.text / formattedAddress / location のいずれかが欠けている場合は
  * null を返し、呼び出し側でフィルタアウトする。
  */
 function toPlaceResult(raw: RawPlace): PlaceResult | null {
-  if (
-    !raw.id ||
-    !raw.displayName?.text ||
-    !raw.formattedAddress ||
-    raw.location?.latitude === undefined ||
-    raw.location?.longitude === undefined
-  ) {
+  if (!hasRequiredPlaceFields(raw)) {
     return null;
   }
   return {
     placeId: raw.id,
-    name: raw.displayName.text,
-    formattedAddress: raw.formattedAddress,
-    lat: raw.location.latitude,
-    lng: raw.location.longitude,
+    name: raw.displayName!.text,
+    formattedAddress: raw.formattedAddress!,
+    lat: raw.location!.latitude,
+    lng: raw.location!.longitude,
     phone: raw.nationalPhoneNumber ?? "",
     rating: raw.rating ?? null,
     userRatingsTotal: raw.userRatingCount ?? null,
@@ -252,21 +279,30 @@ export async function resolveSearchCenter(
 }
 
 /**
- * placeId を指定して Google Places API から詳細を取得する。
- * addStoreFromPlaceAction がサーバー側でデータを再取得する際に使用する。
- * 必須フィールドが欠けている場合は null を返す。
+ * Place Details の URL を組み立てる。
+ * placeId が "places/xxx" 形式で渡ってきた場合は、二重に "places/" を付けないよう
+ * プレフィックスを取り除いてから encodeURIComponent する。
  */
-export async function getPlaceById(placeId: string): Promise<PlaceResult | null> {
+function buildPlaceDetailsUrl(placeId: string): string {
+  const id = placeId.startsWith("places/") ? placeId.slice("places/".length) : placeId;
+  return `${DETAILS_ENDPOINT}/${encodeURIComponent(id)}`;
+}
+
+/**
+ * Place Details API (GET) を1回呼び出し、RawPlace を返す共通処理。
+ * `getPlaceById` / `getPlaceDetails` で共有する (フィールドマスクのみ呼び出し側で変える)。
+ */
+async function fetchRawPlaceDetails(placeId: string, fieldMask: string): Promise<RawPlace> {
   const apiKey = process.env.GOOGLE_PLACES_API_KEY;
   if (!apiKey) {
     throw new Error("GOOGLE_PLACES_API_KEY が設定されていません");
   }
 
-  const response = await fetch(`${DETAILS_ENDPOINT}/${encodeURIComponent(placeId)}`, {
+  const response = await fetch(buildPlaceDetailsUrl(placeId), {
     method: "GET",
     headers: {
       "X-Goog-Api-Key": apiKey,
-      "X-Goog-FieldMask": DETAILS_FIELD_MASK,
+      "X-Goog-FieldMask": fieldMask,
     },
     cache: "no-store",
   });
@@ -276,6 +312,45 @@ export async function getPlaceById(placeId: string): Promise<PlaceResult | null>
     throw new Error(`Places API エラー (${response.status}): ${text}`);
   }
 
-  const raw = (await response.json()) as RawPlace;
+  return (await response.json()) as RawPlace;
+}
+
+/**
+ * placeId を指定して Google Places API から詳細を取得する。
+ * addStoreFromPlaceAction がサーバー側でデータを再取得する際に使用する。
+ * 必須フィールドが欠けている場合は null を返す。
+ */
+export async function getPlaceById(placeId: string): Promise<PlaceResult | null> {
+  const raw = await fetchRawPlaceDetails(placeId, DETAILS_FIELD_MASK);
   return toPlaceResult(raw);
+}
+
+/**
+ * エリア検索の「Place Detailsオンデマンド取得」用 (Issue #104 follow-up)。
+ *
+ * 一覧検索やNearby Searchでは取得しない電話番号・Webサイト・評価・口コミ数・営業状態を、
+ * ユーザーが選んだ1店舗分だけ取得する。reviews/photos/営業時間等は取得しない。
+ * 必須フィールド (id/displayName.text/formattedAddress/location) が欠けている場合は例外を投げる。
+ */
+export async function getPlaceDetails(placeId: string): Promise<PlaceDetailsResult> {
+  const raw = await fetchRawPlaceDetails(placeId, PLACE_DETAILS_FIELD_MASK);
+
+  if (!hasRequiredPlaceFields(raw)) {
+    throw new Error("店舗情報が不足しているため詳細を取得できませんでした");
+  }
+
+  return {
+    placeId: raw.id,
+    name: raw.displayName!.text,
+    address: raw.formattedAddress!,
+    lat: raw.location!.latitude,
+    lng: raw.location!.longitude,
+    googleMapsUri: raw.googleMapsUri ?? "",
+    types: raw.types ?? [],
+    phone: raw.nationalPhoneNumber ?? "",
+    rating: raw.rating ?? null,
+    userRatingsTotal: raw.userRatingCount ?? null,
+    websiteUri: raw.websiteUri ?? null,
+    businessStatus: raw.businessStatus ?? null,
+  };
 }

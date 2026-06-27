@@ -25,6 +25,8 @@ function makeViewModel(lat: number, lng: number): AreaSearchPlaceViewModel {
     matchedStore: null,
     distanceMeters: 0,
     isWithinRadius: true,
+    discovery: { sources: ["mainTextSearch"], firstSource: "mainTextSearch", sourceCount: 1 },
+    candidateInfo: null,
   };
 }
 

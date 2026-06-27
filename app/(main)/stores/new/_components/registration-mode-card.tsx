@@ -16,7 +16,11 @@ import type {
   ApplyResult,
   ParsedSource,
 } from "@/lib/url-parser/types";
-import type { AreaSearchPlaceViewModel, SearchCenter } from "@/lib/places/types";
+import type {
+  AreaSearchMeta,
+  AreaSearchPlaceViewModel,
+  SearchCenter,
+} from "@/lib/places/types";
 import {
   ManualFallbackModal,
   type ManualFallbackReason,
@@ -292,6 +296,8 @@ export interface AreaSearchSessionResult {
   center: SearchCenter;
   /** 検索半径 (メートル)。 */
   radiusMeters: number;
+  /** 初回検索のメタ情報 (取得元・上限件数・API回数目安など)。 */
+  meta: AreaSearchMeta;
 }
 
 export interface AreaSearchPanelProps {
@@ -319,13 +325,13 @@ export function AreaSearchPanel({
         radiusMeters,
       );
       if (result.ok) {
-        const { places, nextPageToken, center } = result.data;
+        const { places, nextPageToken, center, meta } = result.data;
         if (places.length === 0) {
           setError(
             "該当する店舗が見つかりませんでした。条件を変えて再検索してください。",
           );
         }
-        onSearched({ places, nextPageToken, keyword, area, center, radiusMeters });
+        onSearched({ places, nextPageToken, keyword, area, center, radiusMeters, meta });
       } else {
         setError(result.error);
       }

@@ -14,9 +14,11 @@ import { PlaceResultList } from "./place-result-list";
 import { AreaSearchMap } from "./area-search-map";
 import {
   bulkAddStoresFromPlacesAction,
+  getPlaceDetailsForAreaSearchAction,
   searchPlacesWithMatchesAction,
 } from "@/lib/actions/area-search-actions";
 import { mergeUniquePlaces, mergeUniquePlacesWithStats } from "@/lib/places/bulk-utils";
+import { mergePlaceDetailsIntoAreaSearchResult } from "@/lib/places/details";
 import {
   FEW_ELIGIBLE_THRESHOLD,
   SEARCH_RESULT_SOFT_LIMIT,
@@ -28,7 +30,22 @@ import {
   type ExplorationKind,
 } from "@/lib/places/exploration";
 import { formatDistanceMeters } from "@/lib/utils/geo";
-import type { AreaSearchPlaceViewModel, SearchCenter } from "@/lib/places/types";
+import {
+  AREA_SEARCH_SORT_MODES,
+  AREA_SEARCH_SORT_MODE_LABELS,
+  DEFAULT_AREA_SEARCH_SORT_MODE,
+  isEligiblePlace,
+  sortAreaSearchResults,
+  type AreaSearchSortMode,
+} from "@/lib/places/ranking";
+import { buildTextSearchMeta, getAreaSearchMetaMessages } from "@/lib/places/search-meta";
+import { Select } from "@/components/ui/select";
+import type {
+  AreaSearchDiscoverySource,
+  AreaSearchMeta,
+  AreaSearchPlaceViewModel,
+  SearchCenter,
+} from "@/lib/places/types";
 
 /**
  * 一覧の絞り込み区分。
@@ -39,18 +56,13 @@ import type { AreaSearchPlaceViewModel, SearchCenter } from "@/lib/places/types"
  */
 type ResultFilter = "all" | "eligible" | "registered" | "inRange";
 
-/** 一括追加対象 (登録候補): DB未登録 かつ まだ追加していない店舗 */
-function isEligiblePlace(
-  { place, matchedStore }: AreaSearchPlaceViewModel,
-  addedIds: ReadonlySet<string>,
-): boolean {
-  return matchedStore === null && !addedIds.has(place.placeId);
-}
+/** 探索履歴の種別。`ExplorationKind` (条件を変えて探す)。 */
+type ExplorationRunKind = ExplorationKind;
 
 /** 「追加探索」1回分の実行記録 (画面内 state のみ。DB保存しない)。 */
 interface ExplorationRun {
   id: string;
-  kind: ExplorationKind;
+  kind: ExplorationRunKind;
   keyword: string;
   centerQuery: string;
   radiusMeters: number;
@@ -64,10 +76,17 @@ interface ExplorationRun {
 /** 探索履歴に保持する最大件数。 */
 const EXPLORATION_HISTORY_LIMIT = 5;
 
-const EXPLORATION_KIND_LABELS: Record<ExplorationKind, string> = {
+const EXPLORATION_KIND_LABELS: Record<ExplorationRunKind, string> = {
   keyword: "別キーワード",
   center: "周辺地点",
   radius: "半径拡大",
+};
+
+/** 追加探索の種別ごとの discovery source。 */
+const EXPLORATION_DISCOVERY_SOURCES: Record<ExplorationKind, AreaSearchDiscoverySource> = {
+  keyword: "keywordExploration",
+  center: "centerExploration",
+  radius: "radiusExploration",
 };
 
 /** 結果ヘッダーの件数表示。Stat primitive はオーバースペックなので軽量版。 */
@@ -113,6 +132,8 @@ export interface AreaSearchResultsProps {
   center: SearchCenter;
   /** 検索半径 (メートル)。 */
   radiusMeters: number;
+  /** 初回検索のメタ情報 (取得元・上限件数・API回数目安など)。 */
+  meta: AreaSearchMeta;
 }
 
 /**
@@ -128,17 +149,24 @@ export function AreaSearchResults({
   area,
   center,
   radiusMeters,
+  meta: initialMeta,
 }: AreaSearchResultsProps) {
   const [allResults, setAllResults] =
     useState<readonly AreaSearchPlaceViewModel[]>(results);
   const [nextPageToken, setNextPageToken] = useState<string | null>(
     initialNextPageToken,
   );
+  // 検索状況メタ (取得元・上限件数・もっと読み込み可否・API回数目安)。
+  // 「もっと読み込む」「追加探索」のたびに累積更新する。
+  const [searchMeta, setSearchMeta] = useState<AreaSearchMeta>(initialMeta);
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
   const [isLoadingMore, startLoadMoreTransition] = useTransition();
   const [addedIds, setAddedIds] = useState<ReadonlySet<string>>(new Set());
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
   const [resultFilter, setResultFilter] = useState<ResultFilter>("all");
+  const [sortMode, setSortMode] = useState<AreaSearchSortMode>(
+    DEFAULT_AREA_SEARCH_SORT_MODE,
+  );
   // 一覧カードのホバー/クリック、地図ピンのクリックで連動して強調する placeId。
   const [activePlaceId, setActivePlaceId] = useState<string | null>(null);
   // マップピン明示クリック時のみ、対応カードへスクロール + 2秒ハイライト。
@@ -178,6 +206,14 @@ export function AreaSearchResults({
   );
   const [explorationError, setExplorationError] = useState<string | null>(null);
   const [, startExplorationTransition] = useTransition();
+  // Place Detailsオンデマンド取得 (Issue #104 follow-up): カード単位の取得中/取得済み/エラー状態。
+  const [detailsLoadingPlaceIds, setDetailsLoadingPlaceIds] = useState<ReadonlySet<string>>(
+    new Set(),
+  );
+  const [detailsLoadedPlaceIds, setDetailsLoadedPlaceIds] = useState<ReadonlySet<string>>(
+    new Set(),
+  );
+  const [detailsErrors, setDetailsErrors] = useState<Record<string, string>>({});
   // 連打や StrictMode の二重実行でも同一条件を重複実行しないよう、
   // state 反映を待たずに即時ロックする ref。
   const pendingExplorationRunIdsRef = useRef<Set<string>>(new Set());
@@ -205,7 +241,7 @@ export function AreaSearchResults({
   // 「DB照合時点では未登録だった」という意味で「登録候補のみ」からは除外する
   // (addedIds.has で判定)。登録済み店舗はもともと選択不可のため、
   // 選択状態 (selectedIds/addedIds) には影響しない。
-  const displayedResults =
+  const filteredResults =
     resultFilter === "eligible"
       ? allResults.filter((vm) => isEligiblePlace(vm, addedIds))
       : resultFilter === "registered"
@@ -213,6 +249,13 @@ export function AreaSearchResults({
         : resultFilter === "inRange"
           ? allResults.filter((vm) => vm.isWithinRadius)
           : allResults;
+
+  // 表示順: フィルタ後の結果を sortMode に応じて並び替える (filter → sort)。
+  const displayedResults = sortAreaSearchResults(
+    filteredResults,
+    sortMode,
+    addedIds,
+  );
 
   // 「全選択」の対象は常に「現在のフィルタで表示中の登録候補」。
   // 「範囲内のみ」フィルタ中は範囲内に表示中の登録候補のみが対象になる。
@@ -236,8 +279,17 @@ export function AreaSearchResults({
         setLoadMoreError(result.error);
         return;
       }
-      setAllResults((prev) => mergeUniquePlaces(prev, result.data.places));
+      const merged = mergeUniquePlaces(allResults, result.data.places);
+      setAllResults(merged);
       setNextPageToken(result.data.nextPageToken);
+      setSearchMeta((prev) =>
+        buildTextSearchMeta({
+          loadedCount: merged.length,
+          hasNextPage: result.data.meta.hasNextPage,
+          currentPageCount: prev.currentPageCount + result.data.meta.currentPageCount,
+          apiCallEstimate: prev.apiCallEstimate + result.data.meta.apiCallEstimate,
+        }),
+      );
     });
   };
 
@@ -269,7 +321,10 @@ export function AreaSearchResults({
     setExplorationPendingId(runId);
     // center 探索のみ中心地点を未指定にし、新たに resolveSearchCenter させる。
     // keyword/radius 探索はメイン中心地点をそのまま使い回す。
-    const options = kind === "center" ? undefined : { center };
+    const options = {
+      ...(kind === "center" ? {} : { center }),
+      discoverySource: EXPLORATION_DISCOVERY_SOURCES[kind],
+    };
 
     startExplorationTransition(async () => {
       try {
@@ -305,6 +360,15 @@ export function AreaSearchResults({
         const newlyAdded = merged.slice(merged.length - addedCount);
 
         setAllResults(merged);
+        setSearchMeta((prev) =>
+          buildTextSearchMeta({
+            loadedCount: merged.length,
+            hasNextPage:
+              kind === "radius" ? result.data.meta.hasNextPage : prev.hasNextPage,
+            currentPageCount: prev.currentPageCount + result.data.meta.currentPageCount,
+            apiCallEstimate: prev.apiCallEstimate + result.data.meta.apiCallEstimate,
+          }),
+        );
 
         const newRun: ExplorationRun = {
           id: runId,
@@ -341,6 +405,60 @@ export function AreaSearchResults({
         setExplorationPendingId(null);
       }
     });
+  };
+
+  /**
+   * 「詳細取得」: カード単位でPlace Detailsをオンデマンド取得する (Issue #104 follow-up)。
+   * 一覧の全店舗へ一括実行することはなく、ユーザーが押した1店舗分のみ取得する。
+   * 取得中・取得済みの場合は連打しても二重実行しない。
+   */
+  const handleFetchDetails = (placeId: string) => {
+    if (!placeId) return;
+    if (detailsLoadingPlaceIds.has(placeId) || detailsLoadedPlaceIds.has(placeId)) {
+      return;
+    }
+
+    setDetailsLoadingPlaceIds((prev) => new Set([...prev, placeId]));
+    setDetailsErrors((prev) => {
+      if (!(placeId in prev)) return prev;
+      const next = { ...prev };
+      delete next[placeId];
+      return next;
+    });
+
+    void (async () => {
+      try {
+        const result = await getPlaceDetailsForAreaSearchAction(placeId);
+        if (!result.ok) {
+          setDetailsErrors((prev) => ({ ...prev, [placeId]: result.error }));
+          return;
+        }
+
+        setAllResults((prev) =>
+          prev.map((vm) => mergePlaceDetailsIntoAreaSearchResult(vm, result.data)),
+        );
+        setDetailsLoadedPlaceIds((prev) => new Set([...prev, placeId]));
+        setSearchMeta((prev) =>
+          buildTextSearchMeta({
+            loadedCount: prev.loadedCount,
+            hasNextPage: prev.hasNextPage,
+            currentPageCount: prev.currentPageCount,
+            apiCallEstimate: prev.apiCallEstimate + 1,
+          }),
+        );
+      } catch (e) {
+        setDetailsErrors((prev) => ({
+          ...prev,
+          [placeId]: e instanceof Error ? e.message : "詳細情報の取得に失敗しました",
+        }));
+      } finally {
+        setDetailsLoadingPlaceIds((prev) => {
+          const next = new Set(prev);
+          next.delete(placeId);
+          return next;
+        });
+      }
+    })();
   };
 
   const handleAdded = (placeId: string) => {
@@ -426,6 +544,10 @@ export function AreaSearchResults({
   const radiusChips = suggestLargerRadii(mainRadiusMeters);
   const widerRadius = radiusChips[0];
 
+  // 検索状況メタ (取得元・上限件数・もっと読み込み可否・API回数目安) の表示文言。
+  // loadedCount は常に最新の読み込み済み件数 (allResults.length) を反映する。
+  const metaMessages = getAreaSearchMetaMessages({ ...searchMeta, loadedCount });
+
   return (
     <div className="space-y-4">
       {/* 結果ヘッダー: 検索条件チップ + 件数メトリクス。
@@ -467,6 +589,17 @@ export function AreaSearchResults({
             )}
           </p>
         )}
+        {/* 検索状況メタ: 「探索の説明責任」のための小さな説明文 (Issue #129 follow-up)。
+            取得元・上限件数・もっと読み込み可否・API回数目安・locationBiasの注意点を表示する。 */}
+        <ul className="border-t border-border pt-2 space-y-0.5 text-xs text-muted-foreground">
+          {metaMessages.map((message) => (
+            <li key={message}>{message}</li>
+          ))}
+          <li>
+            表示中の候補: {displayedResults.length.toLocaleString()}件
+            {explorationRuns.length > 0 && " (追加探索の結果を含みます)"}
+          </li>
+        </ul>
       </div>
 
       {/* 探索コントロール: 「さらに候補を読み込む」(同一条件の次ページ) と
@@ -626,13 +759,13 @@ export function AreaSearchResults({
               </div>
             </div>
           )}
+          </div>
+          )}
 
           {explorationError && (
             <p role="alert" className="text-sm text-destructive">
               {explorationError}
             </p>
-          )}
-          </div>
           )}
 
           {explorationRuns.length > 0 && (
@@ -674,19 +807,39 @@ export function AreaSearchResults({
         {/* 一覧 + 操作系: スマホでは地図の下、PCでは左側 */}
         <div className="order-2 lg:order-1 space-y-4">
           {allResults.length > 0 && (
-            <Tabs
-              value={resultFilter}
-              onValueChange={(next) => setResultFilter(next as ResultFilter)}
-              defaultValue="all"
-              variant="pill"
-            >
-              <TabsList>
-                <TabsTrigger value="all">すべて ({loadedCount})</TabsTrigger>
-                <TabsTrigger value="eligible">候補 ({eligibleCount})</TabsTrigger>
-                <TabsTrigger value="registered">登録済 ({registeredCount})</TabsTrigger>
-                <TabsTrigger value="inRange">範囲内 ({inRangeCount})</TabsTrigger>
-              </TabsList>
-            </Tabs>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Tabs
+                value={resultFilter}
+                onValueChange={(next) => setResultFilter(next as ResultFilter)}
+                defaultValue="all"
+                variant="pill"
+              >
+                <TabsList>
+                  <TabsTrigger value="all">すべて ({loadedCount})</TabsTrigger>
+                  <TabsTrigger value="eligible">候補 ({eligibleCount})</TabsTrigger>
+                  <TabsTrigger value="registered">登録済 ({registeredCount})</TabsTrigger>
+                  <TabsTrigger value="inRange">範囲内 ({inRangeCount})</TabsTrigger>
+                </TabsList>
+              </Tabs>
+
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                表示順
+                <Select
+                  value={sortMode}
+                  onChange={(e) =>
+                    setSortMode(e.target.value as AreaSearchSortMode)
+                  }
+                  className="h-8 w-auto text-xs"
+                  aria-label="表示順を切り替え"
+                >
+                  {AREA_SEARCH_SORT_MODES.map((mode) => (
+                    <option key={mode} value={mode}>
+                      {AREA_SEARCH_SORT_MODE_LABELS[mode]}
+                    </option>
+                  ))}
+                </Select>
+              </label>
+            </div>
           )}
 
           {/* 0 件選択時のみ: 最初の一括選択への導線をリスト上部に残す (Option B)。
@@ -775,6 +928,10 @@ export function AreaSearchResults({
                 onActivatePlace={setActivePlaceId}
                 onAdded={handleAdded}
                 onToggle={handleToggle}
+                detailsLoadingPlaceIds={detailsLoadingPlaceIds}
+                detailsLoadedPlaceIds={detailsLoadedPlaceIds}
+                detailsErrors={detailsErrors}
+                onFetchDetails={handleFetchDetails}
               />
             )}
           </div>

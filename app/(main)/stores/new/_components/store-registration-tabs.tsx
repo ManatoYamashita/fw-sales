@@ -252,6 +252,7 @@ export function StoreRegistrationTabs({
                 area={areaResults.area}
                 center={areaResults.center}
                 radiusMeters={areaResults.radiusMeters}
+                meta={areaResults.meta}
               />
             )}
           </div>

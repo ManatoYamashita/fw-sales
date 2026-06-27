@@ -8,6 +8,7 @@ import { Breadcrumb, type BreadcrumbItem } from "@/components/ui/breadcrumb";
 import { buttonVariants } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { NotificationBell } from "@/components/layout/notification-bell";
+import { useMounted } from "@/lib/hooks/use-mounted";
 import { cn } from "@/lib/utils/cn";
 import type { Notification } from "@/types/notification";
 
@@ -46,8 +47,14 @@ export interface TopbarProps {
 
 export function Topbar({ notifications = [] }: TopbarProps) {
   const pathname = usePathname();
-  const items = deriveBreadcrumb(pathname);
-  const isOnStoreNew = pathname === "/stores/new";
+  const mounted = useMounted();
+
+  // 初回SSR/初回クライアントレンダーでは pathname に依存しない安定したUIを出し、
+  // mount完了後 (useMounted) にのみ実際の pathname に応じた表示へ切り替える。
+  // これにより breadcrumb の <a>/<span> 切替や店舗登録ボタンの表示が
+  // server/clientで一致せず hydration mismatch になることを防ぐ。
+  const items = mounted ? deriveBreadcrumb(pathname) : [];
+  const isOnStoreNew = mounted && pathname === "/stores/new";
 
   return (
     <header className="sticky top-0 z-20 h-15 bg-background/80 backdrop-blur-md border-b border-border flex items-center justify-between px-4 md:px-6 gap-4">

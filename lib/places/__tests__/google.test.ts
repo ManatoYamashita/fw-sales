@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { resolveSearchCenter, searchPlacesPage } from "../google";
+import {
+  getPlaceDetails,
+  resolveSearchCenter,
+  searchPlacesPage,
+} from "../google";
 
 const SEARCH_ENDPOINT = "https://places.googleapis.com/v1/places:searchText";
+const DETAILS_ENDPOINT = "https://places.googleapis.com/v1/places";
 
 function jsonResponse(body: unknown, ok = true, status = 200): Response {
   return {
@@ -13,6 +18,7 @@ function jsonResponse(body: unknown, ok = true, status = 200): Response {
 }
 
 interface FetchInit {
+  method?: string;
   headers: Record<string, string>;
   body?: string;
 }
@@ -306,5 +312,197 @@ describe("resolveSearchCenter", () => {
     await expect(resolveSearchCenter("渋谷駅")).rejects.toThrow(
       "GOOGLE_PLACES_API_KEY が設定されていません",
     );
+  });
+});
+
+const DETAILS_PLACE = {
+  id: "ChIJfood",
+  displayName: { text: "テスト居酒屋" },
+  formattedAddress: "東京都渋谷区テスト1-1-1",
+  location: { latitude: 35.6595, longitude: 139.7005 },
+  types: ["restaurant", "food"],
+  googleMapsUri: "https://maps.google.com/?cid=123",
+  nationalPhoneNumber: "03-1234-5678",
+  rating: 4.1,
+  userRatingCount: 120,
+  websiteUri: "https://example.com",
+  businessStatus: "OPERATIONAL",
+};
+
+describe("getPlaceDetails", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.stubEnv("GOOGLE_PLACES_API_KEY", "test-api-key");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("places/{PLACE_ID} にGETする", async () => {
+    fetchMock = vi.fn().mockResolvedValue(jsonResponse(DETAILS_PLACE));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getPlaceDetails("ChIJfood");
+
+    const [url, init] = getFetchCall(fetchMock);
+    expect(url).toBe(`${DETAILS_ENDPOINT}/ChIJfood`);
+    expect(init.method).toBe("GET");
+  });
+
+  it("placeId が 'places/xxx' 形式の場合は二重に 'places/' を付けない", async () => {
+    fetchMock = vi.fn().mockResolvedValue(jsonResponse(DETAILS_PLACE));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getPlaceDetails("places/ChIJfood");
+
+    const [url] = getFetchCall(fetchMock);
+    expect(url).toBe(`${DETAILS_ENDPOINT}/ChIJfood`);
+  });
+
+  it("X-Goog-FieldMask が正しい", async () => {
+    fetchMock = vi.fn().mockResolvedValue(jsonResponse(DETAILS_PLACE));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getPlaceDetails("ChIJfood");
+
+    const [, init] = getFetchCall(fetchMock);
+    const fieldMask = init.headers["X-Goog-FieldMask"];
+    expect(fieldMask).toBe(
+      "id,displayName,formattedAddress,location,types,googleMapsUri,nationalPhoneNumber,rating,userRatingCount,websiteUri,businessStatus",
+    );
+  });
+
+  it("FieldMask に nationalPhoneNumber / rating / userRatingCount / websiteUri / businessStatus が含まれる", async () => {
+    fetchMock = vi.fn().mockResolvedValue(jsonResponse(DETAILS_PLACE));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getPlaceDetails("ChIJfood");
+
+    const [, init] = getFetchCall(fetchMock);
+    const fields = (init.headers["X-Goog-FieldMask"] ?? "").split(",");
+    expect(fields).toEqual(
+      expect.arrayContaining([
+        "nationalPhoneNumber",
+        "rating",
+        "userRatingCount",
+        "websiteUri",
+        "businessStatus",
+      ]),
+    );
+  });
+
+  it("FieldMask に reviews / photos / currentOpeningHours / regularOpeningHours が含まれない", async () => {
+    fetchMock = vi.fn().mockResolvedValue(jsonResponse(DETAILS_PLACE));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getPlaceDetails("ChIJfood");
+
+    const [, init] = getFetchCall(fetchMock);
+    const fields = (init.headers["X-Goog-FieldMask"] ?? "").split(",");
+    expect(fields).not.toContain("reviews");
+    expect(fields).not.toContain("photos");
+    expect(fields).not.toContain("currentOpeningHours");
+    expect(fields).not.toContain("regularOpeningHours");
+  });
+
+  it("GOOGLE_PLACES_API_KEY が未設定の場合は例外を投げる", async () => {
+    vi.unstubAllEnvs();
+    fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getPlaceDetails("ChIJfood")).rejects.toThrow(
+      "GOOGLE_PLACES_API_KEY が設定されていません",
+    );
+  });
+
+  it("response.ok=false の場合は例外を投げる", async () => {
+    fetchMock = vi.fn().mockResolvedValue(jsonResponse({ error: "invalid" }, false, 404));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getPlaceDetails("ChIJfood")).rejects.toThrow(/Places API エラー \(404\)/);
+  });
+
+  it("必須フィールド (location) が欠けている場合は例外を投げる", async () => {
+    fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        id: "ChIJfood",
+        displayName: { text: "テスト居酒屋" },
+        formattedAddress: "東京都渋谷区テスト1-1-1",
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getPlaceDetails("ChIJfood")).rejects.toThrow();
+  });
+
+  it("nationalPhoneNumber がない場合 phone は空文字になる", async () => {
+    fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        id: "ChIJfood",
+        displayName: { text: "テスト居酒屋" },
+        formattedAddress: "東京都渋谷区テスト1-1-1",
+        location: { latitude: 35.6595, longitude: 139.7005 },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const details = await getPlaceDetails("ChIJfood");
+    expect(details.phone).toBe("");
+  });
+
+  it("rating/userRatingCount がない場合 null になる", async () => {
+    fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        id: "ChIJfood",
+        displayName: { text: "テスト居酒屋" },
+        formattedAddress: "東京都渋谷区テスト1-1-1",
+        location: { latitude: 35.6595, longitude: 139.7005 },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const details = await getPlaceDetails("ChIJfood");
+    expect(details.rating).toBeNull();
+    expect(details.userRatingsTotal).toBeNull();
+  });
+
+  it("websiteUri/businessStatus がない場合 null になる", async () => {
+    fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        id: "ChIJfood",
+        displayName: { text: "テスト居酒屋" },
+        formattedAddress: "東京都渋谷区テスト1-1-1",
+        location: { latitude: 35.6595, longitude: 139.7005 },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const details = await getPlaceDetails("ChIJfood");
+    expect(details.websiteUri).toBeNull();
+    expect(details.businessStatus).toBeNull();
+  });
+
+  it("取得した値をPlaceDetailsResultにマッピングする", async () => {
+    fetchMock = vi.fn().mockResolvedValue(jsonResponse(DETAILS_PLACE));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const details = await getPlaceDetails("ChIJfood");
+    expect(details).toEqual({
+      placeId: "ChIJfood",
+      name: "テスト居酒屋",
+      address: "東京都渋谷区テスト1-1-1",
+      lat: 35.6595,
+      lng: 139.7005,
+      googleMapsUri: "https://maps.google.com/?cid=123",
+      types: ["restaurant", "food"],
+      phone: "03-1234-5678",
+      rating: 4.1,
+      userRatingsTotal: 120,
+      websiteUri: "https://example.com",
+      businessStatus: "OPERATIONAL",
+    });
   });
 });
