@@ -23,6 +23,16 @@ export interface UpdateSessionResult {
   readonly userId: string | null;
 }
 
+/**
+ * Supabase Auth API への fetch を強制中断する上限。
+ *
+ * Vercel Edge Middleware の総上限は 25,000ms。Supabase プロジェクトが pause /
+ * DNS NXDOMAIN / 経路障害でハングした際に MIDDLEWARE_INVOCATION_TIMEOUT (504)
+ * を返さず、`/login` リダイレクトに fall through するため 4 秒で AbortSignal を
+ * 発火させる。通常応答は数百ms に収まるため誤発火しない想定。
+ */
+const AUTH_FETCH_TIMEOUT_MS = 4_000;
+
 let _missingEnvWarned = false;
 
 function readSupabaseEnv(): { url: string; anonKey: string } | null {
@@ -63,6 +73,21 @@ export async function updateSession(
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(env.url, env.anonKey, {
+    global: {
+      // signal は `...init` の後に置くと将来 supabase-js が `init.signal` を渡し
+      // 始めた際に黙ってクロバーされるため、`AbortSignal.any` で合成する。
+      // (Node 20 / Edge runtime 両対応)
+      fetch: (input: RequestInfo | URL, init?: RequestInit) =>
+        fetch(input, {
+          ...init,
+          signal: init?.signal
+            ? AbortSignal.any([
+                init.signal,
+                AbortSignal.timeout(AUTH_FETCH_TIMEOUT_MS),
+              ])
+            : AbortSignal.timeout(AUTH_FETCH_TIMEOUT_MS),
+        }),
+    },
     cookies: {
       getAll() {
         return request.cookies.getAll();
@@ -87,10 +112,22 @@ export async function updateSession(
       error,
     } = await supabase.auth.getUser();
     if (error || !user) {
+      // auth-js は fetch 失敗 (timeout / DNS / network) を `AuthRetryableFetchError`
+      // に wrap して error として return する (throw しない)。よって本番で起きる
+      // Supabase 障害はこの分岐で警告し可視化する。`!user` のみで error が null の
+      // 通常の未認証ケース (cookie 不在等) は静かに fall through する。
+      if (error?.name === "AuthRetryableFetchError") {
+        console.warn(
+          `[auth] Supabase auth.getUser() failed (likely ${AUTH_FETCH_TIMEOUT_MS}ms timeout or network) — falling through as unauthenticated:`,
+          error.message,
+        );
+      }
       return { response, isAuthenticated: false, userId: null };
     }
     return { response, isAuthenticated: true, userId: user.id };
   } catch (err) {
+    // 防御コード (theoretical) — auth-js が error を return するため通常は到達しない。
+    // 安全網として残置。
     console.error("[auth] middleware updateSession failed:", err);
     return { response, isAuthenticated: false, userId: null };
   }
