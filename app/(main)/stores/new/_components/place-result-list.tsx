@@ -78,6 +78,13 @@ export function PlaceResultList({
             <li
               key={place.placeId}
               data-place-id={place.placeId}
+              // li 自体を tabIndex で focusable にする。onFocus/onBlur は focusin/focusout で
+              // バブルするため、子コントロール (チェックボックス・追加ボタン・各リンク) への
+              // フォーカスでもピン連動は成立する。それでも tabIndex を残すのは、追加済み
+              // (AddStoreButton が非フォーカスな Badge を返す) かつ Google Maps リンクも無い行では
+              // フォーカス可能な子が一切無くなり、キーボード単独ユーザーのピン連動到達手段が
+              // 失われるため。この行は意図的に冗長なタブストップを許容している。
+              // なお li は checkbox/button/link を内包するため role="button" は ARIA 違反になり付与しない。
               tabIndex={0}
               className="focus-visible:outline-none"
               onMouseEnter={() => onActivatePlace(place.placeId)}
