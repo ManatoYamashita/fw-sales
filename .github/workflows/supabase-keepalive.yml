@@ -4,8 +4,10 @@
 # 自動 pause する。pause すると本番 middleware の Supabase fetch が刺さり
 # 504 MIDDLEWARE_INVOCATION_TIMEOUT を返す (2026-06-21 障害 / Issue #147)。
 #
-# 本 workflow は 5 日周期 (7 日タイマーに 1〜2 日の余裕) で本番 DB に
-# 読み取り専用クエリを 1 本投げ、pause タイマーをリセットして発生を予防する。
+# 本 workflow は日次で本番 DB に読み取り専用クエリを 1 本投げ、
+# pause タイマーをリセットして発生を予防する。
+# (cron は best-effort で遅延/ドロップし得るため、7 日 window に対し日次=連続 6 回
+#  ドロップしない限り pause しない十分なマージンを確保する。ジョブは ~140ms で実質無料。)
 #
 # 設計判断:
 # - pause タイマーは「実 DB クエリ」でのみリセットされる (Supabase 公式定義:
@@ -26,7 +28,7 @@ name: Supabase Keepalive
 
 on:
   schedule:
-    - cron: "0 9 */5 * *" # 5 日周期 / 09:00 UTC = 18:00 JST
+    - cron: "0 9 * * *" # 日次 / 09:00 UTC = 18:00 JST
   workflow_dispatch: # 手動実行
 
 # 最小権限: 本ジョブは GITHUB_TOKEN を一切使わない (checkout もしない)。

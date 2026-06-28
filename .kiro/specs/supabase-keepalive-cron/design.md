@@ -9,7 +9,7 @@
 **Impact**: 2026-06-21 に発生した「7 日 pause → `504 MIDDLEWARE_INVOCATION_TIMEOUT`」の根本原因（無アクティビティ）を、アプリ実行経路に一切手を加えずに CI 側で解消する。PR #146 の fail-fast 防御（被害最小化）とは独立し、本設計は pause の **発生予防** のみを担う。
 
 ### Goals
-- 5 日周期の自動実行で、7 日 pause タイマーに常に 1〜2 日の余裕を確保する。
+- 日次の自動実行で、7 日 pause タイマーに対し十分なマージン（連続多数回ドロップしない限り pause しない）を確保する。
 - 実行ごとに **確実な user database activity** を生成し、pause タイマーをリセットする。
 - 失敗を fail-loud に検知し運用者へ通知する。
 - 本番アプリのリクエスト経路・スキーマ・データに一切変更を加えない。
@@ -47,7 +47,7 @@
 
 ### Operational Risks (GitHub Actions 固有)
 - **GitHub の scheduled workflow 自動無効化**: GitHub はリポジトリが 60 日間無活動だと scheduled workflow を自動 disable する。本 keep-alive cron が静かに止まると、気づかぬうちに 7 日 pause が再発する（watcher を誰が watch するか問題）。本リポは活発に開発されており通常は問題にならないが、開発が長期停止する局面では運用者が `workflow_dispatch` で手動 keep-warm するか、Actions の有効状態を確認する必要がある。
-- **cron 実行遅延（drift）**: GitHub の scheduled トリガは混雑時に最大数時間遅延・稀にスキップされ得る。5 日周期は 7 日 pause に対し 1〜2 日の余裕を持つため通常の遅延は吸収できるが、連続スキップ時はバッファを侵食する。これが 5 日周期（より短い間隔ではない）を選ぶ根拠でもある。
+- **cron 実行遅延（drift）**: GitHub の scheduled トリガは混雑時に最大数時間遅延・稀にスキップされ得る。当初 5 日周期を検討したが、7 日 pause に対し実マージンが 2 日しかなく 1 回ドロップで間隔が 10 日に伸び pause を自招するリスクがあった（PR #149 レビュー指摘）。ジョブは ~140ms で実質無料のため **日次（`0 9 * * *`）に変更**し、連続多数回ドロップしない限り pause しないマージンで scheduler のブレを吸収する。
 - **失敗通知の到達先**: scheduled workflow 失敗の email 通知は、原則として該当ワークフローファイルを最後に変更したユーザーへ飛ぶ（Req 4.2）。運用者は自身が通知対象に含まれることを確認すること。
 
 ## Architecture
@@ -91,7 +91,7 @@ graph LR
 ```
 .github/
 └── workflows/
-    └── supabase-keepalive.yml   # 新規: 5日周期 cron + 手動実行で psql select 1 を本番に投げる keep-alive
+    └── supabase-keepalive.yml   # 新規: 日次 cron + 手動実行で psql count(*) を本番に投げる keep-alive
 ```
 
 `supabase-keepalive.yml` の単一責務: スケジュール/手動トリガで起動し、`DATABASE_URL` 経由の読み取り専用クエリを 1 本実行し、成否を green/red で報告する。
@@ -111,11 +111,11 @@ graph LR
 
 | Field | Detail |
 |-------|--------|
-| Intent | 5 日周期の自動 + 手動トリガで本番 Supabase に読み取り専用 keep-alive クエリを実行し、pause タイマーをリセットする |
+| Intent | 日次の自動 + 手動トリガで本番 Supabase に読み取り専用 keep-alive クエリを実行し、pause タイマーをリセットする |
 | Requirements | 1.1, 1.2, 1.3, 1.4, 2.1, 2.2, 2.3, 3.1, 3.2, 3.3, 3.4, 4.1, 4.2, 4.3, 4.4, 5.1, 5.2, 5.3, 5.4, 6.1, 6.2, 6.3, 6.4, 7.1, 7.4 |
 
 **Responsibilities & Constraints**
-- 2 つのトリガを受理: `schedule`(cron 5 日周期) と `workflow_dispatch`(手動)。両者は同一ジョブを実行する（2.2）。
+- 2 つのトリガを受理: `schedule`(cron 日次) と `workflow_dispatch`(手動)。両者は同一ジョブを実行する（2.2）。
 - ジョブは `DATABASE_URL` を環境変数として受け取り、`psql` で **単一の読み取り専用クエリ** を実行する（3.1, 3.4）。
 - クエリ成功時は exit 0 = green、失敗（接続不可・認証失敗・タイムアウト・非ゼロ exit）時は exit 非ゼロ = red（3.3, 4.1）。
 - 実行に上限時間（`timeout-minutes`）を設け、無応答時の無限ハングを防ぐ（6.1）。
@@ -131,7 +131,7 @@ graph LR
 
 ##### Batch / Job Contract
 - **Trigger**:
-  - `schedule: cron: '0 9 */5 * *'`（5 日周期 / 18:00 JST 相当, 7 日 pause に対し 1〜2 日の余裕 — 1.1）
+  - `schedule: cron: '0 9 * * *'`（日次 / 18:00 JST 相当, 7 日 pause に対し scheduler drift を吸収する十分なマージン — 1.1）
   - `workflow_dispatch`（手動実行 — 2.1）
 - **Input / validation**:
   - `DATABASE_URL`（secret）。未設定/空なら psql 接続が失敗し red 終了（5.3）。
@@ -169,7 +169,7 @@ flowchart TD
 
 | Requirement | Summary | Components | Contracts | Flows |
 |-------------|---------|------------|-----------|-------|
-| 1.1–1.4 | 5 日周期の自動実行・コミット非依存 | Keep-Alive Workflow | Batch(Trigger: schedule) | trigger→Run |
+| 1.1–1.4 | 日次の自動実行・コミット非依存 | Keep-Alive Workflow | Batch(Trigger: schedule) | trigger→Run |
 | 2.1–2.3 | 手動実行と自動実行の同一処理 | Keep-Alive Workflow | Batch(Trigger: dispatch) | trigger→Run→Green |
 | 3.1–3.4 | 実 DB クエリ・読取専用・成否・ログ | Keep-Alive Workflow | Batch(Action/output) | Run→Ok |
 | 4.1–4.4 | 失敗検知・通知・追跡可能ログ | Keep-Alive Workflow | Batch(`ON_ERROR_STOP`) | Ok→Red→Notify |
