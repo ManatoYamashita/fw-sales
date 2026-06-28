@@ -1,0 +1,49 @@
+# Supabase Free Tier keep-alive。
+#
+# Supabase は Free プランのプロジェクトを「7 日連続 user database activity 無し」で
+# 自動 pause する。pause すると本番 middleware の Supabase fetch が刺さり
+# 504 MIDDLEWARE_INVOCATION_TIMEOUT を返す (2026-06-21 障害 / Issue #147)。
+#
+# 本 workflow は日次で本番 DB に読み取り専用クエリを 1 本投げ、
+# pause タイマーをリセットして発生を予防する。
+# (cron は best-effort で遅延/ドロップし得るため、7 日 window に対し日次=連続 6 回
+#  ドロップしない限り pause しない十分なマージンを確保する。ジョブは ~140ms で実質無料。)
+#
+# 設計判断:
+# - pause タイマーは「実 DB クエリ」でのみリセットされる (Supabase 公式定義:
+#   "sufficient user database activity over the past 7-day period")。
+#   auth/REST health ping では DB に到達せず無効のため、既存 secret DATABASE_URL を
+#   再利用し実テーブル (app_settings) へ count クエリを投げる。新規 secret は不要。
+# - psql -c の単発クエリは simple query protocol のため Transaction Pooler (6543) でも動作。
+# - 読み取り専用 (select count) のため冪等で本番データを一切変更しない。
+#
+# 運用上の注意:
+# - GitHub は 60 日無活動の repo で scheduled workflow を自動 disable する。長期開発停止時は
+#   workflow_dispatch で手動 keep-warm するか、Actions の有効状態を確認すること。
+# - 失敗時は workflow が red になり、GitHub 標準の失敗通知 (本ファイル最終変更者宛) が飛ぶ。
+#
+# 前提: GitHub Secret `DATABASE_URL` に本番 Supabase pooler connection string を登録 (migrate.yml と共用)。
+
+name: Supabase Keepalive
+
+on:
+  schedule:
+    - cron: "0 9 * * *" # 日次 / 09:00 UTC = 18:00 JST
+  workflow_dispatch: # 手動実行
+
+# 最小権限: 本ジョブは GITHUB_TOKEN を一切使わない (checkout もしない)。
+permissions: {}
+
+jobs:
+  keepalive:
+    name: Ping production database
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Run read-only keepalive query
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          set -euo pipefail
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+            -c "select count(*) as keepalive_rows from app_settings;"
