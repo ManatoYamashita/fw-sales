@@ -7,15 +7,19 @@
 # 本 workflow は日次で本番 DB に読み取り専用クエリを 1 本投げ、
 # pause タイマーをリセットして発生を予防する。
 # (cron は best-effort で遅延/ドロップし得るため、7 日 window に対し日次=連続 6 回
-#  ドロップしない限り pause しない十分なマージンを確保する。ジョブは ~140ms で実質無料。)
+#  ドロップしない限り pause しない十分なマージンを確保する。ジョブは数秒で実質無料。)
 #
 # 設計判断:
 # - pause タイマーは「実 DB クエリ」でのみリセットされる (Supabase 公式定義:
 #   "sufficient user database activity over the past 7-day period")。
 #   auth/REST health ping では DB に到達せず無効のため、既存 secret DATABASE_URL を
 #   再利用し実テーブル (app_settings) へ count クエリを投げる。新規 secret は不要。
-# - psql -c の単発クエリは simple query protocol のため Transaction Pooler (6543) でも動作。
-# - 読み取り専用 (select count) のため冪等で本番データを一切変更しない。
+# - クエリは Node の postgres クライアントで実行する。psql(libpq) の厳格な URI パーサは
+#   パスワード中の特殊文字 (@ 等) を host と誤読して失敗するため不可
+#   (PR #149 マージ後の初回 dispatch で "could not translate host name" として顕在化)。
+#   migrate.yml と同じく Node 系クライアントなら同 DATABASE_URL を問題なく解釈する。
+# - prepare:false で Transaction Pooler (6543) でも動作。読み取り専用 (count) のため
+#   冪等で本番データを一切変更しない。
 #
 # 運用上の注意:
 # - GitHub は 60 日無活動の repo で scheduled workflow を自動 disable する。長期開発停止時は
@@ -40,10 +44,31 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install postgres client
+        run: npm install --no-save postgres@3.4.9
+
       - name: Run read-only keepalive query
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
-          set -euo pipefail
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
-            -c "select count(*) as keepalive_rows from app_settings;"
+          node -e '
+          const postgres = require("postgres");
+          const sql = postgres(process.env.DATABASE_URL, { prepare: false, max: 1, idle_timeout: 5, connect_timeout: 10 });
+          (async () => {
+            const start = Date.now();
+            try {
+              const rows = await sql`select count(*) as keepalive_rows from app_settings`;
+              console.log(`OK keepalive_rows=${rows[0].keepalive_rows} time_ms=${Date.now() - start}`);
+              await sql.end({ timeout: 5 });
+            } catch (e) {
+              console.error("KEEPALIVE FAILED:", e.message);
+              await sql.end({ timeout: 5 }).catch(() => {});
+              process.exit(1);
+            }
+          })();
+          '

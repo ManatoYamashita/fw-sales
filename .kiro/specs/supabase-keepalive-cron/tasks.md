@@ -39,3 +39,5 @@
 - **psql は GitHub Actions ランナー(ubuntu-latest)に同梱**だがローカル macOS には未インストール。ローカル検証は `postgres` npm パッケージで代替した。
 - **Task 2.1 (手動 dispatch green / 失敗モード) と 2.2 (運用観測) はマージ後・運用フェーズで消化**。ローカル/PR 段階では完了不可(workflow_dispatch は merge 後、pause 不再発観測は数週間)。
 - **follow-up**: 実装 PR / Issue #147 コメントで OQ2(Issue literal の `SUPABASE_URL`/`SUPABASE_ANON_KEY` ではなく既存 `DATABASE_URL` 再利用)を明記し合意を取ること。
+- **PR #149 レビュー対応**: cron を `0 9 */5 * *`(5日周期)→ `0 9 * * *`(日次)に変更(scheduler drift 耐性, commit 306a968)。
+- **psql→Node 是正(PR #149 マージ後の初回 dispatch で発覚)**: `gh workflow run` 初回実行が `psql: error: could not translate host name "...@..."` で **failure**。原因は libpq の厳格 URI パーサが `DATABASE_URL` のパスワード中特殊文字(@ 等)を host と誤読。ローカル smoke が通っていたのは Node `postgres`(寛容パーサ)を使ったため、psql との差で CI でのみ顕在化した。修正: workflow を `psql` から **Node `postgres` クライアント**(`actions/setup-node@v4` + `npm install --no-save postgres@3.4.9` + inline `node -e`)へ切替。`migrate.yml` も同 `DATABASE_URL` を Node 系で問題なく使えている precedent に整合。ローカルで同一 inline logic を本番 read-only 実行し green(keepalive_rows=0 / exit0 / 213ms)。教訓: **CI で外部接続文字列を使う際、ローカル node クライアントの寛容パースと psql(libpq)の厳格パースの差に注意**。
