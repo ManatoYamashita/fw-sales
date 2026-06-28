@@ -46,4 +46,19 @@ describe("formatDistanceMeters", () => {
     expect(formatDistanceMeters(1200)).toBe("1.2km");
     expect(formatDistanceMeters(1850)).toBe("1.9km");
   });
+
+  it("負値は負のメートル表示になる — 正常パス外: 現状の動作を記録 (N4)", () => {
+    // distanceMeters() は常に非負の値を返すため実運用では到達しないが、
+    // 実装変更時の回帰検知のために現状の動作を固定する。
+    expect(formatDistanceMeters(-1)).toBe("-1m");
+    expect(formatDistanceMeters(-500)).toBe("-500m");
+  });
+
+  it("NaN は 'NaNm' になる — 正常パス外: 現状の動作を記録 (N4)", () => {
+    expect(formatDistanceMeters(NaN)).toBe("NaNm");
+  });
+
+  it("Infinity は 'Infinitykm' になる — 正常パス外: 現状の動作を記録 (N4)", () => {
+    expect(formatDistanceMeters(Infinity)).toBe("Infinitykm");
+  });
 });

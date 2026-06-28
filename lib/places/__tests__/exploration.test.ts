@@ -6,7 +6,7 @@ import {
   suggestExplorationKeywords,
   suggestLargerRadii,
 } from "../exploration";
-import type { AreaSearchPlaceViewModel } from "../types";
+import type { AreaSearchCandidateInfo, AreaSearchPlaceViewModel } from "../types";
 
 function makeViewModel(lat: number, lng: number): AreaSearchPlaceViewModel {
   return {
@@ -143,5 +143,34 @@ describe("recomputeViewModel", () => {
     const result = recomputeViewModel(vm, { lat: 35.658, lng: 139.7016 }, 1000);
     expect(result).not.toBe(vm);
     expect(vm.distanceMeters).toBe(0);
+  });
+
+  it("matchedStore が非null の場合でも再計算後に保持される (L8)", () => {
+    const matchedStore = { id: "store-1", name: "既存店舗" };
+    const vm: AreaSearchPlaceViewModel = {
+      ...makeViewModel(35.6896, 139.6917),
+      matchedStore,
+    };
+    const result = recomputeViewModel(vm, { lat: 35.658, lng: 139.7016 }, 1000);
+    expect(result.matchedStore).toBe(matchedStore);
+    // distanceMeters/isWithinRadius だけ変わり、他フィールドは同一参照で維持される
+    expect(result.place).toBe(vm.place);
+    expect(result.discovery).toBe(vm.discovery);
+  });
+
+  it("candidateInfo が非null の場合でも再計算後に保持される", () => {
+    const candidateInfo: AreaSearchCandidateInfo = {
+      status: "candidate",
+      seenCount: 2,
+      firstSeenAt: "2026-01-01",
+      lastSeenAt: "2026-06-01",
+      discoverySources: ["mainTextSearch"],
+    };
+    const vm: AreaSearchPlaceViewModel = {
+      ...makeViewModel(35.6896, 139.6917),
+      candidateInfo,
+    };
+    const result = recomputeViewModel(vm, { lat: 35.658, lng: 139.7016 }, 1000);
+    expect(result.candidateInfo).toBe(candidateInfo);
   });
 });

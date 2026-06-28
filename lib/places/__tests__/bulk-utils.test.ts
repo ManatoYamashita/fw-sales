@@ -191,3 +191,43 @@ describe("mergeUniquePlacesWithStats", () => {
     expect(incoming).toEqual(incomingSnapshot);
   });
 });
+
+describe("mergeUniquePlacesWithStats — incoming 内重複・不正入力 (L9)", () => {
+  it("incoming 内に同一 placeId が重複し、かつ current に存在しない場合、重複は除去されず両件 merged に追加される (現状の動作を記録)", () => {
+    // 実装は incoming 側の内部重複を deduplicate しない。
+    // calling side (handleExplore) 側で重複が発生しないことを前提とした設計。
+    const current = [makePlace("a")];
+    const incoming = [makePlace("b"), makePlace("b")];
+    const result = mergeUniquePlacesWithStats(current, incoming);
+    expect(result.addedCount).toBe(2);
+    expect(result.duplicateCount).toBe(0);
+    expect(result.merged).toHaveLength(3);
+    expect(result.merged.map((p) => p.place.placeId)).toEqual(["a", "b", "b"]);
+  });
+
+  it("incoming 内に同一 placeId が重複し、かつ全件が current に存在する場合、重複は全件 duplicateCount に加算される", () => {
+    const current = [makePlace("a")];
+    const incoming = [makePlace("a"), makePlace("a")];
+    const result = mergeUniquePlacesWithStats(current, incoming);
+    expect(result.duplicateCount).toBe(2);
+    expect(result.addedCount).toBe(0);
+    expect(result.merged).toHaveLength(1);
+  });
+
+  it("incoming に placeId が空文字のアイテムが混在しても例外は発生しない", () => {
+    const current = [makePlace("a")];
+    const incoming = [makePlace("b"), makePlace("")];
+    expect(() => mergeUniquePlacesWithStats(current, incoming)).not.toThrow();
+    const result = mergeUniquePlacesWithStats(current, incoming);
+    // 空文字 placeId は current の "a" にも存在しないため新規として追加される
+    expect(result.addedCount).toBe(2);
+    expect(result.merged).toHaveLength(3);
+  });
+
+  it("current と incoming がともに空配列のとき merged も空配列になる", () => {
+    const result = mergeUniquePlacesWithStats([], []);
+    expect(result.merged).toEqual([]);
+    expect(result.addedCount).toBe(0);
+    expect(result.duplicateCount).toBe(0);
+  });
+});

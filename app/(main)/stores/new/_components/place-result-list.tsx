@@ -78,9 +78,32 @@ export function PlaceResultList({
             <li
               key={place.placeId}
               data-place-id={place.placeId}
+              // li 自体を tabIndex で focusable にする。onFocus/onBlur は focusin/focusout で
+              // バブルするため、子コントロール (チェックボックス・追加ボタン・各リンク) への
+              // フォーカスでもピン連動は成立する。それでも tabIndex を残すのは、追加済み
+              // (AddStoreButton が非フォーカスな Badge を返す) かつ Google Maps リンクも無い行では
+              // フォーカス可能な子が一切無くなり、キーボード単独ユーザーのピン連動到達手段が
+              // 失われるため。この行は意図的に冗長なタブストップを許容している。
+              // なお li は checkbox/button/link を内包するため role="button" は ARIA 違反になり付与しない。
+              tabIndex={0}
+              className="focus-visible:outline-none"
               onMouseEnter={() => onActivatePlace(place.placeId)}
               onMouseLeave={() => onActivatePlace(null)}
               onClick={() => onActivatePlace(place.placeId)}
+              onFocus={() => onActivatePlace(place.placeId)}
+              onBlur={(e) => {
+                // フォーカスが li 内の子要素に移動した場合はピン連動を解除しない
+                if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                  onActivatePlace(null);
+                }
+              }}
+              onKeyDown={(e) => {
+                // li 自体がフォーカスを持つとき Enter / Space で地図ピンを連動させる
+                if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) {
+                  e.preventDefault();
+                  onActivatePlace(place.placeId);
+                }
+              }}
             >
               <Card
                 className={cn(

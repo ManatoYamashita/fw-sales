@@ -151,6 +151,31 @@ export async function searchPlacesWithMatchesAction(
   if (!centerQuery.trim()) {
     return failure("中心地点を入力してください");
   }
+  // L4: 半径バリデーション (非数・ゼロ以下・上限超過を拒否)
+  if (!Number.isFinite(radiusMeters) || radiusMeters <= 0) {
+    return failure("検索半径は正の値を入力してください");
+  }
+  if (radiusMeters > 50_000) {
+    return failure("検索半径は 50,000m (50km) 以下で指定してください");
+  }
+  // L4: options.center バリデーション (「もっと読み込む」・追加探索で解決済み座標を渡す場合)
+  const optCenter = options?.center;
+  if (
+    optCenter !== undefined &&
+    (!Number.isFinite(optCenter.lat) ||
+      optCenter.lat < -90 ||
+      optCenter.lat > 90 ||
+      !Number.isFinite(optCenter.lng) ||
+      optCenter.lng < -180 ||
+      optCenter.lng > 180)
+  ) {
+    return failure("中心地点の座標が不正です");
+  }
+  // L4: pageToken バリデーション (空文字は Google Places API が INVALID_ARGUMENT を返すため事前に弾く)
+  const optPageToken = options?.pageToken;
+  if (optPageToken !== undefined && optPageToken.length === 0) {
+    return failure("ページトークンが不正です");
+  }
   try {
     const center = options?.center ?? (await resolveSearchCenter(centerQuery));
     if (!center) {
@@ -217,6 +242,7 @@ export async function searchPlacesWithMatchesAction(
       candidatePersistence,
     });
   } catch (e) {
+    console.error("[area-search] searchPlacesWithMatchesAction failed", e); // L3
     return failure(e instanceof Error ? e.message : "検索に失敗しました");
   }
 }

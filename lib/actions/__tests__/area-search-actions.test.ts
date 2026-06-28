@@ -161,6 +161,106 @@ describe("searchPlacesWithMatchesAction", () => {
     expect(mockSearchPlacesPage).not.toHaveBeenCalled();
   });
 
+  // ---- L4: radiusMeters バリデーション ----
+
+  it("radiusMeters が 0 の場合は failure を返す (L4)", async () => {
+    const result = await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", 0);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/検索半径/);
+    expect(mockResolveSearchCenter).not.toHaveBeenCalled();
+    expect(mockSearchPlacesPage).not.toHaveBeenCalled();
+  });
+
+  it("radiusMeters が負値の場合は failure を返す (L4)", async () => {
+    const result = await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", -1);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/検索半径/);
+  });
+
+  it("radiusMeters が NaN の場合は failure を返す (L4)", async () => {
+    const result = await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", NaN);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/検索半径/);
+    expect(mockResolveSearchCenter).not.toHaveBeenCalled();
+  });
+
+  it("radiusMeters が Infinity の場合は failure を返す (L4)", async () => {
+    const result = await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", Infinity);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/検索半径/);
+  });
+
+  it("radiusMeters が 50,000m 超の場合は failure を返す (L4)", async () => {
+    const result = await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", 50_001);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/検索半径/);
+    expect(mockResolveSearchCenter).not.toHaveBeenCalled();
+  });
+
+  it("radiusMeters が 50,000m ちょうどは通過する (L4)", async () => {
+    mockResolveSearchCenter.mockResolvedValue(CENTER);
+    mockSearchPlacesPage.mockResolvedValue(makeSearchPage());
+
+    const result = await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", 50_000);
+
+    expect(result.ok).toBe(true);
+  });
+
+  // ---- L4: options.center バリデーション ----
+
+  it("options.center の lat が範囲外 (91) の場合は failure を返す (L4)", async () => {
+    const result = await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", 1000, {
+      center: { lat: 91, lng: 139.7016 },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/座標/);
+    expect(mockSearchPlacesPage).not.toHaveBeenCalled();
+  });
+
+  it("options.center の lng が範囲外 (-181) の場合は failure を返す (L4)", async () => {
+    const result = await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", 1000, {
+      center: { lat: 35.658, lng: -181 },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/座標/);
+  });
+
+  it("options.center の lat が NaN の場合は failure を返す (L4)", async () => {
+    const result = await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", 1000, {
+      center: { lat: NaN, lng: 139.7016 },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/座標/);
+  });
+
+  // ---- L4: options.pageToken バリデーション ----
+
+  it("options.pageToken が空文字の場合は failure を返す (L4)", async () => {
+    const result = await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", 1000, {
+      center: CENTER,
+      pageToken: "",
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/ページトークン/);
+    expect(mockSearchPlacesPage).not.toHaveBeenCalled();
+  });
+
+  // ---- L3: メイン catch の console.error ----
+
+  it("searchPlacesPage が throw した場合は console.error が呼ばれる (L3)", async () => {
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockResolveSearchCenter.mockResolvedValue(CENTER);
+    mockSearchPlacesPage.mockRejectedValue(new Error("予期しないエラー"));
+
+    await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", 1000);
+
+    expect(consoleSpy).toHaveBeenCalledWith(
+      expect.stringContaining("[area-search]"),
+      expect.any(Error),
+    );
+    consoleSpy.mockRestore();
+  });
+
   it("resolveSearchCenter が null の場合、中心地点が見つからない旨の failure を返す", async () => {
     mockResolveSearchCenter.mockResolvedValue(null);
 
@@ -215,13 +315,14 @@ describe("searchPlacesWithMatchesAction", () => {
     }
   });
 
-  it("isWithinRadius は中心地点と同座標・半径0mの境界値で true になる", async () => {
+  it("isWithinRadius は中心地点と同座標で true になる (distance=0 <= radius=1)", async () => {
+    // radiusMeters=0 はバリデーションで弾かれるため、最小有効値の 1m で境界値を確認する。
     mockResolveSearchCenter.mockResolvedValue(CENTER);
     mockSearchPlacesPage.mockResolvedValue(
       makeSearchPage({ places: [makePlace({ lat: CENTER.lat, lng: CENTER.lng })] }),
     );
 
-    const result = await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", 0);
+    const result = await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", 1);
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -249,6 +350,7 @@ describe("searchPlacesWithMatchesAction", () => {
   });
 
   it("searchPlacesPage が throw した場合は failure に変換される", async () => {
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     mockResolveSearchCenter.mockResolvedValue(CENTER);
     mockSearchPlacesPage.mockRejectedValue(new Error("Places API エラー (500): boom"));
 
@@ -256,6 +358,7 @@ describe("searchPlacesWithMatchesAction", () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toBe("Places API エラー (500): boom");
+    consoleSpy.mockRestore();
   });
 
   it("repos.store.list の結果から DB登録済み判定 (matchedStore) が反映される", async () => {
