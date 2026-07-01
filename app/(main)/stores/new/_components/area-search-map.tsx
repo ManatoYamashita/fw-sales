@@ -88,6 +88,9 @@ export function AreaSearchMap({
   >(new Map());
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // L1: tracks the last search params for which we auto-zoomed; avoids overriding
+  // a user's manual zoom when the same search result is re-rendered.
+  const prevSearchRef = useRef<{ center: SearchCenter; radiusMeters: number } | null>(null);
 
   // スクリプト読込 + 地図初期化
   useEffect(() => {
@@ -137,7 +140,19 @@ export function AreaSearchMap({
     if (!map || !google || status !== "ready") return;
 
     map.setCenter(center);
-    map.setZoom(zoomForRadius(radiusMeters));
+
+    // Auto-zoom only on initial display or when search parameters actually change.
+    // If center and radius are unchanged the user may have zoomed manually — keep their level.
+    const prev = prevSearchRef.current;
+    const isNewSearch =
+      prev === null ||
+      prev.radiusMeters !== radiusMeters ||
+      prev.center.lat !== center.lat ||
+      prev.center.lng !== center.lng;
+    if (isNewSearch) {
+      map.setZoom(zoomForRadius(radiusMeters));
+      prevSearchRef.current = { center, radiusMeters };
+    }
 
     if (!centerMarkerRef.current) {
       centerMarkerRef.current = new google.maps.Marker({
@@ -254,25 +269,30 @@ export function AreaSearchMap({
 
   return (
     <div className="space-y-2">
-      <div
-        ref={containerRef}
-        className="h-[280px] lg:h-[520px] w-full rounded-md border border-border bg-muted"
-      />
-      {status === "loading" && (
-        <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <Spinner className="h-3 w-3" />
-          地図を読み込み中…
-        </p>
-      )}
-      {status === "error" && (
-        <p role="alert" className="text-xs text-destructive">
-          地図の読み込みに失敗しました。
-          {process.env.NODE_ENV === "development" && errorMessage ? (
-            <span className="block text-[11px] text-muted-foreground">
-              {errorMessage}
-            </span>
-          ) : null}
-        </p>
+      {status === "error" ? (
+        // H2: show error inside the map area instead of an empty gray box + text below
+        <div
+          role="alert"
+          className="flex h-[280px] lg:h-[520px] w-full flex-col items-center justify-center gap-1 rounded-md border border-border bg-muted"
+        >
+          <p className="text-sm text-destructive">地図の読み込みに失敗しました。</p>
+          {process.env.NODE_ENV === "development" && errorMessage && (
+            <p className="text-[11px] text-muted-foreground">{errorMessage}</p>
+          )}
+        </div>
+      ) : (
+        <>
+          <div
+            ref={containerRef}
+            className="h-[280px] lg:h-[520px] w-full rounded-md border border-border bg-muted"
+          />
+          {status === "loading" && (
+            <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Spinner className="h-3 w-3" />
+              地図を読み込み中…
+            </p>
+          )}
+        </>
       )}
       <ul className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
         <li className="flex items-center gap-1">
