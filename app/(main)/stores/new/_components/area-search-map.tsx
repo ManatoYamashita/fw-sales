@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Spinner } from "@/components/ui/spinner";
 import type { AreaSearchPlaceViewModel, SearchCenter } from "@/lib/places/types";
+import { markerColorFor, zoomForRadius } from "@/lib/places/area-search-map-utils";
 
 export interface AreaSearchMapProps {
   center: SearchCenter;
@@ -18,13 +19,6 @@ export interface AreaSearchMapProps {
 
 const SCRIPT_ID = "area-search-google-maps-script";
 const CALLBACK_NAME = "__areaSearchGoogleMapsLoaded";
-
-const PIN_COLORS = {
-  eligible: "#2563eb", // 登録候補: 青
-  registered: "#9ca3af", // DB登録済み: グレー
-  added: "#16a34a", // 追加済み: 緑
-  outOfRange: "#d1d5db", // 範囲外: 薄いグレー
-} as const;
 
 // 複数の AreaSearchMap インスタンスが同時にマウントされても script タグを
 // 1つだけ追加するよう、モジュールスコープで読み込み Promise を共有する。
@@ -51,6 +45,7 @@ function loadGoogleMapsScript(apiKey: string): Promise<void> {
       apiKey,
     )}&v=weekly&loading=async&callback=${CALLBACK_NAME}`;
     script.async = true;
+    script.referrerPolicy = "no-referrer-when-downgrade";
     script.onerror = () =>
       reject(new Error("Google Mapsスクリプトの読み込みに失敗しました"));
     document.head.appendChild(script);
@@ -63,24 +58,6 @@ function loadGoogleMapsScript(apiKey: string): Promise<void> {
   });
 
   return googleMapsScriptPromise;
-}
-
-/** 半径(m)からおおよそ全体が収まるズームレベルを返す簡易マッピング。 */
-function zoomForRadius(radiusMeters: number): number {
-  if (radiusMeters <= 500) return 16;
-  if (radiusMeters <= 1000) return 15;
-  if (radiusMeters <= 2000) return 14;
-  return 13;
-}
-
-function markerColorFor(
-  place: AreaSearchPlaceViewModel,
-  isAdded: boolean,
-): string {
-  if (isAdded) return PIN_COLORS.added;
-  if (place.matchedStore !== null) return PIN_COLORS.registered;
-  if (!place.isWithinRadius) return PIN_COLORS.outOfRange;
-  return PIN_COLORS.eligible;
 }
 
 /**

@@ -136,8 +136,9 @@ export function StoreRegistrationTabs({
 
   const handleAreaSearched = (result: AreaSearchSessionResult) => {
     if (result.places.length === 0) {
-      // 0 件はエラー扱い(子パネルで alert 表示)。step は開かない。
+      // 0 件はエラー扱い(子パネルで alert 表示)。step は開かない / 再検索で開いていれば閉じる。
       setAreaResults(result);
+      setStepUnlocked(false);
       return;
     }
     startTransition(() => {
