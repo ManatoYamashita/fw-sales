@@ -81,7 +81,9 @@ graph LR
 |-------|------------------|-----------------|-------|
 | Infrastructure / Runtime | GitHub Actions, `ubuntu-latest` | スケジューラ + 実行環境 | 既存 3 ワークフローと同基盤 |
 | Data / Storage | Supabase Postgres（本番, pooler 経由） | keep-alive クエリの対象 | `DATABASE_URL` secret 経由 |
-| CLI | `psql`(postgresql-client, ランナー同梱) | `select 1` 実行手段 | 追加 install 不要 |
+| DB クライアント | Node `postgres`(`npm install --no-save postgres@3.4.9`, `actions/setup-node@v4` + node 20) | keep-alive クエリ実行手段 | psql 不採用（下記注記） |
+
+> **実装是正（PR #149 マージ後）**: 当初 `psql`(ランナー同梱)採用だったが、初回 dispatch で `psql: error: could not translate host name "...@..."` で失敗。原因は libpq の厳格な URI パーサが `DATABASE_URL` のパスワード中特殊文字(@ 等)を host と誤読すること。`migrate.yml` 同様 **Node の `postgres` クライアント**(寛容なパーサ)に切替え、同一 `DATABASE_URL` を問題なく解釈する形に是正。以降、本 design 内の "psql" 記述は Node `postgres` 実行に読み替えること（fail-loud は psql の `ON_ERROR_STOP` ではなく JS catch → `process.exit(1)` で担保）。
 
 > 設計判断の根拠（pause 定義・代替案比較）は `research.md` 参照。要点: pause タイマーは **実 DB クエリ**でのみリセットされ、auth/REST health ping では不十分。ゆえに Issue #147 の literal 提案（`/auth/v1/health` curl）から意図的に逸脱し、`DATABASE_URL` 経由 `select 1` を採用。
 
@@ -137,7 +139,7 @@ graph LR
   - `DATABASE_URL`（secret）。未設定/空なら psql 接続が失敗し red 終了（5.3）。
   - 追加入力パラメータなし。
 - **Action / output**:
-  - 実行コマンド（概念）: `psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "select count(*) from app_settings;"`
+  - 実行手段（概念）: Node `postgres` クライアントで `select count(*) as keepalive_rows from app_settings` を実行（`prepare:false` で transaction pooler 対応）。失敗時は JS catch → `process.exit(1)` で red。
   - **テーブル読取**を採用（`select 1` 単体ではなく実テーブルにアクセス）し、Supabase の "user database activity" 計上を確実化（OQ1 を設計段階で解消）。`app_settings` は `DATABASE_URL`（直結・フル権限）で読むため RLS に非依存。`count(*)` は **内容非依存で常に 1 行返す**ため、`app_settings` が空（手動シードの KV ストア）でも判定が安定する（実装時の探索で空であることを確認、`limit 1` だと 0 行返却になるため `count(*)` を採用）。対象テーブルが drop/rename された場合は psql エラー → red で fail-loud（4.1）。
   - ログに実行結果（成功可否・所要時間相当の step ログ）を残す（3.2, 4.4, 6.3）。secret 値は出力しない（5.4）。
   - 成功 → green、失敗 → red + GitHub 標準失敗通知（4.2）。
