@@ -45,7 +45,9 @@ function loadGoogleMapsScript(apiKey: string): Promise<void> {
       apiKey,
     )}&v=weekly&loading=async&callback=${CALLBACK_NAME}`;
     script.async = true;
-    script.referrerPolicy = "no-referrer-when-downgrade";
+    // Google Maps の HTTP referrer キー制限には origin だけで十分なため、
+    // full path を送らない近代既定 (origin のみ送出) を明示する。
+    script.referrerPolicy = "strict-origin-when-cross-origin";
     script.onerror = () =>
       reject(new Error("Google Mapsスクリプトの読み込みに失敗しました"));
     document.head.appendChild(script);
