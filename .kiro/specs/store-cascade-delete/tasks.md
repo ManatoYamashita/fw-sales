@@ -27,7 +27,7 @@
   - 既存 delete / bulkDelete の単発 DML 構造(原子性)には手を触れない(明示 transaction wrap の再導入禁止)
   - 完了条件: 紐づけデータを持つ店舗 ID で実件数、空配列で全カテゴリ 0 が返り、`pnpm typecheck` green
   - _Requirements: 1.4, 3.1, 3.5_
-- [ ] 2.2 影響カウントの読み取り Server Action を実装する
+- [x] 2.2 影響カウントの読み取り Server Action を実装する
   - 一括削除 action と同一の ID 正規化(非文字列・空白の除去、残 0 件は failure)を行う
   - 取得はキャッシュしない(revalidate も 'use cache' も使わない)。常に呼び出し時点の実データを返す
   - 失敗時は構造化ログ(SQLSTATE / detail / constraint)を残し、UI へは内部スキーマ情報を含まない汎用文言のみ返す

@@ -15,6 +15,7 @@ import {
   type ContactForm,
   type OperatorType,
   type Priority,
+  type StoreDeleteImpact,
   type StoreInput,
   type StorePatch,
 } from "@/types/store";
@@ -254,6 +255,49 @@ export async function updateStorePatchAction(
   if (!updated) return failure("店舗が見つかりませんでした");
   invalidateAllStoreScopes(id);
   return success(undefined, "更新しました");
+}
+
+/**
+ * 削除確認ダイアログ向けに、店舗群へ紐づく子データのカテゴリ別件数を返す読み取り系
+ * Server Action (store-cascade-delete / Issue #152)。
+ *
+ * - `bulkDeleteStoresAction` と同一の ID 正規化 (空・非文字列の除外 + 重複排除)
+ * - 読み取り専用: `'use cache'` も `revalidateTag` も使わず、常に呼び出し時点の実データを返す
+ * - 失敗時は診断情報 (SQLSTATE / constraint 等) を構造化ログにのみ残し、UI へは
+ *   内部スキーマ情報を含まない汎用文言のみ返す (delete 系と同じ二系統設計)
+ */
+export async function getStoreDeleteImpactAction(
+  ids: readonly string[],
+): Promise<ActionResult<StoreDeleteImpact>> {
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return failure("削除対象の店舗が指定されていません");
+  }
+  const uniqueIds = [
+    ...new Set(ids.filter((id) => typeof id === "string" && id.trim() !== "")),
+  ];
+  if (uniqueIds.length === 0) {
+    return failure("削除対象の店舗が指定されていません");
+  }
+
+  try {
+    const impact = await repos.store.getDeleteImpact(uniqueIds);
+    return success(impact);
+  } catch (err) {
+    const parsed = parsePostgresError(err);
+    // Vercel logs に SQLSTATE / detail / constraint を必ず残し、UI 用の文言とは分離する
+    console.error("[stores.deleteImpact] failed", {
+      requestedCount: uniqueIds.length,
+      sample: uniqueIds.slice(0, 3),
+      code: parsed?.code,
+      detail: parsed?.detail,
+      constraint: parsed?.constraint,
+      table: parsed?.table,
+      message:
+        parsed?.message ?? (err instanceof Error ? err.message : String(err)),
+    });
+    if (parsed === null) dumpUnrecognizedErrorShape("[stores.deleteImpact]", err);
+    return failure("紐づけデータの件数を取得できませんでした");
+  }
 }
 
 export async function deleteStoreAction(id: string): Promise<ActionResult> {
