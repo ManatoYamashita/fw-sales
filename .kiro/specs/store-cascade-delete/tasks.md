@@ -7,7 +7,7 @@
   - 冪等: 既に CASCADE の DB に適用しても同一結果に収束すること。place_candidates には触れない
   - 完了条件: 生成 SQL が上記 4 文のみで構成され、`pnpm db:check` が green
   - _Requirements: 1.1, 1.2, 1.3, 5.1, 5.3, 5.4_
-- [ ] 1.2 (P) migration journal の水位線ガードを追加する
+- [x] 1.2 (P) migration journal の水位線ガードを追加する
   - 整合性チェックスクリプトに Check 5(journal `when` が idx 順に狭義単調増加)を追加する
   - 逆行検出時は「水位線スキップにより適用されない migration が生じる」旨を出力して exit 1
   - 完了条件: 既存 journal + 0021 追加後の journal で `pnpm db:check` が green、`when` を人工的に逆行させると red になる

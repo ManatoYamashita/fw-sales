@@ -7,11 +7,12 @@
 # `pnpm drizzle-kit migrate` は journal 未登録 SQL を黙って無視するため、本番 DB
 # に DDL が未適用の状態が発生する (過去事例: `0004_add_store_google_place_id.sql`)。
 #
-# 本スクリプトは以下 4 種類の不整合を検出する:
+# 本スクリプトは以下 5 種類の不整合を検出する:
 #   1. 同一 idx の SQL ファイルが複数存在
 #   2. SQL ファイル数と journal entries 数の不一致
 #   3. journal に登録された tag に対応する SQL ファイルが欠落
 #   4. SQL ファイルが journal に登録されていない (孤児)
+#   5. journal の when が idx 順に狭義単調増加でない (水位線スキップの温床)
 #
 # 不整合があれば exit 1、無ければ exit 0。
 #
@@ -88,6 +89,31 @@ while IFS= read -r filename; do
     exit_code=1
   fi
 done < <(list_sql_files)
+
+# Check 5: journal の when が idx 順に狭義単調増加であること (水位線ガード)
+#
+# drizzle-kit migrate は「適用済み最終行の created_at (水位線) より新しい when のみ適用」する。
+# journal 上で when が idx 順に対して逆行・同値になると、後続 migration の適用後に
+# 古い when の migration が永久にスキップされる。
+# 過去事例: 0015_store_cascade_delete が本番未適用のまま 0016 以降が適用され、
+# FK が NO ACTION のまま残存 → 店舗削除が 23503 でブロック (Issue #152)。
+check5_errors=$(jq -r '
+  .entries
+  | sort_by(.idx)
+  | . as $e
+  | [range(1; length)
+     | select($e[.].when <= $e[. - 1].when)
+     | "  idx=\($e[.].idx) tag=\($e[.].tag) when=\($e[.].when) <= idx=\($e[. - 1].idx) when=\($e[. - 1].when)"]
+  | .[]' "$JOURNAL")
+if [ -n "$check5_errors" ]; then
+  echo "ERROR: Journal 'when' values must be strictly increasing by idx (watermark guard):"
+  echo "$check5_errors"
+  echo ""
+  echo "  when が適用済み水位線を下回る migration は drizzle-kit migrate に永久スキップされます。"
+  echo "  Resolution: 該当 migration を \`pnpm db:generate --custom --name=<name>\` で"
+  echo "  新しい idx / when として再生成してください (_journal.json の手書き編集は不可)。"
+  exit_code=1
+fi
 
 if [ "$exit_code" -eq 0 ]; then
   echo "OK: ${sql_count} Drizzle migrations, all consistent with journal."
