@@ -14,7 +14,8 @@
     "db:migrate": "node --env-file-if-exists=.env.local ./node_modules/drizzle-kit/bin.cjs migrate",
     "db:generate": "node --env-file-if-exists=.env.local ./node_modules/drizzle-kit/bin.cjs generate",
     "db:studio": "node --env-file-if-exists=.env.local ./node_modules/drizzle-kit/bin.cjs studio",
-    "db:check": "bash scripts/check-drizzle-migrations.sh"
+    "db:check": "bash scripts/check-drizzle-migrations.sh",
+    "db:verify-fks": "node --env-file-if-exists=.env.local scripts/verify-store-cascade-fks.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",

@@ -1,6 +1,6 @@
 # Implementation Plan
 
-- [ ] 1. 削除ポリシー是正の基盤を整える(Wave 1 / 先行 PR)
+- [x] 1. 削除ポリシー是正の基盤を整える(Wave 1 / 先行 PR)
 - [x] 1.1 店舗系 FK を CASCADE に再宣言する custom migration を作成する
   - drizzle-kit の custom 生成機構で新規 migration(0021)と journal エントリを生成する(journal の手書き編集は行わない。`when` は生成時刻となり現水位線を越える)
   - design.md の DDL 契約に従い、制約 1 本 = 1 文(同一 ALTER TABLE 内で DROP CONSTRAINT IF EXISTS と ADD CONSTRAINT ... ON DELETE cascade を束ねる)で、商談・調査・引き継ぎ×2(store_id / deal_id)の計 4 制約を記述する
@@ -13,7 +13,7 @@
   - 完了条件: 既存 journal + 0021 追加後の journal で `pnpm db:check` が green、`when` を人工的に逆行させると red になる
   - _Requirements: 5.4_
   - _Boundary: check-migrations guard_
-- [ ] 1.3 (P) FK 実態の読み取り専用検証スクリプトを追加する
+- [x] 1.3 (P) FK 実態の読み取り専用検証スクリプトを追加する
   - keepalive と同一の接続様式(Node postgres クライアント、prepare 無効・接続 1 本、接続文字列は環境変数から取得しログへ出力しない)
   - pg_constraint を SELECT し、4 制約 = CASCADE / 場所候補 = SET NULL を assert。不一致は対象一覧を出力して exit 1。書き込みは一切行わない
   - 完了条件: 是正前の本番に対して実行すると不一致 4 件を列挙して exit 1(0021 適用後の再実行で exit 0 になることは 6.2 で確認)
@@ -99,3 +99,9 @@
   - 完了条件: 上記シナリオがすべてブラウザで確認済み
   - _Requirements: 1.1, 1.2, 1.3, 1.5, 2.1, 2.2, 2.3, 2.4, 2.5, 3.1, 3.2, 3.3, 3.4, 3.5, 4.1, 4.3, 5.3_
   - _Depends: 4.1, 4.2, 4.3, 6.2_
+
+## Implementation Notes
+
+- 1.1: `pnpm db:generate --custom --name=<name>` は空 SQL + journal エントリに加えて **snapshot の純複製 (0021_snapshot.json) も生成する**(schema 同一・prevId 連鎖維持を確認済み)。0022 の通常 generate の系譜は保たれる。
+- 1.3: 是正前の本番に対する `pnpm db:verify-fks` は期待どおり **4 件 NG (全て NO ACTION) / exit 1** を返した(2026-07-05 実測)。0021 適用後の exit 0 転化は 6.2 で確認する。
+- 検証コマンド: `pnpm test` (vitest) が存在する(tech.md の「テスト未導入」は古い)。scripts/__tests__ に backfill テストのみ。
