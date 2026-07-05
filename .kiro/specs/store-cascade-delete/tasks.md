@@ -20,7 +20,7 @@
   - _Requirements: 5.2_
   - _Boundary: verify-store-cascade-fks_
 
-- [ ] 2. 影響カウントの読み取り契約とエラー文言を整える
+- [x] 2. 影響カウントの読み取り契約とエラー文言を整える
 - [x] 2.1 削除影響カウントの型と Repository 契約を実装する
   - 4 カテゴリ(商談 / 調査 / 引き継ぎ / 場所候補)の件数を表す型をドメイン型集約に追加する
   - Repository interface に getDeleteImpact(ids) を追加し、DB 実装は単一 SELECT のスカラーサブクエリ ×4 で 1 往復取得する。空配列・存在しない ID は 0 件扱い。引き継ぎは store_id 基準で数える
@@ -33,7 +33,7 @@
   - 失敗時は構造化ログ(SQLSTATE / detail / constraint)を残し、UI へは内部スキーマ情報を含まない汎用文言のみ返す
   - 完了条件: client から店舗 ID 群を渡すと ActionResult で件数が返り、失敗時はログと汎用文言に分離される
   - _Requirements: 3.1, 3.5, 4.2, 4.4_
-- [ ] 2.3 (P) FK 違反時の利用者向け文言を更新する
+- [x] 2.3 (P) FK 違反時の利用者向け文言を更新する
   - 23503 の UI 文言から「スキーマの ON DELETE 設定…」の開発者向け文を除去し、design.md 記載の利用者向け文言に置換する
   - constraint / table 名の非露出と構造化ログ分離は現行維持。formatter は全エンティティ共通のため店舗固有表現を入れない
   - 完了条件: 23503 変換結果が新文言になる(該当 formatter の文字列変更のみで挙動不変)
@@ -104,4 +104,5 @@
 
 - 1.1: `pnpm db:generate --custom --name=<name>` は空 SQL + journal エントリに加えて **snapshot の純複製 (0021_snapshot.json) も生成する**(schema 同一・prevId 連鎖維持を確認済み)。0022 の通常 generate の系譜は保たれる。
 - 1.3: 是正前の本番に対する `pnpm db:verify-fks` は期待どおり **4 件 NG (全て NO ACTION) / exit 1** を返した(2026-07-05 実測)。0021 適用後の exit 0 転化は 6.2 で確認する。
+- 2.1: drizzle の `sql` テンプレートへ **配列を直接埋め込むとスカラー展開されて `any(($1))` の不正 SQL になる**。ID 群の条件は `inArray()` で合成する (モック/typecheck では検出不能、本番への読み取り専用実行で発見)。
 - 検証コマンド: `pnpm test` (vitest) が存在する(tech.md の「テスト未導入」は古い)。scripts/__tests__ に backfill テストのみ。

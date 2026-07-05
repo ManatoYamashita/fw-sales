@@ -97,7 +97,7 @@ describe("bulkDeleteStoresAction エラーハンドリング", () => {
     if (result.ok === false) {
       // UI 文言には内部スキーマ情報 (制約名) を露出しない
       expect(result.error).not.toContain("deals_store_id_stores_id_fk");
-      expect(result.error).toMatch(/関連レコード/);
+      expect(result.error).toMatch(/関連データ/);
     }
     // 構造化ログには constraint 名を残し、運用者がログから即座に原因特定できる
     expect(consoleErrorSpy).toHaveBeenCalledWith(

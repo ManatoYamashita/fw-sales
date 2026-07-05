@@ -117,8 +117,11 @@ const SQLSTATE_MESSAGES: Record<string, Formatter> = {
   // foreign_key_violation
   // constraint 名は内部スキーマ情報のため UI には出さず、構造化ログ
   // (Action 層の console.error) にのみ残す (PR #144 セルフレビュー容疑 A 対応)。
+  // 「スキーマの ON DELETE 設定…」のような開発者向け文言も UI から排除する
+  // (store-cascade-delete / Issue #152, Req 4.2)。formatter は全エンティティ共通の
+  // ため、店舗固有の表現は入れない。
   "23503": () =>
-    "関連レコードに紐づいているため削除できませんでした。スキーマの ON DELETE 設定を確認してください。",
+    "関連データに紐づいているため削除できませんでした。解消しない場合は管理者に連絡してください。",
   // unique_violation
   "23505": () => "一意制約に違反しました。",
   // not_null_violation
@@ -143,7 +146,7 @@ const SQLSTATE_PATTERN = /^[0-9A-Z]{5}$/;
 
 /**
  * `ParsedPgError` (または null) を UI 表示用の日本語メッセージに整形する。
- * - SQLSTATE 形式 + 既知 code → 専用文言 (例: 23503 → 関連レコード文言)。
+ * - SQLSTATE 形式 + 既知 code → 専用文言 (例: 23503 → 関連データ文言)。
  * - SQLSTATE 形式 + 未知 code → `[code] message` のフォールバック。
  * - 非 SQLSTATE 形式 (例: `UNSAFE_TRANSACTION` / `ECONNREFUSED`) → 同じく
  *   `[code] message` のフォールバック (内部スキーマ情報ではなくエラー種別の文字列なので
