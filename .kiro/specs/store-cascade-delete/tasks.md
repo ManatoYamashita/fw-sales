@@ -21,7 +21,7 @@
   - _Boundary: verify-store-cascade-fks_
 
 - [ ] 2. 影響カウントの読み取り契約とエラー文言を整える
-- [ ] 2.1 削除影響カウントの型と Repository 契約を実装する
+- [x] 2.1 削除影響カウントの型と Repository 契約を実装する
   - 4 カテゴリ(商談 / 調査 / 引き継ぎ / 場所候補)の件数を表す型をドメイン型集約に追加する
   - Repository interface に getDeleteImpact(ids) を追加し、DB 実装は単一 SELECT のスカラーサブクエリ ×4 で 1 往復取得する。空配列・存在しない ID は 0 件扱い。引き継ぎは store_id 基準で数える
   - 既存 delete / bulkDelete の単発 DML 構造(原子性)には手を触れない(明示 transaction wrap の再導入禁止)

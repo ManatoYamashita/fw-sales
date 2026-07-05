@@ -75,6 +75,24 @@ export interface Store {
 export type StoreInput = Omit<Store, "id" | "created_at" | "updated_at">;
 export type StorePatch = Partial<StoreInput>;
 
+/**
+ * 店舗削除時に影響を受ける紐づけデータのカテゴリ別件数 (#152 store-cascade-delete)。
+ *
+ * deals / research / handoffs は店舗削除で連鎖削除され、place_candidates は
+ * 紐付け解除 (matched_store_id が NULL 化) される。件数は取得時点の実データに基づく。
+ * 削除確認ダイアログの影響表示に用いる。
+ */
+export interface StoreDeleteImpact {
+  /** 削除される商談件数 */
+  deals: number;
+  /** 削除される調査件数 */
+  research: number;
+  /** 削除される引き継ぎ件数 */
+  handoffs: number;
+  /** 紐付け解除される場所候補件数 */
+  place_candidates: number;
+}
+
 export interface StoreFilter {
   q?: string;
   stage?: StageId;
