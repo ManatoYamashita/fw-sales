@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { Modal, ModalContent, ModalFooter } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
+import { useIsAdmin } from "@/components/layout/current-user-provider";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { FormField } from "@/components/ui/form-field";
@@ -246,6 +247,9 @@ function TemplateRow({
 }) {
   const isChangingThis = changingDefaultId === t.id;
   const isAnyChanging = changingDefaultId !== null;
+  // #155: テンプレート削除は admin 限定 (真の防御はサーバ側 requireAdmin)。
+  const { isAdmin, loaded } = useIsAdmin();
+  const denyDelete = loaded && !isAdmin;
 
   return (
     <li className="flex flex-wrap items-center gap-3 px-4 py-3 bg-card">
@@ -295,6 +299,8 @@ function TemplateRow({
             size="sm"
             variant="ghost"
             onClick={onDelete}
+            disabled={denyDelete}
+            title={denyDelete ? "管理者のみ実行できます" : undefined}
             className="text-destructive hover:text-destructive hover:bg-destructive/10"
           >
             <Trash2 className="h-3.5 w-3.5" />

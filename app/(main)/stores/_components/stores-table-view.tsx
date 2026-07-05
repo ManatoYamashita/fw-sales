@@ -18,6 +18,7 @@ import type { Store } from "@/types/store";
 import { StoreRowActions } from "./store-row-actions";
 import { StoreDeleteConfirmDialog } from "./store-delete-confirm-dialog";
 import { bulkDeleteStoresAction } from "@/lib/actions/store-actions";
+import { useIsAdmin } from "@/components/layout/current-user-provider";
 
 export interface StoresTableViewProps {
   stores: readonly Store[];
@@ -151,6 +152,9 @@ export function StoresTableView({
   const router = useRouter();
   const profileMap = new Map(profileEntries);
   const columns = buildColumns(profileMap);
+  // #155: 一括削除は admin 限定 (真の防御はサーバ側 requireAdmin)。
+  const { isAdmin, loaded } = useIsAdmin();
+  const denyDelete = loaded && !isAdmin;
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkOpen, setBulkOpen] = useState(false);
@@ -232,7 +236,8 @@ export function StoresTableView({
             variant="destructive"
             size="sm"
             onClick={() => setBulkOpen(true)}
-            disabled={isDeleting}
+            disabled={isDeleting || denyDelete}
+            title={denyDelete ? "管理者のみ実行できます" : undefined}
             className="ml-auto gap-1.5"
           >
             {isDeleting ? <Spinner /> : <Trash2 className="h-3.5 w-3.5" />}

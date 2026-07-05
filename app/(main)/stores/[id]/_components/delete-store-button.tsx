@@ -5,6 +5,7 @@ import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { deleteStoreAction } from "@/lib/actions/store-actions";
 import { toast } from "@/components/ui/toast";
+import { useIsAdmin } from "@/components/layout/current-user-provider";
 import { StoreDeleteConfirmDialog } from "@/app/(main)/stores/_components/store-delete-confirm-dialog";
 
 export function DeleteStoreButton({
@@ -16,6 +17,9 @@ export function DeleteStoreButton({
 }) {
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
+  // #155: 破壊的操作は admin 限定 (真の防御はサーバ側 requireAdmin)。
+  const { isAdmin, loaded } = useIsAdmin();
+  const denyDelete = loaded && !isAdmin;
 
   const remove = () => {
     startTransition(async () => {
@@ -33,6 +37,8 @@ export function DeleteStoreButton({
         variant="ghost"
         size="sm"
         onClick={() => setOpen(true)}
+        disabled={denyDelete}
+        title={denyDelete ? "管理者のみ実行できます" : undefined}
         className="text-red-600 hover:text-red-700 hover:bg-red-50"
       >
         <Trash2 className="h-4 w-4" /> 削除
