@@ -132,6 +132,17 @@ export function makeProfileRepo(executor: DbClient | Tx): ProfileRepository {
       await executor.insert(profiles).values(row);
       return row;
     },
+
+    async updateRole(id, role) {
+      // 純粋な UPDATE。認可・最後の管理者保護は Server Action 層 (#155) の責務。
+      const rows = await executor
+        .update(profiles)
+        .set({ role, updated_at: today() })
+        .where(eq(profiles.id, id))
+        .returning();
+      const head = rows[0];
+      return head ? fromDbRow(head) : null;
+    },
   };
 }
 

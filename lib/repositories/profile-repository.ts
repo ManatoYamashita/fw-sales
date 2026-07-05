@@ -15,7 +15,11 @@
  * 関連: design.md §「ProfileRepository」, requirements.md §2.1, §2.5, §3.4, §3.5, §3.7
  */
 
-import type { PlaceholderProfileInput, Profile } from "@/types/profile";
+import type {
+  PlaceholderProfileInput,
+  Profile,
+  ProfileRole,
+} from "@/types/profile";
 
 export interface ProfileRepository {
   findById(id: string): Promise<Profile | null>;
@@ -37,4 +41,10 @@ export interface ProfileRepository {
    * @returns 生成された Profile (`role: 'placeholder'` 保証)
    */
   createPlaceholder(input: PlaceholderProfileInput): Promise<Profile>;
+  /**
+   * 指定ユーザーの role を更新し、更新後の Profile を返す (#155 ユーザー管理)。
+   * 対象が存在しなければ null。認可 (admin 限定) や最後の管理者保護は
+   * 呼び出し側 (Server Action) の責務であり、本メソッドは純粋な UPDATE のみを行う。
+   */
+  updateRole(id: string, role: ProfileRole): Promise<Profile | null>;
 }
