@@ -17,7 +17,8 @@
  * - 純関数のみ。`server-only` を冒頭に置き、Client バンドルへの混入を防ぐ。
  *
  * 関連: lib/actions/store-actions.ts (bulkDeleteStoresAction / deleteStoreAction)、
- *       lib/db/store-repository.ts (bulkDelete の transaction wrap)
+ *       lib/db/store-repository.ts (bulkDelete。transaction wrap は Pooler 非互換のため
+ *       PR #144 で撤回済みで、単発 DML の暗黙トランザクションに依拠する)
  */
 
 import "server-only";
