@@ -1,4 +1,10 @@
-import type { Store, StoreInput, StorePatch, StoreFilter } from "@/types/store";
+import type {
+  Store,
+  StoreDeleteImpact,
+  StoreInput,
+  StorePatch,
+  StoreFilter,
+} from "@/types/store";
 import type { BasicInfo, FillSource } from "@/types/basic-info";
 
 export interface StoreRepository {
@@ -9,6 +15,15 @@ export interface StoreRepository {
   delete(id: string): Promise<boolean>;
   /** 指定 ID 群を一括削除し、実際に削除された件数を返す。 */
   bulkDelete(ids: string[]): Promise<number>;
+  /**
+   * 指定 ID 群の店舗に紐づく子データのカテゴリ別件数を返す
+   * (store-cascade-delete / Issue #152)。削除確認ダイアログの影響表示用。
+   *
+   * - `ids` が空配列のときは DB へ問い合わせず全カテゴリ 0 を返す
+   * - 存在しない ID は 0 件として扱われる (エラーにしない)
+   * - 読み取りのみでデータ・キャッシュの状態を変更しない
+   */
+  getDeleteImpact(ids: readonly string[]): Promise<StoreDeleteImpact>;
   /**
    * 店舗の `basic_info`(jsonb)を 1 ソース分の部分更新で原子的にマージする
    * (store-basic-info / Issue #114, #121)。

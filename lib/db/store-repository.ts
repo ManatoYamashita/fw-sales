@@ -21,13 +21,14 @@
  */
 
 import "server-only";
-import { eq, desc, and, or, ilike, inArray, type SQL } from "drizzle-orm";
+import { eq, desc, and, or, ilike, inArray, sql, type SQL } from "drizzle-orm";
 import { db, type DbClient, type Tx } from "./client";
-import { stores } from "./schema";
+import { deals, handoffs, placeCandidates, research, stores } from "./schema";
 import {
   OPERATOR_TYPES,
   type OperatorType,
   type Store,
+  type StoreDeleteImpact,
   type StoreInput,
   type StorePatch,
   type StoreFilter,
@@ -150,6 +151,21 @@ function buildFilterConditions(filter: StoreFilter): SQL | undefined {
 }
 
 /**
+ * `count(*)` の結果値を number へ正規化する (getDeleteImpact 用)。
+ * `::int` キャストにより通常は number で返るが、driver 差異 (bigint / 文字列) にも
+ * 防御的に対応し、解釈できない値は 0 に落とす。
+ */
+function toImpactCount(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "bigint") return Number(value);
+  if (typeof value === "string" && value !== "") {
+    const n = Number(value);
+    if (Number.isFinite(n)) return n;
+  }
+  return 0;
+}
+
+/**
  * `StoreRepository` を Drizzle で実装するファクトリ。
  *
  * - `executor` には `db` (singleton) または transaction `tx` を渡せる
@@ -237,6 +253,35 @@ export function makeStoreRepo(executor: DbClient | Tx): StoreRepository {
         .where(inArray(stores.id, ids))
         .returning({ id: stores.id });
       return deleted.length;
+    },
+
+    async getDeleteImpact(ids) {
+      if (ids.length === 0) {
+        return { deals: 0, research: 0, handoffs: 0, place_candidates: 0 };
+      }
+      // 単一 SELECT のスカラーサブクエリ ×4 で 1 往復・同一スナップショットの件数を得る
+      // (design.md §StoreRepository.getDeleteImpact / Issue #152)。
+      // - handoffs は store_id 基準で数える (deal_id 経由の間接連鎖は同一店舗前提の
+      //   データモデルであり、二重計上を避ける)
+      // - 存在しない ID は各 count が 0 になるだけでエラーにしない
+      // - 読み取りのみ。delete / bulkDelete の単発 DML 構造 (原子性) には関与しない
+      // - ID 群は `inArray` で合成する。`sql` テンプレートへ配列を直接埋め込むと
+      //   スカラー展開されて `any(($1))` の不正 SQL になる (実 DB 検証で確認済み)
+      const idArray = [...ids];
+      const rows = await executor.execute(sql`
+        select
+          (select count(*)::int from ${deals} where ${inArray(deals.store_id, idArray)}) as deals,
+          (select count(*)::int from ${research} where ${inArray(research.store_id, idArray)}) as research,
+          (select count(*)::int from ${handoffs} where ${inArray(handoffs.store_id, idArray)}) as handoffs,
+          (select count(*)::int from ${placeCandidates} where ${inArray(placeCandidates.matched_store_id, idArray)}) as place_candidates
+      `);
+      const row = (rows as Array<Record<string, unknown>>)[0];
+      return {
+        deals: toImpactCount(row?.deals),
+        research: toImpactCount(row?.research),
+        handoffs: toImpactCount(row?.handoffs),
+        place_candidates: toImpactCount(row?.place_candidates),
+      } satisfies StoreDeleteImpact;
     },
 
     async mergeBasicInfo(id, incoming, source: FillSource) {

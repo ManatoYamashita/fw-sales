@@ -3,10 +3,9 @@
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { Pencil, Trash2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Modal, ModalContent, ModalFooter } from "@/components/ui/modal";
 import { deleteStoreAction } from "@/lib/actions/store-actions";
 import { toast } from "@/components/ui/toast";
+import { StoreDeleteConfirmDialog } from "./store-delete-confirm-dialog";
 
 export function StoreRowActions({
   storeId,
@@ -38,38 +37,24 @@ export function StoreRowActions({
       >
         <Pencil className="h-3.5 w-3.5" />
       </Link>
-      <Modal open={open} onOpenChange={setOpen}>
-        <button
-          type="button"
-          aria-label={`${storeName} を削除`}
-          title="削除"
-          onClick={() => setOpen(true)}
-          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive-soft hover:text-destructive transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-        </button>
-        <ModalContent title="店舗を削除しますか?" size="sm">
-          <p className="text-sm text-foreground leading-relaxed">
-            「<strong className="font-semibold">{storeName}</strong>」を削除します。
-            <br />
-            関連する商談・調査・ハンドオフ・Deep Research も同時に削除されます。
-            <br />
-            この操作は取り消せません。
-          </p>
-          <ModalFooter>
-            <Button
-              variant="ghost"
-              onClick={() => setOpen(false)}
-              disabled={pending}
-            >
-              キャンセル
-            </Button>
-            <Button variant="danger" onClick={remove} disabled={pending}>
-              {pending ? "削除中…" : "削除する"}
-            </Button>
-          </ModalFooter>
-        </ModalContent>
-      </Modal>
+      <button
+        type="button"
+        aria-label={`${storeName} を削除`}
+        title="削除"
+        onClick={() => setOpen(true)}
+        className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive-soft hover:text-destructive transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <Trash2 className="h-3.5 w-3.5" />
+      </button>
+      {/* 影響表示つき共有確認ダイアログ (store-cascade-delete / Issue #152)。
+          削除 action の実行と失敗 toast は本コンポーネントの責務のまま。 */}
+      <StoreDeleteConfirmDialog
+        open={open}
+        onOpenChange={setOpen}
+        target={{ kind: "single", storeId, storeName }}
+        onConfirm={remove}
+        pending={pending}
+      />
     </div>
   );
 }

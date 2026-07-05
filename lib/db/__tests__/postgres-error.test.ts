@@ -138,7 +138,7 @@ describe("formatUserMessage", () => {
     expect(msg).toMatch(/タイムアウト/);
   });
 
-  it("23503 (FK 違反) → 関連レコード文言。制約名は UI に出さない (容疑 A 対応)", () => {
+  it("23503 (FK 違反) → 関連データ文言。制約名・開発者向け文は UI に出さない (#152)", () => {
     const msg = formatUserMessage(
       {
         code: "23503",
@@ -147,10 +147,14 @@ describe("formatUserMessage", () => {
       },
       "fallback",
     );
-    expect(msg).toMatch(/関連レコード/);
+    expect(msg).toBe(
+      "関連データに紐づいているため削除できませんでした。解消しない場合は管理者に連絡してください。",
+    );
     // UI には内部スキーマ情報 (制約名) を露出しない。constraint は console.error
     // 側に渡される構造化ログにのみ残す方針 (PR #144 セルフレビュー容疑 A 対応)。
     expect(msg).not.toContain("deals_store_id_fk");
+    // 「スキーマの ON DELETE 設定…」のような開発者向け文言も UI に出さない (Req 4.2)
+    expect(msg).not.toMatch(/ON DELETE|スキーマ/);
   });
 
   it("23505 (UNIQUE 違反) → 一意制約文言。制約名は UI に出さない", () => {
@@ -223,6 +227,6 @@ describe("formatUserMessage", () => {
       "fallback",
     );
     expect(msg).toBe("[ECONNREFUSED] write ECONNREFUSED ...");
-    expect(msg).not.toMatch(/関連レコード/);
+    expect(msg).not.toMatch(/関連データ/);
   });
 });
