@@ -7,7 +7,6 @@ import { Card } from "@/components/ui/card";
 import { DataTable, type ColumnDef } from "@/components/ui/data-table";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
-import { Modal, ModalContent, ModalFooter } from "@/components/ui/modal";
 import { Spinner } from "@/components/ui/spinner";
 import { StageBadge } from "@/components/feature/stage-badge";
 import { ChannelBadge } from "@/components/feature/channel-badge";
@@ -17,6 +16,7 @@ import { formatDate } from "@/lib/utils/date";
 import { toast } from "@/components/ui/toast";
 import type { Store } from "@/types/store";
 import { StoreRowActions } from "./store-row-actions";
+import { StoreDeleteConfirmDialog } from "./store-delete-confirm-dialog";
 import { bulkDeleteStoresAction } from "@/lib/actions/store-actions";
 
 export interface StoresTableViewProps {
@@ -241,35 +241,16 @@ export function StoresTableView({
         </div>
       )}
 
-      <Modal open={bulkOpen} onOpenChange={setBulkOpen}>
-        <ModalContent title="選択中の店舗を削除しますか?" size="sm">
-          <p className="text-sm text-foreground leading-relaxed">
-            選択中の
-            <strong className="font-semibold">
-              {" "}
-              {selectedVisibleIds.length} 件{" "}
-            </strong>
-            の店舗を削除します。関連する商談・調査・ハンドオフ・Deep Research も
-            同時に完全に削除されます。この操作は取り消せません。
-          </p>
-          <ModalFooter>
-            <Button
-              variant="ghost"
-              onClick={() => setBulkOpen(false)}
-              disabled={isDeleting}
-            >
-              キャンセル
-            </Button>
-            <Button
-              variant="danger"
-              onClick={handleBulkDelete}
-              disabled={isDeleting || selectedVisibleIds.length === 0}
-            >
-              {isDeleting ? "削除中…" : "削除する"}
-            </Button>
-          </ModalFooter>
-        </ModalContent>
-      </Modal>
+      {/* 影響表示つき共有確認ダイアログ (store-cascade-delete / Issue #152)。
+          選択群の合算影響件数を表示し、bulk 削除 action と部分結果 toast は
+          handleBulkDelete (現行) の責務のまま。 */}
+      <StoreDeleteConfirmDialog
+        open={bulkOpen}
+        onOpenChange={setBulkOpen}
+        target={{ kind: "bulk", storeIds: selectedVisibleIds }}
+        onConfirm={handleBulkDelete}
+        pending={isDeleting}
+      />
     </>
   );
 }
