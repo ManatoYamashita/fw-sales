@@ -1,0 +1,101 @@
+# Implementation Plan
+
+- [ ] 1. 削除ポリシー是正の基盤を整える(Wave 1 / 先行 PR)
+- [ ] 1.1 店舗系 FK を CASCADE に再宣言する custom migration を作成する
+  - drizzle-kit の custom 生成機構で新規 migration(0021)と journal エントリを生成する(journal の手書き編集は行わない。`when` は生成時刻となり現水位線を越える)
+  - design.md の DDL 契約に従い、制約 1 本 = 1 文(同一 ALTER TABLE 内で DROP CONSTRAINT IF EXISTS と ADD CONSTRAINT ... ON DELETE cascade を束ねる)で、商談・調査・引き継ぎ×2(store_id / deal_id)の計 4 制約を記述する
+  - 冪等: 既に CASCADE の DB に適用しても同一結果に収束すること。place_candidates には触れない
+  - 完了条件: 生成 SQL が上記 4 文のみで構成され、`pnpm db:check` が green
+  - _Requirements: 1.1, 1.2, 1.3, 5.1, 5.3, 5.4_
+- [ ] 1.2 (P) migration journal の水位線ガードを追加する
+  - 整合性チェックスクリプトに Check 5(journal `when` が idx 順に狭義単調増加)を追加する
+  - 逆行検出時は「水位線スキップにより適用されない migration が生じる」旨を出力して exit 1
+  - 完了条件: 既存 journal + 0021 追加後の journal で `pnpm db:check` が green、`when` を人工的に逆行させると red になる
+  - _Requirements: 5.4_
+  - _Boundary: check-migrations guard_
+- [ ] 1.3 (P) FK 実態の読み取り専用検証スクリプトを追加する
+  - keepalive と同一の接続様式(Node postgres クライアント、prepare 無効・接続 1 本、接続文字列は環境変数から取得しログへ出力しない)
+  - pg_constraint を SELECT し、4 制約 = CASCADE / 場所候補 = SET NULL を assert。不一致は対象一覧を出力して exit 1。書き込みは一切行わない
+  - 完了条件: 是正前の本番に対して実行すると不一致 4 件を列挙して exit 1(0021 適用後の再実行で exit 0 になることは 6.2 で確認)
+  - _Requirements: 5.2_
+  - _Boundary: verify-store-cascade-fks_
+
+- [ ] 2. 影響カウントの読み取り契約とエラー文言を整える
+- [ ] 2.1 削除影響カウントの型と Repository 契約を実装する
+  - 4 カテゴリ(商談 / 調査 / 引き継ぎ / 場所候補)の件数を表す型をドメイン型集約に追加する
+  - Repository interface に getDeleteImpact(ids) を追加し、DB 実装は単一 SELECT のスカラーサブクエリ ×4 で 1 往復取得する。空配列・存在しない ID は 0 件扱い。引き継ぎは store_id 基準で数える
+  - 既存 delete / bulkDelete の単発 DML 構造(原子性)には手を触れない(明示 transaction wrap の再導入禁止)
+  - 完了条件: 紐づけデータを持つ店舗 ID で実件数、空配列で全カテゴリ 0 が返り、`pnpm typecheck` green
+  - _Requirements: 1.4, 3.1, 3.5_
+- [ ] 2.2 影響カウントの読み取り Server Action を実装する
+  - 一括削除 action と同一の ID 正規化(非文字列・空白の除去、残 0 件は failure)を行う
+  - 取得はキャッシュしない(revalidate も 'use cache' も使わない)。常に呼び出し時点の実データを返す
+  - 失敗時は構造化ログ(SQLSTATE / detail / constraint)を残し、UI へは内部スキーマ情報を含まない汎用文言のみ返す
+  - 完了条件: client から店舗 ID 群を渡すと ActionResult で件数が返り、失敗時はログと汎用文言に分離される
+  - _Requirements: 3.1, 3.5, 4.2, 4.4_
+- [ ] 2.3 (P) FK 違反時の利用者向け文言を更新する
+  - 23503 の UI 文言から「スキーマの ON DELETE 設定…」の開発者向け文を除去し、design.md 記載の利用者向け文言に置換する
+  - constraint / table 名の非露出と構造化ログ分離は現行維持。formatter は全エンティティ共通のため店舗固有表現を入れない
+  - 完了条件: 23503 変換結果が新文言になる(該当 formatter の文字列変更のみで挙動不変)
+  - _Requirements: 4.2_
+  - _Boundary: postgres-error_
+
+- [ ] 3. 共有の削除確認ダイアログを実装する
+  - 単体(店舗名表示)と一括(選択件数表示)を対象種別で受け、削除ロジックは持たず承認コールバックで呼び出し元に委譲する
+  - open のたびに影響カウント action を 1 回呼び、取得中 / 取得失敗 / 取得成功の 3 状態を描画する。失敗時は件数を偽装せず「関連データがある場合は同時に削除されます」の警告に degrade し、いずれの状態でも承認ボタンは有効のまま
+  - 件数 > 0 のカテゴリのみ「ラベル・件数・処理種別(削除 / 紐付け解除)」を表示し、全カテゴリ 0 件なら「紐づけデータはありません」を表示する
+  - 影響リストに aria-live を付与し、既存 Modal の focus trap / Escape / aria-modal をそのまま利用する。破壊的操作の danger ボタンと「この操作は取り消せません。」文言を継承する
+  - 完了条件: design.md の props 契約どおりに 3 状態・カテゴリ表示・全 0 件文言が分岐描画され、`pnpm typecheck` / `pnpm lint` green
+  - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 3.1, 3.2, 3.3, 3.4_
+  - _Depends: 2.2_
+
+- [ ] 4. 3 経路を共有ダイアログに統合する
+- [ ] 4.1 (P) 一覧行の削除を共有ダイアログに置換する
+  - 内蔵 Modal と固定文言(廃止済み Deep Research への言及を含む)を撤去する
+  - 承認時の削除 action 呼び出し・失敗 toast・成功時挙動は現行を維持する
+  - 完了条件: 一覧行の削除アイコンで共有ダイアログが開いて実件数が表示され、承認で削除される
+  - _Requirements: 1.5, 2.1, 3.5, 4.1_
+  - _Boundary: StoreRowActions_
+  - _Depends: 3_
+- [ ] 4.2 (P) 一括削除を共有ダイアログに置換する
+  - 選択店舗数と選択群の合算影響件数を表示する。一括削除 action と部分結果 toast(削除数 / 要求数)は現行維持
+  - 完了条件: 複数選択 → 削除で合算件数が表示され、成功 toast の件数が実削除数と一致する
+  - _Requirements: 1.5, 2.1, 2.5, 3.1, 4.1, 4.3_
+  - _Boundary: StoresTableView bulk_
+  - _Depends: 3_
+- [ ] 4.3 (P) 詳細画面の削除を共有ダイアログに置換し件数 prop 経路を撤去する
+  - 詳細画面の削除ボタンを共有ダイアログ化し、dealCount prop・タブの中継・ページの件数算出用クエリ呼び出しを削除する
+  - 成功時の一覧への redirect は現行維持
+  - 完了条件: 詳細画面の削除で 4 カテゴリの実件数が表示され、dealCount への参照がコードベースから消える(typecheck green)
+  - _Requirements: 1.5, 2.1, 2.4, 3.1, 4.1_
+  - _Boundary: DeleteStoreButton, StoreDetailTabs_
+  - _Depends: 3_
+
+- [ ] 5. (P) 子 FK 列のインデックス migration を生成する(Wave 3 / 独立 PR 可)
+  - schema に商談・調査・引き継ぎ×2・場所候補の FK 5 列の index 宣言を追加し、通常の生成機構で migration(0022)を生成する
+  - 生成 SQL が CREATE INDEX のみで構成されることをレビューする(無関係差分の混入は拒否 — 過去の生成事故の再発防止)
+  - 完了条件: 0022 の SQL が 5 本の CREATE INDEX のみで、`pnpm db:check` green
+  - _Requirements: 5.3_
+  - _Boundary: migration 0022, Drizzle schema_
+  - _Depends: 1.1_
+
+- [ ] 6. 検証
+- [ ] 6.1 静的検証一式を green にする
+  - `pnpm typecheck` / `pnpm lint` / `pnpm build` / `pnpm db:check`(Check 1-5)がすべて exit 0
+  - 完了条件: 上記 4 コマンドの成功ログ
+  - _Requirements: 5.4_
+- [ ] 6.2 本番への migration 適用と FK 実態を検証する
+  - merge 後に migration 適用 workflow が 0021 / 0022 を適用して green になることを確認する
+  - 検証スクリプト(1.3)を実行し、4 制約 = CASCADE / 場所候補 = SET NULL で exit 0 になることを確認する
+  - 完了条件: 検証スクリプトの exit 0 実行ログ(是正前の exit 1 からの遷移)
+  - _Requirements: 5.1, 5.2, 5.4_
+  - _Depends: 1.1, 1.3, 5_
+- [ ] 6.3 紐づけデータ持ち店舗の削除をブラウザ E2E で検証する
+  - 使い捨てのテスト店舗のみを使用する(稼働 DB は本番直結のため既存データには触れない)
+  - テスト店舗に商談・調査・引き継ぎ各 1 件と場所候補マッチ 1 件を用意 → 一覧行から削除: 4 カテゴリの実件数と処理種別が表示され、承認で削除成功・子データ消滅・場所候補が未マッチに戻る(23503 が発生しない)
+  - 紐づけゼロのテスト店舗 → 詳細画面から: 「紐づけデータはありません」表示、キャンセルで無変更、再承認で削除され一覧へ遷移する
+  - テスト店舗 2 件 → 一括削除: 合算影響件数が表示され、成功 toast の件数が一致する
+  - 3 経路のダイアログに固定文言(Deep Research への言及)が残っていない
+  - 完了条件: 上記シナリオがすべてブラウザで確認済み
+  - _Requirements: 1.1, 1.2, 1.3, 1.5, 2.1, 2.2, 2.3, 2.4, 2.5, 3.1, 3.2, 3.3, 3.4, 3.5, 4.1, 4.3, 5.3_
+  - _Depends: 4.1, 4.2, 4.3, 6.2_
