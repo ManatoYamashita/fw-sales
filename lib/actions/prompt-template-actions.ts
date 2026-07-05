@@ -24,6 +24,7 @@ import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
 import { getCurrentSession } from "@/lib/supabase/server";
 import { failure, readString, success, type ActionResult } from "./_helpers";
+import { requireAdmin } from "./_authz";
 import {
   parseTemplateBody,
   serializeFewshots,
@@ -225,22 +226,28 @@ export async function updatePromptTemplateAction(
 export async function deletePromptTemplateAction(
   id: string,
 ): Promise<ActionResult<boolean>> {
-  const session = await getCurrentSession();
-  if (!session) return failure("ログインが必要です");
+  // 破壊的操作のため admin ロールを要求する (#155)。所有スコープ (自分のテンプレート
+  // のみ操作可) は guard.profile.id で従前どおり維持する。
+  const guard = await requireAdmin("promptTemplates.delete");
+  if (!guard.ok) return guard.denied;
 
   const validId = parseTemplateId(id);
   if (!validId) return failure("テンプレートが見つかりません");
 
-  const template = await repos.promptTemplate.findById(validId, session.userId);
+  const template = await repos.promptTemplate.findById(validId, guard.profile.id);
   if (!template) return failure("テンプレートが見つかりません");
   if (template.is_default) {
     return failure("デフォルトテンプレートは削除できません");
   }
 
-  const deleted = await repos.promptTemplate.delete(validId, session.userId);
+  const deleted = await repos.promptTemplate.delete(validId, guard.profile.id);
   if (!deleted) return failure("テンプレートが見つかりません");
 
   updateTag(CACHE_TAGS.promptTemplates);
+  console.log("[audit] promptTemplates.delete", {
+    by: guard.profile.email,
+    templateId: validId,
+  });
   return success(true);
 }
 

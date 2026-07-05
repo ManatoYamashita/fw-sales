@@ -13,6 +13,7 @@ import {
   success,
   type ActionResult,
 } from "./_helpers";
+import { requireAdmin } from "./_authz";
 
 function invalidate(handoffId?: string, storeId?: string) {
   revalidateTag(CACHE_TAGS.handoffs, "max");
@@ -136,9 +137,12 @@ export async function completeHandoffAction(
 export async function deleteHandoffAction(
   handoffId: string,
 ): Promise<ActionResult> {
+  const guard = await requireAdmin("handoffs.delete");
+  if (!guard.ok) return guard.denied;
   const current = await repos.handoff.get(handoffId);
   if (!current) return failure("引き継ぎが見つかりませんでした");
   await repos.handoff.delete(handoffId);
   invalidate(handoffId, current.store_id);
+  console.log("[audit] handoffs.delete", { by: guard.profile.email, handoffId });
   redirect("/handoffs");
 }

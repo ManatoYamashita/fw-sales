@@ -15,11 +15,13 @@ import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } fr
 
 vi.mock("server-only", () => ({}));
 
-const { mockBulkDelete, mockRevalidateTag, mockRedirect } = vi.hoisted(() => ({
-  mockBulkDelete: vi.fn(),
-  mockRevalidateTag: vi.fn(),
-  mockRedirect: vi.fn(),
-}));
+const { mockBulkDelete, mockRevalidateTag, mockRedirect, mockGetCurrentProfile } =
+  vi.hoisted(() => ({
+    mockBulkDelete: vi.fn(),
+    mockRevalidateTag: vi.fn(),
+    mockRedirect: vi.fn(),
+    mockGetCurrentProfile: vi.fn(),
+  }));
 
 vi.mock("@/lib/repositories", () => ({
   repos: {
@@ -34,6 +36,22 @@ vi.mock("next/cache", () => ({
 vi.mock("next/navigation", () => ({
   redirect: mockRedirect,
 }));
+
+// #155: bulkDeleteStoresAction は requireAdmin (getCurrentProfile) 経由の admin
+// ガード配下になった。既定は admin を返し、拒否ケースのみ role を差し替える。
+vi.mock("@/lib/supabase/server", () => ({
+  getCurrentProfile: mockGetCurrentProfile,
+}));
+
+const ADMIN_PROFILE = {
+  id: "admin-uuid",
+  email: "admin@test.com",
+  display_name: "管理者",
+  avatar_url: null,
+  role: "admin" as const,
+  created_at: "2026-07-05",
+  updated_at: "2026-07-05",
+};
 
 const { bulkDeleteStoresAction } = await import("../store-actions");
 
@@ -55,6 +73,9 @@ describe("bulkDeleteStoresAction エラーハンドリング", () => {
   beforeEach(() => {
     mockBulkDelete.mockReset();
     mockRevalidateTag.mockReset();
+    mockGetCurrentProfile.mockReset();
+    // 既定は admin 許可。エラーハンドリング系テストがガードを通過できるようにする。
+    mockGetCurrentProfile.mockResolvedValue(ADMIN_PROFILE);
     consoleErrorSpy = vi
       .spyOn(console, "error")
       .mockImplementation(() => undefined);
@@ -191,5 +212,24 @@ describe("bulkDeleteStoresAction エラーハンドリング", () => {
     const result = await bulkDeleteStoresAction(["", "   "]);
     expect(result.ok).toBe(false);
     expect(mockBulkDelete).not.toHaveBeenCalled();
+  });
+
+  it("非 admin (member) はガードで拒否され、repos.bulkDelete を呼ばない (#155)", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    mockGetCurrentProfile.mockResolvedValueOnce({
+      ...ADMIN_PROFILE,
+      role: "member",
+    });
+
+    const result = await bulkDeleteStoresAction(["store_a", "store_b"]);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/管理者/);
+    expect(mockBulkDelete).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(
+      "[authz] denied",
+      expect.objectContaining({ action: "stores.bulkDelete", reason: "not_admin" }),
+    );
+    warnSpy.mockRestore();
   });
 });

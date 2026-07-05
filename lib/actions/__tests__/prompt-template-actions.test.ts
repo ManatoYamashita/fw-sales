@@ -13,20 +13,22 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // vi.hoisted: vi.mock factory より前に評価されるため、factory 内で参照できる
 // ---------------------------------------------------------------------------
 
-const { mockRepo, mockTransaction, mockGetCurrentSession } = vi.hoisted(() => ({
-  mockRepo: {
-    list: vi.fn(),
-    findById: vi.fn(),
-    insert: vi.fn(),
-    update: vi.fn(),
-    delete: vi.fn(),
-    countByUser: vi.fn(),
-    clearDefaultForUser: vi.fn(),
-    setDefault: vi.fn(),
-  },
-  mockTransaction: vi.fn(),
-  mockGetCurrentSession: vi.fn(),
-}));
+const { mockRepo, mockTransaction, mockGetCurrentSession, mockGetCurrentProfile } =
+  vi.hoisted(() => ({
+    mockRepo: {
+      list: vi.fn(),
+      findById: vi.fn(),
+      insert: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      countByUser: vi.fn(),
+      clearDefaultForUser: vi.fn(),
+      setDefault: vi.fn(),
+    },
+    mockTransaction: vi.fn(),
+    mockGetCurrentSession: vi.fn(),
+    mockGetCurrentProfile: vi.fn(),
+  }));
 
 vi.mock("@/lib/repositories", () => ({
   repos: {
@@ -35,8 +37,11 @@ vi.mock("@/lib/repositories", () => ({
   },
 }));
 
+// delete は #155 で requireAdmin (getCurrentProfile) 経由の admin ガードに昇格した。
+// 他アクションは従来どおり getCurrentSession の login チェックのため両方を mock する。
 vi.mock("@/lib/supabase/server", () => ({
   getCurrentSession: mockGetCurrentSession,
+  getCurrentProfile: mockGetCurrentProfile,
 }));
 
 vi.mock("next/cache", () => ({
@@ -66,6 +71,16 @@ const USER_B = "user-uuid-b";
 const TEMPLATE_ID = "f47ac10b-58cc-4372-a567-0e02b2c3d479";
 
 const SESSION_A = { userId: USER_A, email: "a@test.com" };
+/** #155: delete は admin ロールを要求する。id は USER_A に一致させ所有スコープを維持。 */
+const ADMIN_A = {
+  id: USER_A,
+  email: "a@test.com",
+  display_name: "管理者A",
+  avatar_url: null,
+  role: "admin" as const,
+  created_at: "2026-07-05",
+  updated_at: "2026-07-05",
+};
 
 function makeTemplateRow(
   overrides: Partial<AiPromptTemplate> = {},
@@ -487,7 +502,7 @@ describe("updatePromptTemplateAction", () => {
 
 describe("deletePromptTemplateAction", () => {
   it("正常に削除できる", async () => {
-    mockGetCurrentSession.mockResolvedValue(SESSION_A);
+    mockGetCurrentProfile.mockResolvedValue(ADMIN_A);
     mockRepo.findById.mockResolvedValue(makeTemplateRow({ is_default: false }));
     mockRepo.delete.mockResolvedValue(true);
 
@@ -498,8 +513,19 @@ describe("deletePromptTemplateAction", () => {
     expect(mockRepo.delete).toHaveBeenCalledWith(TEMPLATE_ID, USER_A);
   });
 
+  it("非 admin (member) は拒否され、repo.findById / repo.delete を呼ばない (#155)", async () => {
+    mockGetCurrentProfile.mockResolvedValue({ ...ADMIN_A, role: "member" });
+
+    const result = await deletePromptTemplateAction(TEMPLATE_ID);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/管理者/);
+    expect(mockRepo.findById).not.toHaveBeenCalled();
+    expect(mockRepo.delete).not.toHaveBeenCalled();
+  });
+
   it("デフォルトテンプレートは削除拒否", async () => {
-    mockGetCurrentSession.mockResolvedValue(SESSION_A);
+    mockGetCurrentProfile.mockResolvedValue(ADMIN_A);
     mockRepo.findById.mockResolvedValue(makeTemplateRow({ is_default: true }));
 
     const result = await deletePromptTemplateAction(TEMPLATE_ID);
@@ -510,7 +536,7 @@ describe("deletePromptTemplateAction", () => {
   });
 
   it("存在しない id なら failure", async () => {
-    mockGetCurrentSession.mockResolvedValue(SESSION_A);
+    mockGetCurrentProfile.mockResolvedValue(ADMIN_A);
     mockRepo.findById.mockResolvedValue(null);
 
     const result = await deletePromptTemplateAction("nonexistent");
@@ -521,7 +547,7 @@ describe("deletePromptTemplateAction", () => {
   });
 
   it("id が不正UUID なら failure を返し、repo.findById / repo.delete を呼ばない", async () => {
-    mockGetCurrentSession.mockResolvedValue(SESSION_A);
+    mockGetCurrentProfile.mockResolvedValue(ADMIN_A);
 
     const result = await deletePromptTemplateAction("not-a-uuid");
 

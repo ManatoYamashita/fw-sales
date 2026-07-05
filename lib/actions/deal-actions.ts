@@ -22,6 +22,7 @@ import {
   success,
   type ActionResult,
 } from "./_helpers";
+import { requireAdmin } from "./_authz";
 
 function asMeetingType(v: string): MeetingType {
   return (MEETING_TYPES as readonly string[]).includes(v)
@@ -153,9 +154,12 @@ export async function updateDealAction(
 }
 
 export async function deleteDealAction(dealId: string): Promise<ActionResult> {
+  const guard = await requireAdmin("deals.delete");
+  if (!guard.ok) return guard.denied;
   const current = await repos.deal.get(dealId);
   if (!current) return failure("商談が見つかりませんでした");
   await repos.deal.delete(dealId);
   invalidateDealScopes(dealId, current.store_id);
+  console.log("[audit] deals.delete", { by: guard.profile.email, dealId });
   redirect("/deals");
 }
