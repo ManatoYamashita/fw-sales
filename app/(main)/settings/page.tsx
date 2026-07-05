@@ -6,6 +6,7 @@ import { Stat } from "@/components/ui/stat";
 import { Heading, Text } from "@/components/ui/typography";
 import { DataActions } from "./_components/data-actions";
 import { ThemeToggleCard } from "./_components/theme-toggle-card";
+import { UserManagementCard } from "./_components/user-management-card";
 import { AiPromptTemplatesCard } from "./_components/ai-prompt-templates-card";
 import { GemUrlCard } from "./_components/gem-url-card";
 import { repos } from "@/lib/repositories";
@@ -88,6 +89,11 @@ export default function SettingsPage() {
       <ThemeToggleCard />
 
       <DataActions />
+
+      {/* admin のみ表示。getCurrentProfile() で cookies を読むため隔離 (#155)。 */}
+      <Suspense fallback={null}>
+        <UserManagementCard />
+      </Suspense>
 
       {/* getCurrentSession() で cookies を読む動的コンポーネント。静的シェルを保つため隔離。 */}
       <Suspense fallback={null}>
