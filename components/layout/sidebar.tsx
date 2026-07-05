@@ -42,9 +42,13 @@ export function Sidebar({
   defaultCollapsed = false,
 }: SidebarProps) {
   const displayName = currentProfile?.display_name ?? "ゲスト";
-  // 現状 ProfileRole は "member" | "placeholder" の 2 値。
-  // 表示は placeholder の場合のみラベルを変える(管理者ロールは将来 Issue で追加)。
-  const role = currentProfile?.role === "placeholder" ? "未登録" : "メンバー";
+  // ロール表示ラベル (#155): placeholder=未登録 / admin=管理者 / それ以外=メンバー。
+  const role =
+    currentProfile?.role === "placeholder"
+      ? "未登録"
+      : currentProfile?.role === "admin"
+        ? "管理者"
+        : "メンバー";
   const pathname = usePathname();
   const router = useRouter();
   const [open, setOpen] = useState(false);

@@ -12,11 +12,17 @@ import {
   resetToSeedAction,
 } from "@/lib/actions/data-actions";
 import { toast } from "@/components/ui/toast";
+import { useIsAdmin } from "@/components/layout/current-user-provider";
 
 export function DataActions() {
   const [resetOpen, setResetOpen] = useState(false);
   const [clearOpen, setClearOpen] = useState(false);
   const [pending, startTransition] = useTransition();
+  // #155: リセット / 全削除 / インポートは admin 限定 (真の防御はサーバ側 requireAdmin)。
+  // Export は非破壊のためゲートしない。
+  const { isAdmin, loaded } = useIsAdmin();
+  const denyDestructive = loaded && !isAdmin;
+  const adminOnlyTitle = denyDestructive ? "管理者のみ実行できます" : undefined;
 
   const reset = () => {
     startTransition(async () => {
@@ -64,14 +70,17 @@ export function DataActions() {
           JSON エクスポート
         </a>
 
-        <label className="inline-flex items-center justify-center gap-2 h-11 rounded-lg border border-border bg-card text-sm font-medium hover:bg-muted/40 cursor-pointer">
+        <label
+          title={adminOnlyTitle}
+          className="inline-flex items-center justify-center gap-2 h-11 rounded-lg border border-border bg-card text-sm font-medium hover:bg-muted/40 cursor-pointer has-[:disabled]:opacity-40 has-[:disabled]:cursor-not-allowed"
+        >
           <Upload className="h-4 w-4" />
           JSON インポート
           <input
             type="file"
             accept="application/json,.json"
             onChange={importFile}
-            disabled={pending}
+            disabled={pending || denyDestructive}
             className="sr-only"
           />
         </label>
@@ -80,6 +89,8 @@ export function DataActions() {
           <Button
             variant="outline"
             onClick={() => setResetOpen(true)}
+            disabled={denyDestructive}
+            title={adminOnlyTitle}
             className="h-11"
           >
             <RotateCcw className="h-4 w-4" />
@@ -109,6 +120,8 @@ export function DataActions() {
           <Button
             variant="ghost"
             onClick={() => setClearOpen(true)}
+            disabled={denyDestructive}
+            title={adminOnlyTitle}
             className="h-11 text-red-600 hover:text-red-700 hover:bg-red-50"
           >
             <Trash2 className="h-4 w-4" />

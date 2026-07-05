@@ -31,6 +31,7 @@ import {
   success,
   type ActionResult,
 } from "./_helpers";
+import { requireAdmin } from "./_authz";
 
 function asPriority(value: string): Priority {
   return (PRIORITIES as readonly string[]).includes(value)
@@ -301,6 +302,8 @@ export async function getStoreDeleteImpactAction(
 }
 
 export async function deleteStoreAction(id: string): Promise<ActionResult> {
+  const guard = await requireAdmin("stores.delete");
+  if (!guard.ok) return guard.denied;
   try {
     const removed = await repos.store.delete(id);
     if (!removed) return failure("店舗が見つかりませんでした");
@@ -329,6 +332,7 @@ export async function deleteStoreAction(id: string): Promise<ActionResult> {
   revalidateTag(CACHE_TAGS.researchByStore(id), "max");
   revalidateTag(CACHE_TAGS.handoffs, "max");
   revalidateTag(CACHE_TAGS.handoffsByStore(id), "max");
+  console.log("[audit] stores.delete", { by: guard.profile.email, id });
   redirect("/stores");
 }
 
@@ -346,6 +350,8 @@ export interface BulkDeleteStoresResult {
 export async function bulkDeleteStoresAction(
   ids: string[],
 ): Promise<ActionResult<BulkDeleteStoresResult>> {
+  const guard = await requireAdmin("stores.bulkDelete");
+  if (!guard.ok) return guard.denied;
   if (!Array.isArray(ids) || ids.length === 0) {
     return failure("削除対象の店舗が指定されていません");
   }
@@ -392,5 +398,11 @@ export async function bulkDeleteStoresAction(
     revalidateTag(CACHE_TAGS.handoffsByStore(id), "max");
   }
 
+  console.log("[audit] stores.bulkDelete", {
+    by: guard.profile.email,
+    requestedCount: uniqueIds.length,
+    deletedCount,
+    sample: uniqueIds.slice(0, 3),
+  });
   return success({ deletedCount, requestedCount: uniqueIds.length });
 }

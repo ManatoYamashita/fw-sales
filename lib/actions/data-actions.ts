@@ -36,6 +36,7 @@ import type { DbSnapshot } from "@/lib/db/snapshot";
 import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
 import { failure, success, type ActionResult } from "./_helpers";
+import { requireAdmin } from "./_authz";
 
 function invalidateAll() {
   for (const tag of [
@@ -53,6 +54,8 @@ function invalidateAll() {
 }
 
 export async function resetToSeedAction(): Promise<ActionResult> {
+  const guard = await requireAdmin("data.resetToSeed");
+  if (!guard.ok) return guard.denied;
   // 4 entity 全てを DB トランザクション内でリセット
   // (research-handoff-db-migration §8.3, §8.4, §8.5)。
   // lib/db/* は DATABASE_URL 必須の副作用を持つため動的 import する (Issue 2)。
@@ -111,10 +114,13 @@ export async function resetToSeedAction(): Promise<ActionResult> {
   }
 
   invalidateAll();
+  console.log("[audit] data.resetToSeed", { by: guard.profile.email });
   return success(undefined, "シードデータにリセットしました");
 }
 
 export async function clearAllAction(): Promise<ActionResult> {
+  const guard = await requireAdmin("data.clearAll");
+  if (!guard.ok) return guard.denied;
   // 4 entity 全てを DB トランザクション内で全削除
   // (research-handoff-db-migration §8.4, §8.5)。
   // lib/db/* は DATABASE_URL 必須の副作用を持つため動的 import する (Issue 2)。
@@ -139,6 +145,7 @@ export async function clearAllAction(): Promise<ActionResult> {
   }
 
   invalidateAll();
+  console.log("[audit] data.clearAll", { by: guard.profile.email });
   return success(undefined, "全データを削除しました");
 }
 
@@ -146,6 +153,8 @@ export async function importJsonAction(
   _prev: ActionResult | null,
   formData: FormData,
 ): Promise<ActionResult> {
+  const guard = await requireAdmin("data.import");
+  if (!guard.ok) return guard.denied;
   const file = formData.get("file");
   if (!(file instanceof File)) {
     return failure("ファイルを選択してください");
@@ -224,6 +233,7 @@ export async function importJsonAction(
     }
 
     invalidateAll();
+    console.log("[audit] data.import", { by: guard.profile.email });
     return success(undefined, "インポートに成功しました");
   } catch (e) {
     return failure(

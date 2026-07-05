@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Modal, ModalContent, ModalFooter } from "@/components/ui/modal";
 import { deleteDealAction } from "@/lib/actions/deal-actions";
 import { toast } from "@/components/ui/toast";
+import { useIsAdmin } from "@/components/layout/current-user-provider";
 
 export function DealRowActions({
   dealId,
@@ -17,6 +18,9 @@ export function DealRowActions({
 }) {
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
+  // #155: 破壊的操作は admin 限定 (真の防御はサーバ側 requireAdmin)。
+  const { isAdmin, loaded } = useIsAdmin();
+  const denyDelete = loaded && !isAdmin;
 
   const remove = () => {
     startTransition(async () => {
@@ -41,9 +45,10 @@ export function DealRowActions({
         <button
           type="button"
           aria-label="商談を削除"
-          title="削除"
+          title={denyDelete ? "管理者のみ実行できます" : "削除"}
           onClick={() => setOpen(true)}
-          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive-soft hover:text-destructive transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          disabled={denyDelete}
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive-soft hover:text-destructive transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40 disabled:pointer-events-none"
         >
           <Trash2 className="h-3.5 w-3.5" />
         </button>

@@ -9,10 +9,33 @@
 "use server";
 
 import { failure, success, type ActionResult } from "./_helpers";
-import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { getCurrentProfile, getSupabaseServerClient } from "@/lib/supabase/server";
+import type { ProfileRole } from "@/types/profile";
 
 export interface SignOutResult {
   readonly redirectTo: string;
+}
+
+export interface SessionRole {
+  readonly role: ProfileRole;
+  readonly isAdmin: boolean;
+}
+
+/**
+ * 現在のセッションのロールを返す読み取り系 Server Action (#155)。
+ *
+ * Client Component (CurrentUserProvider) が hydration 後に 1 回だけ呼び、
+ * 破壊的操作ボタンの無効化に使う。cookies() を読むが Server Action は
+ * post-hydration の POST であり、(main) ページの静的 PPR シェルには影響しない
+ * (page 本体で cookies() を読まないことで #106/#107 の build 崩壊を回避する設計)。
+ *
+ * 認可の真の防御は各 action の requireAdmin ガードであり、本 action の値は
+ * UI 表示上の補助に過ぎない。
+ */
+export async function getSessionRoleAction(): Promise<ActionResult<SessionRole>> {
+  const profile = await getCurrentProfile();
+  if (!profile) return failure("未認証");
+  return success({ role: profile.role, isAdmin: profile.role === "admin" });
 }
 
 /**
