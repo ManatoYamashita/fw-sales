@@ -80,7 +80,7 @@
   - _Depends: 1.1_
 
 - [ ] 6. 検証
-- [ ] 6.1 静的検証一式を green にする
+- [x] 6.1 静的検証一式を green にする
   - `pnpm typecheck` / `pnpm lint` / `pnpm build` / `pnpm db:check`(Check 1-5)がすべて exit 0
   - 完了条件: 上記 4 コマンドの成功ログ
   - _Requirements: 5.4_
@@ -104,6 +104,7 @@
 
 - 1.1: `pnpm db:generate --custom --name=<name>` は空 SQL + journal エントリに加えて **snapshot の純複製 (0021_snapshot.json) も生成する**(schema 同一・prevId 連鎖維持を確認済み)。0022 の通常 generate の系譜は保たれる。
 - 1.3: 是正前の本番に対する `pnpm db:verify-fks` は期待どおり **4 件 NG (全て NO ACTION) / exit 1** を返した(2026-07-05 実測)。0021 適用後の exit 0 転化は 6.2 で確認する。
+- 6.1: `pnpm test` は `.env.local` を source した shell で走らせない (GOOGLE_PLACES_API_KEY 未設定を検証するテストが env 汚染で fail する)。build のみ sourcing が必要。
 - 3: React 19 の lint 規則 `react-hooks/set-state-in-effect` は effect 直下の同期 setState を error にする。非同期取得の状態リセットは `startTransition` コールバック内 (await 前) へ移す。
 - 2.1: drizzle の `sql` テンプレートへ **配列を直接埋め込むとスカラー展開されて `any(($1))` の不正 SQL になる**。ID 群の条件は `inArray()` で合成する (モック/typecheck では検出不能、本番への読み取り専用実行で発見)。
 - 検証コマンド: `pnpm test` (vitest) が存在する(tech.md の「テスト未導入」は古い)。scripts/__tests__ に backfill テストのみ。
