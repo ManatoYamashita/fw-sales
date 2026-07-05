@@ -171,7 +171,11 @@ export const deals = pgTable("deals", {
   ),
   created_at: text("created_at").notNull(),
   updated_at: text("updated_at").notNull(),
-});
+}, (table) => [
+  // store-cascade-delete (#152): FK 列インデックス。cascade 削除の子走査と
+  // 削除影響カウント (getDeleteImpact) の seq scan を回避する。
+  index("deals_store_id_idx").on(table.store_id),
+]);
 
 /**
  * research テーブル
@@ -212,7 +216,10 @@ export const research = pgTable("research", {
   status: text("status").notNull(),
   created_at: text("created_at").notNull(),
   updated_at: text("updated_at").notNull(),
-});
+}, (table) => [
+  // store-cascade-delete (#152): FK 列インデックス (deals_store_id_idx と同趣旨)。
+  index("research_store_id_idx").on(table.store_id),
+]);
 
 /**
  * handoffs テーブル
@@ -252,7 +259,12 @@ export const handoffs = pgTable("handoffs", {
   status: text("status").notNull(),
   created_at: text("created_at").notNull(),
   updated_at: text("updated_at").notNull(),
-});
+}, (table) => [
+  // store-cascade-delete (#152): FK 列インデックス (deals_store_id_idx と同趣旨)。
+  // deal_id は deals 削除の cascade 走査も受けるため両列に張る。
+  index("handoffs_store_id_idx").on(table.store_id),
+  index("handoffs_deal_id_idx").on(table.deal_id),
+]);
 
 /**
  * ai_prompt_templates テーブル (Issue #42)
@@ -352,4 +364,7 @@ export const placeCandidates = pgTable("place_candidates", {
   updated_at: text("updated_at").notNull(),
 }, (table) => [
   uniqueIndex("place_candidates_google_place_id_idx").on(table.google_place_id),
+  // store-cascade-delete (#152): FK 列インデックス。店舗削除時の SET NULL 走査と
+  // 削除影響カウント (getDeleteImpact) の seq scan を回避する。
+  index("place_candidates_matched_store_id_idx").on(table.matched_store_id),
 ]);

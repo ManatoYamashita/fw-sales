@@ -71,7 +71,7 @@
   - _Boundary: DeleteStoreButton, StoreDetailTabs_
   - _Depends: 3_
 
-- [ ] 5. (P) 子 FK 列のインデックス migration を生成する(Wave 3 / 独立 PR 可)
+- [x] 5. (P) 子 FK 列のインデックス migration を生成する(Wave 3 / 独立 PR 可)
   - schema に商談・調査・引き継ぎ×2・場所候補の FK 5 列の index 宣言を追加し、通常の生成機構で migration(0022)を生成する
   - 生成 SQL が CREATE INDEX のみで構成されることをレビューする(無関係差分の混入は拒否 — 過去の生成事故の再発防止)
   - 完了条件: 0022 の SQL が 5 本の CREATE INDEX のみで、`pnpm db:check` green
