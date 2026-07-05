@@ -154,6 +154,7 @@ scripts/
 - `app/(main)/stores/[id]/_components/store-detail-tabs.tsx` — `dealCount` prop の受け渡しを除去
 - `app/(main)/stores/[id]/page.tsx` — `dealCount` 算出のための `listDealsByStoreCached` 呼び出しを除去
 - `scripts/check-drizzle-migrations.sh` — Check 5(journal `when` の idx 順単調増加)を追加
+- `package.json` — `db:verify-fks` スクリプトを追加(検証スクリプトの実行手段)
 
 ## System Flows
 

@@ -239,7 +239,8 @@ export function makeStoreRepo(executor: DbClient | Tx): StoreRepository {
     async bulkDelete(ids) {
       if (ids.length === 0) return 0;
       // 関連テーブル (deals / research / handoffs / handoffs.deal_id) は FK の
-      // ON DELETE CASCADE (migration 0015) で連鎖削除される。
+      // ON DELETE CASCADE (migration 0021 で再宣言 / #152) で連鎖削除される。
+      // (0015 は水位線スキップで本番未適用のまま残った経緯があり、実効宣言は 0021。)
       // 単発 DML 文 `DELETE FROM stores WHERE id IN (...)` は PostgreSQL の
       // 暗黙 transaction で auto-commit され、CASCADE 連鎖含めて全件成功 OR
       // 全件 rollback の atomic 保証が標準で得られる。
