@@ -79,18 +79,18 @@
   - _Boundary: migration 0022, Drizzle schema_
   - _Depends: 1.1_
 
-- [ ] 6. 検証
+- [x] 6. 検証
 - [x] 6.1 静的検証一式を green にする
   - `pnpm typecheck` / `pnpm lint` / `pnpm build` / `pnpm db:check`(Check 1-5)がすべて exit 0
   - 完了条件: 上記 4 コマンドの成功ログ
   - _Requirements: 5.4_
-- [ ] 6.2 本番への migration 適用と FK 実態を検証する
+- [x] 6.2 本番への migration 適用と FK 実態を検証する
   - merge 後に migration 適用 workflow が 0021 / 0022 を適用して green になることを確認する
   - 検証スクリプト(1.3)を実行し、4 制約 = CASCADE / 場所候補 = SET NULL で exit 0 になることを確認する
   - 完了条件: 検証スクリプトの exit 0 実行ログ(是正前の exit 1 からの遷移)
   - _Requirements: 5.1, 5.2, 5.4_
   - _Depends: 1.1, 1.3, 5_
-- [ ] 6.3 紐づけデータ持ち店舗の削除をブラウザ E2E で検証する
+- [x] 6.3 紐づけデータ持ち店舗の削除をブラウザ E2E で検証する
   - 使い捨てのテスト店舗のみを使用する(稼働 DB は本番直結のため既存データには触れない)
   - テスト店舗に商談・調査・引き継ぎ各 1 件と場所候補マッチ 1 件を用意 → 一覧行から削除: 4 カテゴリの実件数と処理種別が表示され、承認で削除成功・子データ消滅・場所候補が未マッチに戻る(23503 が発生しない)
   - 紐づけゼロのテスト店舗 → 詳細画面から: 「紐づけデータはありません」表示、キャンセルで無変更、再承認で削除され一覧へ遷移する
@@ -104,6 +104,8 @@
 
 - 1.1: `pnpm db:generate --custom --name=<name>` は空 SQL + journal エントリに加えて **snapshot の純複製 (0021_snapshot.json) も生成する**(schema 同一・prevId 連鎖維持を確認済み)。0022 の通常 generate の系譜は保たれる。
 - 1.3: 是正前の本番に対する `pnpm db:verify-fks` は期待どおり **4 件 NG (全て NO ACTION) / exit 1** を返した(2026-07-05 実測)。0021 適用後の exit 0 転化は 6.2 で確認する。
+- 6.2: PR #153 merge → Apply Migrations green → `pnpm db:verify-fks` が **exit 1 → exit 0 へ遷移** (2026-07-05 実測。4 制約 CASCADE + 候補 SET NULL)。
+- 6.3: 本番ブラウザ E2E 完遂 (2026-07-05)。S1=4カテゴリ実件数+処理種別表示→削除成功、S2=紐づけなし文言+キャンセル無変更→削除、S3+S4=一括合算表示→2件削除。事後 SQL 検証: 残存店舗 0 / 孤児 0 / 候補 matched_store_id=null。GIF: issue152-store-cascade-delete-e2e.gif (Downloads)。
 - 6.1: `pnpm test` は `.env.local` を source した shell で走らせない (GOOGLE_PLACES_API_KEY 未設定を検証するテストが env 汚染で fail する)。build のみ sourcing が必要。
 - 3: React 19 の lint 規則 `react-hooks/set-state-in-effect` は effect 直下の同期 setState を error にする。非同期取得の状態リセットは `startTransition` コールバック内 (await 前) へ移す。
 - 2.1: drizzle の `sql` テンプレートへ **配列を直接埋め込むとスカラー展開されて `any(($1))` の不正 SQL になる**。ID 群の条件は `inArray()` で合成する (モック/typecheck では検出不能、本番への読み取り専用実行で発見)。
