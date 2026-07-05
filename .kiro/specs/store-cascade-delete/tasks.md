@@ -1,7 +1,7 @@
 # Implementation Plan
 
 - [ ] 1. 削除ポリシー是正の基盤を整える(Wave 1 / 先行 PR)
-- [ ] 1.1 店舗系 FK を CASCADE に再宣言する custom migration を作成する
+- [x] 1.1 店舗系 FK を CASCADE に再宣言する custom migration を作成する
   - drizzle-kit の custom 生成機構で新規 migration(0021)と journal エントリを生成する(journal の手書き編集は行わない。`when` は生成時刻となり現水位線を越える)
   - design.md の DDL 契約に従い、制約 1 本 = 1 文(同一 ALTER TABLE 内で DROP CONSTRAINT IF EXISTS と ADD CONSTRAINT ... ON DELETE cascade を束ねる)で、商談・調査・引き継ぎ×2(store_id / deal_id)の計 4 制約を記述する
   - 冪等: 既に CASCADE の DB に適用しても同一結果に収束すること。place_candidates には触れない

@@ -148,6 +148,13 @@
       "when": 1781386255948,
       "tag": "0020_add_place_candidates",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1783241146656,
+      "tag": "0021_reassert_store_cascade_fks",
+      "breakpoints": true
     }
   ]
 }
