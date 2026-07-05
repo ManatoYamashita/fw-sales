@@ -40,7 +40,7 @@
   - _Requirements: 4.2_
   - _Boundary: postgres-error_
 
-- [ ] 3. 共有の削除確認ダイアログを実装する
+- [x] 3. 共有の削除確認ダイアログを実装する
   - 単体(店舗名表示)と一括(選択件数表示)を対象種別で受け、削除ロジックは持たず承認コールバックで呼び出し元に委譲する
   - open のたびに影響カウント action を 1 回呼び、取得中 / 取得失敗 / 取得成功の 3 状態を描画する。失敗時は件数を偽装せず「関連データがある場合は同時に削除されます」の警告に degrade し、いずれの状態でも承認ボタンは有効のまま
   - 件数 > 0 のカテゴリのみ「ラベル・件数・処理種別(削除 / 紐付け解除)」を表示し、全カテゴリ 0 件なら「紐づけデータはありません」を表示する
@@ -104,5 +104,6 @@
 
 - 1.1: `pnpm db:generate --custom --name=<name>` は空 SQL + journal エントリに加えて **snapshot の純複製 (0021_snapshot.json) も生成する**(schema 同一・prevId 連鎖維持を確認済み)。0022 の通常 generate の系譜は保たれる。
 - 1.3: 是正前の本番に対する `pnpm db:verify-fks` は期待どおり **4 件 NG (全て NO ACTION) / exit 1** を返した(2026-07-05 実測)。0021 適用後の exit 0 転化は 6.2 で確認する。
+- 3: React 19 の lint 規則 `react-hooks/set-state-in-effect` は effect 直下の同期 setState を error にする。非同期取得の状態リセットは `startTransition` コールバック内 (await 前) へ移す。
 - 2.1: drizzle の `sql` テンプレートへ **配列を直接埋め込むとスカラー展開されて `any(($1))` の不正 SQL になる**。ID 群の条件は `inArray()` で合成する (モック/typecheck では検出不能、本番への読み取り専用実行で発見)。
 - 検証コマンド: `pnpm test` (vitest) が存在する(tech.md の「テスト未導入」は古い)。scripts/__tests__ に backfill テストのみ。
