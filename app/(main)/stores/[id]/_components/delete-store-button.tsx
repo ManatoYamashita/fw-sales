@@ -3,18 +3,16 @@
 import { useState, useTransition } from "react";
 import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Modal, ModalContent, ModalFooter } from "@/components/ui/modal";
 import { deleteStoreAction } from "@/lib/actions/store-actions";
 import { toast } from "@/components/ui/toast";
+import { StoreDeleteConfirmDialog } from "@/app/(main)/stores/_components/store-delete-confirm-dialog";
 
 export function DeleteStoreButton({
   storeId,
   storeName,
-  dealCount,
 }: {
   storeId: string;
   storeName: string;
-  dealCount: number;
 }) {
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -30,7 +28,7 @@ export function DeleteStoreButton({
   };
 
   return (
-    <Modal open={open} onOpenChange={setOpen}>
+    <>
       <Button
         variant="ghost"
         size="sm"
@@ -39,31 +37,15 @@ export function DeleteStoreButton({
       >
         <Trash2 className="h-4 w-4" /> 削除
       </Button>
-      <ModalContent title="店舗を削除しますか?" size="sm">
-        <p className="text-sm text-foreground leading-relaxed">
-          「<strong>{storeName}</strong>」を削除します。
-          {dealCount > 0 ? (
-            <>
-              <br />
-              関連する商談 <strong>{dealCount}</strong> 件も同時に削除されます。
-            </>
-          ) : null}
-          <br />
-          この操作は取り消せません。
-        </p>
-        <ModalFooter>
-          <Button
-            variant="ghost"
-            onClick={() => setOpen(false)}
-            disabled={pending}
-          >
-            キャンセル
-          </Button>
-          <Button variant="danger" onClick={remove} disabled={pending}>
-            {pending ? "削除中…" : "削除する"}
-          </Button>
-        </ModalFooter>
-      </ModalContent>
-    </Modal>
+      {/* 影響表示つき共有確認ダイアログ (store-cascade-delete / Issue #152)。
+          旧 dealCount prop は廃止し、ダイアログが open 時に 4 カテゴリの実件数を取得する。 */}
+      <StoreDeleteConfirmDialog
+        open={open}
+        onOpenChange={setOpen}
+        target={{ kind: "single", storeId, storeName }}
+        onConfirm={remove}
+        pending={pending}
+      />
+    </>
   );
 }

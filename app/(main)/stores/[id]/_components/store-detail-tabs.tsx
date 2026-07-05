@@ -22,16 +22,16 @@ interface StoreDetailTabsProps {
   store: Store;
   profiles: readonly Profile[];
   isApiKeyConfigured: boolean;
-  dealCount: number;
   // task 4.2 (PR3a): deepResearchSlot / promptTemplates / hasDeepResearchReport /
   // assignedSalesName を撤去。営業資産生成は SalesAssetsGenerator に集約済み。
+  // store-cascade-delete (#152): dealCount prop を撤去。削除ダイアログが
+  // open 時に影響件数 (商談/調査/引き継ぎ/場所候補) を直接取得する。
 }
 
 export function StoreDetailTabs({
   store,
   profiles,
   isApiKeyConfigured,
-  dealCount,
 }: StoreDetailTabsProps) {
   const editHref = `/stores/${store.id}/edit`;
 
@@ -76,11 +76,7 @@ export function StoreDetailTabs({
           >
             <Edit2 className="h-4 w-4" /> 編集
           </Link>
-          <DeleteStoreButton
-            storeId={store.id}
-            storeName={store.name}
-            dealCount={dealCount}
-          />
+          <DeleteStoreButton storeId={store.id} storeName={store.name} />
         </div>
 
         {/* narrow (md 未満): [...] にまとめる */}
@@ -93,11 +89,7 @@ export function StoreDetailTabs({
             >
               <Edit2 className="h-4 w-4" /> 編集
             </Link>
-            <DeleteStoreButton
-              storeId={store.id}
-              storeName={store.name}
-              dealCount={dealCount}
-            />
+            <DeleteStoreButton storeId={store.id} storeName={store.name} />
           </MoreActionsMenu>
         </div>
       </div>
