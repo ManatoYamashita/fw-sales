@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findMatchedStore, attachStoreMatches } from "../match-store";
+import { findMatchedStore, attachStoreMatches, computePlacesBounds } from "../match-store";
 import type { PlaceResult } from "../types";
 import type { Store } from "@/types/store";
 
@@ -182,5 +182,57 @@ describe("attachStoreMatches", () => {
     expect(results[0]?.matchedStore?.id).toBe("store_a");
     expect(results[1]?.matchedStore?.id).toBe("store_b");
     expect(results[2]?.matchedStore).toBeNull();
+  });
+});
+
+// ---- computePlacesBounds ---------------------------------------------------
+
+describe("computePlacesBounds", () => {
+  it("returns null for an empty array", () => {
+    expect(computePlacesBounds([])).toBeNull();
+  });
+
+  it("returns a padded bbox for a single point", () => {
+    const result = computePlacesBounds([{ lat: 35.0, lng: 139.0 }]);
+    expect(result).not.toBeNull();
+    expect(result!.minLat).toBeCloseTo(35.0 - 0.001, 6);
+    expect(result!.maxLat).toBeCloseTo(35.0 + 0.001, 6);
+    expect(result!.minLng).toBeCloseTo(139.0 - 0.001, 6);
+    expect(result!.maxLng).toBeCloseTo(139.0 + 0.001, 6);
+  });
+
+  it("encloses all points in the padded bbox", () => {
+    const places = [
+      { lat: 35.0, lng: 139.0 },
+      { lat: 35.5, lng: 139.8 },
+      { lat: 34.7, lng: 138.5 },
+    ];
+    const result = computePlacesBounds(places)!;
+    expect(result.minLat).toBeCloseTo(34.7 - 0.001, 6);
+    expect(result.maxLat).toBeCloseTo(35.5 + 0.001, 6);
+    expect(result.minLng).toBeCloseTo(138.5 - 0.001, 6);
+    expect(result.maxLng).toBeCloseTo(139.8 + 0.001, 6);
+  });
+
+  it("all place coordinates fall strictly inside the returned bbox", () => {
+    const places = [
+      { lat: 35.6762, lng: 139.6503 },
+      { lat: 35.6800, lng: 139.7000 },
+    ];
+    const result = computePlacesBounds(places)!;
+    for (const p of places) {
+      expect(p.lat).toBeGreaterThan(result.minLat);
+      expect(p.lat).toBeLessThan(result.maxLat);
+      expect(p.lng).toBeGreaterThan(result.minLng);
+      expect(p.lng).toBeLessThan(result.maxLng);
+    }
+  });
+
+  it("a point 50 m outside the outermost place is still within the bbox", () => {
+    // 50 m in degrees latitude ≈ 0.00045. margin is 0.001, so 50 m fits inside.
+    const outerPlace = { lat: 35.6762, lng: 139.6503 };
+    const result = computePlacesBounds([outerPlace])!;
+    const nearbyLat = outerPlace.lat - 0.00045; // ~50 m south
+    expect(nearbyLat).toBeGreaterThan(result.minLat);
   });
 });

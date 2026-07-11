@@ -22,6 +22,7 @@ const {
   mockGetPlaceById,
   mockGetPlaceDetails,
   mockStoreList,
+  mockFindAreaSearchCandidates,
   mockTransaction,
   mockRevalidateTag,
   mockUpsertPlaceCandidates,
@@ -32,6 +33,7 @@ const {
   mockGetPlaceById: vi.fn(),
   mockGetPlaceDetails: vi.fn(),
   mockStoreList: vi.fn(),
+  mockFindAreaSearchCandidates: vi.fn(),
   mockTransaction: vi.fn(),
   mockRevalidateTag: vi.fn(),
   mockUpsertPlaceCandidates: vi.fn(),
@@ -48,7 +50,10 @@ vi.mock("@/lib/places/google", () => ({
 
 vi.mock("@/lib/repositories", () => ({
   repos: {
-    store: { list: mockStoreList },
+    store: {
+      list: mockStoreList,
+      findAreaSearchCandidates: mockFindAreaSearchCandidates,
+    },
     placeCandidate: {
       upsertFromAreaSearch: mockUpsertPlaceCandidates,
       findByGooglePlaceIds: mockFindByGooglePlaceIds,
@@ -107,6 +112,7 @@ function makeSearchPage(overrides: Partial<PlaceSearchPage> = {}): PlaceSearchPa
 beforeEach(() => {
   vi.resetAllMocks();
   mockStoreList.mockResolvedValue([]);
+  mockFindAreaSearchCandidates.mockResolvedValue([]);
   mockUpsertPlaceCandidates.mockResolvedValue({
     insertedCount: 0,
     updatedCount: 0,
@@ -361,7 +367,7 @@ describe("searchPlacesWithMatchesAction", () => {
     consoleSpy.mockRestore();
   });
 
-  it("repos.store.list の結果から DB登録済み判定 (matchedStore) が反映される", async () => {
+  it("findAreaSearchCandidates の結果から DB登録済み判定 (matchedStore) が反映される", async () => {
     mockResolveSearchCenter.mockResolvedValue(CENTER);
     mockSearchPlacesPage.mockResolvedValue(
       makeSearchPage({
@@ -371,7 +377,7 @@ describe("searchPlacesWithMatchesAction", () => {
         ],
       }),
     );
-    mockStoreList.mockResolvedValue([
+    mockFindAreaSearchCandidates.mockResolvedValue([
       makeStore({ id: "store-1", name: "登録済み店舗", google_place_id: "ChIJregistered" }),
     ]);
 

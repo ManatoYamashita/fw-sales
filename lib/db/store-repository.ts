@@ -21,7 +21,7 @@
  */
 
 import "server-only";
-import { eq, desc, and, or, ilike, inArray, sql, type SQL } from "drizzle-orm";
+import { eq, desc, and, or, ilike, inArray, isNull, gte, lte, sql, type SQL } from "drizzle-orm";
 import { db, type DbClient, type Tx } from "./client";
 import { deals, handoffs, placeCandidates, research, stores } from "./schema";
 import {
@@ -36,6 +36,7 @@ import {
 import type { AiAnalysisResult } from "@/types/ai-analysis";
 import type { BasicInfo, FillSource } from "@/types/basic-info";
 import type { StoreRepository } from "@/lib/repositories/store-repository";
+import type { PlacesBounds } from "@/lib/places/match-store";
 import { validateAiAnalysis } from "@/lib/ai/validate";
 import { mergeBasicInfo as mergeBasicInfoPure } from "@/lib/domain/basic-info-merge";
 import { generateId } from "@/lib/utils/id";
@@ -319,6 +320,42 @@ export function makeStoreRepo(executor: DbClient | Tx): StoreRepository {
       };
       await executor.update(stores).set(toDbRow(next)).where(eq(stores.id, id));
       return next;
+    },
+
+    async findAreaSearchCandidates({ googlePlaceIds, bounds }: {
+      googlePlaceIds: string[];
+      bounds?: PlacesBounds;
+    }) {
+      // No conditions at all — return early without touching the DB.
+      if (googlePlaceIds.length === 0 && !bounds) return [];
+
+      const conditions: SQL[] = [];
+
+      if (googlePlaceIds.length > 0) {
+        conditions.push(inArray(stores.google_place_id, googlePlaceIds));
+      }
+
+      if (bounds) {
+        // Hand-registered stores (google_place_id IS NULL) within the bbox.
+        // Stores with null lat/lng won't match gte/lte and are silently excluded
+        // (correct: we can't do proximity matching without coordinates).
+        const boundsCondition = and(
+          isNull(stores.google_place_id),
+          gte(stores.lat, bounds.minLat),
+          lte(stores.lat, bounds.maxLat),
+          gte(stores.lng, bounds.minLng),
+          lte(stores.lng, bounds.maxLng),
+        );
+        if (boundsCondition) conditions.push(boundsCondition);
+      }
+
+      const where = conditions.length === 1 ? conditions[0]! : or(...conditions)!;
+      const rows = await executor
+        .select()
+        .from(stores)
+        .where(where)
+        .orderBy(desc(stores.created_at));
+      return rows.map(fromDbRow);
     },
   };
 }
