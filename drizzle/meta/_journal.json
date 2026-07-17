@@ -162,6 +162,13 @@
       "when": 1783243909976,
       "tag": "0022_add_child_fk_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1784110612296,
+      "tag": "0023_add_store_sales_progress",
+      "breakpoints": true
     }
   ]
 }

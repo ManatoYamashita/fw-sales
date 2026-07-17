@@ -4,22 +4,12 @@ import Link from "next/link";
 import { Handshake } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { DataTable, type ColumnDef } from "@/components/ui/data-table";
-import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
+import { DealStatusBadge } from "@/components/feature/deal-status-badge";
 import { formatDate } from "@/lib/utils/date";
 import { formatYen } from "@/lib/utils/format";
-import type { Deal, DealStatus } from "@/types/deal";
+import type { Deal } from "@/types/deal";
 import { DealRowActions } from "./deal-row-actions";
-
-const statusTone: Record<
-  DealStatus,
-  "default" | "secondary" | "success" | "destructive"
-> = {
-  継続追客: "default",
-  見積提出: "secondary",
-  受注: "success",
-  失注: "destructive",
-};
 
 function buildDealColumns(
   profileNameById: Map<string, string>,
@@ -68,7 +58,7 @@ function buildDealColumns(
     {
       key: "status",
       header: "ステータス",
-      cell: (d) => <Badge tone={statusTone[d.status]}>{d.status}</Badge>,
+      cell: (d) => <DealStatusBadge status={d.status} />,
     },
     { key: "sales", header: "担当", cell: resolveAssignedSales },
     {

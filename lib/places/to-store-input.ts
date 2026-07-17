@@ -97,6 +97,10 @@ export function placeResultToStoreInput(place: PlaceResult): StoreInput {
     lat: place.lat,
     lng: place.lng,
     google_place_id: place.placeId,
+    // 営業進捗フィールドはエリア検索登録時には未設定で初期化する。
+    appointment_acquired_date: null,
+    next_action_date: null,
+    next_action_note: null,
     // basic_info はエリア検索登録時には空で初期化する。Places 由来の項目への充填は
     // task 2.2 (placeResultToBasicInfo) + task 3.1 (mergeBasicInfo 経由) が担う。
     basic_info: {},

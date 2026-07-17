@@ -2,24 +2,15 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { DealStatusBadge } from "@/components/feature/deal-status-badge";
 import { DealStatusForm } from "./_components/deal-status-form";
 import { getDealCached } from "@/lib/queries/deals";
 import { getStoreCached } from "@/lib/queries/stores";
 import { getProfileById } from "@/lib/queries/profiles";
 import { formatDate } from "@/lib/utils/date";
 import { formatYen } from "@/lib/utils/format";
-import type { DealStatus } from "@/types/deal";
-import { ArrowLeftRight } from "lucide-react";
 
 type Params = Promise<{ id: string }>;
-
-const statusTone: Record<DealStatus, "neutral" | "amber" | "green" | "red"> = {
-  継続追客: "neutral",
-  見積提出: "amber",
-  受注: "green",
-  失注: "red",
-};
 
 export async function generateMetadata({
   params,
@@ -66,27 +57,18 @@ export default async function DealDetailPage({
             {assignedSalesName}
           </p>
         </div>
-        <Badge tone={statusTone[deal.status]}>{deal.status}</Badge>
+        <DealStatusBadge status={deal.status} />
       </div>
 
       {deal.status === "受注" ? (
         <Card>
-          <Card.Body className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-semibold text-green-700">
-                受注金額 {formatYen(deal.order_amount)}
-              </p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                運用への引き継ぎを作成しましょう。
-              </p>
-            </div>
-            <Link
-              href={`/handoffs/new?deal=${deal.id}`}
-              className="inline-flex items-center gap-1 h-9 px-3 rounded-md text-sm bg-primary text-primary-foreground"
-            >
-              <ArrowLeftRight className="h-4 w-4" />
-              引き継ぎを作成
-            </Link>
+          <Card.Body>
+            <p className="text-sm font-semibold text-foreground">
+              受注金額 {formatYen(deal.order_amount)}
+            </p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              引き継ぎ機能は準備中です。
+            </p>
           </Card.Body>
         </Card>
       ) : null}

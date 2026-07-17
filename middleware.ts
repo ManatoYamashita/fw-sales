@@ -26,7 +26,7 @@ const DISABLED_ROUTE_PREFIXES: readonly string[] = [
   "/dashboard",
   "/pipeline",
   "/actions",
-  "/deals",
+  // "/deals" は customer-sales-progress-management で解除 (nav.ts と同時に戻した)。
   "/handoffs",
   "/kpi",
 ];

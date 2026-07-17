@@ -31,7 +31,9 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { href: "/research", label: "調査", icon: Search, badgeKey: "research" },
   { href: "/pipeline", label: "パイプライン", icon: GitBranch, badgeKey: "pipeline", disabled: true },
   { href: "/actions", label: "営業アクション", icon: Send, disabled: true },
-  { href: "/deals", label: "商談管理", icon: Handshake, badgeKey: "deals", disabled: true },
+  // customer-sales-progress-management: 営業進捗一覧・店舗詳細から商談詳細 /
+  // 商談作成 (/deals/new?store=) へ遷移するため解除。middleware 側と同時に戻した。
+  { href: "/deals", label: "商談管理", icon: Handshake, badgeKey: "deals" },
   {
     href: "/handoffs",
     label: "引き継ぎ",

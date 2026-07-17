@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Plus } from "lucide-react";
 import { StoresFilterBar } from "./_components/stores-filter-bar";
 import { StoresTable } from "./_components/stores-table";
+import { StoresViewSwitch } from "./_components/stores-view-switch";
 import { Spinner } from "@/components/ui/spinner";
 import { STAGE_IDS, type StageId } from "@/types/stage";
 import {
@@ -65,6 +66,7 @@ export default async function StoresPage({ searchParams }: PageProps) {
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <h2 className="text-xl md:text-2xl font-bold text-foreground">店舗一覧</h2>
         <div className="flex items-center gap-2">
+          <StoresViewSwitch active="list" />
           <Link
             href="/stores/new"
             className="inline-flex items-center gap-1.5 h-10 px-4 rounded-lg border border-transparent bg-primary text-primary-foreground text-sm font-medium transition-colors hover:bg-background hover:text-foreground hover:border-foreground"

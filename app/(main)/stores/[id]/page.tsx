@@ -4,6 +4,7 @@ import type { Metadata } from "next";
 import { StoreTitleSection } from "./_components/store-title-section";
 import { StoreDetailTabs } from "./_components/store-detail-tabs";
 import { getStoreCached } from "@/lib/queries/stores";
+import { listDealsByStoreCached } from "@/lib/queries/deals";
 import { getAllProfiles } from "@/lib/queries/profiles";
 import { isApiKeyConfigured } from "@/lib/env";
 import { getStoreResearchPhase } from "@/lib/domain/store-research-phase";
@@ -28,9 +29,12 @@ export default async function StoreDetailPage({
   params: Params;
 }) {
   const { id } = await params;
-  const [store, profiles] = await Promise.all([
+  // deals は営業進捗タブ用の店舗単位キャッシュ (dealsByStore タグ)。
+  // #152 で撤去された dealCount は一覧全店舗の事前計算であり、これとは別物。
+  const [store, profiles, deals] = await Promise.all([
     getStoreCached(id),
     getAllProfiles({ excludePlaceholders: false }),
+    listDealsByStoreCached(id),
   ]);
   if (!store) notFound();
   // task 4.2 (PR3a): DeepResearchSection / getDeepResearchReport / assignedSalesName 解決 /
@@ -57,6 +61,7 @@ export default async function StoreDetailPage({
       <StoreDetailTabs
         store={store}
         profiles={profiles}
+        deals={deals}
         isApiKeyConfigured={apiKeyConfigured}
       />
     </div>
