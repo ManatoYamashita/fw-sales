@@ -10,6 +10,50 @@
  */
 import type { Deal, DealStatus } from "@/types/deal";
 import type { SortDirection, Store } from "@/types/store";
+import type { StageId } from "@/types/stage";
+import type { Channel } from "@/types/store";
+
+export type CurrentSalesState =
+  | "won"
+  | "lost"
+  | "estimated"
+  | "following"
+  | "appointment"
+  | "called"
+  | "ready"
+  | "researched"
+  | "unresearched";
+
+export const CURRENT_SALES_STATE_LABELS: Record<CurrentSalesState, string> = {
+  won: "受注（契約）",
+  lost: "失注（ロスト）",
+  estimated: "見積提出",
+  following: "継続追客",
+  appointment: "アポ取得済み",
+  called: "架電済み・アポ未取得",
+  ready: "営業準備済み",
+  researched: "調査済み・未営業",
+  unresearched: "未調査・未営業",
+};
+
+export const CURRENT_SALES_STATES = Object.keys(
+  CURRENT_SALES_STATE_LABELS,
+) as CurrentSalesState[];
+
+export function deriveCurrentSalesState(
+  store: Pick<Store, "appointment_acquired_date" | "stage">,
+  latestDeal: Pick<Deal, "status"> | null,
+): CurrentSalesState {
+  if (latestDeal?.status === "受注") return "won";
+  if (latestDeal?.status === "失注") return "lost";
+  if (latestDeal?.status === "見積提出") return "estimated";
+  if (latestDeal?.status === "継続追客") return "following";
+  if (store.appointment_acquired_date) return "appointment";
+  if (store.stage === "架電済み") return "called";
+  if (store.stage === "DeepResearch済み") return "ready";
+  if (store.stage === "調査済み") return "researched";
+  return "unresearched";
+}
 
 /* ------------------------------------------------------------------ */
 /*  次回アクションの緊急度                                              */
@@ -94,6 +138,7 @@ export interface SalesProgressRow {
   urgency: NextActionUrgency;
   /** 最終商談日 (`YYYY-MM-DD`)。商談がない場合は null。 */
   latestMeetingDate: string | null;
+  currentSalesState: CurrentSalesState;
 }
 
 /**
@@ -124,6 +169,7 @@ export function buildSalesProgressRows(
       latestDeal,
       urgency: getNextActionUrgency(store.next_action_date, todayStr),
       latestMeetingDate: latestDeal?.date ?? null,
+      currentSalesState: deriveCurrentSalesState(store, latestDeal),
     };
   });
 }
@@ -143,6 +189,9 @@ export interface SalesProgressFilter {
   sales?: string;
   /** 次回アクションの緊急度。 */
   next?: NextActionUrgency;
+  state?: CurrentSalesState;
+  stage?: StageId;
+  channel?: Channel;
 }
 
 export function applyProgressFilter(
@@ -161,6 +210,9 @@ export function applyProgressFilter(
     }
     if (filter.sales && s.assigned_sales_user_id !== filter.sales) return false;
     if (filter.next && row.urgency !== filter.next) return false;
+    if (filter.state && row.currentSalesState !== filter.state) return false;
+    if (filter.stage && s.stage !== filter.stage) return false;
+    if (filter.channel && s.channel !== filter.channel) return false;
     if (q) {
       // applyStoreFilter と同じ対象 + 次回アクション内容も検索できるようにする
       const haystack = [
@@ -184,7 +236,7 @@ export function applyProgressFilter(
 /*  ソート                                                              */
 /* ------------------------------------------------------------------ */
 
-export type ProgressSortKey = "next" | "name" | "appt" | "meeting" | "updated";
+export type ProgressSortKey = "next" | "name" | "appt" | "meeting" | "updated" | "location" | "genre" | "review" | "stage" | "channel" | "sales";
 
 export interface ProgressSort {
   key: ProgressSortKey;
@@ -197,6 +249,12 @@ export const PROGRESS_SORT_KEYS: readonly ProgressSortKey[] = [
   "appt",
   "meeting",
   "updated",
+  "location",
+  "genre",
+  "review",
+  "stage",
+  "channel",
+  "sales",
 ];
 
 export const DEFAULT_PROGRESS_SORT: ProgressSort = { key: "next", dir: "asc" };
@@ -252,6 +310,26 @@ export function applyProgressSort(
         case "name":
           diff = NAME_COLLATOR.compare(a.store.name, b.store.name);
           break;
+        case "location":
+          diff = NAME_COLLATOR.compare(`${a.store.prefecture}${a.store.city}`, `${b.store.prefecture}${b.store.city}`);
+          break;
+        case "genre":
+          diff = NAME_COLLATOR.compare(a.store.genre, b.store.genre);
+          break;
+        case "review":
+          diff = a.store.review_avg - b.store.review_avg || a.store.review_count - b.store.review_count;
+          break;
+        case "stage":
+          diff = a.store.stage.localeCompare(b.store.stage);
+          break;
+        case "channel":
+          diff = a.store.channel.localeCompare(b.store.channel);
+          break;
+        case "sales":
+          if (a.salesName === null && b.salesName !== null) return 1;
+          if (a.salesName !== null && b.salesName === null) return -1;
+          diff = NAME_COLLATOR.compare(a.salesName ?? "", b.salesName ?? "");
+          break;
         case "updated":
         default:
           diff = a.store.updated_at.localeCompare(b.store.updated_at);
@@ -267,4 +345,18 @@ export function applyProgressSort(
     return a.store.id.localeCompare(b.store.id);
   });
   return sorted;
+}
+
+const LEGACY_PROGRESS_QUERY_KEYS = ["q", "appt", "deal", "sales", "next", "sort", "dir"] as const;
+
+export function buildLegacyProgressRedirect(
+  source: Readonly<Record<string, string | string[] | undefined>>,
+): string {
+  const target = new URLSearchParams();
+  for (const key of LEGACY_PROGRESS_QUERY_KEYS) {
+    const value = source[key];
+    if (typeof value === "string" && value) target.set(key, value);
+  }
+  const query = target.toString();
+  return query ? `/stores?${query}` : "/stores";
 }

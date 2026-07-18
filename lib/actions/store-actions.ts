@@ -276,6 +276,7 @@ export async function updateStorePatchAction(
 
 /** 次回アクション内容の最大文字数 (`MAX_INSTRUCTIONS_LENGTH` と同水準)。 */
 const NEXT_ACTION_NOTE_MAX_LENGTH = 500;
+const SALES_MEMO_MAX_LENGTH = 5000;
 
 /**
  * 営業進捗 (アポ取得日 / 次回アクション予定日 / 次回アクション内容) の更新用
@@ -297,6 +298,7 @@ export async function updateSalesProgressAction(
   const hasAppointmentDate = formData.has("appointment_acquired_date");
   const hasNextActionDate = formData.has("next_action_date");
   const hasNextActionNote = formData.has("next_action_note");
+  const hasMemo = formData.has("memo");
   const appointment_acquired_date = hasAppointmentDate
     ? readNullableString(formData, "appointment_acquired_date")
     : undefined;
@@ -306,6 +308,7 @@ export async function updateSalesProgressAction(
   const next_action_note = hasNextActionNote
     ? readNullableString(formData, "next_action_note")
     : undefined;
+  const memo = hasMemo ? readNullableString(formData, "memo") : undefined;
 
   if (
     hasAppointmentDate &&
@@ -333,10 +336,14 @@ export async function updateSalesProgressAction(
       `次回アクション内容は${NEXT_ACTION_NOTE_MAX_LENGTH}文字以内で入力してください`,
     );
   }
+  if (hasMemo && memo !== null && memo !== undefined && memo.length > SALES_MEMO_MAX_LENGTH) {
+    return failure(`営業メモは${SALES_MEMO_MAX_LENGTH}文字以内で入力してください`);
+  }
 
   if (hasAppointmentDate) patch.appointment_acquired_date = appointment_acquired_date;
   if (hasNextActionDate) patch.next_action_date = next_action_date;
   if (hasNextActionNote) patch.next_action_note = next_action_note;
+  if (hasMemo) patch.memo = memo ?? "";
 
   let updated;
   try {

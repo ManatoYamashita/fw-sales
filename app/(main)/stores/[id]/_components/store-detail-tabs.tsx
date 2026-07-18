@@ -11,7 +11,6 @@ import { BasicInfoCard } from "./basic-info-card";
 import { BasicInfoFieldsCard } from "./basic-info-fields-card";
 import { MapEmbedCard } from "./map-embed-card";
 import { WebAssetCard } from "./web-asset-card";
-import { MemoCard } from "./memo-card";
 import { SalesProgressCard } from "./sales-progress-card";
 import { AiAnalysisDetailSection } from "./ai-analysis-detail-section";
 import { StageInlineSelect } from "./stage-inline-select";
@@ -72,7 +71,6 @@ export function StoreDetailTabs({
         <TabsList>
           <TabsTrigger value="basic">基本情報</TabsTrigger>
           <TabsTrigger value="progress">営業進捗</TabsTrigger>
-          <TabsTrigger value="supplement">補足情報</TabsTrigger>
           <TabsTrigger value="ai">AI 分析</TabsTrigger>
         </TabsList>
 
@@ -114,10 +112,6 @@ export function StoreDetailTabs({
 
       <TabsPanel value="progress">
         <SalesProgressCard store={store} deals={deals} />
-      </TabsPanel>
-
-      <TabsPanel value="supplement">
-        <MemoCard store={store} />
       </TabsPanel>
 
       <TabsPanel value="ai" className="space-y-4">

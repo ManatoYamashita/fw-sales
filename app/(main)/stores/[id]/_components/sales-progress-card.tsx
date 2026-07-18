@@ -12,15 +12,18 @@ import { Textarea } from "@/components/ui/textarea";
 import { FormField } from "@/components/ui/form-field";
 import { toast } from "@/components/ui/toast";
 import { DealStatusBadge } from "@/components/feature/deal-status-badge";
+import { SalesStateBadge } from "@/components/feature/sales-state-badge";
 import { updateSalesProgressAction } from "@/lib/actions/store-actions";
 import { formatDate, todayInTimeZone } from "@/lib/utils/date";
 import {
   compareDealsNewestFirst,
+  deriveCurrentSalesState,
   getNextActionUrgency,
   NEXT_ACTION_URGENCY_LABELS,
   pickLatestDeal,
   type NextActionUrgency,
 } from "@/lib/domain/sales-progress";
+import { formatYen } from "@/lib/utils/format";
 import type { Deal } from "@/types/deal";
 import type { Store } from "@/types/store";
 
@@ -61,11 +64,14 @@ export function SalesProgressCard({
   const [nextActionNote, setNextActionNote] = useState(
     store.next_action_note ?? "",
   );
+  const [memo, setMemo] = useState(store.memo);
 
   const latestDeal = pickLatestDeal(deals);
   const recentDeals = [...deals]
     .sort(compareDealsNewestFirst)
+    .filter((deal) => deal.id !== latestDeal?.id)
     .slice(0, RECENT_DEALS_LIMIT);
+  const currentSalesState = deriveCurrentSalesState(store, latestDeal);
   const urgency = getNextActionUrgency(
     store.next_action_date,
     todayInTimeZone("Asia/Tokyo"),
@@ -75,6 +81,7 @@ export function SalesProgressCard({
     setAppointmentDate(store.appointment_acquired_date ?? "");
     setNextActionDate(store.next_action_date ?? "");
     setNextActionNote(store.next_action_note ?? "");
+    setMemo(store.memo);
     setEditing(false);
   };
 
@@ -85,6 +92,7 @@ export function SalesProgressCard({
       formData.set("appointment_acquired_date", appointmentDate);
       formData.set("next_action_date", nextActionDate);
       formData.set("next_action_note", nextActionNote);
+      formData.set("memo", memo);
       const result = await updateSalesProgressAction(store.id, formData);
       if (result.ok) {
         toast.success(result.message ?? "更新しました");
@@ -148,6 +156,9 @@ export function SalesProgressCard({
                 onChange={(e) => setAppointmentDate(e.target.value)}
               />
             </FormField>
+            <FormField label="営業メモ" htmlFor="sales_memo" hint={`${memo.length}/5000 文字。顧客について継続的に覚えておきたい情報`} className="sm:col-span-2">
+              <Textarea id="sales_memo" rows={6} maxLength={5000} value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="例: オーナーへの連絡は平日15時以降。前回の電話で予算時期を秋頃と伺った。" />
+            </FormField>
             <FormField label="次回アクション予定日" htmlFor="next_action_date">
               <Input
                 id="next_action_date"
@@ -174,6 +185,7 @@ export function SalesProgressCard({
           </div>
         ) : (
           <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4 text-sm">
+            <div className="space-y-1"><dt className="text-xs font-semibold text-muted-foreground">現在の営業状態</dt><dd><SalesStateBadge state={currentSalesState} /></dd></div>
             <div className="space-y-1">
               <dt className="text-xs font-semibold text-muted-foreground">
                 アポ取得
@@ -217,6 +229,7 @@ export function SalesProgressCard({
                 ) : null}
               </dd>
             </div>
+            <div className="space-y-1 sm:col-span-2"><dt className="text-xs font-semibold text-muted-foreground">営業メモ</dt><dd className="whitespace-pre-wrap break-words leading-6">{store.memo || <span className="text-muted-foreground">未設定</span>}</dd></div>
           </dl>
         )}
 
@@ -244,7 +257,7 @@ export function SalesProgressCard({
                   href={`/deals/${latestDeal.id}`}
                   className="text-sm font-medium text-primary hover:underline"
                 >
-                  商談を開く
+                  商談を開く・編集する
                 </Link>
               ) : null}
               <Link
@@ -256,23 +269,28 @@ export function SalesProgressCard({
             </div>
           </div>
 
+          {latestDeal ? <div className="rounded-lg border border-border bg-muted/20 p-4 space-y-3 text-sm">
+            <div className="flex flex-wrap gap-x-6 gap-y-2"><span>商談形式: {latestDeal.meeting_type}</span>{latestDeal.estimate_amount ? <span>見積金額: {formatYen(latestDeal.estimate_amount)}</span> : null}{(latestDeal.status === "受注" || latestDeal.order_amount !== null) ? <span>受注金額: {formatYen(latestDeal.order_amount)}</span> : null}</div>
+            {latestDeal.proposal ? <section><h4 className="text-xs font-semibold text-muted-foreground">提案内容</h4><p className="whitespace-pre-wrap break-words leading-6">{latestDeal.proposal}</p></section> : null}
+            {latestDeal.discussion ? <section><h4 className="text-xs font-semibold text-muted-foreground">ヒアリング・打ち合わせ内容</h4><p className="whitespace-pre-wrap break-words leading-6">{latestDeal.discussion}</p></section> : null}
+            {(latestDeal.status === "失注" || latestDeal.lost_reason) && latestDeal.lost_reason ? <section><h4 className="text-xs font-semibold text-muted-foreground">失注理由</h4><p className="whitespace-pre-wrap break-words leading-6">{latestDeal.lost_reason}</p></section> : null}
+          </div> : null}
+
           {recentDeals.length > 0 ? (
-            <ul className="space-y-1.5" aria-label="商談履歴">
+            <div className="space-y-2" aria-label="過去の商談履歴">
               {recentDeals.map((deal) => (
-                <li key={deal.id}>
-                  <Link
-                    href={`/deals/${deal.id}`}
-                    className="flex items-center gap-3 rounded-md px-2 py-1.5 -mx-2 text-sm hover:bg-muted/50 transition-colors"
-                  >
+                <details key={deal.id} className="rounded-md border border-border px-3 py-2">
+                  <summary className="cursor-pointer list-none flex items-center gap-3 text-sm">
                     <span className="text-muted-foreground tabular-nums whitespace-nowrap">
                       {formatDate(deal.date)}
                     </span>
                     <span className="text-foreground/80">{deal.meeting_type}</span>
                     <DealStatusBadge status={deal.status} />
-                  </Link>
-                </li>
+                  </summary>
+                  <div className="pt-3 pl-2 space-y-2 text-sm">{deal.proposal ? <p className="whitespace-pre-wrap break-words"><strong>提案内容:</strong> {deal.proposal}</p> : null}{deal.discussion ? <p className="whitespace-pre-wrap break-words"><strong>打ち合わせ内容:</strong> {deal.discussion}</p> : null}<p>見積金額: {formatYen(deal.estimate_amount)}</p>{deal.order_amount !== null ? <p>受注金額: {formatYen(deal.order_amount)}</p> : null}{deal.lost_reason ? <p className="whitespace-pre-wrap break-words"><strong>失注理由:</strong> {deal.lost_reason}</p> : null}<Link href={`/deals/${deal.id}`} className="font-medium text-primary hover:underline">商談詳細を開く</Link></div>
+                </details>
               ))}
-            </ul>
+            </div>
           ) : null}
         </div>
       </Card.Body>

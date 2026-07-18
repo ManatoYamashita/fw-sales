@@ -24,7 +24,11 @@ import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { cn } from "@/lib/utils/cn";
 import { DEAL_STATUSES } from "@/types/deal";
+import { STAGES } from "@/types/stage";
+import { CHANNELS } from "@/types/store";
 import {
+  CURRENT_SALES_STATES,
+  CURRENT_SALES_STATE_LABELS,
   NEXT_ACTION_URGENCIES,
   NEXT_ACTION_URGENCY_LABELS,
 } from "@/lib/domain/sales-progress";
@@ -90,7 +94,7 @@ function Popover({
 /*  Filter Bar 本体                                                     */
 /* ------------------------------------------------------------------ */
 
-const ALL_FILTER_KEYS = ["q", "appt", "deal", "next", "sales"] as const;
+const ALL_FILTER_KEYS = ["q", "state", "appt", "deal", "next", "sales", "stage", "channel"] as const;
 type FilterKey = (typeof ALL_FILTER_KEYS)[number];
 
 const APPT_OPTIONS = [
@@ -124,12 +128,15 @@ export function ProgressFilterBar({ profileEntries }: ProgressFilterBarProps) {
   const deal = params.get("deal") ?? "";
   const next = params.get("next") ?? "";
   const sales = params.get("sales") ?? "";
+  const state = params.get("state") ?? "";
+  const stage = params.get("stage") ?? "";
+  const channel = params.get("channel") ?? "";
 
   const profileMap = useMemo(() => new Map(profileEntries), [profileEntries]);
 
   const filterCount = useMemo(
-    () => [appt, deal, next, sales].filter(Boolean).length, // 検索語(q) は別カウント
-    [appt, deal, next, sales],
+    () => [state, appt, deal, next, sales, stage, channel].filter(Boolean).length,
+    [state, appt, deal, next, sales, stage, channel],
   );
 
   /* --- URL 反映 --- */
@@ -139,7 +146,7 @@ export function ProgressFilterBar({ profileEntries }: ProgressFilterBarProps) {
       mutate(nextParams);
       startTransition(() => {
         const qs = nextParams.toString();
-        router.replace(qs ? `/stores/progress?${qs}` : "/stores/progress");
+        router.replace(qs ? `/stores?${qs}` : "/stores");
       });
     },
     [params, router],
@@ -209,6 +216,7 @@ export function ProgressFilterBar({ profileEntries }: ProgressFilterBarProps) {
               <X className="h-3.5 w-3.5" />
             </button>
           ) : null}
+          {state ? <Chip onClear={() => setKey("state", "")} label="営業状態">{CURRENT_SALES_STATE_LABELS[state as keyof typeof CURRENT_SALES_STATE_LABELS] ?? state}</Chip> : null}
         </div>
 
         {/* 縦区切り */}
@@ -234,10 +242,13 @@ export function ProgressFilterBar({ profileEntries }: ProgressFilterBarProps) {
             className="w-[min(92vw,360px)]"
           >
             <FilterPanel
+              state={state}
               appt={appt}
               deal={deal}
               next={next}
               sales={sales}
+              stage={stage}
+              channel={channel}
               profileEntries={profileEntries}
               onChange={setKey}
               onClear={clearFilters}
@@ -279,6 +290,8 @@ export function ProgressFilterBar({ profileEntries }: ProgressFilterBarProps) {
               {profileMap.get(sales) ?? sales}
             </Chip>
           ) : null}
+          {stage ? <Chip onClear={() => setKey("stage", "")} label="調査段階">{stage}</Chip> : null}
+          {channel ? <Chip onClear={() => setKey("channel", "")} label="チャネル">{channel}</Chip> : null}
 
           <div className="flex-1" />
 
@@ -385,10 +398,13 @@ function Chip({ label, onClear, children }: ChipProps) {
 /* ------------------------------------------------------------------ */
 
 interface FilterPanelProps {
+  state: string;
   appt: string;
   deal: string;
   next: string;
   sales: string;
+  stage: string;
+  channel: string;
   profileEntries: ReadonlyArray<readonly [string, string]>;
   onChange: (key: FilterKey, value: string) => void;
   onClear: () => void;
@@ -396,10 +412,13 @@ interface FilterPanelProps {
 }
 
 function FilterPanel({
+  state,
   appt,
   deal,
   next,
   sales,
+  stage,
+  channel,
   profileEntries,
   onChange,
   onClear,
@@ -421,6 +440,12 @@ function FilterPanel({
       </div>
 
       <div className="px-4 py-3 space-y-4 max-h-[60vh] overflow-y-auto">
+        <PanelGroup label="現在の営業状態">
+          <Select value={state} onChange={(e) => onChange("state", e.target.value)} aria-label="現在の営業状態で絞り込み">
+            <option value="">すべて</option>
+            {CURRENT_SALES_STATES.map((value) => <option key={value} value={value}>{CURRENT_SALES_STATE_LABELS[value]}</option>)}
+          </Select>
+        </PanelGroup>
         <PanelGroup label="アポ取得">
           <ChipGroup
             value={appt}
@@ -459,6 +484,8 @@ function FilterPanel({
             ))}
           </Select>
         </PanelGroup>
+        <PanelGroup label="調査段階"><Select value={stage} onChange={(e) => onChange("stage", e.target.value)} aria-label="調査段階で絞り込み"><option value="">すべて</option>{STAGES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</Select></PanelGroup>
+        <PanelGroup label="チャネル"><Select value={channel} onChange={(e) => onChange("channel", e.target.value)} aria-label="チャネルで絞り込み"><option value="">すべて</option>{CHANNELS.map((value) => <option key={value} value={value}>{value}</option>)}</Select></PanelGroup>
       </div>
     </div>
   );

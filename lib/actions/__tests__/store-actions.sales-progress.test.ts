@@ -58,6 +58,7 @@ describe("updateSalesProgressAction", () => {
         appointment_acquired_date: "2026-07-10",
         next_action_date: "2026-07-20",
         next_action_note: "見積フォローの電話",
+        memo: "平日15時以降に連絡",
       }),
     );
 
@@ -71,6 +72,7 @@ describe("updateSalesProgressAction", () => {
       appointment_acquired_date: "2026-07-10",
       next_action_date: "2026-07-20",
       next_action_note: "見積フォローの電話",
+      memo: "平日15時以降に連絡",
     });
     const revalidated = mockRevalidateTag.mock.calls.map((c) => c[0]);
     expect(revalidated).toContain("stores");
@@ -109,6 +111,22 @@ describe("updateSalesProgressAction", () => {
     expect(mockUpdate).toHaveBeenCalledWith("store_1", {
       next_action_note: "電話する",
     });
+  });
+
+  it("営業メモは保存・空文字クリアでき、未送信時は触らない", async () => {
+    mockUpdate.mockResolvedValue({ id: "store_1" });
+    await updateSalesProgressAction("store_1", makeFormData({ memo: "継続メモ" }));
+    expect(mockUpdate).toHaveBeenLastCalledWith("store_1", { memo: "継続メモ" });
+    await updateSalesProgressAction("store_1", makeFormData({ memo: "" }));
+    expect(mockUpdate).toHaveBeenLastCalledWith("store_1", { memo: "" });
+  });
+
+  it("営業メモは5000文字を許可し、5001文字を拒否する", async () => {
+    mockUpdate.mockResolvedValueOnce({ id: "store_1" });
+    expect((await updateSalesProgressAction("store_1", makeFormData({ memo: "あ".repeat(5000) }))).ok).toBe(true);
+    const result = await updateSalesProgressAction("store_1", makeFormData({ memo: "あ".repeat(5001) }));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("5000文字以内");
   });
 
   it("空の店舗 ID は repository を呼ばず拒否する", async () => {

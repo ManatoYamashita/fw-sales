@@ -3,6 +3,8 @@ import {
   applyProgressFilter,
   applyProgressSort,
   buildSalesProgressRows,
+  buildLegacyProgressRedirect,
+  deriveCurrentSalesState,
   getNextActionUrgency,
   pickLatestDeal,
   type SalesProgressRow,
@@ -73,6 +75,42 @@ function makeDeal(overrides: Partial<Deal>): Deal {
 }
 
 const TODAY = "2026-07-15";
+
+describe("deriveCurrentSalesState", () => {
+  it.each([
+    ["受注", "won"],
+    ["失注", "lost"],
+    ["見積提出", "estimated"],
+    ["継続追客", "following"],
+  ] as const)("最新商談 %s を営業状態へ導出する", (status, expected) => {
+    expect(deriveCurrentSalesState(makeStore({}), makeDeal({ status }))).toBe(expected);
+  });
+
+  it.each([
+    [{ appointment_acquired_date: "2026-07-01" }, "appointment"],
+    [{ stage: "架電済み" }, "called"],
+    [{ stage: "DeepResearch済み" }, "ready"],
+    [{ stage: "調査済み" }, "researched"],
+    [{ stage: "未調査" }, "unresearched"],
+  ] as const)("DealなしのStoreから営業状態を導出する", (overrides, expected) => {
+    expect(deriveCurrentSalesState(makeStore(overrides), null)).toBe(expected);
+  });
+
+  it("期限状態は営業状態を上書きしない", () => {
+    const store = makeStore({ next_action_date: "2026-07-01" });
+    expect(getNextActionUrgency(store.next_action_date, TODAY)).toBe("overdue");
+    expect(deriveCurrentSalesState(store, makeDeal({ status: "継続追客" }))).toBe("following");
+  });
+});
+
+describe("buildLegacyProgressRedirect", () => {
+  it("旧営業進捗URLを店舗一覧へredirectし、互換parameterを保持する", () => {
+    expect(buildLegacyProgressRedirect({ q: "東京", appt: "none", deal: "受注", sales: "u1", next: "today", sort: "meeting", dir: "desc", ignored: "x" })).toBe("/stores?q=%E6%9D%B1%E4%BA%AC&appt=none&deal=%E5%8F%97%E6%B3%A8&sales=u1&next=today&sort=meeting&dir=desc");
+  });
+  it("parameterなしでもredirect loopを作らない", () => {
+    expect(buildLegacyProgressRedirect({})).toBe("/stores");
+  });
+});
 
 describe("getNextActionUrgency", () => {
   it("null は unset", () => {
@@ -293,6 +331,16 @@ describe("applyProgressFilter", () => {
     expect(
       idsOf(applyProgressFilter(rows, { appt: "acquired", sales: "uuid-1" })),
     ).toEqual(["a"]);
+  });
+
+  it("営業状態・調査段階・チャネルを統合して絞り込む", () => {
+    const rows = rowsOf(
+      { store: makeStore({ id: "a", stage: "DeepResearch済み", channel: "テレアポ推奨" }) },
+      { store: makeStore({ id: "b", stage: "調査済み", channel: "DM推奨" }) },
+    );
+    expect(idsOf(applyProgressFilter(rows, { state: "ready" }))).toEqual(["a"]);
+    expect(idsOf(applyProgressFilter(rows, { stage: "調査済み" }))).toEqual(["b"]);
+    expect(idsOf(applyProgressFilter(rows, { channel: "テレアポ推奨" }))).toEqual(["a"]);
   });
 });
 
