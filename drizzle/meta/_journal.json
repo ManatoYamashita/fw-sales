@@ -169,6 +169,13 @@
       "when": 1784110612296,
       "tag": "0023_add_store_sales_progress",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1784366261804,
+      "tag": "0024_add_deal_activity_followup_fields",
+      "breakpoints": true
     }
   ]
 }

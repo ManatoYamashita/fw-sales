@@ -4,6 +4,7 @@ import {
   applyProgressSort,
   buildSalesProgressRows,
   buildLegacyProgressRedirect,
+  deriveCurrentNextAction,
   deriveCurrentSalesState,
   getNextActionUrgency,
   pickLatestDeal,
@@ -68,6 +69,10 @@ function makeDeal(overrides: Partial<Deal>): Deal {
     lost_reason: "",
     status: "継続追客",
     assigned_sales_user_id: null,
+    activity_memo: null,
+    next_action_date: null,
+    next_action_type: null,
+    next_action_note: null,
     created_at: "2026-01-01",
     updated_at: "2026-01-01",
     ...overrides,
@@ -88,8 +93,8 @@ describe("deriveCurrentSalesState", () => {
 
   it.each([
     [{ appointment_acquired_date: "2026-07-01" }, "appointment"],
-    [{ stage: "架電済み" }, "called"],
-    [{ stage: "DeepResearch済み" }, "ready"],
+    [{ stage: "架電済み" }, "initial"],
+    [{ stage: "DeepResearch済み" }, "researched"],
     [{ stage: "調査済み" }, "researched"],
     [{ stage: "未調査" }, "unresearched"],
   ] as const)("DealなしのStoreから営業状態を導出する", (overrides, expected) => {
@@ -100,6 +105,18 @@ describe("deriveCurrentSalesState", () => {
     const store = makeStore({ next_action_date: "2026-07-01" });
     expect(getNextActionUrgency(store.next_action_date, TODAY)).toBe("overdue");
     expect(deriveCurrentSalesState(store, makeDeal({ status: "継続追客" }))).toBe("following");
+  });
+});
+
+describe("deriveCurrentNextAction", () => {
+  it("最新営業記録の次回アクションを優先する", () => {
+    const store = makeStore({ next_action_date: "2026-08-01", next_action_note: "旧値" });
+    const deal = makeDeal({ next_action_date: "2026-07-20", next_action_type: "電話", next_action_note: "見積確認" });
+    expect(deriveCurrentNextAction(store, deal)).toEqual({ date: "2026-07-20", type: "電話", note: "見積確認", source: "deal" });
+  });
+  it("最新記録に次回アクションがなければStore legacy値へfallbackする", () => {
+    const store = makeStore({ next_action_date: "2026-08-01", next_action_note: "旧値" });
+    expect(deriveCurrentNextAction(store, makeDeal({}))).toEqual({ date: "2026-08-01", type: null, note: "旧値", source: "legacy-store" });
   });
 });
 
@@ -338,7 +355,7 @@ describe("applyProgressFilter", () => {
       { store: makeStore({ id: "a", stage: "DeepResearch済み", channel: "テレアポ推奨" }) },
       { store: makeStore({ id: "b", stage: "調査済み", channel: "DM推奨" }) },
     );
-    expect(idsOf(applyProgressFilter(rows, { state: "ready" }))).toEqual(["a"]);
+    expect(idsOf(applyProgressFilter(rows, { state: "researched" }))).toEqual(["a", "b"]);
     expect(idsOf(applyProgressFilter(rows, { stage: "調査済み" }))).toEqual(["b"]);
     expect(idsOf(applyProgressFilter(rows, { channel: "テレアポ推奨" }))).toEqual(["a"]);
   });

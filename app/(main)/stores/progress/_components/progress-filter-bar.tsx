@@ -104,7 +104,7 @@ const APPT_OPTIONS = [
 
 const DEAL_OPTIONS = [
   ...DEAL_STATUSES.map((s) => ({ value: s, label: s })),
-  { value: "none", label: "商談なし" },
+  { value: "none", label: "営業記録なし" },
 ];
 
 const NEXT_OPTIONS = NEXT_ACTION_URGENCIES.map((u) => ({
@@ -276,7 +276,7 @@ export function ProgressFilterBar({ profileEntries }: ProgressFilterBarProps) {
             </Chip>
           ) : null}
           {deal ? (
-            <Chip onClear={() => setKey("deal", "")} label="商談">
+            <Chip onClear={() => setKey("deal", "")} label="営業記録">
               {labelOf(DEAL_OPTIONS, deal)}
             </Chip>
           ) : null}
@@ -454,7 +454,7 @@ function FilterPanel({
           />
         </PanelGroup>
 
-        <PanelGroup label="商談ステータス">
+        <PanelGroup label="最新の営業状態">
           <ChipGroup
             value={deal}
             onChange={(v) => onChange("deal", v)}

@@ -18,9 +18,8 @@ export type CurrentSalesState =
   | "lost"
   | "estimated"
   | "following"
+  | "initial"
   | "appointment"
-  | "called"
-  | "ready"
   | "researched"
   | "unresearched";
 
@@ -29,9 +28,8 @@ export const CURRENT_SALES_STATE_LABELS: Record<CurrentSalesState, string> = {
   lost: "失注（ロスト）",
   estimated: "見積提出",
   following: "継続追客",
+  initial: "初回接触",
   appointment: "アポ取得済み",
-  called: "架電済み・アポ未取得",
-  ready: "営業準備済み",
   researched: "調査済み・未営業",
   unresearched: "未調査・未営業",
 };
@@ -48,11 +46,29 @@ export function deriveCurrentSalesState(
   if (latestDeal?.status === "失注") return "lost";
   if (latestDeal?.status === "見積提出") return "estimated";
   if (latestDeal?.status === "継続追客") return "following";
+  if (latestDeal?.status === "初回接触") return "initial";
+  if (latestDeal?.status === "アポ取得") return "appointment";
   if (store.appointment_acquired_date) return "appointment";
-  if (store.stage === "架電済み") return "called";
-  if (store.stage === "DeepResearch済み") return "ready";
-  if (store.stage === "調査済み") return "researched";
+  if (store.stage === "架電済み") return "initial";
+  if (store.stage === "DeepResearch済み" || store.stage === "調査済み") return "researched";
   return "unresearched";
+}
+
+export interface CurrentNextAction {
+  date: string | null;
+  type: import("@/types/deal").NextActionType | null;
+  note: string | null;
+  source: "deal" | "legacy-store" | "unset";
+}
+
+export function deriveCurrentNextAction(store: Pick<Store, "next_action_date" | "next_action_note">, latestDeal: Pick<Deal, "next_action_date" | "next_action_type" | "next_action_note"> | null): CurrentNextAction {
+  if (latestDeal && (latestDeal.next_action_date || latestDeal.next_action_type || latestDeal.next_action_note)) {
+    return { date: latestDeal.next_action_date, type: latestDeal.next_action_type, note: latestDeal.next_action_note, source: "deal" };
+  }
+  if (store.next_action_date || store.next_action_note) {
+    return { date: store.next_action_date, type: null, note: store.next_action_note, source: "legacy-store" };
+  }
+  return { date: null, type: null, note: null, source: "unset" };
 }
 
 /* ------------------------------------------------------------------ */
@@ -139,6 +155,7 @@ export interface SalesProgressRow {
   /** 最終商談日 (`YYYY-MM-DD`)。商談がない場合は null。 */
   latestMeetingDate: string | null;
   currentSalesState: CurrentSalesState;
+  currentNextAction: CurrentNextAction;
 }
 
 /**
@@ -167,9 +184,10 @@ export function buildSalesProgressRows(
         : null,
       appointmentAcquired: store.appointment_acquired_date !== null,
       latestDeal,
-      urgency: getNextActionUrgency(store.next_action_date, todayStr),
+      urgency: getNextActionUrgency(deriveCurrentNextAction(store, latestDeal).date, todayStr),
       latestMeetingDate: latestDeal?.date ?? null,
       currentSalesState: deriveCurrentSalesState(store, latestDeal),
+      currentNextAction: deriveCurrentNextAction(store, latestDeal),
     };
   });
 }
@@ -280,7 +298,7 @@ export function applyProgressSort(
   const dateOf = (row: SalesProgressRow): string | null => {
     switch (sort.key) {
       case "next":
-        return row.store.next_action_date;
+        return row.currentNextAction.date;
       case "appt":
         return row.store.appointment_acquired_date;
       case "meeting":

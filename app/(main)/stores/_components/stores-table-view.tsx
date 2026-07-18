@@ -11,7 +11,6 @@ import { Spinner } from "@/components/ui/spinner";
 import { StageBadge } from "@/components/feature/stage-badge";
 import { ChannelBadge } from "@/components/feature/channel-badge";
 import { SalesStateBadge } from "@/components/feature/sales-state-badge";
-import { DealStatusBadge } from "@/components/feature/deal-status-badge";
 import { Badge } from "@/components/ui/badge";
 import { IndividualStoreBadge } from "@/components/feature/individual-store-badge";
 import { formatDate } from "@/lib/utils/date";
@@ -70,8 +69,8 @@ function buildColumns(): ColumnDef<SalesProgressRow>[] {
       sortDefaultDir: "asc",
       cell: (r) => r.store.genre || "—",
     },
-    { key: "salesState", header: "現在の営業状態", cell: (r) => <div className="space-y-1"><SalesStateBadge state={r.currentSalesState} />{r.latestDeal ? <DealStatusBadge status={r.latestDeal.status} /> : null}</div> },
-    { key: "next", header: "次回アクション", sortKey: "next", sortDefaultDir: "asc", cell: (r) => <div className="max-w-[240px] space-y-1">{r.urgency !== "unset" ? <Badge tone={URGENCY_TONE[r.urgency]}>{NEXT_ACTION_URGENCY_LABELS[r.urgency]}</Badge> : <Badge tone="outline">未設定</Badge>}<div className="text-xs">{r.store.next_action_date ? formatDate(r.store.next_action_date) : "—"}</div>{r.store.next_action_note ? <p className="truncate text-xs text-muted-foreground" title={r.store.next_action_note}>{r.store.next_action_note}</p> : null}</div> },
+    { key: "salesState", header: "現在の営業状態", cell: (r) => <SalesStateBadge state={r.currentSalesState} /> },
+    { key: "next", header: "次回アクション", sortKey: "next", sortDefaultDir: "asc", cell: (r) => <div className="max-w-[240px] space-y-1">{r.urgency !== "unset" ? <Badge tone={URGENCY_TONE[r.urgency]}>{NEXT_ACTION_URGENCY_LABELS[r.urgency]}</Badge> : <Badge tone="outline">未設定</Badge>}<div className="text-xs">{r.currentNextAction.date ? formatDate(r.currentNextAction.date) : "—"}{r.currentNextAction.type ? ` / ${r.currentNextAction.type}` : ""}</div>{r.currentNextAction.note ? <p className="truncate text-xs text-muted-foreground" title={r.currentNextAction.note}>{r.currentNextAction.note}</p> : null}</div> },
     {
       key: "stage",
       header: "状態",
@@ -98,7 +97,7 @@ function buildColumns(): ColumnDef<SalesProgressRow>[] {
     },
     {
       key: "updated",
-      header: "最終商談",
+      header: "最終営業日",
       sortKey: "meeting",
       sortDefaultDir: "desc",
       cell: (r) => (

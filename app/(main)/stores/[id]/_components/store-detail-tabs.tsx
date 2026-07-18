@@ -111,7 +111,7 @@ export function StoreDetailTabs({
       </TabsPanel>
 
       <TabsPanel value="progress">
-        <SalesProgressCard store={store} deals={deals} />
+        <SalesProgressCard store={store} deals={deals} profiles={profiles} />
       </TabsPanel>
 
       <TabsPanel value="ai" className="space-y-4">

@@ -175,6 +175,12 @@ export const deals = pgTable("deals", {
   assigned_sales_user_id: uuid("assigned_sales_user_id").references(
     () => profiles.id,
   ),
+  /** 日付単位の営業メモ。 */
+  activity_memo: text("activity_memo"),
+  /** 当該記録時点で設定した次回アクション。 */
+  next_action_date: text("next_action_date"),
+  next_action_type: text("next_action_type"),
+  next_action_note: text("next_action_note"),
   created_at: text("created_at").notNull(),
   updated_at: text("updated_at").notNull(),
 }, (table) => [

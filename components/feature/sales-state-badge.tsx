@@ -12,9 +12,8 @@ const TONES: Record<
   lost: "destructive",
   estimated: "warning",
   following: "info",
+  initial: "info",
   appointment: "success",
-  called: "warning",
-  ready: "info",
   researched: "outline",
   unresearched: "outline",
 };

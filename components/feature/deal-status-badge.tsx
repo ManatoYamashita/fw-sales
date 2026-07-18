@@ -12,6 +12,8 @@ const STATUS_TONE: Record<
   DealStatus,
   "info" | "warning" | "success" | "destructive"
 > = {
+  初回接触: "info",
+  アポ取得: "success",
   継続追客: "info",
   見積提出: "warning",
   受注: "success",
@@ -19,6 +21,8 @@ const STATUS_TONE: Record<
 };
 
 const STATUS_LABEL: Record<DealStatus, string> = {
+  初回接触: "初回接触",
+  アポ取得: "アポ取得",
   継続追客: "継続追客",
   見積提出: "見積提出",
   受注: "受注（契約）",
