@@ -392,6 +392,42 @@ describe("searchPlacesWithMatchesAction", () => {
     }
   });
 
+  it("空でない重複除去済み Place ID と複数地点の bbox を候補取得へ渡す", async () => {
+    mockResolveSearchCenter.mockResolvedValue(CENTER);
+    mockSearchPlacesPage.mockResolvedValue(
+      makeSearchPage({
+        places: [
+          makePlace({ placeId: "ChIJ_A", lat: 35.5, lng: 139.2 }),
+          makePlace({ placeId: "", lat: 35.7, lng: 139.8 }),
+          makePlace({ placeId: "ChIJ_A", lat: 35.6, lng: 139.4 }),
+          makePlace({ placeId: "ChIJ_B", lat: 35.4, lng: 139.6 }),
+        ],
+      }),
+    );
+
+    await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", 1000);
+
+    expect(mockFindAreaSearchCandidates).toHaveBeenCalledTimes(1);
+    const params = mockFindAreaSearchCandidates.mock.calls[0]?.[0];
+    expect(params?.googlePlaceIds).toEqual(["ChIJ_A", "ChIJ_B"]);
+    expect(params?.bounds?.minLat).toBeCloseTo(35.399, 6);
+    expect(params?.bounds?.maxLat).toBeCloseTo(35.701, 6);
+    expect(params?.bounds?.minLng).toBeCloseTo(139.199, 6);
+    expect(params?.bounds?.maxLng).toBeCloseTo(139.801, 6);
+  });
+
+  it("Places が空なら空の Place ID と undefined bounds を候補取得へ渡す", async () => {
+    mockResolveSearchCenter.mockResolvedValue(CENTER);
+    mockSearchPlacesPage.mockResolvedValue(makeSearchPage({ places: [] }));
+
+    await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", 1000);
+
+    expect(mockFindAreaSearchCandidates).toHaveBeenCalledWith({
+      googlePlaceIds: [],
+      bounds: undefined,
+    });
+  });
+
   it("nextPageToken が action result に引き継がれる", async () => {
     mockResolveSearchCenter.mockResolvedValue(CENTER);
     mockSearchPlacesPage.mockResolvedValue(makeSearchPage({ nextPageToken: "page-2" }));

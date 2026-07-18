@@ -21,7 +21,7 @@
  */
 
 import "server-only";
-import { eq, desc, and, or, ilike, inArray, isNull, gte, lte, sql, type SQL } from "drizzle-orm";
+import { eq, desc, and, or, ilike, inArray, gte, lte, sql, type SQL } from "drizzle-orm";
 import { db, type DbClient, type Tx } from "./client";
 import { deals, handoffs, placeCandidates, research, stores } from "./schema";
 import {
@@ -336,11 +336,11 @@ export function makeStoreRepo(executor: DbClient | Tx): StoreRepository {
       }
 
       if (bounds) {
-        // Hand-registered stores (google_place_id IS NULL) within the bbox.
+        // All stores within the bbox are candidates, regardless of place ID.
+        // This preserves name + proximity matching when Google changes a Place ID.
         // Stores with null lat/lng won't match gte/lte and are silently excluded
         // (correct: we can't do proximity matching without coordinates).
         const boundsCondition = and(
-          isNull(stores.google_place_id),
           gte(stores.lat, bounds.minLat),
           lte(stores.lat, bounds.maxLat),
           gte(stores.lng, bounds.minLng),

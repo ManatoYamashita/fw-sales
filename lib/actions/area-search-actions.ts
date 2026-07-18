@@ -185,13 +185,16 @@ export async function searchPlacesWithMatchesAction(
     }
 
     // M4: fetch only stores relevant to this search rather than the full table.
-    // places must be fetched first so we can build the googlePlaceIds + bbox filter.
+    // This is intentionally sequential: the Places response is required to build
+    // the googlePlaceIds + bbox filter before querying candidate stores.
     const { places, nextPageToken } = await searchPlacesPage(keyword, centerQuery, {
       pageToken: options?.pageToken,
       locationBias: { center, radiusMeters },
     });
 
-    const googlePlaceIds = places.map((p) => p.placeId).filter((id) => id !== "");
+    const googlePlaceIds = [
+      ...new Set(places.map((p) => p.placeId).filter((id) => id !== "")),
+    ];
     const bounds = computePlacesBounds(places) ?? undefined;
     const stores = await repos.store.findAreaSearchCandidates({ googlePlaceIds, bounds });
 

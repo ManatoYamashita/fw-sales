@@ -98,6 +98,32 @@ describe("findMatchedStore", () => {
   });
 
   describe("第二優先: 店名一致 + 50m以内", () => {
+    it("古い Place ID でも店名一致 + 50m以内なら既存店舗として返す", () => {
+      const store = makeStore({ google_place_id: "ChIJ_OLD" });
+      const place = makePlace({ placeId: "ChIJ_NEW" });
+
+      expect(findMatchedStore(place, [store])).toEqual({
+        id: "store_test_001",
+        name: "テスト食堂",
+      });
+    });
+
+    it("近接候補より Place ID 完全一致を優先する", () => {
+      const proximityStore = makeStore({ id: "store_near", google_place_id: "ChIJ_OLD" });
+      const exactStore = makeStore({
+        id: "store_exact",
+        name: "別名でも完全一致",
+        google_place_id: "ChIJ_NEW",
+        lat: 0,
+        lng: 0,
+      });
+
+      expect(findMatchedStore(makePlace({ placeId: "ChIJ_NEW" }), [proximityStore, exactStore])).toEqual({
+        id: "store_exact",
+        name: "別名でも完全一致",
+      });
+    });
+
     it("店名一致 + 50m以内 (≈44m) の場合は matchedStore を返す", () => {
       // 緯度差 0.0004° ≈ 44m — 50m以内
       const store = makeStore({

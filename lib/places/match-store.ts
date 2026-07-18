@@ -12,8 +12,10 @@ export interface PlacesBounds {
 
 /**
  * Degrees added as a safety margin around the places bbox.
- * ~111 m — more than 2× the 50 m proximity threshold in findMatchedStore,
- * so no hand-registered candidate within range will be missed.
+ * 0.001° is about 111 m in latitude; longitude distance becomes shorter as
+ * latitude increases. In Japan's practical latitude range it still safely
+ * covers the 50 m proximity threshold. This is a coarse candidate-fetching
+ * margin, not an exact degrees-to-distance conversion.
  */
 const BBOX_MARGIN_DEGREES = 0.001;
 
@@ -66,7 +68,7 @@ export function findMatchedStore(
     return { id: byPlaceId.id, name: byPlaceId.name };
   }
 
-  // 第二優先: 店名一致 + 50m以内 (google_place_id が null の手動登録店舗を拾う)
+  // 第二優先: 店名一致 + 50m以内 (Place ID の有無・新旧を問わない)
   const byProximity = stores.find((s) => {
     if (s.lat === null || s.lng === null) return false;
     if (s.name !== place.name) return false;
