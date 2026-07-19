@@ -1,6 +1,5 @@
 import { listSalesProgressRows } from "@/lib/queries/sales-progress";
 import type { ProgressSort, SalesProgressFilter } from "@/lib/domain/sales-progress";
-import type { Profile } from "@/types/profile";
 import { StoresTableView } from "./stores-table-view";
 
 /**
@@ -14,21 +13,18 @@ import { StoresTableView } from "./stores-table-view";
  *
  * task 4.2 (PR3a): listActiveDeepResearchStoreIds 撤去 (#121 / #110 連動)。
  *
- * 営業担当 (sales) ソートは profile.display_name 解決が必要なため、
- * profile 取得後に id → display_name の Map を `listStores` の ctx に渡す。
- *
- * `profiles` は親 (`StoresPage`) から渡される。本コンポーネント内で
- * `getAllProfiles` を再取得しない (キャッシュキー分裂 / 二重 SELECT 防止)。
+ * 営業担当 (sales) ソートに必要な profile.display_name の解決は
+ * `listSalesProgressRows` の内部で完結する (props 経由では受け取らない)。
+ * profiles を引数で渡す形にすると、渡し忘れたときに全行の salesName が null になり
+ * sales ソートが無言で壊れるため。
  */
 export async function StoresTable({
   filter,
   sort,
-  profiles,
 }: {
   filter: SalesProgressFilter;
   sort: ProgressSort;
-  profiles: readonly Profile[];
 }) {
-  const rows = await listSalesProgressRows(filter, sort, profiles);
+  const rows = await listSalesProgressRows(filter, sort);
   return <StoresTableView rows={rows} />;
 }

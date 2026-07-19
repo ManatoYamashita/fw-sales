@@ -9,6 +9,7 @@
 import "server-only";
 import { listStores } from "./stores";
 import { listDealsCached } from "./deals";
+import { getAllProfiles } from "./profiles";
 import { todayInTimeZone } from "@/lib/utils/date";
 import {
   applyProgressFilter,
@@ -19,23 +20,27 @@ import {
   type SalesProgressFilter,
   type SalesProgressRow,
 } from "@/lib/domain/sales-progress";
-import type { Profile } from "@/types/profile";
 
 /**
- * @param profiles 呼び出し側で一度だけ取得した profile 一覧を渡す。
- *        本関数内で `getAllProfiles` を独自に呼ばない (呼び出し元と引数形状が
- *        食い違うと `'use cache'` のキャッシュキーが割れ、同じ SELECT がコールド時に
- *        二重に走るため。呼び出し側 (`StoresTable`) と `getAllProfiles` 呼び出しを
- *        1 箇所に統一する)。
+ * `getAllProfiles` の引数形状は **`{ excludePlaceholders: false }` で固定**する。
+ *
+ * `'use cache'` のキャッシュキーは引数を含むため、同一リクエスト内の別の呼び出し元
+ * (`app/(main)/stores/page.tsx` の `ProgressFilterBarSlot`) と形状が食い違うと
+ * キーが割れ、コールド時に同じ SELECT が 2 回走る。
+ * この一致は `lib/queries/__tests__/sales-progress.test.ts` で機械的に検証している。
+ *
+ * profiles を引数で受け取らないのは、既定値 (`= []`) を許すと呼び出し側の渡し忘れで
+ * 全行の `salesName` が null になり、`applyProgressSort` の `case "sales"` が例外も
+ * 型エラーも出さずタイブレーカへ落ちて「更新日降順」に無言で化けるため。
  */
 export async function listSalesProgressRows(
   filter: SalesProgressFilter = {},
   sort: ProgressSort = DEFAULT_PROGRESS_SORT,
-  profiles: readonly Profile[] = [],
 ): Promise<SalesProgressRow[]> {
-  const [stores, deals] = await Promise.all([
+  const [stores, deals, profiles] = await Promise.all([
     listStores({}),
     listDealsCached(),
+    getAllProfiles({ excludePlaceholders: false }),
   ]);
   const profilesById = new Map(profiles.map((p) => [p.id, p.display_name]));
   const rows = buildSalesProgressRows(

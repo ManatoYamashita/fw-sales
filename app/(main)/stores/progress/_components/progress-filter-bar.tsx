@@ -158,25 +158,72 @@ export function ProgressFilterBar({ profileEntries }: ProgressFilterBarProps) {
       else nextParams.delete(key);
     });
 
-  const clearAll = () =>
+  /* --- 入力検索 (debounce) --- */
+  /**
+   * 入力値はローカル state を単一の真実とし、URL の `q` は「確定値」として扱う。
+   *
+   * 以前は `<Input key={q} defaultValue={q}>` で URL 同期していたが、debounce 自身が
+   * push した URL 変更でも key が変わって `<input>` が再マウントされ、フォーカスと
+   * caret が飛び、push 〜 commit の間に打った文字が defaultValue で上書き消失していた。
+   * pushedTermRef に「自分が push した値」を記録し、それと異なる q (ブラウザの戻る /
+   * 進む、外部からのクリア) が来たときだけ入力値を URL へ追従させる。
+   */
+  const [term, setTerm] = useState(q);
+  const pushedTermRef = useRef(q);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (q === pushedTermRef.current) return;
+    pushedTermRef.current = q;
+    setTerm(q);
+  }, [q]);
+
+  // アンマウント後に router.replace が発火するのを防ぐ
+  useEffect(
+    () => () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    },
+    [],
+  );
+
+  /** 保留中の debounce を捨てて入力値を空へ戻す (クリア系ボタン共通)。 */
+  const resetSearchTerm = () => {
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
+    pushedTermRef.current = "";
+    setTerm("");
+  };
+
+  const onSearch = (e: ChangeEvent<HTMLInputElement>) => {
+    const v = e.target.value;
+    setTerm(v);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      pushedTermRef.current = v;
+      setKey("q", v);
+    }, 220);
+  };
+  const clearSearch = () => {
+    resetSearchTerm();
+    setKey("q", "");
+  };
+
+  const clearAll = () => {
+    resetSearchTerm();
     push((nextParams) => {
       ALL_FILTER_KEYS.forEach((k) => nextParams.delete(k));
       nextParams.delete("sort");
       nextParams.delete("dir");
     });
-  const clearFilters = () =>
+  };
+  const clearFilters = () => {
+    resetSearchTerm();
     push((nextParams) => {
       ALL_FILTER_KEYS.forEach((k) => nextParams.delete(k));
     });
-
-  /* --- 入力検索 (debounce) --- */
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const onSearch = (e: ChangeEvent<HTMLInputElement>) => {
-    const v = e.target.value;
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => setKey("q", v), 220);
   };
-  const clearSearch = () => setKey("q", "");
 
   /* --- ポップオーバー制御 --- */
   const filterAnchor = useRef<HTMLDivElement>(null);
@@ -195,8 +242,7 @@ export function ProgressFilterBar({ profileEntries }: ProgressFilterBarProps) {
         <div className="relative flex-1 min-w-[180px] basis-full sm:basis-auto">
           <Search className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            key={q /* URL からの値同期用 */}
-            defaultValue={q}
+            value={term}
             onChange={onSearch}
             placeholder="店舗名・エリア・次回アクションから検索…"
             aria-label="顧客を検索"
@@ -206,7 +252,7 @@ export function ProgressFilterBar({ profileEntries }: ProgressFilterBarProps) {
               "shadow-none rounded-lg",
             )}
           />
-          {q ? (
+          {term ? (
             <button
               type="button"
               onClick={clearSearch}
