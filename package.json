@@ -16,7 +16,8 @@
     "db:studio": "node --env-file-if-exists=.env.local ./node_modules/drizzle-kit/bin.cjs studio",
     "db:check": "bash scripts/check-drizzle-migrations.sh",
     "db:verify-fks": "node --env-file-if-exists=.env.local scripts/verify-store-cascade-fks.mjs",
-    "db:set-role": "node --env-file-if-exists=.env.local scripts/set-profile-role.mjs"
+    "db:set-role": "node --env-file-if-exists=.env.local scripts/set-profile-role.mjs",
+    "db:diagnose-area-search": "node --env-file-if-exists=.env.local scripts/diagnose-area-search-plan.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",
