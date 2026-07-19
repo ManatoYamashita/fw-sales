@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
+import { YenAmountInput } from "@/components/ui/yen-amount-input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/toast";
@@ -35,8 +36,11 @@ export function SalesActivityForm({ store, deal, profiles, onClose }: { store: S
       <FormField label="営業メモ" htmlFor={`memo-${deal?.id ?? "new"}`} hint="この日に行ったことを記録します（最大5000文字）" className="md:col-span-2"><Textarea id={`memo-${deal?.id ?? "new"}`} name="activity_memo" rows={4} maxLength={5000} defaultValue={deal?.activity_memo ?? ""} /></FormField>
       <FormField label="提案内容" htmlFor={`proposal-${deal?.id ?? "new"}`} className="md:col-span-2"><Textarea id={`proposal-${deal?.id ?? "new"}`} name="proposal" rows={3} defaultValue={deal?.proposal ?? ""} /></FormField>
       <FormField label="ヒアリング・打ち合わせ内容" htmlFor={`discussion-${deal?.id ?? "new"}`} className="md:col-span-2"><Textarea id={`discussion-${deal?.id ?? "new"}`} name="discussion" rows={4} defaultValue={deal?.discussion ?? ""} /></FormField>
-      <FormField label="見積金額" htmlFor={`estimate-${deal?.id ?? "new"}`}><Input id={`estimate-${deal?.id ?? "new"}`} name="estimate_amount" type="number" min={0} step={1} defaultValue={deal?.estimate_amount ?? 0} /></FormField>
-      {status === "受注" ? <FormField label="受注金額" htmlFor={`order-${deal?.id ?? "new"}`}><Input id={`order-${deal?.id ?? "new"}`} name="order_amount" type="number" min={0} step={1} defaultValue={deal?.order_amount ?? ""} /></FormField> : null}
+      {/* 金額はカンマ区切り表示 + 円サフィックス。送信値はカンマなし整数円 (#172)。
+          新規時は空欄 (0 を自動表示しない)。空欄の保存はサーバ現行仕様
+          (estimate_amount: 0 / order_amount: null) に従う */}
+      <FormField label="見積金額" htmlFor={`estimate-${deal?.id ?? "new"}`}><YenAmountInput id={`estimate-${deal?.id ?? "new"}`} name="estimate_amount" defaultValue={deal?.estimate_amount} /></FormField>
+      {status === "受注" ? <FormField label="受注金額" htmlFor={`order-${deal?.id ?? "new"}`}><YenAmountInput id={`order-${deal?.id ?? "new"}`} name="order_amount" defaultValue={deal?.order_amount} /></FormField> : null}
       {status === "失注" ? <FormField label="失注理由" htmlFor={`lost-${deal?.id ?? "new"}`} className="md:col-span-2"><Textarea id={`lost-${deal?.id ?? "new"}`} name="lost_reason" rows={3} maxLength={10000} defaultValue={deal?.lost_reason ?? ""} /></FormField> : null}
       <div className="md:col-span-2 border-t border-border pt-4"><h4 className="text-sm font-semibold">この記録時点の次回アクション</h4><p className="text-xs text-muted-foreground">日付・種別・内容はそれぞれ単独でも保存できます。</p></div>
       <FormField label="次回アクション予定日" htmlFor={`next-date-${deal?.id ?? "new"}`}><Input id={`next-date-${deal?.id ?? "new"}`} name="next_action_date" type="date" defaultValue={deal?.next_action_date ?? ""} /></FormField>

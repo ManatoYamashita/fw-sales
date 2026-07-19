@@ -196,6 +196,36 @@ describe("pickLatestDeal", () => {
     expect(pickLatestDeal([a, b])?.id).toBe("deal_b");
     expect(pickLatestDeal([b, a])?.id).toBe("deal_b");
   });
+
+  // #172: 営業記録削除後の最新記録の再計算 (削除は「配列から除いた状態で再導出」に等しい)
+  describe("営業記録削除後の再計算 (#172)", () => {
+    const oldest = makeDeal({ id: "deal_a", date: "2026-01-10" });
+    const middle = makeDeal({ id: "deal_b", date: "2026-02-01" });
+    const newest = makeDeal({ id: "deal_c", date: "2026-03-15" });
+
+    it("最新記録を削除すると、一つ前の記録が最新になる", () => {
+      expect(pickLatestDeal([oldest, middle, newest])?.id).toBe("deal_c");
+      expect(pickLatestDeal([oldest, middle])?.id).toBe("deal_b");
+    });
+
+    it("過去記録を削除しても最新は変わらない", () => {
+      expect(pickLatestDeal([oldest, newest])?.id).toBe("deal_c");
+    });
+
+    it("最後の 1 件を削除すると null (営業記録なし)", () => {
+      expect(pickLatestDeal([])).toBeNull();
+    });
+
+    it("過去記録の日付を最新日より新しく更新すると、その記録が最新へ入れ替わる", () => {
+      const promoted = makeDeal({ id: "deal_a", date: "2026-04-01" });
+      expect(pickLatestDeal([promoted, middle, newest])?.id).toBe("deal_a");
+    });
+
+    it("最新記録の日付を最古へ更新すると、次に新しい記録が最新になる", () => {
+      const demoted = makeDeal({ id: "deal_c", date: "2026-01-01" });
+      expect(pickLatestDeal([oldest, middle, demoted])?.id).toBe("deal_b");
+    });
+  });
 });
 
 describe("buildSalesProgressRows", () => {
