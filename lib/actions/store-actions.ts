@@ -21,6 +21,7 @@ import {
 } from "@/types/store";
 import type { AiAnalysisResult } from "@/types/ai-analysis";
 import { validateAiAnalysis } from "@/lib/ai/validate";
+import { isValidYmd } from "@/lib/utils/date";
 import { STAGE_IDS, type StageId } from "@/types/stage";
 import {
   failure,
@@ -31,7 +32,7 @@ import {
   success,
   type ActionResult,
 } from "./_helpers";
-import { requireAdmin } from "./_authz";
+import { requireAdmin, requireSignedIn } from "./_authz";
 
 function asPriority(value: string): Priority {
   return (PRIORITIES as readonly string[]).includes(value)
@@ -85,13 +86,22 @@ function readNullableAiAnalysis(
 
 /**
  * FormData から StoreInput の共通フィールドを読み取る。
- * google_place_id / basic_info は通常フォームに存在しないため含めない。
- * create 時は呼び出し側で `google_place_id: null` と `basic_info: {}` を付与する。
- * update 時はそのまま StorePatch として渡し、既存値を保持する。
+ * google_place_id / basic_info / 営業進捗 3 フィールド (appointment_acquired_date /
+ * next_action_date / next_action_note) は通常フォームに存在しないため含めない。
+ * create 時は呼び出し側でこれらのデフォルト値を付与する。
+ * update 時はそのまま StorePatch として渡し、既存値を保持する
+ * (営業進捗の編集は `updateSalesProgressAction` が担う)。
  */
 function buildStoreInput(
   formData: FormData,
-): Omit<StoreInput, "google_place_id" | "basic_info"> {
+): Omit<
+  StoreInput,
+  | "google_place_id"
+  | "basic_info"
+  | "appointment_acquired_date"
+  | "next_action_date"
+  | "next_action_note"
+> {
   const has_contact_form = asContactForm(readString(formData, "has_contact_form"));
   const channelInput = asChannel(readString(formData, "channel"));
   return {
@@ -184,6 +194,9 @@ export async function createStoreAction(
     ...buildStoreInput(formData),
     google_place_id: null,
     basic_info: {},
+    appointment_acquired_date: null,
+    next_action_date: null,
+    next_action_note: null,
   };
   if (!input.name) return failure("店舗名を入力してください");
   const assigneeError = await validateAssignedUserIds(input);
@@ -202,6 +215,9 @@ export async function createStoreAndRedirect(formData: FormData) {
     ...buildStoreInput(formData),
     google_place_id: null,
     basic_info: {},
+    appointment_acquired_date: null,
+    next_action_date: null,
+    next_action_note: null,
   };
   if (!input.name) {
     throw new Error("店舗名を入力してください");
@@ -256,6 +272,73 @@ export async function updateStorePatchAction(
   if (!updated) return failure("店舗が見つかりませんでした");
   invalidateAllStoreScopes(id);
   return success(undefined, "更新しました");
+}
+
+const SALES_MEMO_MAX_LENGTH = 5000;
+
+/**
+ * 営業進捗 (アポ取得日 / 顧客共有メモ) の更新用 Server Action
+ * (customer-sales-progress-management)。
+ *
+ * - 空文字は `readNullableString` により null へ正規化 (= フィールドのクリア)
+ * - 日付は `YYYY-MM-DD` 形式かつ実在日付のみ受理 (クライアント検証は信頼しない)
+ * - 商談 (deals) 側には一切書き込まない。Deal.status が商談進捗の単一の真実
+ *
+ * `stores.next_action_date` / `stores.next_action_note` (migration 0023) は
+ * 書き込み先ではない。Deal (migration 0024) が次回アクションの単一の書き込み先であり、
+ * Store 側の値は `deriveCurrentNextAction` が最新 Deal に次回アクションが
+ * 無い場合にのみ参照する read-only な legacy fallback として残す
+ * (削除自体は別 issue でスケジュールする。#161 follow-up)。
+ */
+export async function updateSalesProgressAction(
+  id: string,
+  formData: FormData,
+): Promise<ActionResult> {
+  const denied = await requireSignedIn();
+  if (denied) return denied;
+  if (typeof id !== "string" || id.trim() === "") {
+    return failure("店舗が指定されていません");
+  }
+
+  const patch: StorePatch = {};
+  const hasAppointmentDate = formData.has("appointment_acquired_date");
+  const hasMemo = formData.has("memo");
+  const appointment_acquired_date = hasAppointmentDate
+    ? readNullableString(formData, "appointment_acquired_date")
+    : undefined;
+  const memo = hasMemo ? readNullableString(formData, "memo") : undefined;
+
+  if (
+    hasAppointmentDate &&
+    appointment_acquired_date !== null &&
+    appointment_acquired_date !== undefined &&
+    !isValidYmd(appointment_acquired_date)
+  ) {
+    return failure("アポ取得日は有効な日付 (YYYY-MM-DD) で入力してください");
+  }
+  if (hasMemo && memo !== null && memo !== undefined && memo.length > SALES_MEMO_MAX_LENGTH) {
+    return failure(`営業メモは${SALES_MEMO_MAX_LENGTH}文字以内で入力してください`);
+  }
+
+  if (hasAppointmentDate) patch.appointment_acquired_date = appointment_acquired_date;
+  if (hasMemo) patch.memo = memo ?? "";
+
+  let updated;
+  try {
+    updated = await repos.store.update(id, patch);
+  } catch (err) {
+    const parsed = parsePostgresError(err);
+    console.error("[stores.salesProgress] failed", {
+      id,
+      code: parsed?.code,
+      constraint: parsed?.constraint,
+      table: parsed?.table,
+    });
+    return failure("営業進捗の更新に失敗しました");
+  }
+  if (!updated) return failure("店舗が見つかりませんでした");
+  invalidateAllStoreScopes(id);
+  return success(undefined, "営業進捗を更新しました");
 }
 
 /**

@@ -25,7 +25,7 @@ const {
 } = await import("../store-delete-confirm-dialog");
 
 describe("DELETE_IMPACT_CATEGORIES", () => {
-  it("4 カテゴリを定義順 (商談 → 調査 → 引き継ぎ → 場所候補) で保持する", () => {
+  it("4 カテゴリを定義順 (営業記録 → 調査 → 引き継ぎ → 場所候補) で保持する", () => {
     expect(DELETE_IMPACT_CATEGORIES.map((c) => c.key)).toEqual([
       "deals",
       "research",
@@ -33,7 +33,7 @@ describe("DELETE_IMPACT_CATEGORIES", () => {
       "place_candidates",
     ]);
     expect(DELETE_IMPACT_CATEGORIES.map((c) => c.label)).toEqual([
-      "商談",
+      "営業記録",
       "調査",
       "引き継ぎ",
       "場所候補",
@@ -63,7 +63,7 @@ describe("visibleImpactEntries", () => {
       place_candidates: 4,
     });
     expect(entries).toEqual([
-      { key: "deals", label: "商談", effect: "delete", count: 3 },
+      { key: "deals", label: "営業記録", effect: "delete", count: 3 },
       { key: "handoffs", label: "引き継ぎ", effect: "delete", count: 1 },
       { key: "place_candidates", label: "場所候補", effect: "unlink", count: 4 },
     ]);

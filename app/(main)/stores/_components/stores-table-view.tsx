@@ -10,34 +10,25 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { StageBadge } from "@/components/feature/stage-badge";
 import { ChannelBadge } from "@/components/feature/channel-badge";
+import { SalesStateBadge } from "@/components/feature/sales-state-badge";
+import { Badge } from "@/components/ui/badge";
 import { IndividualStoreBadge } from "@/components/feature/individual-store-badge";
-import { StarRating } from "@/components/ui/star-rating";
 import { formatDate } from "@/lib/utils/date";
 import { toast } from "@/components/ui/toast";
-import type { Store } from "@/types/store";
+import { NEXT_ACTION_URGENCY_LABELS, type NextActionUrgency, type SalesProgressRow } from "@/lib/domain/sales-progress";
 import { StoreRowActions } from "./store-row-actions";
 import { StoreDeleteConfirmDialog } from "./store-delete-confirm-dialog";
 import { bulkDeleteStoresAction } from "@/lib/actions/store-actions";
 import { useIsAdmin } from "@/components/layout/current-user-provider";
 
 export interface StoresTableViewProps {
-  stores: readonly Store[];
-  /**
-   * `Profile.id → display_name` を tuple 配列で受け取る。
-   * Server Component から Client Component への RSC 境界では `Map<>` の
-   * シリアライズ挙動に依存せず、明示的にプレーンな配列で渡す。
-   */
-  profileEntries: ReadonlyArray<readonly [string, string]>;
+  rows: readonly SalesProgressRow[];
   // task 4.2 (PR3a): activeDrStoreIds props 撤去 (#121 / #110 連動)。
 }
 
-function buildColumns(
-  profileMap: Map<string, string>,
-): ColumnDef<Store>[] {
-  const resolveAssignedSales = (s: Store): string =>
-    s.assigned_sales_user_id
-      ? (profileMap.get(s.assigned_sales_user_id) ?? "—")
-      : "—";
+const URGENCY_TONE: Record<Exclude<NextActionUrgency, "unset">, "destructive" | "warning" | "info"> = { overdue: "destructive", today: "warning", upcoming: "info" };
+
+function buildColumns(): ColumnDef<SalesProgressRow>[] {
 
   return [
     {
@@ -47,12 +38,12 @@ function buildColumns(
       sortDefaultDir: "asc",
       truncate: true,
       maxWidth: "260px",
-      title: (s) => s.name,
-      cell: (s) => (
+      title: (r) => r.store.name,
+      cell: (r) => (
         <span className="inline-flex items-center gap-2 min-w-0 max-w-full align-middle">
-          <span className="font-semibold text-foreground truncate">{s.name}</span>
+          <span className="font-semibold text-foreground truncate">{r.store.name}</span>
           <span className="flex-shrink-0">
-            <IndividualStoreBadge operatorType={s.operator_type} />
+            <IndividualStoreBadge operatorType={r.store.operator_type} />
           </span>
         </span>
       ),
@@ -64,11 +55,10 @@ function buildColumns(
       sortDefaultDir: "asc",
       truncate: true,
       maxWidth: "200px",
-      title: (s) =>
-        [s.prefecture, s.city].filter(Boolean).join(" / ") || undefined,
-      cell: (s) => (
+      title: (r) => [r.store.prefecture, r.store.city].filter(Boolean).join(" / ") || undefined,
+      cell: (r) => (
         <span className="text-foreground/80">
-          {[s.prefecture, s.city].filter(Boolean).join(" / ") || "—"}
+          {[r.store.prefecture, r.store.city].filter(Boolean).join(" / ") || "—"}
         </span>
       ),
     },
@@ -77,38 +67,23 @@ function buildColumns(
       header: "業態",
       sortKey: "genre",
       sortDefaultDir: "asc",
-      cell: (s) => s.genre || "—",
+      cell: (r) => r.store.genre || "—",
     },
-    {
-      key: "review",
-      header: "口コミ",
-      sortKey: "review",
-      sortDefaultDir: "desc",
-      cell: (s) =>
-        s.review_count > 0 ? (
-          <span className="inline-flex items-center gap-1.5">
-            <StarRating value={s.review_avg} showValue />
-            <span className="text-xs text-muted-foreground">
-              {s.review_count}件
-            </span>
-          </span>
-        ) : (
-          <span className="text-xs text-muted-foreground/70">—</span>
-        ),
-    },
+    { key: "salesState", header: "現在の営業状態", cell: (r) => <SalesStateBadge state={r.currentSalesState} /> },
+    { key: "next", header: "次回アクション", sortKey: "next", sortDefaultDir: "asc", cell: (r) => <div className="max-w-[240px] space-y-1">{r.urgency !== "unset" ? <Badge tone={URGENCY_TONE[r.urgency]}>{NEXT_ACTION_URGENCY_LABELS[r.urgency]}</Badge> : <Badge tone="outline">未設定</Badge>}<div className="text-xs">{r.currentNextAction.date ? formatDate(r.currentNextAction.date) : "—"}{r.currentNextAction.type ? ` / ${r.currentNextAction.type}` : ""}</div>{r.currentNextAction.note ? <p className="truncate text-xs text-muted-foreground" title={r.currentNextAction.note}>{r.currentNextAction.note}</p> : null}</div> },
     {
       key: "stage",
       header: "状態",
       sortKey: "stage",
       sortDefaultDir: "asc",
-      cell: (s) => <StageBadge stage={s.stage} />,
+      cell: (r) => <StageBadge stage={r.store.stage} />,
     },
     {
       key: "channel",
       header: "チャネル",
       sortKey: "channel",
       sortDefaultDir: "asc",
-      cell: (s) => <ChannelBadge channel={s.channel} />,
+      cell: (r) => <ChannelBadge channel={r.store.channel} />,
     },
     {
       key: "sales",
@@ -117,20 +92,17 @@ function buildColumns(
       sortDefaultDir: "asc",
       truncate: true,
       maxWidth: "140px",
-      title: (s) => {
-        const name = resolveAssignedSales(s);
-        return name === "—" ? undefined : name;
-      },
-      cell: (s) => resolveAssignedSales(s),
+      title: (r) => r.salesName ?? undefined,
+      cell: (r) => r.salesName ?? "—",
     },
     {
       key: "updated",
-      header: "更新",
-      sortKey: "updated",
+      header: "最終営業日",
+      sortKey: "meeting",
       sortDefaultDir: "desc",
-      cell: (s) => (
+      cell: (r) => (
         <span className="text-xs text-muted-foreground whitespace-nowrap">
-          {formatDate(s.updated_at)}
+          {r.latestMeetingDate ? formatDate(r.latestMeetingDate) : "—"}
         </span>
       ),
     },
@@ -140,18 +112,16 @@ function buildColumns(
       align: "right",
       width: "92px",
       preventRowClick: true,
-      cell: (s) => <StoreRowActions storeId={s.id} storeName={s.name} />,
+      cell: (r) => <StoreRowActions storeId={r.store.id} storeName={r.store.name} />,
     },
   ];
 }
 
 export function StoresTableView({
-  stores,
-  profileEntries,
+  rows,
 }: StoresTableViewProps) {
   const router = useRouter();
-  const profileMap = new Map(profileEntries);
-  const columns = buildColumns(profileMap);
+  const columns = buildColumns();
   // #155: 一括削除は admin 限定 (真の防御はサーバ側 requireAdmin)。
   const { isAdmin, loaded } = useIsAdmin();
   const denyDelete = loaded && !isAdmin;
@@ -162,7 +132,7 @@ export function StoresTableView({
 
   // 表示中の行のみを選択対象として扱う。フィルタで一覧から消えた行の ID は selectedIds に
   // 残るが、件数表示・一括削除の対象は selectedVisibleIds に限定する (表示中の行のみ操作する)。
-  const visibleIdSet = new Set(stores.map((s) => s.id));
+  const visibleIdSet = new Set(rows.map((r) => r.store.id));
   const selectedVisibleIds = selectedIds.filter((id) => visibleIdSet.has(id));
 
   const handleBulkDelete = () => {
@@ -194,19 +164,19 @@ export function StoresTableView({
         <Card.Header>
           <Card.Title>店舗一覧</Card.Title>
           <span className="text-sm text-muted-foreground">
-            {stores.length} 件
+            {rows.length} 件
           </span>
         </Card.Header>
         <DataTable
           columns={columns}
-          rows={[...stores]}
-          rowKey={(s) => s.id}
-          rowHref={(s) => `/stores/${s.id}`}
+          rows={[...rows]}
+          rowKey={(r) => r.store.id}
+          rowHref={(r) => `/stores/${r.store.id}?tab=progress`}
           rowSelection={{
             selectedRowKeys: selectedVisibleIds,
             onChange: setSelectedIds,
             allRowsLabel: "表示中の店舗をすべて選択",
-            rowLabel: (s) => `${s.name} を選択`,
+            rowLabel: (r) => `${r.store.name} を選択`,
           }}
           emptyState={
             <EmptyState

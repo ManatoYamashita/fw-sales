@@ -62,6 +62,15 @@ export interface Store {
   /** Google Places ID。エリア検索で追加した店舗のみ格納。手動登録時は null。 */
   google_place_id: string | null;
   /**
+   * アポ取得日 (`YYYY-MM-DD`)。null = 未取得。
+   * 「取得済み / 未取得」は本フィールドの有無から導出する (別の boolean は持たない)。
+   */
+  appointment_acquired_date: string | null;
+  /** 次回アクション予定日 (`YYYY-MM-DD`)。null = 未設定。 */
+  next_action_date: string | null;
+  /** 次回アクション内容。null = 未設定。500 文字以内 (Action 層で検証)。 */
+  next_action_note: string | null;
+  /**
    * 基本情報 50 項目 (store-basic-info / Issue #114, #121)。
    * キーは `BASIC_INFO_ITEMS` (`lib/domain/basic-info-items.ts`)、値は `BasicInfoField`。
    * 未充足項目も含み、Places / 手動で段階充填。新規登録時は `{}` (店舗名のみで登録可)。

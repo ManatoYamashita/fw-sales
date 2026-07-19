@@ -1,6 +1,5 @@
-import { listStores } from "@/lib/queries/stores";
-import { getAllProfiles } from "@/lib/queries/profiles";
-import type { StoreFilter, StoreSort } from "@/types/store";
+import { listSalesProgressRows } from "@/lib/queries/sales-progress";
+import type { ProgressSort, SalesProgressFilter } from "@/lib/domain/sales-progress";
 import { StoresTableView } from "./stores-table-view";
 
 /**
@@ -14,27 +13,18 @@ import { StoresTableView } from "./stores-table-view";
  *
  * task 4.2 (PR3a): listActiveDeepResearchStoreIds 撤去 (#121 / #110 連動)。
  *
- * 営業担当 (sales) ソートは profile.display_name 解決が必要なため、
- * profile 取得後に id → display_name の Map を `listStores` の ctx に渡す。
+ * 営業担当 (sales) ソートに必要な profile.display_name の解決は
+ * `listSalesProgressRows` の内部で完結する (props 経由では受け取らない)。
+ * profiles を引数で渡す形にすると、渡し忘れたときに全行の salesName が null になり
+ * sales ソートが無言で壊れるため。
  */
 export async function StoresTable({
   filter,
   sort,
 }: {
-  filter: StoreFilter;
-  sort?: StoreSort;
+  filter: SalesProgressFilter;
+  sort: ProgressSort;
 }) {
-  const profiles = await getAllProfiles({ excludePlaceholders: false });
-  const profilesById = new Map(profiles.map((p) => [p.id, p.display_name]));
-
-  const stores = await listStores(filter, sort, { profilesById });
-
-  // Map / Set を RSC 境界用にプレーン配列へ変換 (依存しない方が安全)
-  const profileEntries = profiles.map(
-    (p) => [p.id, p.display_name] as const,
-  );
-
-  return (
-    <StoresTableView stores={stores} profileEntries={profileEntries} />
-  );
+  const rows = await listSalesProgressRows(filter, sort);
+  return <StoresTableView rows={rows} />;
 }

@@ -11,16 +11,19 @@ import { BasicInfoCard } from "./basic-info-card";
 import { BasicInfoFieldsCard } from "./basic-info-fields-card";
 import { MapEmbedCard } from "./map-embed-card";
 import { WebAssetCard } from "./web-asset-card";
-import { MemoCard } from "./memo-card";
+import { SalesProgressCard } from "./sales-progress-card";
 import { AiAnalysisDetailSection } from "./ai-analysis-detail-section";
 import { StageInlineSelect } from "./stage-inline-select";
 import { DeleteStoreButton } from "./delete-store-button";
 import type { Store } from "@/types/store";
+import type { Deal } from "@/types/deal";
 import type { Profile } from "@/types/profile";
 
 interface StoreDetailTabsProps {
   store: Store;
   profiles: readonly Profile[];
+  /** 営業進捗タブ用の店舗単位の商談一覧 (最新商談の導出 + 履歴表示)。 */
+  deals: readonly Deal[];
   isApiKeyConfigured: boolean;
   // task 4.2 (PR3a): deepResearchSlot / promptTemplates / hasDeepResearchReport /
   // assignedSalesName を撤去。営業資産生成は SalesAssetsGenerator に集約済み。
@@ -31,13 +34,17 @@ interface StoreDetailTabsProps {
 export function StoreDetailTabs({
   store,
   profiles,
+  deals,
   isApiKeyConfigured,
 }: StoreDetailTabsProps) {
   const editHref = `/stores/${store.id}/edit`;
 
   // 調査ページの完了行から `?tab=ai#deep-research` で来た場合は AI 分析タブを初期表示。
+  // `?tab=progress` は営業進捗タブへの deep link (営業進捗一覧からの遷移用)。
   const searchParams = useSearchParams();
-  const initialTab = searchParams.get("tab") === "ai" ? "ai" : "basic";
+  const tabParam = searchParams.get("tab");
+  const initialTab =
+    tabParam === "ai" ? "ai" : tabParam === "progress" ? "progress" : "basic";
 
   // `#deep-research` アンカー指定時は Deep Research セクションへスクロール。
   // スロットは Suspense ストリーミングで遅延描画されるため数回リトライする。
@@ -63,7 +70,7 @@ export function StoreDetailTabs({
         <StageInlineSelect storeId={store.id} current={store.stage} />
         <TabsList>
           <TabsTrigger value="basic">基本情報</TabsTrigger>
-          <TabsTrigger value="supplement">補足情報</TabsTrigger>
+          <TabsTrigger value="progress">営業進捗</TabsTrigger>
           <TabsTrigger value="ai">AI 分析</TabsTrigger>
         </TabsList>
 
@@ -103,8 +110,8 @@ export function StoreDetailTabs({
         </div>
       </TabsPanel>
 
-      <TabsPanel value="supplement">
-        <MemoCard store={store} />
+      <TabsPanel value="progress">
+        <SalesProgressCard store={store} deals={deals} profiles={profiles} />
       </TabsPanel>
 
       <TabsPanel value="ai" className="space-y-4">

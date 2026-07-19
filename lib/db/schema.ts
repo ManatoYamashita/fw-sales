@@ -124,6 +124,12 @@ export const stores = pgTable("stores", {
   lng: real("lng"),
   /** Google Places ID。エリア検索経由で登録した店舗のみ格納。手動登録時は NULL。 */
   google_place_id: text("google_place_id"),
+  /** アポ取得日 (`YYYY-MM-DD`)。NULL = 未取得。取得済み/未取得は本列の有無から導出する。 */
+  appointment_acquired_date: text("appointment_acquired_date"),
+  /** 次回アクション予定日 (`YYYY-MM-DD`)。NULL = 未設定。 */
+  next_action_date: text("next_action_date"),
+  /** 次回アクション内容 (500 文字以内は Action 層で担保)。NULL = 未設定。 */
+  next_action_note: text("next_action_note"),
   /**
    * 基本情報 50 項目 (store-basic-info / Issue #114, #121)。
    * キーは `BASIC_INFO_ITEMS` (`lib/domain/basic-info-items.ts`)、値は `BasicInfoField`。
@@ -169,6 +175,12 @@ export const deals = pgTable("deals", {
   assigned_sales_user_id: uuid("assigned_sales_user_id").references(
     () => profiles.id,
   ),
+  /** 日付単位の営業メモ。 */
+  activity_memo: text("activity_memo"),
+  /** 当該記録時点で設定した次回アクション。 */
+  next_action_date: text("next_action_date"),
+  next_action_type: text("next_action_type"),
+  next_action_note: text("next_action_note"),
   created_at: text("created_at").notNull(),
   updated_at: text("updated_at").notNull(),
 }, (table) => [
