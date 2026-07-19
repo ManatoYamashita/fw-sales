@@ -64,7 +64,9 @@ bash scripts/bench-area-search-index.sh --rows=1000,10000,100000 --null-rates=0.
 - 一時ディレクトリに使い捨てクラスタを `initdb` し、ポート 55432 で起動 → 終了時に必ず破棄
   (`trap` は EXIT / INT / TERM / HUP / PIPE を捕捉。停止を確認してから削除する)
 - スキーマは手書き DDL ではなく**実際の migration チェーン**を適用(ドリフト防止)。
-  `drizzle/0004` が `auth.users` への cross-schema FK を持つためスタブのみ用意する
+  `drizzle/0004` が `auth.users` への cross-schema FK を持つためスタブのみ用意する。
+  適用されるのは main と同じ 0024 時点であり、`stores` の列構成
+  (#161 が追加した `appointment_acquired_date` 等を含む)は本番と一致する
 - planner 設定は本番の `pg_settings` 実測値に一致させる。特に `random_page_cost` は
   本番 1.1 に対し PostgreSQL 既定が 4.0 で、既定のままだと index scan を不当に不利に評価する
 - 本番 DB には接続しない。`DATABASE_URL` を読まず `BENCH_DATABASE_URL` のみを使う
@@ -366,8 +368,12 @@ migration 手順は §8 を参照。
 
 ## 8. 採用する場合の migration 手順(将来用)
 
-**前提**: `#161` が main にマージされ `drizzle/0023_*` `0024_*` と journal idx 23/24 が存在すること。
-`jq '.entries[-1]' drizzle/meta/_journal.json` で確認する。
+**前提は充足済み** (2026-07-19): PR #161 が main にマージされ、`drizzle/0023_*` `0024_*` と
+journal idx 23/24 が main に存在する。
+
+したがって**採用時の migration 番号は `0025`** で確定する。着手前に念のため
+`jq '.entries[-1]' drizzle/meta/_journal.json` で最新 idx が 24 のままかを確認すること
+(別の migration が先に入っていれば番号は繰り上がる)。
 
 `lib/db/schema.ts` の `stores` 定義末尾に 1 行追加する。§5-2 の表で選んだ候補に応じて
 どちらかを使う。どちらも Drizzle で表現でき、raw SQL の追記は不要である(§4)。
