@@ -49,16 +49,28 @@ export default async function StoresPage({ searchParams }: { searchParams: Promi
   const sp = await searchParams;
   const filter = parseFilter(sp);
   const sort = parseSort(sp);
-  const profiles = await getAllProfiles({ excludePlaceholders: false });
-  const profileEntries = profiles.map((p) => [p.id, p.display_name] as const);
   return <div className="space-y-4">
     <div className="flex items-center justify-between gap-2 flex-wrap">
       <div><h2 className="text-xl md:text-2xl font-bold text-foreground">店舗・営業一覧</h2><p className="text-sm text-muted-foreground">現在の営業状態と次に行うことを店舗単位で確認できます。</p></div>
       <Link href="/stores/new" className="inline-flex items-center gap-1.5 h-10 px-4 rounded-lg border border-transparent bg-primary text-primary-foreground text-sm font-medium hover:bg-background hover:text-foreground hover:border-foreground"><Plus className="h-4 w-4" />店舗を登録</Link>
     </div>
-    <ProgressFilterBar profileEntries={profileEntries} />
     <Suspense key={JSON.stringify({ filter, sort })} fallback={<div className="flex items-center gap-2 text-sm text-muted-foreground py-12 justify-center"><Spinner /> 読み込み中…</div>}>
-      <StoresTable filter={filter} sort={sort} />
+      <StoresPageBody filter={filter} sort={sort} />
     </Suspense>
   </div>;
+}
+
+/**
+ * `getAllProfiles` を Suspense 境界の内側に置くための data-fetching shell。
+ * ProgressFilterBar (営業担当セレクト用) と StoresTable の両方が同じ profiles
+ * 一覧を必要とするため、ここで 1 回だけ取得して両方へ渡す
+ * (Low #E: cache key 分裂 / 二重 SELECT 防止、Low #F: ページシェル全体のブロック防止)。
+ */
+async function StoresPageBody({ filter, sort }: { filter: SalesProgressFilter; sort: ProgressSort }) {
+  const profiles = await getAllProfiles({ excludePlaceholders: false });
+  const profileEntries = profiles.map((p) => [p.id, p.display_name] as const);
+  return <>
+    <ProgressFilterBar profileEntries={profileEntries} />
+    <StoresTable filter={filter} sort={sort} profiles={profiles} />
+  </>;
 }

@@ -216,7 +216,6 @@ export function ProgressFilterBar({ profileEntries }: ProgressFilterBarProps) {
               <X className="h-3.5 w-3.5" />
             </button>
           ) : null}
-          {state ? <Chip onClear={() => setKey("state", "")} label="営業状態">{CURRENT_SALES_STATE_LABELS[state as keyof typeof CURRENT_SALES_STATE_LABELS] ?? state}</Chip> : null}
         </div>
 
         {/* 縦区切り */}
@@ -268,6 +267,11 @@ export function ProgressFilterBar({ profileEntries }: ProgressFilterBarProps) {
           {q ? (
             <Chip onClear={clearSearch} label="検索">
               「{q}」
+            </Chip>
+          ) : null}
+          {state ? (
+            <Chip onClear={() => setKey("state", "")} label="営業状態">
+              {CURRENT_SALES_STATE_LABELS[state as keyof typeof CURRENT_SALES_STATE_LABELS] ?? state}
             </Chip>
           ) : null}
           {appt ? (

@@ -12,6 +12,7 @@ import type { Deal, DealStatus } from "@/types/deal";
 import type { SortDirection, Store } from "@/types/store";
 import type { StageId } from "@/types/stage";
 import type { Channel } from "@/types/store";
+import { compareChannel, compareStage } from "@/lib/domain/sort-order";
 
 export type CurrentSalesState =
   | "won"
@@ -232,7 +233,8 @@ export function applyProgressFilter(
     if (filter.stage && s.stage !== filter.stage) return false;
     if (filter.channel && s.channel !== filter.channel) return false;
     if (q) {
-      // applyStoreFilter と同じ対象 + 次回アクション内容も検索できるようにする
+      // applyStoreFilter と同じ対象 + 一覧が実際に表示する現在の次回アクション
+      // (currentNextAction: 最新 Deal 優先、なければ legacy Store 値) も検索対象にする
       const haystack = [
         s.name,
         s.city,
@@ -240,7 +242,9 @@ export function applyProgressFilter(
         s.address,
         s.genre,
         s.memo,
-        s.next_action_note ?? "",
+        row.currentNextAction.note ?? "",
+        row.currentNextAction.type ?? "",
+        row.currentNextAction.date ?? "",
       ]
         .join(" ")
         .toLowerCase();
@@ -338,10 +342,10 @@ export function applyProgressSort(
           diff = a.store.review_avg - b.store.review_avg || a.store.review_count - b.store.review_count;
           break;
         case "stage":
-          diff = a.store.stage.localeCompare(b.store.stage);
+          diff = compareStage(a.store.stage, b.store.stage);
           break;
         case "channel":
-          diff = a.store.channel.localeCompare(b.store.channel);
+          diff = compareChannel(a.store.channel, b.store.channel);
           break;
         case "sales":
           if (a.salesName === null && b.salesName !== null) return 1;

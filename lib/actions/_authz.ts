@@ -26,6 +26,15 @@ export type AdminGuard =
   | { ok: false; denied: ActionResult<never> };
 
 /**
+ * 呼び出し元がログイン済みであることを要求する (非破壊 WRITE 用の最小ガード)。
+ * `requireAdmin` と異なりロールは問わない。middleware による保護に加え、
+ * Server Action 単体でも認証チェックする多層防御として各 action の先頭で呼ぶ。
+ */
+export async function requireSignedIn(): Promise<ActionResult<never> | null> {
+  return (await getCurrentProfile()) ? null : failure("ログインが必要です");
+}
+
+/**
  * 呼び出し元が admin ロールであることを要求する。
  *
  * @param action 監査ログ用のアクション識別子 (既存ログ prefix と統一。例: "stores.delete")

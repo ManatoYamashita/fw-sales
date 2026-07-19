@@ -3,10 +3,15 @@
  *
  * 目的:
  * - 空文字 → null 正規化 (= 日付 / メモのクリア) が repository patch に反映されること
- * - 不正な日付形式 / 実在しない日付 / 500 文字超のメモをサーバ側で拒否すること
+ * - 不正な日付形式 / 実在しない日付 / 5000 文字超のメモをサーバ側で拒否すること
  *   (拒否時は repository を呼ばない)
  * - 成功時に店舗系キャッシュタグ (stores / store:{id}) を revalidate すること
  * - 不存在店舗 (repository が null) は失敗を返すこと
+ * - 未ログインは拒否すること (Low A)
+ * - `next_action_date` / `next_action_note` (stores の legacy 列) は本 Action の
+ *   書き込み対象ではなく、FormData に含まれていても無視されること (#161 follow-up:
+ *   Deal (migration 0024) を次回アクションの単一の書き込み先とし、Store 側は
+ *   read-only fallback として残す)
  *
  * テスト方針は store-actions.delete-impact.test.ts と同様 (repos / next をモック)。
  */
@@ -15,10 +20,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-const { mockUpdate, mockRevalidateTag, mockRedirect } = vi.hoisted(() => ({
+const { mockUpdate, mockRevalidateTag, mockRedirect, mockGetCurrentProfile } = vi.hoisted(() => ({
   mockUpdate: vi.fn(),
   mockRevalidateTag: vi.fn(),
   mockRedirect: vi.fn(),
+  mockGetCurrentProfile: vi.fn(),
 }));
 
 vi.mock("@/lib/repositories", () => ({
@@ -35,7 +41,12 @@ vi.mock("next/navigation", () => ({
   redirect: mockRedirect,
 }));
 
+vi.mock("@/lib/supabase/server", () => ({
+  getCurrentProfile: mockGetCurrentProfile,
+}));
+
 const { updateSalesProgressAction } = await import("../store-actions");
+const profile = { id: "user-1", display_name: "担当", email: "a@example.com", role: "member" };
 
 function makeFormData(fields: Record<string, string>): FormData {
   const fd = new FormData();
@@ -47,6 +58,16 @@ describe("updateSalesProgressAction", () => {
   beforeEach(() => {
     mockUpdate.mockReset();
     mockRevalidateTag.mockReset();
+    mockGetCurrentProfile.mockReset();
+    mockGetCurrentProfile.mockResolvedValue(profile);
+  });
+
+  it("未ログイン時は更新を拒否し、repository を呼ばない (Low A: deal-actions と同じ認証方針)", async () => {
+    mockGetCurrentProfile.mockResolvedValueOnce(null);
+    const result = await updateSalesProgressAction("store_1", makeFormData({ memo: "更新" }));
+    expect(result).toEqual({ ok: false, error: "ログインが必要です" });
+    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(mockRevalidateTag).not.toHaveBeenCalled();
   });
 
   it("正常系: 有効な日付とメモで更新し、店舗系タグを revalidate する", async () => {
@@ -56,8 +77,6 @@ describe("updateSalesProgressAction", () => {
       "store_1",
       makeFormData({
         appointment_acquired_date: "2026-07-10",
-        next_action_date: "2026-07-20",
-        next_action_note: "見積フォローの電話",
         memo: "平日15時以降に連絡",
       }),
     );
@@ -70,8 +89,6 @@ describe("updateSalesProgressAction", () => {
     expect(mockUpdate).toHaveBeenCalledTimes(1);
     expect(mockUpdate).toHaveBeenCalledWith("store_1", {
       appointment_acquired_date: "2026-07-10",
-      next_action_date: "2026-07-20",
-      next_action_note: "見積フォローの電話",
       memo: "平日15時以降に連絡",
     });
     const revalidated = mockRevalidateTag.mock.calls.map((c) => c[0]);
@@ -86,16 +103,14 @@ describe("updateSalesProgressAction", () => {
       "store_1",
       makeFormData({
         appointment_acquired_date: "",
-        next_action_date: "",
-        next_action_note: "",
+        memo: "",
       }),
     );
 
     expect(result.ok).toBe(true);
     expect(mockUpdate).toHaveBeenCalledWith("store_1", {
       appointment_acquired_date: null,
-      next_action_date: null,
-      next_action_note: null,
+      memo: "",
     });
   });
 
@@ -104,13 +119,31 @@ describe("updateSalesProgressAction", () => {
 
     const result = await updateSalesProgressAction(
       "store_1",
-      makeFormData({ next_action_note: "電話する" }),
+      makeFormData({ memo: "電話する" }),
     );
 
     expect(result.ok).toBe(true);
     expect(mockUpdate).toHaveBeenCalledWith("store_1", {
-      next_action_note: "電話する",
+      memo: "電話する",
     });
+  });
+
+  it("next_action_date / next_action_note は FormData に含まれていても無視する (Store legacy列は read-only)", async () => {
+    mockUpdate.mockResolvedValueOnce({ id: "store_1" });
+
+    const result = await updateSalesProgressAction(
+      "store_1",
+      makeFormData({
+        memo: "継続メモ",
+        next_action_date: "2026-08-01",
+        next_action_note: "この値は書き込まれないはず",
+      }),
+    );
+
+    expect(result.ok).toBe(true);
+    // patch に next_action_date / next_action_note が含まれないことを保証する
+    // (Deal (migration 0024) が次回アクションの単一の書き込み先)
+    expect(mockUpdate).toHaveBeenCalledWith("store_1", { memo: "継続メモ" });
   });
 
   it("営業メモは保存・空文字クリアでき、未送信時は触らない", async () => {
@@ -141,7 +174,7 @@ describe("updateSalesProgressAction", () => {
 
     const result = await updateSalesProgressAction(
       "store_1",
-      makeFormData({ next_action_note: "電話する" }),
+      makeFormData({ memo: "電話する" }),
     );
 
     expect(result).toEqual({ ok: false, error: "営業進捗の更新に失敗しました" });
@@ -164,29 +197,12 @@ describe("updateSalesProgressAction", () => {
   it("実在しない日付 (2026-02-30) は拒否する", async () => {
     const result = await updateSalesProgressAction(
       "store_1",
-      makeFormData({ next_action_date: "2026-02-30" }),
+      makeFormData({ appointment_acquired_date: "2026-02-30" }),
     );
 
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toContain("次回アクション予定日");
+    if (!result.ok) expect(result.error).toContain("アポ取得日");
     expect(mockUpdate).not.toHaveBeenCalled();
-  });
-
-  it("501 文字のメモは拒否し、500 文字は受理する", async () => {
-    const tooLong = await updateSalesProgressAction(
-      "store_1",
-      makeFormData({ next_action_note: "あ".repeat(501) }),
-    );
-    expect(tooLong.ok).toBe(false);
-    if (!tooLong.ok) expect(tooLong.error).toContain("500文字以内");
-    expect(mockUpdate).not.toHaveBeenCalled();
-
-    mockUpdate.mockResolvedValueOnce({ id: "store_1" });
-    const justFits = await updateSalesProgressAction(
-      "store_1",
-      makeFormData({ next_action_note: "あ".repeat(500) }),
-    );
-    expect(justFits.ok).toBe(true);
   });
 
   it("不存在店舗 (repository が null) は失敗を返し、revalidate しない", async () => {
@@ -194,7 +210,7 @@ describe("updateSalesProgressAction", () => {
 
     const result = await updateSalesProgressAction(
       "store_missing",
-      makeFormData({ next_action_date: "2026-07-20" }),
+      makeFormData({ appointment_acquired_date: "2026-07-20" }),
     );
 
     expect(result).toEqual({ ok: false, error: "店舗が見つかりませんでした" });

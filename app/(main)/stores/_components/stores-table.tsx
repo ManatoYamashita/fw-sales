@@ -1,5 +1,6 @@
 import { listSalesProgressRows } from "@/lib/queries/sales-progress";
 import type { ProgressSort, SalesProgressFilter } from "@/lib/domain/sales-progress";
+import type { Profile } from "@/types/profile";
 import { StoresTableView } from "./stores-table-view";
 
 /**
@@ -15,14 +16,19 @@ import { StoresTableView } from "./stores-table-view";
  *
  * 営業担当 (sales) ソートは profile.display_name 解決が必要なため、
  * profile 取得後に id → display_name の Map を `listStores` の ctx に渡す。
+ *
+ * `profiles` は親 (`StoresPage`) から渡される。本コンポーネント内で
+ * `getAllProfiles` を再取得しない (キャッシュキー分裂 / 二重 SELECT 防止)。
  */
 export async function StoresTable({
   filter,
   sort,
+  profiles,
 }: {
   filter: SalesProgressFilter;
   sort: ProgressSort;
+  profiles: readonly Profile[];
 }) {
-  const rows = await listSalesProgressRows(filter, sort);
+  const rows = await listSalesProgressRows(filter, sort, profiles);
   return <StoresTableView rows={rows} />;
 }

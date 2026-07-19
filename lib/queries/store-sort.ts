@@ -7,13 +7,12 @@
  *   組み合わせて利用する。
  */
 import {
-  CHANNELS,
   DEFAULT_STORE_SORT,
   type Store,
   type StoreFilter,
   type StoreSort,
 } from "@/types/store";
-import { STAGE_IDS } from "@/types/stage";
+import { compareChannel, compareStage } from "@/lib/domain/sort-order";
 
 /**
  * `applyStoreSort` 用の補助コンテキスト。
@@ -28,14 +27,6 @@ const NAME_COLLATOR = new Intl.Collator("ja", {
   sensitivity: "base",
   numeric: true,
 });
-
-const STAGE_ORDER: Record<string, number> = Object.fromEntries(
-  STAGE_IDS.map((id, i) => [id, i]),
-);
-
-const CHANNEL_ORDER: Record<string, number> = Object.fromEntries(
-  CHANNELS.map((c, i) => [c, i]),
-);
 
 function locationKey(s: Store): string {
   return `${s.prefecture ?? ""}${s.city ?? ""}`;
@@ -118,14 +109,10 @@ export function applyStoreSort(
           }
           break;
         case "stage":
-          diff =
-            (STAGE_ORDER[a.stage] ?? STAGE_IDS.length) -
-            (STAGE_ORDER[b.stage] ?? STAGE_IDS.length);
+          diff = compareStage(a.stage, b.stage);
           break;
         case "channel":
-          diff =
-            (CHANNEL_ORDER[a.channel] ?? CHANNELS.length) -
-            (CHANNEL_ORDER[b.channel] ?? CHANNELS.length);
+          diff = compareChannel(a.channel, b.channel);
           break;
         case "updated":
         default:
