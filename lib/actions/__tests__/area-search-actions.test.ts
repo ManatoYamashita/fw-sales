@@ -22,6 +22,7 @@ const {
   mockGetPlaceById,
   mockGetPlaceDetails,
   mockStoreList,
+  mockFindAreaSearchCandidates,
   mockTransaction,
   mockRevalidateTag,
   mockUpsertPlaceCandidates,
@@ -32,6 +33,7 @@ const {
   mockGetPlaceById: vi.fn(),
   mockGetPlaceDetails: vi.fn(),
   mockStoreList: vi.fn(),
+  mockFindAreaSearchCandidates: vi.fn(),
   mockTransaction: vi.fn(),
   mockRevalidateTag: vi.fn(),
   mockUpsertPlaceCandidates: vi.fn(),
@@ -48,7 +50,10 @@ vi.mock("@/lib/places/google", () => ({
 
 vi.mock("@/lib/repositories", () => ({
   repos: {
-    store: { list: mockStoreList },
+    store: {
+      list: mockStoreList,
+      findAreaSearchCandidates: mockFindAreaSearchCandidates,
+    },
     placeCandidate: {
       upsertFromAreaSearch: mockUpsertPlaceCandidates,
       findByGooglePlaceIds: mockFindByGooglePlaceIds,
@@ -107,6 +112,7 @@ function makeSearchPage(overrides: Partial<PlaceSearchPage> = {}): PlaceSearchPa
 beforeEach(() => {
   vi.resetAllMocks();
   mockStoreList.mockResolvedValue([]);
+  mockFindAreaSearchCandidates.mockResolvedValue([]);
   mockUpsertPlaceCandidates.mockResolvedValue({
     insertedCount: 0,
     updatedCount: 0,
@@ -361,7 +367,7 @@ describe("searchPlacesWithMatchesAction", () => {
     consoleSpy.mockRestore();
   });
 
-  it("repos.store.list の結果から DB登録済み判定 (matchedStore) が反映される", async () => {
+  it("findAreaSearchCandidates の結果から DB登録済み判定 (matchedStore) が反映される", async () => {
     mockResolveSearchCenter.mockResolvedValue(CENTER);
     mockSearchPlacesPage.mockResolvedValue(
       makeSearchPage({
@@ -371,7 +377,7 @@ describe("searchPlacesWithMatchesAction", () => {
         ],
       }),
     );
-    mockStoreList.mockResolvedValue([
+    mockFindAreaSearchCandidates.mockResolvedValue([
       makeStore({ id: "store-1", name: "登録済み店舗", google_place_id: "ChIJregistered" }),
     ]);
 
@@ -384,6 +390,42 @@ describe("searchPlacesWithMatchesAction", () => {
       expect(registered?.matchedStore).toEqual({ id: "store-1", name: "登録済み店舗" });
       expect(notRegistered?.matchedStore).toBeNull();
     }
+  });
+
+  it("空でない重複除去済み Place ID と複数地点の bbox を候補取得へ渡す", async () => {
+    mockResolveSearchCenter.mockResolvedValue(CENTER);
+    mockSearchPlacesPage.mockResolvedValue(
+      makeSearchPage({
+        places: [
+          makePlace({ placeId: "ChIJ_A", lat: 35.5, lng: 139.2 }),
+          makePlace({ placeId: "", lat: 35.7, lng: 139.8 }),
+          makePlace({ placeId: "ChIJ_A", lat: 35.6, lng: 139.4 }),
+          makePlace({ placeId: "ChIJ_B", lat: 35.4, lng: 139.6 }),
+        ],
+      }),
+    );
+
+    await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", 1000);
+
+    expect(mockFindAreaSearchCandidates).toHaveBeenCalledTimes(1);
+    const params = mockFindAreaSearchCandidates.mock.calls[0]?.[0];
+    expect(params?.googlePlaceIds).toEqual(["ChIJ_A", "ChIJ_B"]);
+    expect(params?.bounds?.minLat).toBeCloseTo(35.399, 6);
+    expect(params?.bounds?.maxLat).toBeCloseTo(35.701, 6);
+    expect(params?.bounds?.minLng).toBeCloseTo(139.199, 6);
+    expect(params?.bounds?.maxLng).toBeCloseTo(139.801, 6);
+  });
+
+  it("Places が空なら空の Place ID と undefined bounds を候補取得へ渡す", async () => {
+    mockResolveSearchCenter.mockResolvedValue(CENTER);
+    mockSearchPlacesPage.mockResolvedValue(makeSearchPage({ places: [] }));
+
+    await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", 1000);
+
+    expect(mockFindAreaSearchCandidates).toHaveBeenCalledWith({
+      googlePlaceIds: [],
+      bounds: undefined,
+    });
   });
 
   it("nextPageToken が action result に引き継がれる", async () => {

@@ -2,6 +2,49 @@ import type { Store } from "@/types/store";
 import type { PlaceResult, MatchedStoreSummary, PlaceWithMatch } from "./types";
 import { distanceMeters } from "@/lib/utils/geo";
 
+/** Lat/lng bounding box used to narrow the store DB query for area search. */
+export interface PlacesBounds {
+  minLat: number;
+  maxLat: number;
+  minLng: number;
+  maxLng: number;
+}
+
+/**
+ * Degrees added as a safety margin around the places bbox.
+ * 0.001° is about 111 m in latitude; longitude distance becomes shorter as
+ * latitude increases. In Japan's practical latitude range it still safely
+ * covers the 50 m proximity threshold. This is a coarse candidate-fetching
+ * margin, not an exact degrees-to-distance conversion.
+ */
+const BBOX_MARGIN_DEGREES = 0.001;
+
+/**
+ * Computes a padded bounding box that encloses all place coordinates.
+ * Returns null when places is empty (caller should skip the DB query).
+ */
+export function computePlacesBounds(
+  places: readonly { lat: number; lng: number }[],
+): PlacesBounds | null {
+  if (places.length === 0) return null;
+  let minLat = places[0]!.lat;
+  let maxLat = places[0]!.lat;
+  let minLng = places[0]!.lng;
+  let maxLng = places[0]!.lng;
+  for (const p of places) {
+    if (p.lat < minLat) minLat = p.lat;
+    if (p.lat > maxLat) maxLat = p.lat;
+    if (p.lng < minLng) minLng = p.lng;
+    if (p.lng > maxLng) maxLng = p.lng;
+  }
+  return {
+    minLat: minLat - BBOX_MARGIN_DEGREES,
+    maxLat: maxLat + BBOX_MARGIN_DEGREES,
+    minLng: minLng - BBOX_MARGIN_DEGREES,
+    maxLng: maxLng + BBOX_MARGIN_DEGREES,
+  };
+}
+
 const PROXIMITY_THRESHOLD_M = 50;
 
 /**
@@ -25,7 +68,7 @@ export function findMatchedStore(
     return { id: byPlaceId.id, name: byPlaceId.name };
   }
 
-  // 第二優先: 店名一致 + 50m以内 (google_place_id が null の手動登録店舗を拾う)
+  // 第二優先: 店名一致 + 50m以内 (Place ID の有無・新旧を問わない)
   const byProximity = stores.find((s) => {
     if (s.lat === null || s.lng === null) return false;
     if (s.name !== place.name) return false;

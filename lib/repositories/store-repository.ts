@@ -6,9 +6,22 @@ import type {
   StoreFilter,
 } from "@/types/store";
 import type { BasicInfo, FillSource } from "@/types/basic-info";
+import type { PlacesBounds } from "@/lib/places/match-store";
 
 export interface StoreRepository {
   list(filter?: StoreFilter): Promise<Store[]>;
+  /**
+   * エリア検索の照合に必要な候補店舗だけを返す (M4 / Issue #129)。
+   *
+   * - `googlePlaceIds` に含まれる `google_place_id` を持つ登録済み店舗
+   * - OR `google_place_id IS NULL` かつ `bounds` 内に座標がある手動登録店舗
+   *
+   * 両配列/boundsが空/未指定の場合は DB に問い合わせず `[]` を返す。
+   */
+  findAreaSearchCandidates(params: {
+    googlePlaceIds: string[];
+    bounds?: PlacesBounds;
+  }): Promise<Store[]>;
   get(id: string): Promise<Store | null>;
   create(input: StoreInput): Promise<Store>;
   update(id: string, patch: StorePatch): Promise<Store | null>;

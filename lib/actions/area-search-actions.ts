@@ -12,7 +12,7 @@ import {
 } from "@/lib/places/google";
 import { placeResultToStoreInput } from "@/lib/places/to-store-input";
 import { placeResultToBasicInfo } from "@/lib/places/to-basic-info";
-import { attachStoreMatches } from "@/lib/places/match-store";
+import { attachStoreMatches, computePlacesBounds } from "@/lib/places/match-store";
 import { deduplicatePlaceIds } from "@/lib/places/bulk-utils";
 import { createDiscoveryInfo } from "@/lib/places/discovery";
 import { attachCandidateInfo } from "@/lib/places/candidate-info";
@@ -184,13 +184,19 @@ export async function searchPlacesWithMatchesAction(
       );
     }
 
-    const [{ places, nextPageToken }, stores] = await Promise.all([
-      searchPlacesPage(keyword, centerQuery, {
-        pageToken: options?.pageToken,
-        locationBias: { center, radiusMeters },
-      }),
-      repos.store.list(),
-    ]);
+    // M4: fetch only stores relevant to this search rather than the full table.
+    // This is intentionally sequential: the Places response is required to build
+    // the googlePlaceIds + bbox filter before querying candidate stores.
+    const { places, nextPageToken } = await searchPlacesPage(keyword, centerQuery, {
+      pageToken: options?.pageToken,
+      locationBias: { center, radiusMeters },
+    });
+
+    const googlePlaceIds = [
+      ...new Set(places.map((p) => p.placeId).filter((id) => id !== "")),
+    ];
+    const bounds = computePlacesBounds(places) ?? undefined;
+    const stores = await repos.store.findAreaSearchCandidates({ googlePlaceIds, bounds });
 
     const discoverySource: AreaSearchDiscoverySource =
       options?.discoverySource ?? (options?.pageToken ? "loadMore" : "mainTextSearch");
