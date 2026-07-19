@@ -286,13 +286,28 @@ export const handoffs = pgTable("handoffs", {
  * - `id` は uuid PK、`gen_random_uuid()` で自動生成 (`.defaultRandom()`)
  * - `user_id` は `profiles.id` への FK (ON DELETE CASCADE)
  * - `body` は `{ fewshots: FewShotExample[] }` を JSON 文字列として格納 (既存 ai_analysis_result 規約に揃える)
- * - `is_default` = true の partial unique index は migration 0009 で raw SQL として追加
- *   (Drizzle ORM が partial unique index の WHERE 句を直接サポートしないため)
- * - デフォルトテンプレート削除拒否は migration 0009 の DB trigger で保証
+ * - `is_default` = true の partial unique index は migration 0010 で raw SQL として追加
+ *   (下記「partial index と Drizzle」を参照)
+ * - デフォルトテンプレート削除拒否は migration 0010 の DB trigger で保証
  * - `created_at` / `updated_at` は `YYYY-MM-DD` 形式 text (既存規約に揃える)
  * - RLS は Supabase 側で別途管理 (既存プロジェクトの規約に従う)
  *
- * 関連: Issue #42, drizzle/0009_add_ai_prompt_templates.sql
+ * ## partial index と Drizzle
+ *
+ * 本 JSDoc は当初「Drizzle ORM が partial unique index の WHERE 句を直接サポートしない」と
+ * 記載していたが、**現行の drizzle-orm では誤り**である。`IndexBuilder` は `.where(condition: SQL)`
+ * を持ち (`node_modules/drizzle-orm/pg-core/indexes.d.ts`)、`index()` / `uniqueIndex()` の
+ * どちらからでも `uniqueIndex("...").on(table.user_id).where(sql`...`)` と表現できる。
+ * raw SQL で持っているのは 0010 作成当時の制約に由来する歴史的経緯であり、現在の制約ではない。
+ *
+ * ただし **schema.ts 側へ移す場合は snapshot との同期に注意**すること。
+ * `ai_prompt_templates_default_idx` は drizzle の snapshot に載っておらず
+ * (`drizzle/meta/*_snapshot.json` の indexes は `ai_prompt_templates_user_idx` のみ)、
+ * schema.ts に宣言を足すと `pnpm db:generate` が「DB に無い index」とみなして
+ * 重複した `CREATE UNIQUE INDEX` を生成する。移行するなら生成物の確認が必須。
+ * 現状は動作しているため、本コミットでは記述の訂正のみを行い宣言は移していない。
+ *
+ * 関連: Issue #42, drizzle/0010_add_ai_prompt_templates.sql
  */
 export const aiPromptTemplates = pgTable(
   "ai_prompt_templates",
@@ -310,7 +325,8 @@ export const aiPromptTemplates = pgTable(
   },
   (table) => [
     index("ai_prompt_templates_user_idx").on(table.user_id),
-    // partial unique index (WHERE is_default = true) は migration 0009 に raw SQL で追加
+    // partial unique index (WHERE is_default = true) は migration 0010 に raw SQL で追加。
+    // Drizzle でも .where() で表現できるが snapshot 未登録のため移行には注意 (上の JSDoc 参照)
   ],
 );
 
