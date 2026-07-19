@@ -7,17 +7,38 @@
  *
  * 実行は scripts/bench-area-search-index.sh 経由 (使い捨てクラスタを用意する)。
  * 本スクリプト単体では動作しない。接続先は BENCH_DATABASE_URL のみを読み、
- * localhost の bench ポートでなければ即座に終了する (本番 DB 誤爆の防止)。
  * DATABASE_URL は意図的に一切参照しない。
+ *
+ * 誤爆防止は 2 段構えである。
+ *   1. 接続前: host が localhost 系で port が BENCH_PG_PORT と一致すること (安価な足切り)。
+ *   2. 破壊操作の直前: assertThrowawayCluster() が、DB 名・data_directory・番兵トークンの
+ *      3 点をラッパーの生成値と照合する。1 だけでは不十分で、BENCH_PG_PORT 自体が
+ *      利用者の環境変数であるため、URL と揃えるだけで既存のローカル DB に到達できてしまう。
+ *      番兵トークンは .sh がプロセスごとに生成する nonce で、番兵テーブルは今 initdb した
+ *      クラスタにしか存在しない。data_directory は mktemp 由来の一意なパスであり、
+ *      本番クラスタと一致することは原理的にありえない。
+ *      いずれも取得に失敗した場合は fail-closed (実行を中止) とする。
  *
  * 接続様式は既存スクリプトと同一 (Node postgres / prepare:false / 単一接続)。
  * アプリ本体も prepare:false (lib/db/client.ts) なので毎回 custom plan になる点を揃える。
- * 接続文字列の値はログに出力しない。
+ * 接続文字列・番兵トークンの値はログに出力しない。
+ *
+ * 引数:
+ *   --rows=N,...        行数ティア          (既定 1000,10000,100000)
+ *   --null-rates=R,...  座標 NULL 率        (既定 0.9,0.5,0.1)
+ *   --hit-rates=R,...   Places 20 件のうち既存店舗に一致する割合 (既定 0.25)
+ *   --bbox-radius=M     探索半径 [m]        (既定 1000)
+ *   --bbox-center=I     CITY_LAT/LNG の添字 (既定 0 = 東京駅)
+ *   --seed=S            合成データの種      (既定 0.42)
+ *   --runs=N            計測反復回数        (既定 20)
  */
 import postgres from "postgres";
 
 // ---------------------------------------------------------------------------
-// 接続先ガード: 本番 DB への誤爆を構造的に防ぐ
+// 接続先ガード (第 1 段): 接続前の安価な足切り
+//
+// これ単独では破壊操作を許可しない。expectedPort は利用者が指定できる環境変数であり、
+// 「独立した第三者による検証」ではないため。実際の可否は assertThrowawayCluster() が決める。
 // ---------------------------------------------------------------------------
 const url = process.env.BENCH_DATABASE_URL;
 if (!url) {
@@ -50,8 +71,24 @@ function arg(name, fallback) {
   return hit ? hit.slice(name.length + 3) : fallback;
 }
 
-const ROW_TIERS = arg("rows", "1000,10000,100000").split(",").map((n) => Number(n.trim()));
-const NULL_RATES = arg("null-rates", "0.9,0.5,0.1").split(",").map((n) => Number(n.trim()));
+const nums = (raw, label) => {
+  const xs = raw.split(",").map((n) => Number(n.trim()));
+  if (xs.length === 0 || xs.some((n) => !Number.isFinite(n))) {
+    console.error(`ERROR: --${label} に数値以外が含まれています: ${raw}`);
+    process.exit(1);
+  }
+  return xs;
+};
+
+const ROW_TIERS = nums(arg("rows", "1000,10000,100000"), "rows");
+const NULL_RATES = nums(arg("null-rates", "0.9,0.5,0.1"), "null-rates");
+/**
+ * Places の 1 ページ (20 件) のうち、既に stores に存在する割合。
+ * 実運用では「新規に見つかった店舗」が大半なので既定は低めに置く。
+ */
+const HIT_RATES = nums(arg("hit-rates", "0.25"), "hit-rates");
+const BBOX_RADIUS_M = Number(arg("bbox-radius", "1000"));
+const BBOX_CENTER_I = Number(arg("bbox-center", "0"));
 const SEED = Number(arg("seed", "0.42"));
 const RUNS = Number(arg("runs", "20"));
 
@@ -72,6 +109,19 @@ const CITY_LNG = [
 ];
 
 const IN_LIST_SIZE = 20; // Places 1 ページの最大件数
+
+if (!Number.isInteger(BBOX_CENTER_I) || BBOX_CENTER_I < 0 || BBOX_CENTER_I >= CITY_LAT.length) {
+  console.error(`ERROR: --bbox-center は 0〜${CITY_LAT.length - 1} の整数で指定してください。`);
+  process.exit(1);
+}
+if (!(BBOX_RADIUS_M > 0)) {
+  console.error("ERROR: --bbox-radius は正の数で指定してください。");
+  process.exit(1);
+}
+if (HIT_RATES.some((r) => r < 0 || r > 1)) {
+  console.error("ERROR: --hit-rates は 0〜1 で指定してください。");
+  process.exit(1);
+}
 
 // ---------------------------------------------------------------------------
 // index 候補
@@ -114,6 +164,93 @@ const sql = postgres(url, {
 });
 
 // ---------------------------------------------------------------------------
+// 接続先ガード (第 2 段): 使い捨てクラスタ固有の証拠を破壊操作の直前に検証する
+// ---------------------------------------------------------------------------
+/**
+ * TRUNCATE / INSERT / CREATE INDEX に到達してよいのは、scripts/bench-area-search-index.sh
+ * が直前に initdb したクラスタだけである。それを次の 3 点で確かめる。
+ *
+ *   - current_database()               … ラッパーが createdb した DB 名と一致するか
+ *   - current_setting('data_directory')… ラッパーが mktemp で作った PGDATA と一致するか
+ *   - bench_sentinel.token             … ラッパーが本プロセス用に生成した nonce と一致するか
+ *
+ * 3 点とも「利用者が環境変数を揃えるだけでは満たせない」性質を持つ。とりわけ番兵は、
+ * 対象 DB に同名テーブルを作って同じ乱数を書き込まない限り成立しない。
+ * 取得に失敗した場合 (テーブル不在・権限不足など) は例外を fail-closed として扱う。
+ */
+/**
+ * assertThrowawayCluster() を通過したか。破壊操作を行う関数はすべて requireVerified() を
+ * 先頭で呼ぶ。呼び出し順序の記憶に頼らず、新しい破壊操作を足したときに素通りしないようにする。
+ */
+let clusterVerified = false;
+
+function requireVerified(operation) {
+  if (!clusterVerified) {
+    throw new Error(
+      `内部エラー: 使い捨てクラスタの検証前に破壊操作 (${operation}) が呼ばれました。`,
+    );
+  }
+}
+
+async function assertThrowawayCluster() {
+  const abort = (reason) => {
+    // トークンそのものは出力しない (規約)。
+    console.error(`ERROR: 使い捨てクラスタの検証に失敗しました: ${reason}`);
+    console.error("       bash scripts/bench-area-search-index.sh から実行してください。");
+    console.error("       このスクリプトは検証を通過しない限り一切の書き込みを行いません。");
+    return process.exit(1);
+  };
+
+  const token = process.env.BENCH_SENTINEL_TOKEN;
+  if (!token || !/^[0-9a-f]{32,}$/.test(token)) {
+    return abort("BENCH_SENTINEL_TOKEN が未設定か形式不正です");
+  }
+
+  const expectedDb = process.env.BENCH_DB_NAME;
+  const expectedDataDir = process.env.BENCH_PGDATA;
+  if (!expectedDb) return abort("BENCH_DB_NAME が未設定です");
+  if (!expectedDataDir) return abort("BENCH_PGDATA が未設定です");
+
+  let ctx;
+  try {
+    [ctx] = await sql.unsafe(
+      `select current_database() as db,
+              current_setting('data_directory') as data_dir,
+              pg_is_in_recovery() as in_recovery`,
+    );
+  } catch (err) {
+    return abort(`クラスタ情報を取得できません (${err instanceof Error ? err.message : String(err)})`);
+  }
+
+  if (ctx.db !== expectedDb) {
+    return abort(`DB 名が一致しません (expected ${expectedDb}, got ${ctx.db})`);
+  }
+  if (ctx.data_dir !== expectedDataDir) {
+    return abort("data_directory がラッパーの作成した一時ディレクトリと一致しません");
+  }
+  if (ctx.in_recovery) {
+    return abort("レプリカ (recovery 中) には書き込みません");
+  }
+
+  let rows;
+  try {
+    rows = await sql.unsafe("select token from bench_sentinel");
+  } catch (err) {
+    return abort(`番兵テーブルを読めません (${err instanceof Error ? err.message : String(err)})`);
+  }
+
+  if (rows.length !== 1) {
+    return abort(`番兵は 1 行でなければなりません (got ${rows.length})`);
+  }
+  if (rows[0].token !== token) {
+    return abort("番兵トークンが一致しません");
+  }
+
+  clusterVerified = true;
+  console.log(`==> 使い捨てクラスタを検証しました (db=${ctx.db}, 番兵 OK)`);
+}
+
+// ---------------------------------------------------------------------------
 // 合成データ生成
 // ---------------------------------------------------------------------------
 /**
@@ -137,6 +274,7 @@ function rnd(salt) {
 }
 
 async function populate(rows, nullRate) {
+  requireVerified("populate/truncate");
   await sql.unsafe("truncate table stores cascade");
   await sql.unsafe(
     `
@@ -207,6 +345,66 @@ async function populate(rows, nullRate) {
 function bboxFor(centerLat, centerLng, radiusMeters) {
   const half = radiusMeters / 111000 + 0.001;
   return [centerLat - half, centerLat + half, centerLng - half, centerLng + half];
+}
+
+/** 実行中の設定から bbox を作る。中心・半径の直書きを 1 箇所に集約する。 */
+function currentBbox() {
+  return bboxFor(CITY_LAT[BBOX_CENTER_I], CITY_LNG[BBOX_CENTER_I], BBOX_RADIUS_M);
+}
+
+/**
+ * 実リクエストと同じ相関を持つワークロードを組む。
+ *
+ * 本番の findAreaSearchCandidates では、IN リストの Place ID と bbox は「同一の Places
+ * レスポンス」に由来する。つまり ID が指す店舗は必ず bbox の内側にあり、OR の 2 つの腕は
+ * 強く重なる。この重なりが BitmapOr のコストと選択率の見積もりを支配する。
+ *
+ * 以前の実装は `limit 20` を ORDER BY なしで撃っていたため、heap 先頭 20 件 (合成データの
+ * 80% は 20 都市に散る) と固定の東京 bbox という、ほぼ交わらない組み合わせを測っていた。
+ * それは実リクエストの形状ではない。
+ *
+ * また実運用では 20 件すべてが既存店舗に一致するとは限らない (むしろ大半は新規)。
+ * hitRate でその割合を制御し、残りは存在しない ID で埋める。
+ *
+ * @returns {{ids: string[], bbox: number[], requestedHits: number, actualHits: number,
+ *            actualHitRate: number, bboxRows: number, bboxSelectivity: number}}
+ */
+async function buildWorkload(bbox, hitRate, totalRows) {
+  const requestedHits = Math.round(IN_LIST_SIZE * hitRate);
+
+  // bbox の内側から決定的に採る。md5 順にすることで heap 物理順への依存を断ち、
+  // seed が同じなら何度実行しても同じ ID 集合が選ばれる。
+  const hitRows = await sql.unsafe(
+    `select google_place_id from stores
+      where google_place_id is not null
+        and lat >= $1 and lat <= $2 and lng >= $3 and lng <= $4
+      order by md5(google_place_id)
+      limit $5`,
+    [...bbox, requestedHits],
+  );
+
+  const ids = hitRows.map((r) => r.google_place_id);
+  const actualHits = ids.length;
+
+  // 不足分は「Places が見つけたが stores に未登録の店舗」を表す。
+  // インデックス付きにすることで重複のない一意な ID になる。
+  while (ids.length < IN_LIST_SIZE) ids.push(`ChIJ_absent_${ids.length}`);
+
+  const [sel] = await sql.unsafe(
+    `select count(*)::int as n from stores
+      where lat >= $1 and lat <= $2 and lng >= $3 and lng <= $4`,
+    bbox,
+  );
+
+  return {
+    ids,
+    bbox,
+    requestedHits,
+    actualHits,
+    actualHitRate: actualHits / IN_LIST_SIZE,
+    bboxRows: sel.n,
+    bboxSelectivity: totalRows > 0 ? sel.n / totalRows : 0,
+  };
 }
 
 const IN_PLACEHOLDERS = Array.from({ length: IN_LIST_SIZE }, (_, i) => `$${i + 1}`).join(", ");
@@ -289,10 +487,12 @@ function findIndexCond(node, acc = []) {
 }
 
 async function dropAllTestIndexes() {
+  requireVerified("dropAllTestIndexes");
   for (const n of INDEX_NAMES) await sql.unsafe(`drop index if exists ${n}`);
 }
 
 async function applyCandidate(c) {
+  requireVerified("applyCandidate");
   await dropAllTestIndexes();
   for (const ddl of c.ddl) await sql.unsafe(ddl);
   await sql.unsafe("analyze stores");
@@ -314,12 +514,22 @@ const ms = (n) => n.toFixed(3).padStart(9);
 // main
 // ---------------------------------------------------------------------------
 try {
+  // 破壊操作 (TRUNCATE / INSERT / CREATE INDEX) の前に、接続先が本当に
+  // ラッパーが直前に initdb した使い捨てクラスタであることを確かめる。
+  // 通過しない限り requireVerified() が全ての破壊操作を拒否する (fail-closed)。
+  await assertThrowawayCluster();
+
   console.log("=".repeat(100));
   console.log("エリア検索 bbox index ベンチマーク (Issue #162)");
   const [v] = await sql.unsafe("select version() as v");
   console.log(v.v.split(",")[0]);
-  console.log(`seed=${SEED} runs=${RUNS} rows=[${ROW_TIERS}] nullRates=[${NULL_RATES}]`);
+  console.log(
+    `seed=${SEED} runs=${RUNS} rows=[${ROW_TIERS}] nullRates=[${NULL_RATES}] hitRates=[${HIT_RATES}] ` +
+      `bbox=CITY[${BBOX_CENTER_I}] r=${BBOX_RADIUS_M}m`,
+  );
   console.log("=".repeat(100));
+
+  await assertThrowawayCluster();
 
   const results = [];
 
@@ -336,52 +546,60 @@ try {
         from stores t`);
       const [w] = await sql.unsafe(`select sum(avg_width)::int as w from pg_stats where tablename='stores'`);
 
-      // 実データの place_id を 20 件、都心 bbox を採用 (index にとって最悪ケース = 選択率が高い側)
-      const idRows = await sql.unsafe(
-        `select google_place_id from stores where google_place_id is not null limit ${IN_LIST_SIZE}`,
-      );
-      const ids = idRows.map((r) => r.google_place_id);
-      while (ids.length < IN_LIST_SIZE) ids.push("ChIJ_absent_" + ids.length);
-      const bbox = bboxFor(CITY_LAT[0], CITY_LNG[0], 1000);
+      for (const hitRate of HIT_RATES) {
+        // IN リストは bbox の内側から採る。実リクエストでは Place ID と bbox が同一の
+        // Places レスポンス由来で、2 つの腕が強く重なるため。
+        const wl = await buildWorkload(currentBbox(), hitRate, stat.total);
+        const { ids, bbox } = wl;
 
-      console.log("");
-      console.log("-".repeat(100));
-      console.log(
-        `rows=${stat.total}  lat非NULL=${stat.with_lat} (${((stat.with_lat / stat.total) * 100).toFixed(1)}%)  ` +
-          `place_id非NULL=${stat.with_pid}  heap=${stat.heap}  planner幅=${w.w}B (本番実測 552B / EXPLAIN width=680)`,
-      );
-      console.log("-".repeat(100));
-      console.log(
-        "cand  index                     idxサイズ   Q3中央値   Q3 p95   Q3計画   Q1中央値   1session(10x)  plan",
-      );
-
-      let baseline = null;
-      for (const c of CANDIDATES) {
-        await applyCandidate(c);
-        const size = await indexSizeBytes();
-
-        const q3 = await measure(QUERIES.Q3.sql, QUERIES.Q3.params(ids, bbox));
-        const q1 = await measure(QUERIES.Q1.sql, QUERIES.Q1.params(ids, bbox));
-        const e3 = await explain(QUERIES.Q3.sql, QUERIES.Q3.params(ids, bbox));
-
-        // 1 セッション換算: prepare:false かつ 1 検索で 10 回以上呼ばれるため planning が 10 倍で効く
-        const session = (e3.planningTime + e3.executionTime) * 10;
-        if (c.id === "C0") baseline = { q3: q3.median, session };
-
-        const delta = baseline ? ((q3.median - baseline.q3) / baseline.q3) * 100 : 0;
-        const deltaStr = c.id === "C0" ? "   —  " : `${delta >= 0 ? "+" : ""}${delta.toFixed(1)}%`;
-
+        console.log("");
+        console.log("-".repeat(112));
         console.log(
-          `${c.id}    ${c.label.padEnd(24)} ${kb(size).padStart(8)}  ${ms(q3.median)} ${ms(q3.p95)} ` +
-            `${ms(e3.planningTime)} ${ms(q1.median)}  ${ms(session)} ${deltaStr.padStart(8)}  ${e3.text.slice(0, 60)}`,
+          `rows=${stat.total}  lat非NULL=${stat.with_lat} (${((stat.with_lat / stat.total) * 100).toFixed(1)}%)  ` +
+            `place_id非NULL=${stat.with_pid}  heap=${stat.heap}  planner幅=${w.w}B (本番実測 552B / EXPLAIN width=680)`,
+        );
+        console.log(
+          `bbox=CITY[${BBOX_CENTER_I}] r=${BBOX_RADIUS_M}m  bbox内=${wl.bboxRows}行 ` +
+            `(選択率 ${(wl.bboxSelectivity * 100).toFixed(2)}%)  ` +
+            `IN一致=${wl.actualHits}/${IN_LIST_SIZE} (実ヒット率 ${(wl.actualHitRate * 100).toFixed(0)}%` +
+            `${wl.actualHits < wl.requestedHits ? `, 要求 ${wl.requestedHits} に対し bbox 内の候補不足` : ""})`,
+        );
+        console.log("-".repeat(112));
+        console.log(
+          "cand  index                     idxサイズ   Q3中央値   Q3 p95   Q3計画   Q1中央値   1session(10x)  plan",
         );
 
-        results.push({
-          rows: stat.total, nullRate, withLat: stat.with_lat, candidate: c.id, label: c.label,
-          indexBytes: size, q3Median: q3.median, q3P95: q3.p95, q1Median: q1.median,
-          planningTime: e3.planningTime, executionTime: e3.executionTime, sessionMs: session,
-          deltaPct: c.id === "C0" ? 0 : delta, plan: e3.text, indexConds: findIndexCond(e3.raw),
-        });
+        let baseline = null;
+        for (const c of CANDIDATES) {
+          await applyCandidate(c);
+          const size = await indexSizeBytes();
+
+          const q3 = await measure(QUERIES.Q3.sql, QUERIES.Q3.params(ids, bbox));
+          const q1 = await measure(QUERIES.Q1.sql, QUERIES.Q1.params(ids, bbox));
+          const e3 = await explain(QUERIES.Q3.sql, QUERIES.Q3.params(ids, bbox));
+
+          // 1 セッション換算: prepare:false かつ 1 検索で 10 回以上呼ばれるため planning が 10 倍で効く
+          const session = (e3.planningTime + e3.executionTime) * 10;
+          if (c.id === "C0") baseline = { q3: q3.median, session };
+
+          const delta = baseline ? ((q3.median - baseline.q3) / baseline.q3) * 100 : 0;
+          const deltaStr = c.id === "C0" ? "   —  " : `${delta >= 0 ? "+" : ""}${delta.toFixed(1)}%`;
+
+          console.log(
+            `${c.id}    ${c.label.padEnd(24)} ${kb(size).padStart(8)}  ${ms(q3.median)} ${ms(q3.p95)} ` +
+              `${ms(e3.planningTime)} ${ms(q1.median)}  ${ms(session)} ${deltaStr.padStart(8)}  ${e3.text.slice(0, 60)}`,
+          );
+
+          results.push({
+            rows: stat.total, nullRate, withLat: stat.with_lat, candidate: c.id, label: c.label,
+            hitRate, actualHitRate: wl.actualHitRate, actualHits: wl.actualHits,
+            bboxRows: wl.bboxRows, bboxSelectivity: wl.bboxSelectivity,
+            bboxCenter: BBOX_CENTER_I, bboxRadiusM: BBOX_RADIUS_M,
+            indexBytes: size, q3Median: q3.median, q3P95: q3.p95, q1Median: q1.median,
+            planningTime: e3.planningTime, executionTime: e3.executionTime, sessionMs: session,
+            deltaPct: c.id === "C0" ? 0 : delta, plan: e3.text, indexConds: findIndexCond(e3.raw),
+          });
+        }
       }
     }
   }
@@ -395,8 +613,10 @@ try {
   console.log("bbox 境界が Index Cond に現れれば index で範囲制限できている。Filter に落ちていれば不可。");
   console.log("=".repeat(100));
 
-  await populate(100000, 0.5);
-  const bbox = bboxFor(CITY_LAT[0], CITY_LNG[0], 1000);
+  const crossTypeRows = Math.max(...ROW_TIERS);
+  await populate(crossTypeRows, 0.5);
+  console.log(`(rows=${crossTypeRows}, nullRate=0.5)`);
+  const bbox = currentBbox();
   for (const c of CANDIDATES.filter((x) => x.ddl.length > 0)) {
     await applyCandidate(c);
     // (i) バインドパラメータ
@@ -419,24 +639,26 @@ try {
   console.log("=".repeat(100));
   console.log("enable_seqscan=off 対照 (planner が選ばなくても index パスの推定コストを見る)");
   console.log("=".repeat(100));
+  const seqScanHitRate = HIT_RATES[0];
+  console.log(`(nullRate=0.5, hitRate=${seqScanHitRate})`);
   console.log("rows      nullRate  C0(seq) cost   C1(idx強制) cost   plannerの選択");
 
   for (const rows of ROW_TIERS) {
     await populate(rows, 0.5);
+
+    // ワークロードは候補に依存しないので 1 度だけ組み、C0 と C1 で同一のものを使う。
+    // 以前は C0 側だけ buildWorkload 相当のパディングを欠いており、bbox 内の非 NULL 行が
+    // 20 件未満のときプレースホルダ数が不足して失敗していた。
+    const wl = await buildWorkload(currentBbox(), seqScanHitRate, rows);
+    const params = QUERIES.Q3.params(wl.ids, wl.bbox);
+
     await applyCandidate(CANDIDATES[0]);
-    const seqCost = (await sql.unsafe(
-      `explain (format json) ${QUERIES.Q3.sql}`, QUERIES.Q3.params(
-        (await sql.unsafe(`select google_place_id from stores where google_place_id is not null limit ${IN_LIST_SIZE}`))
-          .map((r) => r.google_place_id), bboxFor(CITY_LAT[0], CITY_LNG[0], 1000))
-    ))[0]["QUERY PLAN"][0].Plan["Total Cost"];
+    const seqCost = (await sql.unsafe(`explain (format json) ${QUERIES.Q3.sql}`, params))[0]["QUERY PLAN"][0].Plan["Total Cost"];
 
     await applyCandidate(CANDIDATES[1]);
-    const ids2 = (await sql.unsafe(`select google_place_id from stores where google_place_id is not null limit ${IN_LIST_SIZE}`)).map((r) => r.google_place_id);
-    while (ids2.length < IN_LIST_SIZE) ids2.push("ChIJ_absent_" + ids2.length);
-    const bb = bboxFor(CITY_LAT[0], CITY_LNG[0], 1000);
-    const natural = (await sql.unsafe(`explain (format json) ${QUERIES.Q3.sql}`, QUERIES.Q3.params(ids2, bb)))[0]["QUERY PLAN"][0].Plan;
+    const natural = (await sql.unsafe(`explain (format json) ${QUERIES.Q3.sql}`, params))[0]["QUERY PLAN"][0].Plan;
     await sql.unsafe("set enable_seqscan = off");
-    const forced = (await sql.unsafe(`explain (format json) ${QUERIES.Q3.sql}`, QUERIES.Q3.params(ids2, bb)))[0]["QUERY PLAN"][0].Plan;
+    const forced = (await sql.unsafe(`explain (format json) ${QUERIES.Q3.sql}`, params))[0]["QUERY PLAN"][0].Plan;
     await sql.unsafe("set enable_seqscan = on");
 
     console.log(

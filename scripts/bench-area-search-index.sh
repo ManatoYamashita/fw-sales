@@ -7,7 +7,10 @@
 # を実行する。終了時 (異常終了・Ctrl-C を含む) にクラスタを停止し一時ディレクトリを削除する。
 #
 # 本番 DB には一切接続しない。ベンチ側は DATABASE_URL を読まず BENCH_DATABASE_URL のみ
-# を使い、.mjs 側でも接続先が localhost の bench ポートであることを検証する。
+# を使う。さらに本スクリプトはランダムな nonce を持つ番兵テーブルを作り、.mjs は破壊操作の
+# 直前に「DB 名・データディレクトリ・番兵トークン」の 3 点がこのクラスタと一致することを
+# 検証する。host/port の一致だけでは、利用者が BENCH_PG_PORT と URL を揃えることで既存の
+# ローカル DB を破壊できてしまうため (BENCH_PG_PORT 自体が利用者の環境変数である)。
 # drizzle-kit は `pnpm db:migrate` 経由で呼ばない (--env-file-if-exists=.env.local が
 # 本番 URL を読み込むため)。bin.cjs を直接叩き、環境変数を明示的に与える。
 #
@@ -16,7 +19,9 @@
 # index scan を不当に不利に評価してしまうため必須。
 #
 # 実行: bash scripts/bench-area-search-index.sh [--rows=N,...] [--null-rates=R,...] [--seed=S]
-#       引数はそのまま .mjs へ渡される。
+#                                              [--runs=N] [--hit-rates=R,...]
+#                                              [--bbox-radius=M] [--bbox-center=I]
+#       引数はそのまま .mjs へ渡される。詳細は .mjs 冒頭を参照。
 #
 # 環境変数:
 #   PG_BIN         PostgreSQL バイナリのディレクトリ (既定: postgresql@17 → @16 の順に自動解決)
@@ -157,11 +162,50 @@ PG_OPTS="${PG_OPTS} -c full_page_writes=off"
 echo "==> pg_ctl start (port ${PORT})"
 "${PG_BIN}/pg_ctl" -D "$PGDATA" -l "$PGLOG" -o "$PG_OPTS" -w start >/dev/null
 
-export BENCH_DATABASE_URL="postgresql://postgres@127.0.0.1:${PORT}/bench"
-export BENCH_PG_PORT="$PORT"
+BENCH_DB_NAME="bench"
 
-echo "==> createdb bench"
-"${PG_BIN}/createdb" -h 127.0.0.1 -p "$PORT" -U postgres bench
+export BENCH_DATABASE_URL="postgresql://postgres@127.0.0.1:${PORT}/${BENCH_DB_NAME}"
+export BENCH_PG_PORT="$PORT"
+export BENCH_DB_NAME
+# .mjs はこのパスと current_setting('data_directory') の一致を検証する。
+# mktemp 由来の一意なパスなので、本番クラスタと一致することは原理的にありえない。
+export BENCH_PGDATA="$PGDATA"
+
+echo "==> createdb ${BENCH_DB_NAME}"
+"${PG_BIN}/createdb" -h 127.0.0.1 -p "$PORT" -U postgres "$BENCH_DB_NAME"
+
+# ---------------------------------------------------------------------------
+# 番兵 (sentinel)
+# ---------------------------------------------------------------------------
+# .mjs は TRUNCATE / INSERT / CREATE INDEX といった破壊操作の直前に、この使い捨て
+# クラスタでしか成立しない証拠を要求する。host/port だけの検査では、利用者が
+# BENCH_PG_PORT と URL を揃えるだけで既存のローカル DB を破壊できてしまうため
+# (BENCH_PG_PORT 自体が利用者の環境変数であり、独立した事実ではない)。
+#
+# ここで生成する nonce は本プロセスでしか知り得ず、番兵テーブルは今 initdb した
+# クラスタにしか存在しない。両方を .mjs 側で照合することで、破壊操作の到達条件を
+# 「このスクリプトが直前に作ったクラスタであること」に固定する。
+if command -v openssl >/dev/null 2>&1; then
+  BENCH_SENTINEL_TOKEN="$(openssl rand -hex 16)"
+else
+  BENCH_SENTINEL_TOKEN="$(od -vAn -N16 -tx1 /dev/urandom | tr -d ' \n')"
+fi
+export BENCH_SENTINEL_TOKEN
+
+if [ "${#BENCH_SENTINEL_TOKEN}" -lt 32 ]; then
+  echo "ERROR: 番兵トークンの生成に失敗しました。" >&2
+  exit 1
+fi
+
+echo "==> 番兵テーブルを作成"
+"${PG_BIN}/psql" -h 127.0.0.1 -p "$PORT" -U postgres -d "$BENCH_DB_NAME" -v ON_ERROR_STOP=1 -q \
+  -v token="$BENCH_SENTINEL_TOKEN" <<'SQL'
+CREATE TABLE bench_sentinel (
+  token      text PRIMARY KEY,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+INSERT INTO bench_sentinel (token) VALUES (:'token');
+SQL
 
 # drizzle/0004 が auth.users への cross-schema FK と AFTER INSERT trigger を持つため、
 # 素の PostgreSQL では migration が失敗する。参照される列のみのスタブを用意する。
