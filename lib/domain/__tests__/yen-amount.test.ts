@@ -9,7 +9,13 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { extractYenDigits, formatYenDigits, MAX_YEN_AMOUNT, parseYenAmount } from "@/lib/domain/yen-amount";
+import {
+  applyYenAmountInput,
+  extractYenDigits,
+  formatYenDigits,
+  MAX_YEN_AMOUNT,
+  parseYenAmount,
+} from "@/lib/domain/yen-amount";
 
 describe("parseYenAmount", () => {
   it("100000 → canonical 100000 (value 100000)", () => {
@@ -32,6 +38,10 @@ describe("parseYenAmount", () => {
   it("前後空白 (半角・全角) を正規化する", () => {
     expect(parseYenAmount("  25000  ")).toEqual({ ok: true, value: 25000, canonical: "25000" });
     expect(parseYenAmount("　25000　")).toEqual({ ok: true, value: 25000, canonical: "25000" });
+  });
+
+  it("数字の途中の空白は拒否する", () => {
+    expect(parseYenAmount("1 000")).toEqual({ ok: false, reason: "invalid" });
   });
 
   it("空欄・空白のみは未入力 (value null, canonical 空文字)", () => {
@@ -69,6 +79,39 @@ describe("parseYenAmount", () => {
   it("safe integer を超える巨大値・非常に長い入力を拒否する", () => {
     expect(parseYenAmount("9007199254740993")).toEqual({ ok: false, reason: "out_of_range" });
     expect(parseYenAmount("9".repeat(100))).toEqual({ ok: false, reason: "out_of_range" });
+  });
+});
+
+describe("applyYenAmountInput (UI 入力状態遷移)", () => {
+  it.each(["-100", "1.5", "1e3", "1000円"])("%s を別の金額へ変換せず拒否する", (raw) => {
+    const state = applyYenAmountInput(raw);
+    expect(state).toMatchObject({ display: raw, canonical: "" });
+    expect(state.error).not.toBeNull();
+  });
+
+  it.each([
+    ["１０００００", "100,000", "100000"],
+    ["100,000", "100,000", "100000"],
+    ["100，000", "100,000", "100000"],
+    ["100、000", "100,000", "100000"],
+    ["", "", ""],
+    ["0", "0", "0"],
+    ["2147483647", "2,147,483,647", "2147483647"],
+  ])("%s を受理して表示 %s・canonical %s にする", (raw, display, canonical) => {
+    expect(applyYenAmountInput(raw)).toEqual({ display, canonical, error: null });
+  });
+
+  it("上限 + 1 は拒否して canonical 送信値を作らない", () => {
+    expect(applyYenAmountInput("2147483648")).toMatchObject({
+      display: "2147483648",
+      canonical: "",
+    });
+    expect(applyYenAmountInput("2147483648").error).not.toBeNull();
+  });
+
+  it("不正値を修正するとエラーが解除され canonical が復元する", () => {
+    expect(applyYenAmountInput("-100").error).not.toBeNull();
+    expect(applyYenAmountInput("100")).toEqual({ display: "100", canonical: "100", error: null });
   });
 });
 

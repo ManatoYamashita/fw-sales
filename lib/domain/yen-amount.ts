@@ -59,7 +59,7 @@ export type YenAmountParseResult =
  * - `MAX_YEN_AMOUNT` 超過 → `{ ok: false, reason: "out_of_range" }`
  */
 export function parseYenAmount(raw: string): YenAmountParseResult {
-  const normalized = toHalfWidthDigits(raw).replace(/[\s　]/g, "");
+  const normalized = toHalfWidthDigits(raw.trim());
   if (normalized === "") return { ok: true, value: null, canonical: "" };
   const withoutSeparators = normalized.replace(/[,，、]/g, "");
   if (!/^[0-9]+$/.test(withoutSeparators)) return { ok: false, reason: "invalid" };
@@ -69,6 +69,32 @@ export function parseYenAmount(raw: string): YenAmountParseResult {
   const value = Number(canonical);
   if (value > MAX_YEN_AMOUNT) return { ok: false, reason: "out_of_range" };
   return { ok: true, value, canonical };
+}
+
+export type YenAmountInputState = {
+  display: string;
+  canonical: string;
+  error: string | null;
+};
+
+/** UI の入力変更と同じ経路で、表示・送信値・エラーを一体で更新する。 */
+export function applyYenAmountInput(raw: string): YenAmountInputState {
+  const parsed = parseYenAmount(raw);
+  if (!parsed.ok) {
+    return {
+      display: raw,
+      canonical: "",
+      error:
+        parsed.reason === "out_of_range"
+          ? `金額は${MAX_YEN_AMOUNT.toLocaleString("ja-JP")}円以下で入力してください。`
+          : "金額は数字と桁区切りのカンマだけで入力してください。",
+    };
+  }
+  return {
+    display: formatYenDigits(parsed.canonical),
+    canonical: parsed.canonical,
+    error: null,
+  };
 }
 
 /**
