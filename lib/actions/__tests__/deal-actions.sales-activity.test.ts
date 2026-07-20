@@ -3,22 +3,22 @@ import { DEAL_STATUSES, MEETING_TYPES } from "@/types/deal";
 
 vi.mock("server-only", () => ({}));
 const mocks = vi.hoisted(() => ({
-  getProfile: vi.fn(), getStore: vi.fn(), getDeal: vi.fn(), create: vi.fn(), update: vi.fn(), findProfile: vi.fn(), revalidate: vi.fn(), redirect: vi.fn(),
-  transaction: vi.fn(), storeStageUpdate: vi.fn(),
+  getProfile: vi.fn(), getStore: vi.fn(), getDeal: vi.fn(), create: vi.fn(), update: vi.fn(), findProfile: vi.fn(), revalidate: vi.fn(), updateTag: vi.fn(), redirect: vi.fn(),
+  transaction: vi.fn(), storeStageUpdate: vi.fn(), dealDelete: vi.fn(),
 }));
 vi.mock("@/lib/supabase/server", () => ({ getCurrentProfile: mocks.getProfile }));
-vi.mock("next/cache", () => ({ revalidateTag: mocks.revalidate }));
+vi.mock("next/cache", () => ({ revalidateTag: mocks.revalidate, updateTag: mocks.updateTag }));
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
 vi.mock("@/lib/repositories", () => ({
   repos: {
     store: { get: mocks.getStore },
-    deal: { get: mocks.getDeal, create: mocks.create, update: mocks.update, delete: vi.fn() },
+    deal: { get: mocks.getDeal, create: mocks.create, update: mocks.update, delete: mocks.dealDelete },
     profile: { findById: mocks.findProfile },
     transaction: mocks.transaction,
   },
 }));
 
-const { createDealAction, updateDealAction } = await import("../deal-actions");
+const { createDealAction, updateDealAction, deleteSalesActivityAction } = await import("../deal-actions");
 const profile = { id: "user-1", display_name: "担当", email: "a@example.com", role: "member" };
 // stage を "架電済み" (= 昇格済み) にしておくと、Middle 1 系のテストで
 // store stage 昇格トランザクションの分岐が余計に絡まない (Middle 7 のテストで個別に上書きする)。
@@ -232,6 +232,7 @@ describe("Deal作成/更新時の Store.stage 自動昇格 (Middle 7)", () => {
     expect(result.ok).toBe(false);
     expect(mocks.storeStageUpdate).not.toHaveBeenCalled();
     expect(mocks.revalidate).not.toHaveBeenCalled();
+    expect(mocks.updateTag).not.toHaveBeenCalled();
     spy.mockRestore();
   });
 
@@ -243,6 +244,180 @@ describe("Deal作成/更新時の Store.stage 自動昇格 (Middle 7)", () => {
     const result = await createDealAction("store-1", null, valid());
     expect(result.ok).toBe(false);
     expect(mocks.revalidate).not.toHaveBeenCalled();
+    expect(mocks.updateTag).not.toHaveBeenCalled();
     spy.mockRestore();
+  });
+});
+
+describe("金額の上限検証 (#172)", () => {
+  beforeEach(() => {
+    Object.values(mocks).forEach((mock) => mock.mockReset());
+    mocks.getProfile.mockResolvedValue(profile);
+    mocks.getStore.mockResolvedValue(store);
+    mocks.getDeal.mockResolvedValue(current);
+    mocks.findProfile.mockResolvedValue(profile);
+    mocks.transaction.mockImplementation(async (fn: (tx: { deal: { create: typeof mocks.create; update: typeof mocks.update }; store: { update: typeof mocks.storeStageUpdate } }) => unknown) =>
+      fn({ deal: { create: mocks.create, update: mocks.update }, store: { update: mocks.storeStageUpdate } }),
+    );
+  });
+
+  it("DB integer 上限 (2147483647) ちょうどは受理する", async () => {
+    mocks.create.mockImplementation(async (input) => ({ ...input, id: "deal-new" }));
+    expect((await createDealAction("store-1", null, valid({ estimate_amount: "2147483647" }))).ok).toBe(true);
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ estimate_amount: 2147483647 }));
+  });
+
+  it("上限超過 (2147483648) と巨大値は拒否し、repository を呼ばない", async () => {
+    for (const fd of [valid({ estimate_amount: "2147483648" }), valid({ status: "受注", order_amount: "9007199254740993" })]) {
+      expect((await createDealAction("store-1", null, fd)).ok).toBe(false);
+    }
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
+
+  it.each(["1e3", "+100", "-100", "0x10", "0b101", "1.5", "1000円", " 100", "100 ", "2147483648"])(
+    "createは非canonical金額 %j を拒否し、repositoryを呼ばない",
+    async (estimateAmount) => {
+      const result = await createDealAction("store-1", null, valid({ estimate_amount: estimateAmount }));
+      expect(result.ok).toBe(false);
+      expect(mocks.getStore).not.toHaveBeenCalled();
+      expect(mocks.create).not.toHaveBeenCalled();
+      expect(mocks.transaction).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["1e3", "+100", "-100", "0x10", "0b101", "1.5", "1000円", " 100", "100 ", "2147483648"])(
+    "updateは非canonical金額 %j を拒否し、repositoryを呼ばない",
+    async (estimateAmount) => {
+      const result = await updateDealAction("deal-1", null, data({ estimate_amount: estimateAmount }));
+      expect(result.ok).toBe(false);
+      expect(mocks.getDeal).not.toHaveBeenCalled();
+      expect(mocks.update).not.toHaveBeenCalled();
+      expect(mocks.transaction).not.toHaveBeenCalled();
+    },
+  );
+
+  it("カンマなし整数 (YenAmountInput の hidden 送信値) がそのまま数値として保存される", async () => {
+    mocks.create.mockImplementation(async (input) => ({ ...input, id: "deal-new" }));
+    await createDealAction("store-1", null, valid({ status: "受注", estimate_amount: "100000", order_amount: "250000" }));
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ estimate_amount: 100000, order_amount: 250000 }));
+  });
+
+  it("空欄の estimate_amount は現行仕様どおり 0 として保存される", async () => {
+    mocks.create.mockImplementation(async (input) => ({ ...input, id: "deal-new" }));
+    await createDealAction("store-1", null, valid({ estimate_amount: "" }));
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ estimate_amount: 0 }));
+  });
+
+  it("0 入力は 0 として保存される", async () => {
+    mocks.create.mockImplementation(async (input) => ({ ...input, id: "deal-new" }));
+    await createDealAction("store-1", null, valid({ estimate_amount: "0" }));
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ estimate_amount: 0 }));
+  });
+});
+
+describe("cache invalidation (read-your-own-writes) (#172)", () => {
+  beforeEach(() => {
+    Object.values(mocks).forEach((mock) => mock.mockReset());
+    mocks.getProfile.mockResolvedValue(profile);
+    mocks.getStore.mockResolvedValue(store);
+    mocks.getDeal.mockResolvedValue(current);
+    mocks.findProfile.mockResolvedValue(profile);
+    mocks.transaction.mockImplementation(async (fn: (tx: { deal: { create: typeof mocks.create; update: typeof mocks.update }; store: { update: typeof mocks.storeStageUpdate } }) => unknown) =>
+      fn({ deal: { create: mocks.create, update: mocks.update }, store: { update: mocks.storeStageUpdate } }),
+    );
+  });
+
+  it("create 成功時、閲覧系タグは updateTag (即時)、集計系タグは revalidateTag (SWR) で失効する", async () => {
+    mocks.create.mockImplementation(async (input) => ({ ...input, id: "deal-new" }));
+    await createDealAction("store-1", null, valid());
+    const updated = mocks.updateTag.mock.calls.map((c) => c[0]);
+    expect(updated).toEqual(expect.arrayContaining(["deals", "deal:deal-new", "deals:store:store-1", "store:store-1", "stores"]));
+    const revalidated = mocks.revalidate.mock.calls.map((c) => c[0]);
+    expect(revalidated).toEqual(expect.arrayContaining(["stats", "kpi", "pipeline"]));
+    // 店舗詳細/一覧の閲覧系タグを SWR (revalidateTag) 側へ落とさない
+    expect(revalidated).not.toContain("deals:store:store-1");
+    expect(revalidated).not.toContain("store:store-1");
+  });
+
+  it("update 成功時も同じタグ構成で失効する", async () => {
+    mocks.update.mockResolvedValueOnce({ id: "deal-1" });
+    await updateDealAction("deal-1", null, data({ activity_memo: "更新" }));
+    const updated = mocks.updateTag.mock.calls.map((c) => c[0]);
+    expect(updated).toEqual(expect.arrayContaining(["deals", "deal:deal-1", "deals:store:store-1", "store:store-1", "stores"]));
+  });
+
+  it("バリデーション失敗時はどのタグも失効しない", async () => {
+    await createDealAction("store-1", null, valid({ estimate_amount: "-1" }));
+    expect(mocks.updateTag).not.toHaveBeenCalled();
+    expect(mocks.revalidate).not.toHaveBeenCalled();
+  });
+});
+
+describe("deleteSalesActivityAction (#172)", () => {
+  beforeEach(() => {
+    Object.values(mocks).forEach((mock) => mock.mockReset());
+    mocks.getProfile.mockResolvedValue(profile);
+    mocks.getDeal.mockResolvedValue(current);
+    mocks.dealDelete.mockResolvedValue(undefined);
+  });
+
+  it("ログイン済みユーザー (admin でなくても) が削除できる", async () => {
+    // profile.role は "member" (admin ではない)
+    const result = await deleteSalesActivityAction("deal-1");
+    expect(result).toEqual({ ok: true, data: undefined, message: "営業記録を削除しました" });
+    expect(mocks.dealDelete).toHaveBeenCalledTimes(1);
+    expect(mocks.dealDelete).toHaveBeenCalledWith("deal-1");
+  });
+
+  it("未ログインは拒否し、repository もキャッシュ失効も呼ばない", async () => {
+    mocks.getProfile.mockResolvedValueOnce(null);
+    const result = await deleteSalesActivityAction("deal-1");
+    expect(result).toEqual({ ok: false, error: "ログインが必要です" });
+    expect(mocks.getDeal).not.toHaveBeenCalled();
+    expect(mocks.dealDelete).not.toHaveBeenCalled();
+    expect(mocks.updateTag).not.toHaveBeenCalled();
+    expect(mocks.revalidate).not.toHaveBeenCalled();
+  });
+
+  it("空の dealId は repository を呼ばず拒否する", async () => {
+    const result = await deleteSalesActivityAction("");
+    expect(result.ok).toBe(false);
+    expect(mocks.dealDelete).not.toHaveBeenCalled();
+  });
+
+  it("存在しない Deal は失敗を返し、削除もキャッシュ失効もしない", async () => {
+    mocks.getDeal.mockResolvedValueOnce(null);
+    const result = await deleteSalesActivityAction("missing");
+    expect(result).toEqual({ ok: false, error: "営業記録が見つかりませんでした" });
+    expect(mocks.dealDelete).not.toHaveBeenCalled();
+    expect(mocks.updateTag).not.toHaveBeenCalled();
+  });
+
+  it("成功時は対象 Deal と店舗スコープのタグを即時失効する (storeId の取り違えなし)", async () => {
+    await deleteSalesActivityAction("deal-1");
+    const updated = mocks.updateTag.mock.calls.map((c) => c[0]);
+    expect(updated).toEqual(expect.arrayContaining(["deals", "deal:deal-1", "deals:store:store-1", "store:store-1", "stores"]));
+  });
+
+  it("repository 例外は利用者向けメッセージへ変換し、内部情報とキャッシュ失効を漏らさない", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.dealDelete.mockRejectedValueOnce(new Error("password=secret relation deals"));
+    const result = await deleteSalesActivityAction("deal-1");
+    expect(result).toEqual({ ok: false, error: "営業記録の削除に失敗しました" });
+    expect(JSON.stringify(result)).not.toContain("secret");
+    expect(mocks.updateTag).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it("成功時に監査ログへ実行者・dealId・storeId を記録する", async () => {
+    const spy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    await deleteSalesActivityAction("deal-1");
+    expect(spy).toHaveBeenCalledWith("[audit] sales-activity.delete", { by: "a@example.com", dealId: "deal-1", storeId: "store-1" });
+    spy.mockRestore();
+  });
+
+  it("redirect しない (画面内で toast + 即時反映するため ActionResult を返す)", async () => {
+    await deleteSalesActivityAction("deal-1");
+    expect(mocks.redirect).not.toHaveBeenCalled();
   });
 });

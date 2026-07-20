@@ -1,8 +1,9 @@
 "use server";
 
-import { revalidateTag } from "next/cache";
+import { revalidateTag, updateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import { repos } from "@/lib/repositories";
+import { getCurrentProfile } from "@/lib/supabase/server";
 import { CACHE_TAGS } from "@/lib/cache";
 import {
   DEAL_STATUSES, MEETING_TYPES, NEXT_ACTION_TYPES,
@@ -11,6 +12,7 @@ import {
 import type { StageId } from "@/types/stage";
 import { todayInTimeZone } from "@/lib/utils/date";
 import { normalizeDealStatusAmounts } from "@/lib/domain/deal-status";
+import { MAX_YEN_AMOUNT, parseCanonicalYenAmount } from "@/lib/domain/yen-amount";
 import { failure, readNullableNumber, readNullableString, readNumber, readString, success, type ActionResult } from "./_helpers";
 import { requireAdmin, requireSignedIn } from "./_authz";
 
@@ -53,9 +55,14 @@ function validateFields(formData: FormData): ActionResult<never> | null {
   if (formData.has("status") && !isOneOf(status, DEAL_STATUSES)) return failure("営業状態が不正です");
   if (nextType && !isOneOf(nextType, NEXT_ACTION_TYPES)) return failure("次回アクション種別が不正です");
   for (const key of ["estimate_amount", "order_amount"] as const) {
-    if (!formData.has(key) || readString(formData, key) === "") continue;
-    const value = Number(readString(formData, key));
-    if (!Number.isInteger(value) || value < 0) return failure("金額は0以上の整数で入力してください");
+    if (!formData.has(key)) continue;
+    const raw = formData.get(key);
+    const parsed = typeof raw === "string" ? parseCanonicalYenAmount(raw) : { ok: false as const, reason: "invalid" as const };
+    if (!parsed.ok) {
+      return parsed.reason === "out_of_range"
+        ? failure(`金額は${MAX_YEN_AMOUNT.toLocaleString("ja-JP")}円以下で入力してください`)
+        : failure("金額は0以上の整数で入力してください");
+    }
   }
   const activityMemo = readNullableString(formData, "activity_memo");
   const nextNote = readNullableString(formData, "next_action_note");
@@ -67,13 +74,20 @@ function validateFields(formData: FormData): ActionResult<never> | null {
 }
 
 function invalidateDealScopes(dealId?: string, storeId?: string) {
-  revalidateTag(CACHE_TAGS.deals, "max");
-  if (dealId) revalidateTag(CACHE_TAGS.deal(dealId), "max");
+  // 店舗詳細 / 店舗一覧が参照するタグは updateTag で即時失効させる (#172)。
+  // revalidateTag(_, "max") は stale-while-revalidate 挙動のため、Server Action 直後の
+  // router.refresh() が失効前のキャッシュを返し「保存したのに古い内容が表示される」
+  // read-your-own-writes 違反が起きていた。updateTag は Server Action 専用 API で、
+  // 同一リクエスト内から失効が保証される (app-settings-actions.ts と同規約)。
+  updateTag(CACHE_TAGS.deals);
+  if (dealId) updateTag(CACHE_TAGS.deal(dealId));
   if (storeId) {
-    revalidateTag(CACHE_TAGS.dealsByStore(storeId), "max");
-    revalidateTag(CACHE_TAGS.store(storeId), "max");
-    revalidateTag(CACHE_TAGS.stores, "max");
+    updateTag(CACHE_TAGS.dealsByStore(storeId));
+    updateTag(CACHE_TAGS.store(storeId));
+    updateTag(CACHE_TAGS.stores);
   }
+  // 集計系ダッシュボード (stats / kpi / pipeline) は保存直後の閲覧画面ではないため、
+  // 従来どおり stale-while-revalidate で背景更新する (過剰な同期失効を避ける)
   revalidateTag(CACHE_TAGS.stats, "max");
   revalidateTag(CACHE_TAGS.kpi, "max");
   revalidateTag(CACHE_TAGS.pipeline, "max");
@@ -188,4 +202,35 @@ export async function deleteDealAction(dealId: string): Promise<ActionResult> {
   invalidateDealScopes(dealId, current.store_id);
   console.log("[audit] deals.delete", { by: guard.profile.email, dealId });
   redirect(`/stores/${current.store_id}?tab=progress`);
+}
+
+/**
+ * 店舗詳細の営業進捗画面から営業記録 1 件を削除する (#172)。
+ *
+ * `deleteDealAction` (admin 限定・成功時 redirect) は .kiro 仕様
+ * (deals-stores-db-migration requirements Req 9) で外部 API 契約として
+ * シグネチャ・挙動の維持が求められているため変更せず、営業進捗 UI 用に
+ * 別 action を追加する。権限は営業記録の追加・編集 (`createDealAction` /
+ * `updateDealAction`) と同じ「ログイン済みユーザー」に統一する
+ * (削除だけ admin 限定にしない)。
+ *
+ * - Store 自体や他の Deal には触れない
+ * - Store.stage は後退させない (stage には一切書き込まない)
+ * - 成功時は redirect せず ActionResult を返す (toast + 画面内更新のため)
+ */
+export async function deleteSalesActivityAction(dealId: string): Promise<ActionResult> {
+  const profile = await getCurrentProfile();
+  if (!profile) return failure("ログインが必要です");
+  if (!dealId) return failure("営業記録が指定されていません");
+  try {
+    const current = await repos.deal.get(dealId);
+    if (!current) return failure("営業記録が見つかりませんでした");
+    await repos.deal.delete(dealId);
+    invalidateDealScopes(dealId, current.store_id);
+    console.log("[audit] sales-activity.delete", { by: profile.email, dealId, storeId: current.store_id });
+    return success(undefined, "営業記録を削除しました");
+  } catch (error) {
+    console.error("[salesActivity.delete] failed", { dealId, message: error instanceof Error ? error.message : String(error) });
+    return failure("営業記録の削除に失敗しました");
+  }
 }

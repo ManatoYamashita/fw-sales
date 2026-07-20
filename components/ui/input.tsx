@@ -1,7 +1,11 @@
-import { type InputHTMLAttributes } from "react";
+import { type InputHTMLAttributes, type Ref } from "react";
 import { cn } from "@/lib/utils/cn";
 
-export type InputProps = InputHTMLAttributes<HTMLInputElement>;
+// React 19 では関数コンポーネントへ ref を通常の prop として渡せる
+// (yen-amount-input のカーソル位置制御で使用)
+export type InputProps = InputHTMLAttributes<HTMLInputElement> & {
+  ref?: Ref<HTMLInputElement>;
+};
 
 export function Input({ className, ...props }: InputProps) {
   return (
