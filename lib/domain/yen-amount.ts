@@ -49,6 +49,23 @@ export type YenAmountParseResult =
   | { ok: false; reason: "invalid" | "out_of_range" };
 
 /**
+ * hidden input が送信する canonical な金額文字列を厳格にパースする。
+ *
+ * 空文字、`0`、または先頭ゼロのない半角数字列だけを受け付ける。Number() が
+ * 解釈できる指数表記・符号・基数prefix・小数・前後空白などは、数値化する前に
+ * 拒否する。Server Action と UI の canonical 値検証で共有するための境界関数。
+ */
+export function parseCanonicalYenAmount(raw: string): YenAmountParseResult {
+  if (raw === "") return { ok: true, value: null, canonical: "" };
+  if (!/^(0|[1-9]\d*)$/.test(raw)) return { ok: false, reason: "invalid" };
+  // 桁数レベルで先に弾き、Number() の精度劣化 (> 2^53) を経由させない
+  if (raw.length > String(MAX_YEN_AMOUNT).length) return { ok: false, reason: "out_of_range" };
+  const value = Number(raw);
+  if (value > MAX_YEN_AMOUNT) return { ok: false, reason: "out_of_range" };
+  return { ok: true, value, canonical: raw };
+}
+
+/**
  * 入力テキストを検証つきでパースする (submit 前の最終正規化・テスト用)。
  *
  * `extractYenDigits` が「不正文字は黙って除外」なのに対し、こちらは
@@ -64,11 +81,7 @@ export function parseYenAmount(raw: string): YenAmountParseResult {
   const withoutSeparators = normalized.replace(/[,，、]/g, "");
   if (!/^[0-9]+$/.test(withoutSeparators)) return { ok: false, reason: "invalid" };
   const canonical = withoutSeparators.replace(/^0+(?=\d)/, "");
-  // 桁数レベルで先に弾き、Number() の精度劣化 (> 2^53) を経由させない
-  if (canonical.length > String(MAX_YEN_AMOUNT).length) return { ok: false, reason: "out_of_range" };
-  const value = Number(canonical);
-  if (value > MAX_YEN_AMOUNT) return { ok: false, reason: "out_of_range" };
-  return { ok: true, value, canonical };
+  return parseCanonicalYenAmount(canonical);
 }
 
 export type YenAmountInputState = {

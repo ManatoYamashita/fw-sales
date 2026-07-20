@@ -14,8 +14,31 @@ import {
   extractYenDigits,
   formatYenDigits,
   MAX_YEN_AMOUNT,
+  parseCanonicalYenAmount,
   parseYenAmount,
 } from "@/lib/domain/yen-amount";
+
+describe("parseCanonicalYenAmount", () => {
+  it.each([
+    ["", null],
+    ["0", 0],
+    ["100", 100],
+    ["2147483647", MAX_YEN_AMOUNT],
+  ])("canonical入力 %j を受理する", (raw, value) => {
+    expect(parseCanonicalYenAmount(raw)).toEqual({ ok: true, value, canonical: raw });
+  });
+
+  it.each(["1e3", "+100", "-100", "0x10", "0b101", "1.5", "1000円", " 100", "100 "])(
+    "非canonical入力 %j を拒否する",
+    (raw) => {
+      expect(parseCanonicalYenAmount(raw)).toEqual({ ok: false, reason: "invalid" });
+    },
+  );
+
+  it("DB integer上限超過を拒否する", () => {
+    expect(parseCanonicalYenAmount("2147483648")).toEqual({ ok: false, reason: "out_of_range" });
+  });
+});
 
 describe("parseYenAmount", () => {
   it("100000 → canonical 100000 (value 100000)", () => {

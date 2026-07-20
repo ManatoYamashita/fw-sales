@@ -274,6 +274,28 @@ describe("金額の上限検証 (#172)", () => {
     expect(mocks.create).not.toHaveBeenCalled();
   });
 
+  it.each(["1e3", "+100", "-100", "0x10", "0b101", "1.5", "1000円", " 100", "100 ", "2147483648"])(
+    "createは非canonical金額 %j を拒否し、repositoryを呼ばない",
+    async (estimateAmount) => {
+      const result = await createDealAction("store-1", null, valid({ estimate_amount: estimateAmount }));
+      expect(result.ok).toBe(false);
+      expect(mocks.getStore).not.toHaveBeenCalled();
+      expect(mocks.create).not.toHaveBeenCalled();
+      expect(mocks.transaction).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["1e3", "+100", "-100", "0x10", "0b101", "1.5", "1000円", " 100", "100 ", "2147483648"])(
+    "updateは非canonical金額 %j を拒否し、repositoryを呼ばない",
+    async (estimateAmount) => {
+      const result = await updateDealAction("deal-1", null, data({ estimate_amount: estimateAmount }));
+      expect(result.ok).toBe(false);
+      expect(mocks.getDeal).not.toHaveBeenCalled();
+      expect(mocks.update).not.toHaveBeenCalled();
+      expect(mocks.transaction).not.toHaveBeenCalled();
+    },
+  );
+
   it("カンマなし整数 (YenAmountInput の hidden 送信値) がそのまま数値として保存される", async () => {
     mocks.create.mockImplementation(async (input) => ({ ...input, id: "deal-new" }));
     await createDealAction("store-1", null, valid({ status: "受注", estimate_amount: "100000", order_amount: "250000" }));

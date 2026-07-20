@@ -12,7 +12,7 @@ import {
 import type { StageId } from "@/types/stage";
 import { todayInTimeZone } from "@/lib/utils/date";
 import { normalizeDealStatusAmounts } from "@/lib/domain/deal-status";
-import { MAX_YEN_AMOUNT } from "@/lib/domain/yen-amount";
+import { MAX_YEN_AMOUNT, parseCanonicalYenAmount } from "@/lib/domain/yen-amount";
 import { failure, readNullableNumber, readNullableString, readNumber, readString, success, type ActionResult } from "./_helpers";
 import { requireAdmin, requireSignedIn } from "./_authz";
 
@@ -55,10 +55,14 @@ function validateFields(formData: FormData): ActionResult<never> | null {
   if (formData.has("status") && !isOneOf(status, DEAL_STATUSES)) return failure("営業状態が不正です");
   if (nextType && !isOneOf(nextType, NEXT_ACTION_TYPES)) return failure("次回アクション種別が不正です");
   for (const key of ["estimate_amount", "order_amount"] as const) {
-    if (!formData.has(key) || readString(formData, key) === "") continue;
-    const value = Number(readString(formData, key));
-    if (!Number.isInteger(value) || value < 0) return failure("金額は0以上の整数で入力してください");
-    if (value > MAX_YEN_AMOUNT) return failure(`金額は${MAX_YEN_AMOUNT.toLocaleString("ja-JP")}円以下で入力してください`);
+    if (!formData.has(key)) continue;
+    const raw = formData.get(key);
+    const parsed = typeof raw === "string" ? parseCanonicalYenAmount(raw) : { ok: false as const, reason: "invalid" as const };
+    if (!parsed.ok) {
+      return parsed.reason === "out_of_range"
+        ? failure(`金額は${MAX_YEN_AMOUNT.toLocaleString("ja-JP")}円以下で入力してください`)
+        : failure("金額は0以上の整数で入力してください");
+    }
   }
   const activityMemo = readNullableString(formData, "activity_memo");
   const nextNote = readNullableString(formData, "next_action_note");
