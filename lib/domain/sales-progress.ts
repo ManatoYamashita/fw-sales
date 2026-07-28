@@ -13,6 +13,7 @@ import type { SortDirection, Store } from "@/types/store";
 import type { StageId } from "@/types/stage";
 import type { Channel } from "@/types/store";
 import { compareChannel, compareStage } from "@/lib/domain/sort-order";
+import { getNearestStationValue } from "@/lib/domain/nearest-station";
 
 export type CurrentSalesState =
   | "won"
@@ -242,6 +243,7 @@ export function applyProgressFilter(
         s.address,
         s.genre,
         s.memo,
+        getNearestStationValue(s.basic_info) ?? "",
         row.currentNextAction.note ?? "",
         row.currentNextAction.type ?? "",
         row.currentNextAction.date ?? "",
@@ -332,9 +334,14 @@ export function applyProgressSort(
         case "name":
           diff = NAME_COLLATOR.compare(a.store.name, b.store.name);
           break;
-        case "location":
-          diff = NAME_COLLATOR.compare(`${a.store.prefecture}${a.store.city}`, `${b.store.prefecture}${b.store.city}`);
+        case "location": {
+          const aStation = getNearestStationValue(a.store.basic_info);
+          const bStation = getNearestStationValue(b.store.basic_info);
+          if (aStation === null && bStation !== null) return 1;
+          if (aStation !== null && bStation === null) return -1;
+          diff = NAME_COLLATOR.compare(aStation ?? "", bStation ?? "");
           break;
+        }
         case "genre":
           diff = NAME_COLLATOR.compare(a.store.genre, b.store.genre);
           break;
