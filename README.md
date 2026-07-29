@@ -237,7 +237,7 @@ Supabase 側の Google OAuth プロバイダーで **誰でもサインイン可
    - **Supabase**: `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` (Supabase Dashboard → Project Settings → API → Legacy anon/service_role)
    - **Database**: `DATABASE_URL` (Supabase Dashboard → Project Settings → Database → Connection string (Transaction pooler))
    - **Google OAuth**: `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` (Google Cloud Console で OAuth 2.0 Client (Web) を作成)
-   - **Gemini API** (AI 店舗分析): `GEMINI_API_KEY` / `GEMINI_MODEL` (オプション、デフォルト `gemini-2.5-flash`) — [Google AI Studio](https://aistudio.google.com/) で取得
+   - **Gemini API** (AI 店舗分析): `GEMINI_API_KEY` / `GEMINI_MODEL` (オプション、デフォルト `gemini-3.6-flash`) — [Google AI Studio](https://aistudio.google.com/) で取得。旧デフォルト `gemini-2.5-flash` は **2026-10-16 シャットダウン**予定のため指定しないこと ([移行 runbook](docs/gemini-model-migration-runbook.md))
    - **Google Places API** (エリア一括検索): `GOOGLE_PLACES_API_KEY` — Google Cloud Console で Places API (New) を有効化
 3. **Supabase Dashboard 設定** (初回のみ):
    - Authentication → URL Configuration → Site URL: `http://localhost:3000` / Redirect URLs: `http://localhost:3000/**`

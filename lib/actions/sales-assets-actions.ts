@@ -21,7 +21,11 @@
 import { revalidateTag } from "next/cache";
 import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
-import { createGeminiClient, type AiClientError } from "@/lib/ai/client";
+import {
+  createGeminiClient,
+  isAiClientError,
+  type AiClientError,
+} from "@/lib/ai/client";
 import { buildSalesAssetsPrompt } from "@/lib/ai/basic-info-prompt";
 import {
   getAiAnalysisJsonSchema,
@@ -32,6 +36,15 @@ import { checkRateLimit } from "@/lib/ai/rate-limiter";
 import { getCurrentSession } from "@/lib/supabase/server";
 import { failure, success, type ActionResult } from "./_helpers";
 
+/**
+ * Gemini 呼出の中断しきい値。
+ *
+ * **本移行では値を変更していない (旧 `gemini-2.5-flash` 時代と同じ 60 秒)。**
+ * Gemini 3 系は thinking が既定で有効なため所要時間が伸びうるが、適切な値は
+ * ①実 API のレイテンシ実測と ②Vercel Function の実際の実行時間上限
+ * の両方が分からないと決められない。**どちらも未確認のため据置とし、Preview 実測後に
+ * 判断する** (`docs/gemini-model-migration-runbook.md` の「実測して決める項目」)。
+ */
 const TIMEOUT_MS = 60_000;
 const MAX_PASTED_LENGTH = 50_000;
 const MAX_INSTRUCTIONS_LENGTH = 500;
@@ -39,18 +52,26 @@ const MAX_INSTRUCTIONS_LENGTH = 500;
 /**
  * `AiClientError` を UI 表示用文字列に正規化する
  * (`ai-analysis-actions.ts` と同型ロジック、API キー漏洩防止)。
+ *
+ * SDK の生メッセージ・API キー・request ID は一切含めない。`unknown` の `message` は
+ * `lib/ai/client.ts` が定型文へ正規化済みのものだけが入る。
  */
 function clientErrorToMessage(err: AiClientError): string {
   switch (err.kind) {
     case "missing_api_key":
       return "AI 生成の API キーが未設定です。環境変数 GEMINI_API_KEY を設定してください。";
     case "timeout":
-      return "AI 生成がタイムアウトしました (60 秒)。再度お試しください。";
+      // 秒数は TIMEOUT_MS から導出する (定数を変えたときに文言だけ古くなるのを防ぐ)。
+      return `AI 生成がタイムアウトしました (${TIMEOUT_MS / 1000} 秒)。再度お試しください。`;
     case "rate_limit":
       return "AI 生成のレートリミットに達しました。しばらくお待ちください。";
     case "auth_error":
       return "AI 生成の認証に失敗しました。GEMINI_API_KEY を確認してください。";
+    case "max_tokens":
+      return "AI 生成の応答が長さ上限に達し、途中で切断されました。再度お試しください (繰り返す場合は管理者に連絡してください)。";
     case "api_error":
+      // 404 が出た場合はモデル ID (GEMINI_MODEL) の誤設定が疑わしい。専用 kind にはせず
+      // ステータスコードを出して切り分け可能にする (runbook に手順を記載)。
       return `AI 生成 API がエラー (${err.status}) を返しました。再度お試しください。`;
     case "network_error":
       return "ネットワークエラーが発生しました。接続を確認して再度お試しください。";
@@ -62,21 +83,6 @@ function clientErrorToMessage(err: AiClientError): string {
       return "AI 生成で不明なエラーが発生しました。";
     }
   }
-}
-
-function isAiClientError(err: unknown): err is AiClientError {
-  if (typeof err !== "object" || err === null) return false;
-  if (!("kind" in err)) return false;
-  const kind = (err as { kind: unknown }).kind;
-  return (
-    kind === "missing_api_key" ||
-    kind === "timeout" ||
-    kind === "rate_limit" ||
-    kind === "auth_error" ||
-    kind === "api_error" ||
-    kind === "network_error" ||
-    kind === "unknown"
-  );
 }
 
 /**

@@ -2,26 +2,63 @@
  * `@google/genai` SDK のラッパ。Server Action からのみ呼出される(`"server-only"` で隔離)。
  *
  * - API キーは `process.env.GEMINI_API_KEY`(`lib/env.ts` の `readEnv` 経由)
- * - `responseMimeType: "application/json"` + `responseJsonSchema` で構造化出力を強制
- * - **URL Context Tool は使用しない** — Gemini API は構造化出力(`responseMimeType:
- *   "application/json"` + `responseJsonSchema`)と `tools` の同時設定を 400
- *   (INVALID_ARGUMENT) で拒否する。SDK の TS 型は `unknown` で受けるが実機 API で発覚。
- *   ページの主データは `prompt.ts` で HTML 全文を user Part として投入済(主軸経路)。
+ * - モデルは `getGeminiModel()`(既定 `gemini-3.6-flash`、`GEMINI_MODEL` で上書き可)
+ * - `generateContent` + `responseMimeType: "application/json"` + `responseJsonSchema` で
+ *   構造化出力を強制
  * - SDK の生エラーは `AiClientError` discriminated union に正規化
  *   (API キー値や request ID の漏洩防止)
  *
+ * ## built-in tools を使わない理由(2026-07 時点の事実に更新)
+ *
+ * 旧記述「Gemini API は構造化出力と `tools` の同時設定を 400 (INVALID_ARGUMENT) で拒否する」
+ * は **Gemini 2.5 系での実機検証(2025-05-09)に基づく当時の事実**であり、現在は当てはまらない。
+ * **Gemini 3 系では Structured Outputs と built-in tools(Grounding with Google Search /
+ * URL Context / Code Execution / File Search / Function Calling)を併用できる。**
+ *
+ * それでも本ファイルが tools を使わないのは、能力の制約ではなく **責務の分離**による:
+ * - 本クライアントは「店舗基本情報 + 貼付調査テキスト → 営業資産(`AiAnalysisResult`)」の
+ *   生成専用であり、**Web 調査を行わない**。入力は既に手元にあるため tools が要らない。
+ * - Google Search / URL Context を伴う Web 調査は **Issue #158 で別モジュール
+ *   (`lib/ai/research/`)として実装**する。そちらは Interactions API を使う。
+ *
+ * ## 本ファイルを Interactions API へ移行しない理由
+ *
+ * Interactions API は GA で公式も推奨だが、本ファイルは `generateContent`(Legacy 表記だが
+ * 現行サポート。`gemini-3.6-flash` + Structured Outputs の公式サンプルあり)を維持する。
+ * Interactions API の利点(built-in tools / background 実行 / 構造化 citation)は **いずれも
+ * Web 調査側が必要とするもので、営業資産生成には不要**。モデル停止対応と API 基盤変更を
+ * 同時に行うと切り戻し単位が粗くなるため、本移行では API 経路を変えない。
+ *
+ * ## sampling parameter を設定しない理由
+ *
+ * `temperature` / `topP` / `topK` は Gemini 3 系で deprecated。公式は「既定値から変えるな。
+ * 下げると loop や性能劣化を起こしうる」としている。旧 `temperature: 0.4` は本移行で削除した。
+ * **今後もこれらを設定しないこと。**
+ *
  * 関連: design.md §「GeminiClient」, requirements.md §2.4, §2.6, §2.7, §6.1,
- *       research.md Topic 2(URL Context 制約の訂正)
+ *       docs/gemini-model-migration-runbook.md
  */
 
 import "server-only";
 
-import { GoogleGenAI, type Part } from "@google/genai";
+import { FinishReason, GoogleGenAI, type Part } from "@google/genai";
 import {
   isApiKeyConfigured as envIsApiKeyConfigured,
   getGeminiModel,
   readEnv,
 } from "@/lib/env";
+
+/**
+ * 1 回の生成で許す出力トークン上限。
+ *
+ * **本移行では値を変更していない (旧 `gemini-2.5-flash` 時代と同じ 4096)。**
+ * Gemini 3 系は thinking が既定で有効で思考トークンも出力枠を消費するため、この値が
+ * 不足しうる。ただし適切な値は実 API を叩かないと決められないため、
+ * **Preview 実測 (`docs/gemini-model-migration-runbook.md` の「実測して決める項目」) で
+ * `finishReason` と `usageMetadata` を測ってから変更する**方針とした。
+ * 実測前に推測で引き上げない。
+ */
+const MAX_OUTPUT_TOKENS = 4096;
 
 export interface AnalysisInput {
   /** PromptBuilder が生成した system prompt 文字列 */
@@ -44,9 +81,35 @@ export type AiClientError =
   | { kind: "timeout" }
   | { kind: "rate_limit"; retryAfterSeconds?: number }
   | { kind: "auth_error" }
+  /**
+   * `maxOutputTokens` に達して応答が打ち切られた (`finishReason === MAX_TOKENS`)。
+   *
+   * 構造化フィールド (`candidates[0].finishReason`) から判定するため、SDK のエラー文面に
+   * 依存しない。Gemini 3 系は thinking が既定で有効で思考トークンも出力枠を消費するため、
+   * 本移行で現実的に起こりうる失敗として専用分類にしている。
+   */
+  | { kind: "max_tokens" }
   | { kind: "api_error"; status: number }
   | { kind: "network_error" }
   | { kind: "unknown"; message: string };
+
+/**
+ * `AiClientError["kind"]` の全値。`isAiClientError` の判定表。
+ *
+ * `Record<AiClientError["kind"], true>` にすることで **union に kind を足したときに
+ * ここへの追加漏れがコンパイルエラーになる** (キー不足も余剰も型エラー)。
+ * 配列 + `satisfies` では「不足」を検出できないため、意図的に Record を使う。
+ */
+const AI_CLIENT_ERROR_KINDS: Record<AiClientError["kind"], true> = {
+  missing_api_key: true,
+  timeout: true,
+  rate_limit: true,
+  auth_error: true,
+  max_tokens: true,
+  api_error: true,
+  network_error: true,
+  unknown: true,
+};
 
 export interface GeminiClient {
   /**
@@ -102,11 +165,20 @@ export function createGeminiClient(): GeminiClient {
             systemInstruction: input.systemPrompt,
             responseMimeType: "application/json",
             responseJsonSchema: input.jsonSchema,
-            temperature: 0.4,
-            maxOutputTokens: 4096,
+            // temperature / topP / topK は設定しない (Gemini 3 系で deprecated)。
+            // 詳細はファイル冒頭 JSDoc「sampling parameter を設定しない理由」を参照。
+            maxOutputTokens: MAX_OUTPUT_TOKENS,
             abortSignal: signal,
           },
         });
+
+        // 長さ上限による打ち切りを、空応答より先に専用分類へ落とす。
+        // Gemini 3 系は thinking が既定で有効で、思考トークンも出力枠を消費するため、
+        // 本文が 1 文字も出ないまま MAX_TOKENS に到達しうる。この場合に
+        // 「応答が空でした」とだけ表示すると、原因が maxOutputTokens 不足だと分からない。
+        if (response.candidates?.[0]?.finishReason === FinishReason.MAX_TOKENS) {
+          throw makeError({ kind: "max_tokens" });
+        }
 
         const text = response.text;
         if (typeof text !== "string" || text.length === 0) {
@@ -115,7 +187,7 @@ export function createGeminiClient(): GeminiClient {
             message: "AI 分析の応答が空でした",
           });
         }
-        return JSON.parse(text);
+        return parseJsonResponse(text);
       } catch (err) {
         throw normalizeSdkError(err);
       }
@@ -124,10 +196,55 @@ export function createGeminiClient(): GeminiClient {
 }
 
 /**
+ * 応答本文を JSON としてパースする。失敗は必ず定型の `unknown` へ変換する。
+ *
+ * `JSON.parse` の `SyntaxError` を SDK エラーと同じ `normalizeSdkError` に流さないために
+ * 分離している。`normalizeSdkError` はメッセージ中の 3 桁数字を HTTP ステータスとみなす
+ * ヒューリスティックを持つため、パース位置が 4xx / 5xx のとき
+ * (例: `Unterminated string in JSON at position 466`) 実際には起きていない
+ * `api_error(466)` に誤分類されてしまう。
+ *
+ * 併せて、応答本文そのもの (第三者サイト由来のテキストを含みうる) を上位へ渡さない。
+ */
+function parseJsonResponse(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw makeError({
+      kind: "unknown",
+      message: "AI 分析の応答を JSON として解釈できませんでした",
+    });
+  }
+}
+
+/**
+ * SDK エラーが構造化された HTTP ステータスを持っていれば返す。
+ *
+ * `@google/genai` の `ApiError` は `status: number` を持つ。メッセージ文字列の数字を
+ * 拾うより信頼でき、`models/xxx is NOT_FOUND for API version v1beta` のように
+ * **数字を含まない文面でもステータスを失わない**。
+ *
+ * SDK のクラスに `instanceof` で依存すると SDK 更新時に壊れうるため、`status` プロパティの
+ * duck typing で読む。HTTP エラーとして意味のある 400-599 のみ採用する。
+ */
+function readStructuredStatus(err: unknown): number | null {
+  if (typeof err !== "object" || err === null) return null;
+  const status = (err as { status?: unknown }).status;
+  if (typeof status !== "number" || !Number.isInteger(status)) return null;
+  return status >= 400 && status <= 599 ? status : null;
+}
+
+/**
  * SDK 生エラーを `AiClientError` に正規化する。
  *
  * 重要: 生エラーメッセージには API キー先頭文字や internal request ID が混入することがある。
  * 必ず正規化済メッセージのみを上位に返すこと(client / log への漏洩防止)。
+ *
+ * 分類の優先順:
+ * 1. 正規化済 `AiClientError` はそのまま
+ * 2. AbortError → timeout / fetch 失敗 → network_error
+ * 3. **構造化ステータス** (`err.status`) があればそれで分類
+ * 4. 無ければメッセージ文字列のヒューリスティック (旧 SDK / 想定外の形状向けフォールバック)
  */
 function normalizeSdkError(err: unknown): AiClientError {
   // 既に正規化済の AiClientError(makeError 経由)はそのまま再 throw
@@ -142,7 +259,18 @@ function normalizeSdkError(err: unknown): AiClientError {
   if (err instanceof TypeError && err.message.toLowerCase().includes("fetch")) {
     return { kind: "network_error" };
   }
-  // SDK が Error に乗せてくるメッセージから分類
+  // 構造化ステータスを最優先。401 / 429 はより具体的な kind を与える。
+  const structuredStatus = readStructuredStatus(err);
+  if (structuredStatus !== null) {
+    if (structuredStatus === 401 || structuredStatus === 403) {
+      return { kind: "auth_error" };
+    }
+    if (structuredStatus === 429) {
+      return { kind: "rate_limit" };
+    }
+    return { kind: "api_error", status: structuredStatus };
+  }
+  // SDK が Error に乗せてくるメッセージから分類 (構造化ステータスが無い場合のみ)
   if (err instanceof Error) {
     const msg = err.message.toLowerCase();
     if (
@@ -159,6 +287,11 @@ function normalizeSdkError(err: unknown): AiClientError {
     ) {
       return { kind: "rate_limit" };
     }
+    // 注: モデル ID 誤設定 (404 / NOT_FOUND) を専用 kind にすることも検討したが、
+    // 「404 = モデル不存在」と断定できる構造化シグナルを SDK の型から確認できなかったため
+    // 見送った (実 API を叩かずに安全な判定条件を確定できない)。404 は api_error(404) と
+    // して扱い、UI にステータスコードを出す。移行直後に 404 が出た場合の切り分け手順は
+    // docs/gemini-model-migration-runbook.md に記載する。
     const statusMatch = err.message.match(/\b([45]\d\d)\b/);
     if (statusMatch && statusMatch[1] !== undefined) {
       const status = Number.parseInt(statusMatch[1], 10);
@@ -181,17 +314,18 @@ function makeError(err: AiClientError): AiClientError {
   return err;
 }
 
-function isAiClientError(err: unknown): err is AiClientError {
+/**
+ * `AiClientError` かを判定する。`AI_CLIENT_ERROR_KINDS` を単一の真実として引くため、
+ * union に kind を足したときにここの更新漏れが起きない
+ * (`Record<AiClientError["kind"], true>` がキー不足をコンパイルエラーにする)。
+ *
+ * Server Action 層 (`sales-assets-actions.ts`) からも使う。以前は同じ判定が action 側に
+ * 複製されていたが、kind を追加したときに片方だけ更新されると **新 kind が
+ * 「不明なエラー」に落ちて UI から原因が読めなくなる**ため、本関数へ一本化した。
+ */
+export function isAiClientError(err: unknown): err is AiClientError {
   if (typeof err !== "object" || err === null) return false;
   if (!("kind" in err)) return false;
   const kind = (err as { kind: unknown }).kind;
-  return (
-    kind === "missing_api_key" ||
-    kind === "timeout" ||
-    kind === "rate_limit" ||
-    kind === "auth_error" ||
-    kind === "api_error" ||
-    kind === "network_error" ||
-    kind === "unknown"
-  );
+  return typeof kind === "string" && Object.hasOwn(AI_CLIENT_ERROR_KINDS, kind);
 }
