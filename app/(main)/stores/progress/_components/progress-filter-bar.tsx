@@ -244,7 +244,7 @@ export function ProgressFilterBar({ profileEntries }: ProgressFilterBarProps) {
           <Input
             value={term}
             onChange={onSearch}
-            placeholder="店舗名・エリア・次回アクションから検索…"
+            placeholder="店舗名・最寄駅・次回アクションから検索…"
             aria-label="顧客を検索"
             className={cn(
               "h-11 pl-10 pr-10 text-[15px] tracking-tight",

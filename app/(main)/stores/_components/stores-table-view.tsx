@@ -18,6 +18,7 @@ import { toast } from "@/components/ui/toast";
 import { NEXT_ACTION_URGENCY_LABELS, type NextActionUrgency, type SalesProgressRow } from "@/lib/domain/sales-progress";
 import { StoreRowActions } from "./store-row-actions";
 import { StoreDeleteConfirmDialog } from "./store-delete-confirm-dialog";
+import { buildStoreLocationColumn } from "./store-location-column";
 import { bulkDeleteStoresAction } from "@/lib/actions/store-actions";
 import { useIsAdmin } from "@/components/layout/current-user-provider";
 
@@ -48,20 +49,7 @@ function buildColumns(): ColumnDef<SalesProgressRow>[] {
         </span>
       ),
     },
-    {
-      key: "location",
-      header: "エリア",
-      sortKey: "location",
-      sortDefaultDir: "asc",
-      truncate: true,
-      maxWidth: "200px",
-      title: (r) => [r.store.prefecture, r.store.city].filter(Boolean).join(" / ") || undefined,
-      cell: (r) => (
-        <span className="text-foreground/80">
-          {[r.store.prefecture, r.store.city].filter(Boolean).join(" / ") || "—"}
-        </span>
-      ),
-    },
+    buildStoreLocationColumn(),
     {
       key: "genre",
       header: "業態",

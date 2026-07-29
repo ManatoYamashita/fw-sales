@@ -315,6 +315,12 @@ function rowsOf(...pairs: Array<{ store: Store; deals?: Deal[] }>): SalesProgres
 
 const idsOf = (rows: SalesProgressRow[]) => rows.map((r) => r.store.id);
 
+function nearestStationInfo(value: unknown): Store["basic_info"] {
+  return {
+    nearest_station: { value },
+  } as unknown as Store["basic_info"];
+}
+
 describe("applyProgressFilter", () => {
   it("q: 店舗名 / エリア / 次回アクション内容 (Store legacy値) を部分一致検索する", () => {
     const rows = rowsOf(
@@ -326,6 +332,55 @@ describe("applyProgressFilter", () => {
     expect(idsOf(applyProgressFilter(rows, { q: "導楽" }))).toEqual(["a"]);
     expect(idsOf(applyProgressFilter(rows, { q: "川崎" }))).toEqual(["b"]);
     expect(idsOf(applyProgressFilter(rows, { q: "フォロー" }))).toEqual(["c"]);
+  });
+
+  it("q: 最寄駅の駅名 / 路線名 / 徒歩情報を部分一致検索する", () => {
+    const rows = rowsOf({
+      store: makeStore({
+        id: "station",
+        basic_info: nearestStationInfo(" 渋谷駅／東京メトロ銀座線 徒歩5分 "),
+      }),
+    });
+
+    expect(idsOf(applyProgressFilter(rows, { q: "渋谷駅" }))).toEqual(["station"]);
+    expect(idsOf(applyProgressFilter(rows, { q: "銀座線" }))).toEqual(["station"]);
+    expect(idsOf(applyProgressFilter(rows, { q: "徒歩5分" }))).toEqual(["station"]);
+  });
+
+  it.each([
+    ["キーなし", {}],
+    ["field null", { nearest_station: null }],
+    ["value null", nearestStationInfo(null)],
+    ["value undefined", nearestStationInfo(undefined)],
+    ["空文字", nearestStationInfo("")],
+    ["空白のみ", nearestStationInfo("   ")],
+    ["不正なvalue型", nearestStationInfo(123)],
+  ])("q: 最寄駅が%sでも例外にならず検索対象外", (_label, basicInfo) => {
+    const rows = rowsOf({
+      store: makeStore({
+        id: "empty",
+        basic_info: basicInfo as Store["basic_info"],
+      }),
+    });
+    expect(idsOf(applyProgressFilter(rows, { q: "渋谷" }))).toEqual([]);
+  });
+
+  it("q: 都道府県 / 市区町村 / 住所 / 店舗名 / 業態 / メモの既存検索を維持する", () => {
+    const rows = rowsOf({
+      store: makeStore({
+        id: "existing",
+        name: "導楽",
+        prefecture: "東京都",
+        city: "渋谷区",
+        address: "神南1-2-3",
+        genre: "居酒屋",
+        memo: "ランチ営業あり",
+      }),
+    });
+
+    for (const q of ["東京都", "渋谷区", "神南", "導楽", "居酒屋", "ランチ"]) {
+      expect(idsOf(applyProgressFilter(rows, { q }))).toEqual(["existing"]);
+    }
   });
 
   it("q: 最新Dealのnext_action_note / next_action_typeで検索できる (一覧が実際に表示するcurrentNextAction経由)", () => {
@@ -445,6 +500,95 @@ describe("applyProgressFilter", () => {
 });
 
 describe("applyProgressSort", () => {
+  it("location: 最寄駅で昇順・降順に並べる", () => {
+    const rows = rowsOf(
+      { store: makeStore({ id: "shibuya", basic_info: nearestStationInfo("か駅") }) },
+      { store: makeStore({ id: "akabane", basic_info: nearestStationInfo("あ駅") }) },
+      { store: makeStore({ id: "yokohama", basic_info: nearestStationInfo("さ駅") }) },
+    );
+
+    expect(idsOf(applyProgressSort(rows, { key: "location", dir: "asc" }))).toEqual([
+      "akabane",
+      "shibuya",
+      "yokohama",
+    ]);
+    expect(idsOf(applyProgressSort(rows, { key: "location", dir: "desc" }))).toEqual([
+      "yokohama",
+      "shibuya",
+      "akabane",
+    ]);
+  });
+
+  it.each([
+    ["キーなし", {}],
+    ["field null", { nearest_station: null }],
+    ["value null", nearestStationInfo(null)],
+    ["value undefined", nearestStationInfo(undefined)],
+    ["空文字", nearestStationInfo("")],
+    ["空白のみ", nearestStationInfo("   ")],
+    ["不正なvalue型", nearestStationInfo({ station: "渋谷" })],
+  ])("location: %sは昇順・降順とも入力済み店舗より末尾", (_label, basicInfo) => {
+    const rows = rowsOf(
+      {
+        store: makeStore({
+          id: "empty",
+          basic_info: basicInfo as Store["basic_info"],
+        }),
+      },
+      {
+        store: makeStore({
+          id: "filled",
+          basic_info: nearestStationInfo("渋谷駅"),
+        }),
+      },
+    );
+
+    expect(idsOf(applyProgressSort(rows, { key: "location", dir: "asc" }))).toEqual([
+      "filled",
+      "empty",
+    ]);
+    expect(idsOf(applyProgressSort(rows, { key: "location", dir: "desc" }))).toEqual([
+      "filled",
+      "empty",
+    ]);
+  });
+
+  it("location: 同一最寄駅は更新日新しい順 → 店舗名 → idで安定化する", () => {
+    const station = nearestStationInfo("渋谷駅");
+    const rows = rowsOf(
+      {
+        store: makeStore({
+          id: "z",
+          name: "あ店",
+          updated_at: "2026-01-01",
+          basic_info: station,
+        }),
+      },
+      {
+        store: makeStore({
+          id: "a",
+          name: "あ店",
+          updated_at: "2026-01-01",
+          basic_info: station,
+        }),
+      },
+      {
+        store: makeStore({
+          id: "new",
+          name: "ん店",
+          updated_at: "2026-02-01",
+          basic_info: station,
+        }),
+      },
+    );
+
+    expect(idsOf(applyProgressSort(rows, { key: "location", dir: "asc" }))).toEqual([
+      "new",
+      "a",
+      "z",
+    ]);
+  });
+
   it("next asc: 日付昇順、未設定は末尾", () => {
     const rows = rowsOf(
       { store: makeStore({ id: "a", next_action_date: "2026-08-01" }) },
