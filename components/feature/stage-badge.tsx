@@ -1,8 +1,8 @@
 import { Badge } from "@/components/ui/badge";
-import { findDisplayStage, type DisplayStateId } from "@/types/stage";
+import { findStage, type StageId } from "@/types/stage";
 
-export function StageBadge({ stage }: { stage: DisplayStateId | string }) {
-  const meta = findDisplayStage(stage);
+export function StageBadge({ stage }: { stage: StageId | string }) {
+  const meta = findStage(stage);
   if (!meta) {
     return <Badge tone="default">{stage || "—"}</Badge>;
   }
