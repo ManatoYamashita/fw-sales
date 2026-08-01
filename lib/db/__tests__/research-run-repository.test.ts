@@ -206,6 +206,30 @@ describe("makeResearchRunRepo.getLatestForStore", () => {
   });
 });
 
+describe("makeResearchRunRepo.listForStore", () => {
+  it("started_at降順のrun一覧を返す (orderByはDB側だが、mockは渡された行をそのまま返す)", async () => {
+    const rows = [
+      makeExistingRow({ id: "research_run_2", started_at: "2026-08-02T02:00:00.000Z" }),
+      makeExistingRow({ id: "research_run_1", started_at: "2026-08-01T00:00:00.000Z" }),
+    ];
+    const executor = makeMockExecutor(rows);
+    const repo = makeResearchRunRepo(executor as unknown as DbClient);
+
+    const result = await repo.listForStore("store_1");
+
+    expect(result.map((r) => r.id)).toEqual(["research_run_2", "research_run_1"]);
+  });
+
+  it("該当runが無ければ空配列を返す", async () => {
+    const executor = makeMockExecutor([]);
+    const repo = makeResearchRunRepo(executor as unknown as DbClient);
+
+    const result = await repo.listForStore("store_missing");
+
+    expect(result).toEqual([]);
+  });
+});
+
 describe("makeResearchRunRepo.update", () => {
   let executor: ReturnType<typeof makeMockExecutor>;
 

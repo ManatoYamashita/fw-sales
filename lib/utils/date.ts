@@ -39,6 +39,19 @@ export function formatDate(input: string | null | undefined): string {
   return `${yyyy}/${mm}/${dd}`;
 }
 
+/** `formatDate` の日時版(時分まで表示)。AI調査runの実施日時表示等に使う。 */
+export function formatDateTime(input: string | null | undefined): string {
+  if (!input) return "—";
+  const d = new Date(input);
+  if (Number.isNaN(d.getTime())) return input;
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+  return `${yyyy}/${mm}/${dd} ${hh}:${mi}`;
+}
+
 /**
  * `YYYY-MM-DD` 形式かつ実在する日付かを検証する。
  * 形式チェックに加え、UTC で再構築した日付と一致するか照合することで
