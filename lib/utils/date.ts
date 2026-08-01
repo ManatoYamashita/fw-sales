@@ -2,6 +2,11 @@ export function today(): string {
   return new Date().toISOString().split("T")[0]!;
 }
 
+/** 現在時刻を ISO 8601 文字列 (timestamptz 列用) で返す。 */
+export function nowIso(): string {
+  return new Date().toISOString();
+}
+
 /** 指定タイムゾーンにおける当日を `YYYY-MM-DD` で返す。 */
 export function todayInTimeZone(
   timeZone: string,

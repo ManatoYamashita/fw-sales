@@ -18,16 +18,29 @@
  * それでも本ファイルが tools を使わないのは、能力の制約ではなく **責務の分離**による:
  * - 本クライアントは「店舗基本情報 + 貼付調査テキスト → 営業資産(`AiAnalysisResult`)」の
  *   生成専用であり、**Web 調査を行わない**。入力は既に手元にあるため tools が要らない。
- * - Google Search / URL Context を伴う Web 調査は **Issue #158 で別モジュール
- *   (`lib/ai/research/`)として実装**する。そちらは Interactions API を使う。
+ * - Google Search / URL Context を伴う Web 調査(AI 店舗調査再設計、Issue #158)は
+ *   別モジュール `lib/ai/research/` として実装する。
  *
- * ## 本ファイルを Interactions API へ移行しない理由
+ * ## Web 調査側も Interactions API へは移行しない(2026-08 訂正)
  *
- * Interactions API は GA で公式も推奨だが、本ファイルは `generateContent`(Legacy 表記だが
- * 現行サポート。`gemini-3.6-flash` + Structured Outputs の公式サンプルあり)を維持する。
- * Interactions API の利点(built-in tools / background 実行 / 構造化 citation)は **いずれも
- * Web 調査側が必要とするもので、営業資産生成には不要**。モデル停止対応と API 基盤変更を
- * 同時に行うと切り戻し単位が粗くなるため、本移行では API 経路を変えない。
+ * 本コメントは以前「Web 調査側は Interactions API を使う」としていたが、これは実機検証を
+ * 伴わない当初の想定に過ぎなかった。実際には以下の実機 Spike (AI 店舗調査再設計 Plan v3.2
+ * Spike 0 / Spike 0.1、`D:\tento\gemini-research-poc` 配下で実施)により、
+ * **`generateContent` + `tools`(googleSearch / urlContext)+ Structured Output の組合せが
+ * 正常動作することを実証済み**:
+ * - `tools:[{urlContext:{}}]` + Structured Output: `urlContextMetadata` / `urlRetrievalStatus`
+ *   / `usageMetadata` すべて正常に返る(Spike 0.1 Test A / Test C)。
+ * - `tools:[{googleSearch:{}}]` + Structured Output: ツール自体は実際に呼ばれるが
+ *   (`toolConfig.includeServerSideToolInvocations` で実証)、公式 `groundingMetadata` は
+ *   返らない。そのため Web 調査側の設計は Stage1(Google Search 単独、Structured Output
+ *   なし)と Stage2(URL Context 単独、Structured Output あり)に役割分離する
+ *   (Plan v3.2 §8)。
+ *
+ * この実証結果があるため、Web 調査側も `generateContent` を使う(Interactions API へは
+ * 移行しない)。Interactions API の利点(built-in tools / background 実行 / 構造化 citation)は
+ * 実機検証していない前提の話であり、既に `generateContent` で必要な機能が確認できている以上、
+ * 新しい API 基盤を追加導入する理由が無い(既存の営業資産生成 `generateContent` 経路も
+ * 理由なく移行しない、という判断と同じ考え方)。
  *
  * ## sampling parameter を設定しない理由
  *

@@ -31,6 +31,7 @@ import type { NotificationRepository } from "./notification-repository";
 import type { PromptTemplateRepository } from "./prompt-template-repository";
 import type { AppSettingsRepository } from "./app-settings-repository";
 import type { PlaceCandidateRepository } from "./place-candidate-repository";
+import type { ResearchRunRepository } from "./research-run-repository";
 
 export type {
   DealRepository,
@@ -42,6 +43,7 @@ export type {
   PromptTemplateRepository,
   AppSettingsRepository,
   PlaceCandidateRepository,
+  ResearchRunRepository,
 };
 
 /**
@@ -66,6 +68,8 @@ export interface TxRepos {
   appSettings: AppSettingsRepository;
   /** エリア検索 候補DB保存の土台 (Issue #129 follow-up) で追加。 */
   placeCandidate: PlaceCandidateRepository;
+  /** AI 店舗調査 run (AI 店舗調査再設計 Plan v3.2, PR1) で追加。 */
+  researchRun: ResearchRunRepository;
   // task 4.2 (PR3a): deepResearch を撤去 (#121 / #110 連動)。
 }
 
@@ -85,6 +89,8 @@ export interface Repos {
   appSettings: AppSettingsRepository;
   /** エリア検索 候補DB保存の土台 (Issue #129 follow-up) で追加。 */
   placeCandidate: PlaceCandidateRepository;
+  /** AI 店舗調査 run (AI 店舗調査再設計 Plan v3.2, PR1) で追加。 */
+  researchRun: ResearchRunRepository;
   /**
    * 複数リポジトリ書込みを 1 トランザクションで実行する。
    * `db.transaction` で BEGIN/COMMIT/ROLLBACK を自動制御。
@@ -106,6 +112,7 @@ async function buildRepos(): Promise<Repos> {
     dbPromptTemplateRepo,
     dbAppSettingsRepo,
     dbPlaceCandidateRepo,
+    dbResearchRunRepo,
     makeDealRepo,
     makeStoreRepo,
     makeResearchRepo,
@@ -115,6 +122,7 @@ async function buildRepos(): Promise<Repos> {
     makePromptTemplateRepo,
     makeAppSettingsRepo,
     makePlaceCandidateRepo,
+    makeResearchRunRepo,
   } = dbModule;
 
   return Object.freeze({
@@ -127,6 +135,7 @@ async function buildRepos(): Promise<Repos> {
     promptTemplate: dbPromptTemplateRepo,
     appSettings: dbAppSettingsRepo,
     placeCandidate: dbPlaceCandidateRepo,
+    researchRun: dbResearchRunRepo,
     transaction: <T>(fn: (tx: TxRepos) => Promise<T>): Promise<T> =>
       db.transaction(async (tx) =>
         fn({
@@ -139,6 +148,7 @@ async function buildRepos(): Promise<Repos> {
           promptTemplate: makePromptTemplateRepo(tx),
           appSettings: makeAppSettingsRepo(tx),
           placeCandidate: makePlaceCandidateRepo(tx),
+          researchRun: makeResearchRunRepo(tx),
         }),
       ),
   }) satisfies Repos;

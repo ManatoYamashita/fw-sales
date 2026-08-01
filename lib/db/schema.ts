@@ -8,9 +8,16 @@ import {
   uuid,
   jsonb,
   boolean,
+  timestamp,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 import type { BasicInfo } from "@/types/basic-info";
+import type {
+  ResearchItem,
+  SourceRegistryEntry,
+  ReviewDecisions,
+} from "@/types/research-run";
 
 /**
  * profiles テーブル (auth-and-notifications spec, Issue #16)
@@ -396,3 +403,95 @@ export const placeCandidates = pgTable("place_candidates", {
   // 削除影響カウント (getDeleteImpact) の seq scan を回避する。
   index("place_candidates_matched_store_id_idx").on(table.matched_store_id),
 ]);
+
+/**
+ * store_research_runs テーブル (AI 店舗調査再設計 Plan v3.2, PR1: データモデル基盤)
+ *
+ * AI による 53 項目調査の 1 回の実行 (run) を表す。53 項目の候補結果 (`result`) と
+ * `stores.basic_info` は完全に分離しており、AI が自動的に `basic_info` を上書きする
+ * ことはない (人間が「採用」した項目のみ `mergeBasicInfo(..., "manual")` で反映する)。
+ *
+ * - `id` は `<entity>_<id>` 形式の text PK (既存規約)
+ * - `store_id` は `stores.id` への FK (ON DELETE CASCADE)
+ * - `status` / `stage` は Postgres ENUM 化せず text として保持 (既存規約)。
+ *   値の妥当性はアプリ層型ガード (`types/research-run.ts`) で担保する
+ * - `result` / `token_usage` は run 未完了時 NULL、`source_registry` /
+ *   `review_decisions` / `warnings` は基本情報 (`stores.basic_info`) と同じ jsonb
+ *   規約で「未設定時も空配列/空オブジェクト」とする (NOT NULL DEFAULT)
+ * - `started_at` / `expires_at` / `finished_at` は他テーブルの `YYYY-MM-DD` text
+ *   規約とは意図的に異なり `timestamptz` (ISO 8601 文字列, mode: "string") を使う。
+ *   所要時間の算出・stuck run 検出には日単位粒度では不十分なため
+ * - `expires_at` は Vercel Workflow 採用後も監査・異常検知用の軽量な参考値として
+ *   保持する (`types/research-run.ts` の JSDoc 参照。役割は waitUntil 時代の
+ *   「lazy sweep による能動的失敗遷移」から後退するが、Workflow 自体には
+ *   「run が想定より明らかに長く running のまま」を機械的に検知する固有の仕組みが
+ *   無いため、この列を廃止しない)
+ * - 二重実行防止: `status='running'` の店舗は 1 行のみに制限する部分ユニーク
+ *   インデックスを持つ (`ai_prompt_templates_default_idx` と同じ手法)
+ *
+ * 関連: Plan v3.2 §12, §13, §15, §17
+ */
+export const storeResearchRuns = pgTable(
+  "store_research_runs",
+  {
+    id: text("id").primaryKey(),
+    store_id: text("store_id")
+      .notNull()
+      .references(() => stores.id, { onDelete: "cascade" }),
+    /** 起動者の監査用。`profiles.id` への FK (nullable、システム起動等を許容)。 */
+    requested_by_user_id: uuid("requested_by_user_id").references(
+      () => profiles.id,
+    ),
+    /** `'running' | 'succeeded' | 'failed'`。アプリ層型ガードで担保 (既存規約)。 */
+    status: text("status").notNull().default("running"),
+    /** `'discovering' | 'researching' | 'done'`。running 中のみ意味を持つ。 */
+    stage: text("stage"),
+    /** 53項目候補 (`ResearchItem[]`)。未完了時 NULL。 */
+    result: jsonb("result").$type<ResearchItem[]>(),
+    /** Stage1 + Stage1.5 で構築した Source Registry。モデル自由生成URLは含まない。 */
+    source_registry: jsonb("source_registry")
+      .$type<SourceRegistryEntry[]>()
+      .notNull()
+      .default([]),
+    /** ユーザーの採用/却下/スキップ操作の永続化。key は ResearchItem.key。 */
+    review_decisions: jsonb("review_decisions")
+      .$type<ReviewDecisions>()
+      .notNull()
+      .default({}),
+    /** 明示的な「レビュー完了」操作の記録。NULL = レビュー未完了。 */
+    review_completed_at: timestamp("review_completed_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
+    /** Stage毎のトークン使用量記録 (コスト監視用)。形状は PR2 で確定。 */
+    token_usage: jsonb("token_usage").$type<Record<string, unknown>>(),
+    /** run単位の非致命的な警告 (例: Places軽量再同期の失敗通知)。 */
+    warnings: jsonb("warnings").$type<string[]>().notNull().default([]),
+    /** `AiClientError` と同種の正規化済みエラー種別。 */
+    error_kind: text("error_kind"),
+    error_message: text("error_message"),
+    started_at: timestamp("started_at", {
+      withTimezone: true,
+      mode: "string",
+    }).notNull(),
+    expires_at: timestamp("expires_at", {
+      withTimezone: true,
+      mode: "string",
+    }).notNull(),
+    finished_at: timestamp("finished_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
+  },
+  (table) => [
+    // 店舗ごとの最新run取得用 (「要確認」判定・過去run一覧に使用)。
+    index("store_research_runs_store_started_idx").on(
+      table.store_id,
+      table.started_at,
+    ),
+    // 二重実行防止: 同一店舗で status='running' の行は1件のみ許可する。
+    uniqueIndex("store_research_runs_running_store_idx")
+      .on(table.store_id)
+      .where(sql`${table.status} = 'running'`),
+  ],
+);

@@ -176,6 +176,13 @@
       "when": 1784366261804,
       "tag": "0024_add_deal_activity_followup_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1785605338698,
+      "tag": "0025_add_store_research_runs",
+      "breakpoints": true
     }
   ]
 }

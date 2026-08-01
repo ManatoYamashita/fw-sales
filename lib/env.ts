@@ -89,6 +89,21 @@ export function getGeminiModel(): string {
 }
 
 /**
+ * AI 店舗調査 run (`store_research_runs`) の `expires_at` マージン(分)。
+ *
+ * `started_at` からこの分数後を stuck run 検出の参考値とする(AI 店舗調査再設計
+ * Plan v3.2 §17)。PoC実測(約3分23秒)に対する暫定値であり、実運用のばらつきを
+ * 見て調整する前提のため、コード直書きの magic number ではなく env で上書き
+ * 可能にする。未設定時のデフォルトは 10 分。
+ *
+ * 旧 `DEEP_RESEARCH_*` 系(このファイル下部)とは無関係の新設定。撤去済み
+ * Deep Research パイプラインの再利用ではない。
+ */
+export function getResearchRunExpiresMarginMinutes(): number {
+  return readPositiveInt("RESEARCH_RUN_EXPIRES_MARGIN_MINUTES", 10);
+}
+
+/**
  * Google Places API キーが設定済みかを返す (boolean のみ、値そのものは返さない)。
  *
  * 用途: Server Component から取得した結果を Client Component に props で渡し、
