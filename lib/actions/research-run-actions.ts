@@ -23,6 +23,19 @@ import { getCurrentSession } from "@/lib/supabase/server";
 import { checkRateLimit } from "@/lib/ai/rate-limiter";
 import { nowIso } from "@/lib/utils/date";
 import { storeResearchWorkflow } from "@/workflows/store-research";
+import { mergeBasicInfo } from "@/lib/domain/basic-info-merge";
+import {
+  buildAdoptedBasicInfoField,
+  getUndecidedReviewableItems,
+  isReviewableItem,
+} from "@/lib/domain/research-review";
+import { isValidReviewDecisionForItem } from "@/lib/ai/research-result-schema";
+import type {
+  ReviewDecision,
+  ReviewDecisionType,
+  ReviewDecisions,
+  StoreResearchRun,
+} from "@/types/research-run";
 import { failure, success, type ActionResult } from "./_helpers";
 
 export interface StartResearchRunResult {
@@ -76,4 +89,215 @@ export async function startResearchRunAction(
 
   revalidateTag(CACHE_TAGS.store(storeId), "max");
   return success({ runId }, "AI店舗調査を開始しました");
+}
+
+/**
+ * run 進捗のポーリング用(PR4)。`repos.researchRun` は server-only のため、
+ * client component からは本 Action 経由で読む。`'use cache'` は使わない
+ * (running中のrunを数秒間隔で読むため、Cache Componentsのキャッシュ対象外)。
+ */
+export async function getResearchRunStatusAction(
+  runId: string,
+): Promise<ActionResult<StoreResearchRun>> {
+  const session = await getCurrentSession();
+  if (!session) return failure("ログインが必要です");
+  if (typeof runId !== "string" || runId.trim() === "") {
+    return failure("runIdが不正です");
+  }
+  const run = await repos.researchRun.get(runId);
+  if (!run) return failure("調査結果が見つかりません");
+  return success(run);
+}
+
+export interface RecordReviewDecisionInput {
+  runId: string;
+  storeId: string;
+  itemKey: string;
+  decision: ReviewDecisionType;
+  selectedCandidateId?: string;
+  editedValue?: string;
+}
+
+/**
+ * 53項目レビューの1件分の判断(採用/却下/スキップ)を記録する(PR4, Plan v3.2 §4, §15)。
+ *
+ * 「採用した項目のみ mergeBasicInfo(..., "manual") で stores.basic_info へ即時反映」
+ * (Plan §4)の実装。却下・スキップは `review_decisions` の記録のみで `basic_info` は
+ * 変更しない。
+ */
+export async function recordReviewDecisionAction(
+  input: RecordReviewDecisionInput,
+): Promise<ActionResult<{ reviewDecisions: ReviewDecisions }>> {
+  const session = await getCurrentSession();
+  if (!session) return failure("ログインが必要です");
+
+  const { runId, storeId, itemKey, decision, selectedCandidateId, editedValue } = input;
+  if (!runId || !storeId || !itemKey) return failure("パラメータが不正です");
+
+  const run = await repos.researchRun.get(runId);
+  if (!run || run.store_id !== storeId) return failure("調査結果が見つかりません");
+  if (run.status !== "succeeded") return failure("この調査はまだレビューできません");
+  if (run.review_completed_at !== null) return failure("このレビューは既に完了しています");
+
+  const item = (run.result ?? []).find((i) => i.key === itemKey);
+  if (!item) return failure("対象の項目が見つかりません");
+  if (!isReviewableItem(item)) return failure("この項目はレビュー対象外です");
+
+  const now = nowIso();
+  const reviewDecision: ReviewDecision =
+    decision === "adopted"
+      ? {
+          decision: "adopted",
+          decided_at: now,
+          ...(selectedCandidateId !== undefined
+            ? { selected_candidate_id: selectedCandidateId }
+            : {}),
+          ...(editedValue !== undefined ? { edited_value: editedValue } : {}),
+        }
+      : { decision, decided_at: now };
+
+  if (!isValidReviewDecisionForItem(reviewDecision, item)) {
+    return failure("不正な選択です");
+  }
+  if (item.status === "conflict" && reviewDecision.decision === "adopted" && !selectedCandidateId) {
+    // isValidReviewDecisionForItem は selected_candidate_id 未指定を一般に許容するため
+    // (rejected/skipped は候補選択不要)、conflict項目のadoptedにのみ本チェックを追加する。
+    // 候補未選択のまま basic_info へ value:null を manual 書込みしてしまう抜け道を塞ぐ。
+    return failure("競合している項目は候補を選択してください");
+  }
+
+  const mergedDecisions: ReviewDecisions = { ...run.review_decisions, [itemKey]: reviewDecision };
+
+  if (reviewDecision.decision === "adopted") {
+    const store = await repos.store.get(storeId);
+    if (!store) return failure("店舗が見つかりません");
+
+    let field;
+    try {
+      field = buildAdoptedBasicInfoField(item, run.source_registry, now, {
+        selectedCandidateId,
+        editedValue,
+      });
+    } catch {
+      return failure("項目の反映に失敗しました");
+    }
+
+    const mergedBasicInfo = mergeBasicInfo(store.basic_info, { [itemKey]: field }, "manual", now);
+    await repos.store.update(storeId, { basic_info: mergedBasicInfo });
+  }
+
+  await repos.researchRun.update(runId, { review_decisions: mergedDecisions });
+  revalidateTag(CACHE_TAGS.store(storeId), "max");
+
+  return success({ reviewDecisions: mergedDecisions });
+}
+
+/**
+ * 確認済み(confirmed)項目のうち未対応のものを一括採用する(PR4, Plan v3.2 §5.3
+ * 「確認済みを全て採用」)。推定(inferred)項目は対象外(1件ずつの人間判断を強制、
+ * Plan §5.3)。store/run の書込みをそれぞれ1回にまとめ、項目数分の往復を避ける。
+ */
+export async function bulkAdoptConfirmedAction(input: {
+  runId: string;
+  storeId: string;
+}): Promise<ActionResult<{ reviewDecisions: ReviewDecisions; adoptedCount: number }>> {
+  const session = await getCurrentSession();
+  if (!session) return failure("ログインが必要です");
+
+  const { runId, storeId } = input;
+  if (!runId || !storeId) return failure("パラメータが不正です");
+
+  const run = await repos.researchRun.get(runId);
+  if (!run || run.store_id !== storeId) return failure("調査結果が見つかりません");
+  if (run.status !== "succeeded") return failure("この調査はまだレビューできません");
+  if (run.review_completed_at !== null) return failure("このレビューは既に完了しています");
+
+  const targets = (run.result ?? []).filter(
+    (item) => item.status === "confirmed" && run.review_decisions[item.key] === undefined,
+  );
+  if (targets.length === 0) {
+    return success({ reviewDecisions: run.review_decisions, adoptedCount: 0 }, "対象がありません");
+  }
+
+  const store = await repos.store.get(storeId);
+  if (!store) return failure("店舗が見つかりません");
+
+  const now = nowIso();
+  let basicInfo = store.basic_info;
+  const mergedDecisions: ReviewDecisions = { ...run.review_decisions };
+  for (const item of targets) {
+    const field = buildAdoptedBasicInfoField(item, run.source_registry, now);
+    basicInfo = mergeBasicInfo(basicInfo, { [item.key]: field }, "manual", now);
+    mergedDecisions[item.key] = { decision: "adopted", decided_at: now };
+  }
+
+  await repos.store.update(storeId, { basic_info: basicInfo });
+  await repos.researchRun.update(runId, { review_decisions: mergedDecisions });
+  revalidateTag(CACHE_TAGS.store(storeId), "max");
+
+  return success(
+    { reviewDecisions: mergedDecisions, adoptedCount: targets.length },
+    `${targets.length}件を採用しました`,
+  );
+}
+
+export interface CompleteReviewInput {
+  runId: string;
+  storeId: string;
+  /** true の場合、未対応の reviewable item を一括 skipped にした上で完了する(Secondary操作)。 */
+  skipRemaining: boolean;
+}
+
+/**
+ * レビュー完了操作(PR4, Plan v3.2 §15)。
+ *
+ * - reviewable item が全件対応済みでなければ、`skipRemaining=false` の場合は失敗を返す
+ *   (Primaryボタンの活性化条件と同じ判定をサーバ側でも強制する)。
+ * - `skipRemaining=true` の場合、未対応item全件を機械的に `skipped` にしてから完了する。
+ * - 完了後、`store.stage==="未調査"` の場合のみ `"調査済み"` へ遷移する(既に調査済み/
+ *   架電済みの店舗を再調査した場合は降格させない、Plan §15)。
+ */
+export async function completeReviewAction(
+  input: CompleteReviewInput,
+): Promise<ActionResult<void>> {
+  const session = await getCurrentSession();
+  if (!session) return failure("ログインが必要です");
+
+  const { runId, storeId, skipRemaining } = input;
+  if (!runId || !storeId) return failure("パラメータが不正です");
+
+  const run = await repos.researchRun.get(runId);
+  if (!run || run.store_id !== storeId) return failure("調査結果が見つかりません");
+  if (run.status !== "succeeded") return failure("この調査はまだレビューできません");
+  if (run.review_completed_at !== null) return failure("このレビューは既に完了しています");
+
+  const items = run.result ?? [];
+  const undecided = getUndecidedReviewableItems(items, run.review_decisions);
+
+  let mergedDecisions = run.review_decisions;
+  if (undecided.length > 0) {
+    if (!skipRemaining) {
+      return failure(`未対応の項目が${undecided.length}件残っています`);
+    }
+    const now = nowIso();
+    mergedDecisions = { ...run.review_decisions };
+    for (const item of undecided) {
+      mergedDecisions[item.key] = { decision: "skipped", decided_at: now };
+    }
+  }
+
+  await repos.researchRun.update(runId, {
+    review_decisions: mergedDecisions,
+    review_completed_at: nowIso(),
+  });
+
+  const store = await repos.store.get(storeId);
+  if (store && store.stage === "未調査") {
+    await repos.store.update(storeId, { stage: "調査済み" });
+  }
+
+  revalidateTag(CACHE_TAGS.store(storeId), "max");
+  revalidateTag(CACHE_TAGS.stores, "max");
+
+  return success(undefined, "レビューを完了しました");
 }

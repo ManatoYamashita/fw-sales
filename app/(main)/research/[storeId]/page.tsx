@@ -1,9 +1,8 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { PasteWorkbench } from "./_components/paste-workbench";
+import { AiResearchWorkbench } from "./_components/ai-research-workbench";
 import { getStoreCached } from "@/lib/queries/stores";
-import { getGemUrlCached } from "@/lib/queries/app-settings";
-import { buildBasicInfoBlock } from "@/lib/ai/basic-info-prompt";
+import { repos } from "@/lib/repositories";
 
 type Params = Promise<{ storeId: string }>;
 
@@ -25,21 +24,15 @@ export default async function ResearchDetailPage({
   params: Params;
 }) {
   const { storeId } = await params;
-  const [store, gemUrl] = await Promise.all([
+  const [store, runs] = await Promise.all([
     getStoreCached(storeId),
-    getGemUrlCached(),
+    // 調査run一覧は running中の状態を含むため 'use cache' を経由しない
+    // (`repos.researchRun.listForStore` 参照、PR4)。
+    repos.researchRun.listForStore(storeId, 10),
   ]);
   if (!store) notFound();
-  // task 3.6 (PR2): 旧 51 項目プレビュー (DeepResearchReportView) を撤去したため
-  // initialReport / getDeepResearchReport は本ページでは不要 (#121)。
-  // STEP0 (Issue #122): 外部 Gem へ渡す基本情報サマリを server で算出 (buildBasicInfoBlock
-  // は server-only)。店名を先頭に付し、basic_info が薄い店舗でも最低限の文脈を持たせる。
-  const researchPrompt = `${store.name}\n\n${buildBasicInfoBlock(store.basic_info)}`;
-  return (
-    <PasteWorkbench
-      store={store}
-      researchPrompt={researchPrompt}
-      gemUrl={gemUrl}
-    />
-  );
+  // AI 店舗調査再設計(Plan v3.2)により、旧 STEP0(外部 Gem へのプロンプト生成・貼付欄)は
+  // 撤去した(§5.1, §12)。`buildBasicInfoBlock` 自体は `generateSalesAssetsAction` の
+  // プロンプト組み立てに引き続き使われるため削除しない(§14)。
+  return <AiResearchWorkbench store={store} initialRuns={runs} />;
 }

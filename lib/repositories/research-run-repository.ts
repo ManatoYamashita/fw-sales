@@ -42,6 +42,12 @@ export interface ResearchRunRepository {
    */
   getLatestForStore(storeId: string): Promise<StoreResearchRun | null>;
 
+  /**
+   * 指定店舗の直近run一覧を `started_at` 降順で取得する(PR4: `/research/[storeId]`
+   * の主表示run選定・過去run一覧表示に使用)。`limit` 省略時は既定件数。
+   */
+  listForStore(storeId: string, limit?: number): Promise<StoreResearchRun[]>;
+
   /** 部分更新する。存在しない `id` の場合は `null`。 */
   update(id: string, patch: StoreResearchRunPatch): Promise<StoreResearchRun | null>;
 }

@@ -142,6 +142,16 @@ export function makeResearchRunRepo(
       return row ? fromDbRow(row) : null;
     },
 
+    async listForStore(storeId, limit = 10) {
+      const rows = await executor
+        .select()
+        .from(storeResearchRuns)
+        .where(eq(storeResearchRuns.store_id, storeId))
+        .orderBy(desc(storeResearchRuns.started_at))
+        .limit(limit);
+      return rows.map(fromDbRow);
+    },
+
     async update(id, patch: StoreResearchRunPatch) {
       const current = await executor
         .select()
