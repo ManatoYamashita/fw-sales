@@ -4,25 +4,18 @@ import { useTransition, type ChangeEvent } from "react";
 import { Select } from "@/components/ui/select";
 import { updateStoreStageAction } from "@/lib/actions/store-actions";
 import { STAGES, type StageId } from "@/types/stage";
-import { StageBadge } from "@/components/feature/stage-badge";
 import { toast } from "@/components/ui/toast";
 
 export interface StageInlineSelectProps {
   storeId: string;
   current: StageId;
-  hasActiveDrJob?: boolean;
 }
 
 export function StageInlineSelect({
   storeId,
   current,
-  hasActiveDrJob,
 }: StageInlineSelectProps) {
   const [pending, startTransition] = useTransition();
-
-  if (hasActiveDrJob) {
-    return <StageBadge stage="DeepResearching..." />;
-  }
 
   const handleChange = (e: ChangeEvent<HTMLSelectElement>) => {
     const next = e.target.value as StageId;

@@ -10,19 +10,16 @@
  */
 
 /**
- * 通知種別。#14 / #43 の発火イベントに合わせて拡張される。
+ * 通知種別。#14 の発火イベントに合わせて拡張される。
  * 本仕様では値の妥当性をアプリ層で担保 (DB は text として保持)。
  *
  * - `research_job_completed` / `research_job_failed`: #16 由来 (旧 Resend 通知。
  *   現状未使用だが型互換性のため残存)
- * - `deep_research_*`: #43 deep-research-pipeline で追加
+ *
+ * `deep_research_*`(#43 deep-research-pipeline で追加、発行元ゼロを確認)は
+ * AI 店舗調査再設計 PR6 で撤去した。
  */
-export type NotificationKind =
-  | "research_job_completed"
-  | "research_job_failed"
-  | "deep_research_done"
-  | "deep_research_failed"
-  | "deep_research_budget_warning";
+export type NotificationKind = "research_job_completed" | "research_job_failed";
 
 export interface Notification {
   readonly id: string;

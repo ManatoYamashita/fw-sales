@@ -21,28 +21,3 @@ export const STAGE_IDS = STAGES.map((s) => s.id) as readonly StageId[];
 export function findStage(id: StageId | string): Stage | undefined {
   return STAGES.find((s) => s.id === id);
 }
-
-export type DisplayStateId = StageId | "DeepResearching...";
-
-const DEEP_RESEARCHING_META = {
-  id: "DeepResearching..." as const,
-  label: "DeepResearching...",
-  color: "#d97706",
-  bg: "#fef3c7",
-};
-
-export const DISPLAY_STAGES = [...STAGES, DEEP_RESEARCHING_META] as const;
-
-export function findDisplayStage(
-  id: DisplayStateId | string,
-): (typeof DISPLAY_STAGES)[number] | undefined {
-  return DISPLAY_STAGES.find((s) => s.id === id);
-}
-
-export function resolveDisplayState(
-  dbStage: StageId,
-  hasActiveDrJob: boolean,
-): DisplayStateId {
-  if (hasActiveDrJob && dbStage !== "架電済み") return "DeepResearching...";
-  return dbStage;
-}
