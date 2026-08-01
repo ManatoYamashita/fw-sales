@@ -79,18 +79,16 @@ describe("applyStoreSort", () => {
     expect(idsOf(sorted)).toEqual(["high-many", "high-few", "low"]);
   });
 
-  it("stage: STAGE_IDS 定義順 (未調査 → 調査済み → ...) で asc", () => {
+  it("stage: STAGE_IDS 定義順 (未調査 → 調査済み → 架電済み) で asc", () => {
     const stores = [
       makeStore({ id: "called", stage: "架電済み" }),
       makeStore({ id: "untouched", stage: "未調査" }),
-      makeStore({ id: "deep", stage: "DeepResearch済み" }),
       makeStore({ id: "researched", stage: "調査済み" }),
     ];
     const sorted = applyStoreSort(stores, { key: "stage", dir: "asc" });
     expect(idsOf(sorted)).toEqual([
       "untouched",
       "researched",
-      "deep",
       "called",
     ]);
   });

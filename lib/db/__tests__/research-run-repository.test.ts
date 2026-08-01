@@ -52,10 +52,11 @@ function makeWriteCapture() {
   return { insert, update, inserted, updated };
 }
 
-function makeMockExecutor(selectRows: unknown[] = []) {
+function makeMockExecutor(selectRows: unknown[] = [], selectDistinctRows: unknown[] = []) {
   const { insert, update, inserted, updated } = makeWriteCapture();
   return {
     select: vi.fn().mockReturnValue(makeSelectProxy(selectRows)),
+    selectDistinct: vi.fn().mockReturnValue(makeSelectProxy(selectDistinctRows)),
     insert,
     update,
     delete: vi.fn(),
@@ -225,6 +226,29 @@ describe("makeResearchRunRepo.listForStore", () => {
     const repo = makeResearchRunRepo(executor as unknown as DbClient);
 
     const result = await repo.listForStore("store_missing");
+
+    expect(result).toEqual([]);
+  });
+});
+
+describe("makeResearchRunRepo.listStoreIdsNeedingReview", () => {
+  it("succeeded かつ review_completed_at IS NULL のstore_idを重複なく返す(DISTINCT はDB側だが、mockは渡された行をそのまま返す)", async () => {
+    const executor = makeMockExecutor(
+      [],
+      [{ store_id: "store_1" }, { store_id: "store_2" }],
+    );
+    const repo = makeResearchRunRepo(executor as unknown as DbClient);
+
+    const result = await repo.listStoreIdsNeedingReview();
+
+    expect(result).toEqual(["store_1", "store_2"]);
+  });
+
+  it("該当が無ければ空配列を返す", async () => {
+    const executor = makeMockExecutor([], []);
+    const repo = makeResearchRunRepo(executor as unknown as DbClient);
+
+    const result = await repo.listStoreIdsNeedingReview();
 
     expect(result).toEqual([]);
   });

@@ -1,11 +1,13 @@
 /**
- * 53項目レビュー・basic_info採用の純関数群(AI 店舗調査再設計 Plan v3.2 §4, §13, §15, PR4)。
+ * 53項目レビュー・basic_info採用・一覧分類の純関数群
+ * (AI 店舗調査再設計 Plan v3.2 §4, §6, §13, §15, PR4/PR5)。
  *
- * Server Action層(`lib/actions/research-run-actions.ts`)から呼ばれる、副作用のない
- * ドメインロジックのみを集約する。DB I/O・Gemini呼び出しは一切行わない。
+ * Server Action層(`lib/actions/research-run-actions.ts`)・クエリ層
+ * (`lib/queries/research.ts`)から呼ばれる、副作用のないドメインロジックのみを集約する。
+ * DB I/O・Gemini呼び出しは一切行わない。
  *
- * 関連: Plan v3.2 §4(採用即時反映)、§13(tier決定ルール)、§15(reviewable item定義、
- *       レビュー完了条件、要確認runの選定)
+ * 関連: Plan v3.2 §4(採用即時反映)、§6(一覧の要確認判定)、§13(tier決定ルール)、
+ *       §15(reviewable item定義、レビュー完了条件、要確認runの選定)
  */
 
 import type { BasicInfoField } from "@/types/basic-info";
@@ -15,6 +17,7 @@ import type {
   SourceRegistryEntry,
   StoreResearchRun,
 } from "@/types/research-run";
+import type { Store } from "@/types/store";
 
 /**
  * reviewable item の定義(Plan v3.2 §15): AIが具体的な値候補を出した項目のみ。
@@ -69,6 +72,43 @@ export function selectPrimaryResearchRun(
   );
   if (unreviewedSucceeded) return unreviewedSucceeded;
   return runs[0] ?? null;
+}
+
+export interface ResearchQueueBuckets {
+  /** 要確認: 未レビューのsucceeded runが1件以上存在する店舗。 */
+  needsReview: Store[];
+  /** 調査待ち: 要確認に該当せず、`stage==="未調査"` の店舗。 */
+  waiting: Store[];
+  /** 調査済み: 要確認に該当せず、`stage∈{"調査済み","架電済み"}` の店舗。 */
+  done: Store[];
+}
+
+/**
+ * `/research` 一覧の3タブ分類(Plan v3.2 §6)。相互排他になるよう
+ * 「要確認 → 調査待ち → 調査済み」の優先順位で判定する。
+ *
+ * `needsReviewStoreIds` は `ResearchRunRepository.listStoreIdsNeedingReview()` の
+ * 結果(succeeded かつ review_completed_at IS NULL のrunが存在する店舗id集合)を渡す。
+ * これにより、再調査が失敗しても古い未レビューのsucceeded runが「要確認」から
+ * 消えない(Plan §6)。
+ *
+ * 純関数。`stores` の順序を保ったまま3バケットに振り分ける。
+ */
+export function classifyResearchQueue(
+  stores: readonly Store[],
+  needsReviewStoreIds: ReadonlySet<string>,
+): ResearchQueueBuckets {
+  const buckets: ResearchQueueBuckets = { needsReview: [], waiting: [], done: [] };
+  for (const store of stores) {
+    if (needsReviewStoreIds.has(store.id)) {
+      buckets.needsReview.push(store);
+    } else if (store.stage === "未調査") {
+      buckets.waiting.push(store);
+    } else {
+      buckets.done.push(store);
+    }
+  }
+  return buckets;
 }
 
 /** Source Registry の id から実際に開ける URL を解決する(resolved_url優先、無ければ redirect URL)。 */
