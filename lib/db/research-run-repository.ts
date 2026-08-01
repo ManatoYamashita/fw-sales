@@ -14,7 +14,7 @@
 
 import "server-only";
 
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { db, type DbClient, type Tx } from "./client";
 import { storeResearchRuns } from "./schema";
 import type {
@@ -150,6 +150,19 @@ export function makeResearchRunRepo(
         .orderBy(desc(storeResearchRuns.started_at))
         .limit(limit);
       return rows.map(fromDbRow);
+    },
+
+    async listStoreIdsNeedingReview() {
+      const rows = await executor
+        .selectDistinct({ store_id: storeResearchRuns.store_id })
+        .from(storeResearchRuns)
+        .where(
+          and(
+            eq(storeResearchRuns.status, "succeeded"),
+            isNull(storeResearchRuns.review_completed_at),
+          ),
+        );
+      return rows.map((row) => row.store_id);
     },
 
     async update(id, patch: StoreResearchRunPatch) {

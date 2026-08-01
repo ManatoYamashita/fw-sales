@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildAdoptedBasicInfoField,
+  classifyResearchQueue,
   getReviewableItems,
   getUndecidedReviewableItems,
   isReviewableItem,
@@ -14,6 +15,45 @@ import type {
   SourceRegistryEntry,
   StoreResearchRun,
 } from "@/types/research-run";
+import type { Store } from "@/types/store";
+
+function makeStore(overrides: Partial<Store>): Store {
+  return {
+    id: "id",
+    name: "",
+    prefecture: "",
+    city: "",
+    address: "",
+    genre: "",
+    priority: "中",
+    stage: "未調査",
+    channel: "未判定",
+    has_contact_form: "未確認",
+    map_url: "",
+    site_url: "",
+    instagram_url: "",
+    phone: "",
+    target_service: "",
+    review_count: 0,
+    review_avg: 0,
+    memo: "",
+    assigned_planner_user_id: null,
+    assigned_sales_user_id: null,
+    operator_type: "未設定",
+    operator_name: "",
+    ai_analysis_result: null,
+    lat: null,
+    lng: null,
+    google_place_id: null,
+    appointment_acquired_date: null,
+    next_action_date: null,
+    next_action_note: null,
+    basic_info: {},
+    created_at: "2024-01-01",
+    updated_at: "2024-01-01",
+    ...overrides,
+  };
+}
 
 function makeItem(overrides: Partial<ResearchItem> = {}): ResearchItem {
   return {
@@ -226,5 +266,44 @@ describe("buildAdoptedBasicInfoField", () => {
       ],
     });
     expect(() => buildAdoptedBasicInfoField(item, registry, now)).toThrow();
+  });
+});
+
+describe("classifyResearchQueue", () => {
+  it("要確認 > 調査待ち > 調査済みの優先順位で相互排他に分類する", () => {
+    const stores = [
+      makeStore({ id: "a", stage: "未調査" }),
+      makeStore({ id: "b", stage: "調査済み" }),
+      makeStore({ id: "c", stage: "架電済み" }),
+      // 要確認対象なのに未調査のまま(AI調査run成功直後、レビュー未完了)
+      makeStore({ id: "d", stage: "未調査" }),
+      // 要確認対象だが既に調査済み(再調査中の店舗)
+      makeStore({ id: "e", stage: "調査済み" }),
+    ];
+    const needsReviewIds = new Set(["d", "e"]);
+
+    const result = classifyResearchQueue(stores, needsReviewIds);
+
+    expect(result.needsReview.map((s) => s.id)).toEqual(["d", "e"]);
+    expect(result.waiting.map((s) => s.id)).toEqual(["a"]);
+    expect(result.done.map((s) => s.id)).toEqual(["b", "c"]);
+  });
+
+  it("要確認idが空集合ならstageのみで分類する", () => {
+    const stores = [
+      makeStore({ id: "a", stage: "未調査" }),
+      makeStore({ id: "b", stage: "調査済み" }),
+    ];
+
+    const result = classifyResearchQueue(stores, new Set());
+
+    expect(result.needsReview).toEqual([]);
+    expect(result.waiting.map((s) => s.id)).toEqual(["a"]);
+    expect(result.done.map((s) => s.id)).toEqual(["b"]);
+  });
+
+  it("入力が空配列なら全バケット空", () => {
+    const result = classifyResearchQueue([], new Set(["x"]));
+    expect(result).toEqual({ needsReview: [], waiting: [], done: [] });
   });
 });

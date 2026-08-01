@@ -201,9 +201,9 @@ describe("Deal作成/更新時の Store.stage 自動昇格 (Middle 7)", () => {
     expect(mocks.storeStageUpdate).toHaveBeenCalledWith("store-1", { stage: "架電済み" });
   });
 
-  it("DeepResearch済みStoreに継続追客を追加すると架電済みへ昇格する (update)", async () => {
+  it("調査済みStoreに継続追客を追加すると架電済みへ昇格する (update)", async () => {
     mocks.getDeal.mockResolvedValueOnce({ id: "deal-1", store_id: "store-1", status: "初回接触", order_amount: null, lost_reason: "" });
-    mocks.getStore.mockResolvedValue({ ...store, stage: "DeepResearch済み" });
+    mocks.getStore.mockResolvedValue({ ...store, stage: "調査済み" });
     mocks.update.mockResolvedValueOnce({ id: "deal-1" });
     await updateDealAction("deal-1", null, data({ status: "継続追客" }));
     expect(mocks.storeStageUpdate).toHaveBeenCalledWith("store-1", { stage: "架電済み" });

@@ -52,7 +52,7 @@ export function deriveCurrentSalesState(
   if (latestDeal?.status === "アポ取得") return "appointment";
   if (store.appointment_acquired_date) return "appointment";
   if (store.stage === "架電済み") return "initial";
-  if (store.stage === "DeepResearch済み" || store.stage === "調査済み") return "researched";
+  if (store.stage === "調査済み") return "researched";
   return "unresearched";
 }
 

@@ -1,9 +1,49 @@
 import Link from "next/link";
 import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Search, CheckCircle2 } from "lucide-react";
+import { Search, CheckCircle2, ClipboardCheck } from "lucide-react";
 import { findStage } from "@/types/stage";
 import type { Store } from "@/types/store";
+
+export function NeedsReviewList({ stores }: { stores: Store[] }) {
+  if (stores.length === 0) {
+    return (
+      <Card>
+        <EmptyState
+          icon={<CheckCircle2 />}
+          title="要確認の調査結果はありません"
+          description="AI店舗調査が完了すると、レビュー待ちの店舗がここに表示されます。"
+        />
+      </Card>
+    );
+  }
+  return (
+    <Card>
+      <ul className="divide-y divide-border/60">
+        {stores.map((s) => (
+          <li key={s.id}>
+            <Link
+              href={`/research/${s.id}`}
+              className="flex items-center justify-between gap-3 px-5 py-3 hover:bg-muted/40 transition-colors"
+            >
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-foreground">{s.name}</p>
+                <p className="text-xs text-muted-foreground truncate">
+                  {[s.prefecture, s.city, s.genre].filter(Boolean).join(" / ")}
+                </p>
+              </div>
+              <Badge tone="warning" className="whitespace-nowrap">
+                <ClipboardCheck className="h-3 w-3" />
+                レビューする
+              </Badge>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
 
 export function WaitingList({ stores }: { stores: Store[] }) {
   if (stores.length === 0) {
@@ -50,7 +90,7 @@ export function DoneList({ stores }: { stores: Store[] }) {
       <Card>
         <EmptyState
           title="調査済みの店舗はまだありません"
-          description="貼付ワークベンチで構造化・架電生成を完了すると、ここに表示されます。"
+          description="AI店舗調査のレビューを完了すると、ここに表示されます。"
         />
       </Card>
     );

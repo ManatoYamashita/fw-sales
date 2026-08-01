@@ -7,7 +7,7 @@ export const metadata: Metadata = {
 };
 
 export default async function ResearchPage() {
-  const { waiting, done } = await getResearchQueue();
+  const { needsReview, waiting, done } = await getResearchQueue();
 
   return (
     <div className="space-y-4">
@@ -16,11 +16,11 @@ export default async function ResearchPage() {
           調査
         </h2>
         <p className="text-sm text-muted-foreground mt-1">
-          Gemini の DeepResearch 結果を貼り付けて構造化・架電生成します。
+          AIで店舗を調査し、53項目のレビューを経て営業資産を生成します。
         </p>
       </div>
 
-      <ResearchTabs waiting={waiting} done={done} />
+      <ResearchTabs needsReview={needsReview} waiting={waiting} done={done} />
     </div>
   );
 }

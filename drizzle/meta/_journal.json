@@ -183,6 +183,13 @@
       "when": 1785605338698,
       "tag": "0025_add_store_research_runs",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1785709200000,
+      "tag": "0026_migrate_deep_research_stage",
+      "breakpoints": true
     }
   ]
 }

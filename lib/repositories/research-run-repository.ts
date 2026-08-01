@@ -48,6 +48,15 @@ export interface ResearchRunRepository {
    */
   listForStore(storeId: string, limit?: number): Promise<StoreResearchRun[]>;
 
+  /**
+   * `status==="succeeded"` かつ `review_completed_at IS NULL` を満たすrunが
+   * 1件以上存在する店舗のidを重複なく返す(PR5, Plan v3.2 §6「要確認」判定)。
+   *
+   * 「最新runだけを見る」のではなく、該当条件を満たすrunの**存在**を店舗単位で
+   * 判定する(新しい失敗runが古い未レビューのsucceeded runを隠さないため、Plan §6)。
+   */
+  listStoreIdsNeedingReview(): Promise<string[]>;
+
   /** 部分更新する。存在しない `id` の場合は `null`。 */
   update(id: string, patch: StoreResearchRunPatch): Promise<StoreResearchRun | null>;
 }

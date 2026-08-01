@@ -35,7 +35,7 @@ function isOneOf<T extends string>(value: string, values: readonly T[]): value i
 /**
  * Deal 作成/更新時に自動昇格させる目標 stage。
  *
- * 現行の StageId は 4 段階 (未調査 → 調査済み → DeepResearch済み → 架電済み) のみで、
+ * 現行の StageId は 3 段階 (未調査 → 調査済み → 架電済み) のみで、
  * 旧 main の STAGE_BY_DEAL_STATUS が参照していた 商談化/見積提出/受注/失注 のような
  * DealStatus 別 stage はもう存在しない。営業記録 (どの DealStatus であっても) が
  * 作成/更新されたこと自体が「架電済み」を意味するため、全 DealStatus を一律で
