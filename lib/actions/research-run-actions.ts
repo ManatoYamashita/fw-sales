@@ -28,6 +28,7 @@ import {
   buildAdoptedBasicInfoField,
   getUndecidedReviewableItems,
   isReviewableItem,
+  isRunStuck,
 } from "@/lib/domain/research-review";
 import { isValidReviewDecisionForItem } from "@/lib/ai/research-result-schema";
 import type {
@@ -60,7 +61,21 @@ export async function startResearchRunAction(
 
   const latest = await repos.researchRun.getLatestForStore(storeId);
   if (latest?.status === "running") {
-    return failure("この店舗は既に調査中です。完了までお待ちください。");
+    // stuck run対策(Plan v3.2 §17): Workflowが想定外にクラッシュし
+    // markFailedStepすら実行されなかった最悪ケースへの保険。expires_atを
+    // 過ぎたrunning runは、部分ユニークインデックス
+    // (store_research_runs_running_store_idx)が新規runの作成を阻害する前に
+    // ここでfailedへ倒してから再調査を許可する。
+    if (isRunStuck(latest, nowIso())) {
+      await repos.researchRun.update(latest.id, {
+        status: "failed",
+        error_kind: "stuck_run_timeout",
+        error_message: "処理時間が想定を超えたため中断しました。",
+        finished_at: nowIso(),
+      });
+    } else {
+      return failure("この店舗は既に調査中です。完了までお待ちください。");
+    }
   }
 
   let runId: string;

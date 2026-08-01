@@ -50,7 +50,6 @@ export function ResearchReviewSection({ store, run, onUpdate, onRestart, restart
   const router = useRouter();
   const items = useMemo(() => run.result ?? [], [run.result]);
   const [filterUnresolved, setFilterUnresolved] = useState(false);
-  const [pendingKey, setPendingKey] = useState<string | null>(null);
   const [busy, startTransition] = useTransition();
   const [completing, startCompleting] = useTransition();
 
@@ -87,7 +86,6 @@ export function ResearchReviewSection({ store, run, onUpdate, onRestart, restart
 
   const onDecide = (item: ResearchItem, input: DecideInput) => {
     if (reviewCompleted) return;
-    setPendingKey(item.key);
     startTransition(async () => {
       const res = await recordReviewDecisionAction({
         runId: run.id,
@@ -97,7 +95,6 @@ export function ResearchReviewSection({ store, run, onUpdate, onRestart, restart
         selectedCandidateId: input.selectedCandidateId,
         editedValue: input.editedValue,
       });
-      setPendingKey(null);
       if (res.ok) {
         onUpdate({ ...run, review_decisions: res.data.reviewDecisions });
       } else {
@@ -196,7 +193,7 @@ export function ResearchReviewSection({ store, run, onUpdate, onRestart, restart
                       label={label}
                       sourceRegistry={run.source_registry}
                       decision={run.review_decisions[item.key]}
-                      busy={busy && pendingKey === item.key}
+                      busy={busy}
                       onDecide={(input) => onDecide(item, input)}
                     />
                   ) : (
