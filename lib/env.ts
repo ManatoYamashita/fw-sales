@@ -89,6 +89,31 @@ export function getGeminiModel(): string {
 }
 
 /**
+ * AI 店舗調査(`lib/ai/research/`, Issue #158, Plan v3.2)で使う Gemini モデル名。
+ * 既定値は `getGeminiModel()` と同じ `gemini-3.6-flash` だが、独立した
+ * `RESEARCH_GEMINI_MODEL` で上書きできる。営業資産生成(`GEMINI_MODEL`)と
+ * Web調査を意図的に別の切り戻し経路にしている: tools(Google Search/URL Context)を
+ * 使う調査フローは営業資産生成より挙動が変わりやすいため、片方だけを個別に
+ * ロールバックできるようにする。
+ */
+export function getResearchGeminiModel(): string {
+  return readEnv("RESEARCH_GEMINI_MODEL", getGeminiModel()) ?? getGeminiModel();
+}
+
+/**
+ * AI 店舗調査の1回の生成で許す出力トークン上限。
+ *
+ * 営業資産生成(`MAX_OUTPUT_TOKENS = 4096`, `lib/ai/client.ts`)より大きい既定値
+ * (8192)を暫定的に設定する。Stage2(FACT/ANALYSIS)は最大25項目程度を1回の
+ * 応答で返すため、単一のMarkdownブロックより出力が大きくなりやすいという
+ * 構造的な違いに基づく判断であり、実測はまだ行っていない
+ * (Plan v3.2 §26 未決事項)。`RESEARCH_MAX_OUTPUT_TOKENS` で上書き可能。
+ */
+export function getResearchMaxOutputTokens(): number {
+  return readPositiveInt("RESEARCH_MAX_OUTPUT_TOKENS", 8192);
+}
+
+/**
  * AI 店舗調査 run (`store_research_runs`) の `expires_at` マージン(分)。
  *
  * `started_at` からこの分数後を stuck run 検出の参考値とする(AI 店舗調査再設計
