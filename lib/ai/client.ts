@@ -299,7 +299,12 @@ function looksLikeInvalidApiKey(err: unknown): boolean {
  *    示す場合に限り `auth_error` へ寄せる。それ以外の 400 は `api_error(400)` のまま。
  * 4. 無ければメッセージ文字列のヒューリスティック (旧 SDK / 想定外の形状向けフォールバック)
  */
-function normalizeSdkError(err: unknown): AiClientError {
+/**
+ * `lib/ai/research/` (AI 店舗調査、Issue #158) からも再利用する。同じ `@google/genai` SDK・
+ * 同じ Gemini API を呼ぶ以上、エラー分類ロジックを複製すると新 kind 追加時の更新漏れ
+ * (`isAiClientError` の JSDoc 参照)が2箇所で起きうるため、この関数を単一の真実とする。
+ */
+export function normalizeSdkError(err: unknown): AiClientError {
   // 既に正規化済の AiClientError(makeError 経由)はそのまま再 throw
   if (isAiClientError(err)) {
     return err;
@@ -371,7 +376,8 @@ function normalizeSdkError(err: unknown): AiClientError {
   };
 }
 
-function makeError(err: AiClientError): AiClientError {
+/** `lib/ai/research/` からも再利用する(上記 `normalizeSdkError` と同じ理由)。 */
+export function makeError(err: AiClientError): AiClientError {
   return err;
 }
 
