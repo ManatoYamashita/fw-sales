@@ -235,6 +235,44 @@ function readStructuredStatus(err: unknown): number | null {
 }
 
 /**
+ * API キー不正を示す marker。**小文字化したメッセージへの部分一致**で使う。
+ *
+ * - `api_key_invalid`: `google.rpc.ErrorInfo` の `reason`。SDK が レスポンス body 全体を
+ *   `JSON.stringify` して `message` に入れるため `"reason":"API_KEY_INVALID"` として現れる。
+ * - `api key not valid`: Google が返す `error.message` 本文
+ *   (`API key not valid. Please pass a valid API key.`)。body を stringify せず
+ *   `error.message` だけを載せるエラー形状でも拾えるようにするための冗長化。
+ *
+ * **意図的に狭くしている。** 単なる `"api key"` では
+ * `Invalid JSON payload received. Unknown name "api_key..."` のような通常の
+ * malformed request まで巻き込むため使わない。
+ */
+const INVALID_API_KEY_MARKERS = ["api_key_invalid", "api key not valid"] as const;
+
+/**
+ * SDK エラーが「API キーが無効」を示しているかを判定する。
+ *
+ * Gemini API は**無効な API キーに対して 401 ではなく 400
+ * (`INVALID_ARGUMENT` / `reason: API_KEY_INVALID`) を返す**。構造化ステータスだけで
+ * 分類すると `api_error(400)` に落ち、UI が「再度お試しください」と案内してしまうが、
+ * 実際には再試行しても直らない恒久的な設定不備であり、正しい案内は
+ * 「GEMINI_API_KEY を確認してください」(= `auth_error`) である。
+ *
+ * `@google/genai` 1.52.0 の `ApiError` は `{ message, status }` しか持たず、
+ * `details[].reason` を構造化プロパティとして公開していない (`ApiErrorInfo` の型定義参照)。
+ * 一方 `message` にはレスポンス body 全体が `JSON.stringify` されて入るため、
+ * **文言による判定しか採れない**。誤検知を避けるため、呼出側で
+ * **`status === 400` のときだけ**本関数を適用すること。
+ *
+ * 判定に使ったメッセージは上位へ一切返さない (返すのは `kind` のみ)。
+ */
+function looksLikeInvalidApiKey(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const msg = err.message.toLowerCase();
+  return INVALID_API_KEY_MARKERS.some((marker) => msg.includes(marker));
+}
+
+/**
  * SDK 生エラーを `AiClientError` に正規化する。
  *
  * 重要: 生エラーメッセージには API キー先頭文字や internal request ID が混入することがある。
@@ -243,7 +281,9 @@ function readStructuredStatus(err: unknown): number | null {
  * 分類の優先順:
  * 1. 正規化済 `AiClientError` はそのまま
  * 2. AbortError → timeout / fetch 失敗 → network_error
- * 3. **構造化ステータス** (`err.status`) があればそれで分類
+ * 3. **構造化ステータス** (`err.status`) があればそれで分類。
+ *    ただし 400 だけは例外で、内容が API キー不正 (Gemini は 401 ではなく 400 で返す) を
+ *    示す場合に限り `auth_error` へ寄せる。それ以外の 400 は `api_error(400)` のまま。
  * 4. 無ければメッセージ文字列のヒューリスティック (旧 SDK / 想定外の形状向けフォールバック)
  */
 function normalizeSdkError(err: unknown): AiClientError {
@@ -267,6 +307,14 @@ function normalizeSdkError(err: unknown): AiClientError {
     }
     if (structuredStatus === 429) {
       return { kind: "rate_limit" };
+    }
+    // 400 は原則 api_error だが、API キー不正だけは例外的に auth_error へ寄せる。
+    // Gemini は無効な API キーを 401 ではなく 400 (INVALID_ARGUMENT / API_KEY_INVALID)
+    // で返すため、api_error(400) のままだと恒久的な設定不備に対して UI が
+    // 「再度お試しください」と誤案内する。通常の malformed request (INVALID_ARGUMENT) は
+    // marker を含まないため api_error(400) のまま。
+    if (structuredStatus === 400 && looksLikeInvalidApiKey(err)) {
+      return { kind: "auth_error" };
     }
     return { kind: "api_error", status: structuredStatus };
   }

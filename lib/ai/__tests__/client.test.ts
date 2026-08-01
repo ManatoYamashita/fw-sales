@@ -268,6 +268,7 @@ describe("createGeminiClient — 構造化ステータスによる分類", () =>
   });
 
   it.each([
+    [400, "api_error"],
     [401, "auth_error"],
     [403, "auth_error"],
     [429, "rate_limit"],
@@ -304,6 +305,86 @@ describe("createGeminiClient — 構造化ステータスによる分類", () =>
     const serialized = JSON.stringify(err);
     expect(serialized).not.toContain("AIzaSyFAKEKEY123");
     expect(serialized).not.toContain("abc-123");
+  });
+
+  // Gemini は無効な API キーに対して 401 ではなく 400 (INVALID_ARGUMENT /
+  // reason=API_KEY_INVALID) を返す。構造化ステータスだけで分類すると api_error(400) に
+  // 落ち、恒久的な設定不備に対して UI が「再度お試しください」と誤案内してしまう。
+  // 一方で通常の 400 (malformed request) まで auth_error に巻き込んではいけない。
+  describe("status=400 の切り分け", () => {
+    /** Google が無効な API キーに返す 400 body。SDK は body 全体を stringify して message に入れる。 */
+    const API_KEY_INVALID_BODY = JSON.stringify({
+      error: {
+        code: 400,
+        message: "API key not valid. Please pass a valid API key.",
+        status: "INVALID_ARGUMENT",
+        details: [
+          {
+            "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+            reason: "API_KEY_INVALID",
+            domain: "googleapis.com",
+            metadata: { service: "generativelanguage.googleapis.com" },
+          },
+        ],
+      },
+    });
+
+    /** API キーとは無関係な通常の 400。auth_error に巻き込んではいけない。 */
+    const MALFORMED_REQUEST_BODY = JSON.stringify({
+      error: {
+        code: 400,
+        message:
+          'Invalid JSON payload received. Unknown name "foo" at \'generation_config\'.',
+        status: "INVALID_ARGUMENT",
+      },
+    });
+
+    it("reason=API_KEY_INVALID を含む 400 は auth_error", async () => {
+      mockGenerateContent.mockRejectedValue(apiError(400, API_KEY_INVALID_BODY));
+      await expect(callClient()).rejects.toMatchObject({ kind: "auth_error" });
+    });
+
+    // body 全体を stringify せず error.message だけを載せる形状でも拾えること。
+    it("reason 無しでも公式文言 'API key not valid' を含む 400 は auth_error", async () => {
+      mockGenerateContent.mockRejectedValue(
+        apiError(400, "400 API key not valid. Please pass a valid API key."),
+      );
+      await expect(callClient()).rejects.toMatchObject({ kind: "auth_error" });
+    });
+
+    it("通常の INVALID_ARGUMENT な 400 は api_error(400) のまま", async () => {
+      mockGenerateContent.mockRejectedValue(
+        apiError(400, MALFORMED_REQUEST_BODY),
+      );
+      await expect(callClient()).rejects.toMatchObject({
+        kind: "api_error",
+        status: 400,
+      });
+    });
+
+    it("marker を含まない 400 は api_error(400) のまま", async () => {
+      mockGenerateContent.mockRejectedValue(apiError(400, "opaque message"));
+      await expect(callClient()).rejects.toMatchObject({
+        kind: "api_error",
+        status: 400,
+      });
+    });
+
+    // 判定にメッセージ文字列を使うようになっても、そのメッセージ自体は上位へ渡さない。
+    it("API キー不正判定に使ったメッセージを上位へ渡さない", async () => {
+      mockGenerateContent.mockRejectedValue(
+        apiError(
+          400,
+          `${API_KEY_INVALID_BODY} key=AIzaSyFAKEKEY123 requestId=abc-123`,
+        ),
+      );
+      const err = await callClient().catch((e: unknown) => e);
+      expect(err).toMatchObject({ kind: "auth_error" });
+      const serialized = JSON.stringify(err);
+      expect(serialized).not.toContain("AIzaSyFAKEKEY123");
+      expect(serialized).not.toContain("abc-123");
+      expect(serialized).not.toContain("API_KEY_INVALID");
+    });
   });
 });
 

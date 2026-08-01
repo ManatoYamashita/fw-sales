@@ -32,6 +32,7 @@ Gemini 2.5 系は `gemini-2.5-flash` / `gemini-2.5-flash-lite` / `gemini-2.5-pro
 | `AiClientError` | **`max_tokens` を追加** | 長さ切断を「応答が空でした」と区別する。構造化フィールド `candidates[0].finishReason` から判定するため SDK の文面に依存しない |
 | `lib/ai/client.ts` | `JSON.parse` を専用経路 (`parseJsonResponse`) へ分離 | SyntaxError のメッセージに含まれるパース位置 (例: `at position 466`) が、SDK エラー用のステータス抽出ヒューリスティック `\b[45]\d\d\b` に拾われ **`api_error(466)` に誤分類される**のを防ぐ。併せて応答本文を上位へ渡さない |
 | `lib/ai/client.ts` | エラー分類で**構造化ステータス (`err.status`) を最優先**にし、メッセージ文字列判定はフォールバックへ降格 | `models/xxx is NOT_FOUND for API version v1beta` のように**数字を含まない文面**だと、従来はステータスを失って `unknown`（UI 上「AI 生成でエラーが発生しました」）に落ちていた。SDK クラスへの `instanceof` 依存を避けるため `status` の duck typing で読み、400-599 のみ採用する |
+| `lib/ai/client.ts` | 構造化ステータスによる分類のうち **400 だけ例外**を設け、メッセージが API キー不正を示す場合 (`API_KEY_INVALID` / `API key not valid`) のみ `auth_error` へ寄せる | Gemini は**無効な API キーに 401 ではなく 400 (`INVALID_ARGUMENT` / `reason: API_KEY_INVALID`) を返す**ため、ステータスだけで分類すると `api_error(400)` に落ち、恒久的な設定不備に対して UI が「再度お試しください」と誤案内する。SDK の `ApiError` は `{ message, status }` しか公開せず `details[].reason` を構造化取得できないため、**`status === 400` との AND + API キー不正固有の marker のみ**という限定判定にした。**通常の malformed request / `INVALID_ARGUMENT` は `api_error(400)` のまま** |
 | `isAiClientError` | `lib/ai/client.ts` から export し、action 側の複製を削除 | kind 追加時に片方だけ更新され、新 kind が「不明なエラー」に落ちる事故を防ぐ。判定表を `Record<AiClientError["kind"], true>` にして**追加漏れをコンパイルエラーにした** |
 | `.env.example` / `README.md` | 既定モデル表記を更新 | |
 
