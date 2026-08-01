@@ -18,7 +18,7 @@ import {
   getResearchRunStatusAction,
   startResearchRunAction,
 } from "@/lib/actions/research-run-actions";
-import { selectPrimaryResearchRun } from "@/lib/domain/research-review";
+import { isRunStuck, selectPrimaryResearchRun } from "@/lib/domain/research-review";
 import { StartResearchCard } from "./start-research-card";
 import { ResearchProgressCard } from "./research-progress-card";
 import { ResearchFailedCard } from "./research-failed-card";
@@ -71,7 +71,12 @@ export function AiResearchWorkbench({
   };
 
   const onStartClick = () => {
-    if (primaryRun?.status === "running") return;
+    // running中でも、想定時間を超えた stuck run(Plan §17)なら再調査を許可する。
+    // サーバ側(startResearchRunAction)も同じ判定でstuck runをfailedへ倒してから
+    // 新規runを作成するため、ここでの早期returnは単なるUXの無駄クリック防止。
+    if (primaryRun?.status === "running" && !isRunStuck(primaryRun, new Date().toISOString())) {
+      return;
+    }
     if (hasUnreviewedSucceeded) {
       setConfirmRestartOpen(true);
       return;
@@ -91,7 +96,12 @@ export function AiResearchWorkbench({
       {!primaryRun && <StartResearchCard onStart={onStartClick} starting={starting} />}
 
       {primaryRun?.status === "running" && (
-        <ResearchProgressCard run={primaryRun} onUpdate={onRunUpdate} />
+        <ResearchProgressCard
+          run={primaryRun}
+          onUpdate={onRunUpdate}
+          onRetryStuck={onStartClick}
+          retrying={starting}
+        />
       )}
 
       {primaryRun?.status === "failed" && (

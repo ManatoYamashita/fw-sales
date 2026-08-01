@@ -168,13 +168,37 @@ describe("startResearchRunAction", () => {
   });
 
   it("既にrunning runがあれば二重起動を拒否する", async () => {
-    mockGetLatestForStore.mockResolvedValue({ status: "running" });
+    mockGetLatestForStore.mockResolvedValue({
+      status: "running",
+      expires_at: "2099-01-01T00:00:00.000Z",
+    });
 
     const result = await startResearchRunAction(nextStoreId());
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain("既に調査中");
     expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it("running runがexpires_atを過ぎている(stuck run)場合はfailedへ倒してから新規runを許可する", async () => {
+    mockGetLatestForStore.mockResolvedValue({
+      id: "research_run_stuck",
+      status: "running",
+      expires_at: "2000-01-01T00:00:00.000Z",
+    });
+
+    const storeId = nextStoreId();
+    const result = await startResearchRunAction(storeId);
+
+    expect(result.ok).toBe(true);
+    expect(mockUpdate).toHaveBeenCalledWith(
+      "research_run_stuck",
+      expect.objectContaining({ status: "failed", error_kind: "stuck_run_timeout" }),
+    );
+    expect(mockCreate).toHaveBeenCalledWith({
+      store_id: storeId,
+      requested_by_user_id: "user-1",
+    });
   });
 
   it("正常系: runを作成しWorkflowを起動する", async () => {

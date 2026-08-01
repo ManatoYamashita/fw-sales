@@ -58,20 +58,46 @@ export function isReviewFullyDecided(
  * 単一店舗の run 一覧に適用したもの)。
  *
  * 優先順位:
- * 1. `status==="succeeded"` かつ `review_completed_at===null` を満たす run のうち
+ * 1. `status==="running"` の run のうち最新のもの(未レビュー結果がある状態で
+ *    「それでも再調査する」(Plan §5.9)を選んだ直後でも、進行中の調査が必ず
+ *    主表示になる。running中のrunは「要確認」条件に該当しないため、これを
+ *    最優先にしても Plan §6 の一覧分類とは矛盾しない)。
+ * 2. `status==="succeeded"` かつ `review_completed_at===null` を満たす run のうち
  *    最新のもの(未レビュー結果を再調査の失敗等で隠さない、Plan §6 と同じ考え方)。
- * 2. 上記が無ければ `runs` の先頭(呼び出し側は `started_at` 降順を保証すること)。
+ * 3. 上記が無ければ `runs` の先頭(呼び出し側は `started_at` 降順を保証すること)。
  *
  * `runs` は空配列でもよい(null を返す)。
  */
 export function selectPrimaryResearchRun(
   runs: readonly StoreResearchRun[],
 ): StoreResearchRun | null {
+  const running = runs.find((run) => run.status === "running");
+  if (running) return running;
   const unreviewedSucceeded = runs.find(
     (run) => run.status === "succeeded" && run.review_completed_at === null,
   );
   if (unreviewedSucceeded) return unreviewedSucceeded;
   return runs[0] ?? null;
+}
+
+/**
+ * running中のrunが `expires_at` を過ぎているか(stuck run判定、Plan v3.2 §17)。
+ *
+ * Vercel Workflow採用によりstuck run対策の主眼はWorkflow自体のタイムアウト管理に
+ * 後退した(Plan §16)が、beta SDKであり実デプロイでの動作は未検証のため、
+ * Workflow自体が想定外にクラッシュして `markFailedStep` すら実行されない
+ * 最悪ケースへの保険として、この軽量な判定を残す。`startResearchRunAction`
+ * (再調査時の二重起動ガード解除)と `ResearchProgressCard`(UI側の「処理時間が
+ * 想定を超えました」表示)の両方から使う。
+ *
+ * 純関数。`now` は呼び出し側から渡す(決定性のため `Date.now()` を内部で呼ばない)。
+ */
+export function isRunStuck(
+  run: Pick<StoreResearchRun, "status" | "expires_at">,
+  nowIso: string,
+): boolean {
+  if (run.status !== "running") return false;
+  return Date.parse(run.expires_at) < Date.parse(nowIso);
 }
 
 export interface ResearchQueueBuckets {

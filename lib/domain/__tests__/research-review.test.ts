@@ -6,6 +6,7 @@ import {
   getUndecidedReviewableItems,
   isReviewableItem,
   isReviewFullyDecided,
+  isRunStuck,
   resolveSourceUrls,
   selectPrimaryResearchRun,
 } from "../research-review";
@@ -157,6 +158,32 @@ describe("getUndecidedReviewableItems / isReviewFullyDecided", () => {
   });
 });
 
+describe("isRunStuck", () => {
+  it("running かつ expires_at を過ぎていれば stuck", () => {
+    const run = makeRun({
+      status: "running",
+      expires_at: "2026-08-01T00:10:00.000Z",
+    });
+    expect(isRunStuck(run, "2026-08-01T00:10:00.001Z")).toBe(true);
+  });
+
+  it("running でも expires_at 未到達なら stuck でない", () => {
+    const run = makeRun({
+      status: "running",
+      expires_at: "2026-08-01T00:10:00.000Z",
+    });
+    expect(isRunStuck(run, "2026-08-01T00:09:59.999Z")).toBe(false);
+  });
+
+  it("running でなければ expires_at を過ぎていても stuck でない", () => {
+    const run = makeRun({
+      status: "succeeded",
+      expires_at: "2026-08-01T00:10:00.000Z",
+    });
+    expect(isRunStuck(run, "2026-09-01T00:00:00.000Z")).toBe(false);
+  });
+});
+
 describe("selectPrimaryResearchRun", () => {
   it("未レビューのsucceeded runがあればそれを優先する", () => {
     const runs = [
@@ -181,6 +208,21 @@ describe("selectPrimaryResearchRun", () => {
 
   it("空配列なら null", () => {
     expect(selectPrimaryResearchRun([])).toBeNull();
+  });
+
+  it("未レビューのsucceeded runがあっても、実行中(running)のrunを最優先する(それでも再調査する、Plan §5.9)", () => {
+    const runs = [
+      // 新: 「それでも再調査する」で開始した実行中run
+      makeRun({ id: "r_running", status: "running", started_at: "2026-08-02T00:00:00.000Z" }),
+      // 旧: まだレビューしていない過去の成功run
+      makeRun({
+        id: "r_old_unreviewed",
+        status: "succeeded",
+        review_completed_at: null,
+        started_at: "2026-08-01T00:00:00.000Z",
+      }),
+    ];
+    expect(selectPrimaryResearchRun(runs)?.id).toBe("r_running");
   });
 });
 
