@@ -44,7 +44,7 @@ gh secret set DATABASE_URL    # Supabase Session Pooler (port 5432) の接続文
 | `DATABASE_URL` | 必須 | Transaction Pooler (port 6543) |
 | `DATABASE_POOL_MAX` | 必須 | |
 | `GEMINI_API_KEY` | 必須 | Google AI API キー |
-| `GEMINI_MODEL` | 必須 | e.g. `gemini-2.5-flash` |
+| `GEMINI_MODEL` | 必須 | e.g. `gemini-3.6-flash` — 旧記載の `gemini-2.5-flash` は **2026-10-16 シャットダウン**のため設定例として使わないこと ([移行 runbook](./gemini-model-migration-runbook.md)) |
 | `CRON_SECRET` | 必須 | GitHub Secrets と同一値 |
 | `NEXT_PUBLIC_APP_URL` | 必須 | |
 | `DEEP_RESEARCH_MODEL` | 任意 | default: `deep-research-preview-04-2026` |

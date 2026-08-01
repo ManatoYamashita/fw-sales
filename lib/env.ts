@@ -64,9 +64,28 @@ export function isApiKeyConfigured(): boolean {
   return readEnv("GEMINI_API_KEY") !== undefined;
 }
 
-/** Gemini モデル名を返す。未設定時のデフォルトは `gemini-2.5-flash`。 */
+/**
+ * 営業資産生成で使う Gemini モデル名を返す。未設定時のデフォルトは `gemini-3.6-flash`。
+ *
+ * 既定値の変更経緯 (2026-07):
+ * - 旧既定 `gemini-2.5-flash` は Google 公式に deprecated であり、**シャットダウン日は
+ *   2026-10-16**。放置すると営業資産生成が本番で停止するため、公式推奨後継である
+ *   `gemini-3.6-flash` (GA) へ既定値を移した。
+ *
+ * `GEMINI_MODEL` による上書きは維持する。これは単なる設定項目ではなく **切り戻し経路**
+ * そのものである:
+ * - 品質が期待に届かない → `GEMINI_MODEL=gemini-3.5-flash` (GA・同世代)
+ * - レイテンシ/コストが重い → `GEMINI_MODEL=gemini-3.5-flash-lite` (GA・低レイテンシ低コスト)
+ *
+ * **切り戻し先に deprecated な旧モデル (`gemini-2.5-*`) を指定しないこと。**
+ * 2026-10-16 に必ず停止するため、問題を先送りするだけで解決にならない。
+ *
+ * 注意: Vercel 等で `GEMINI_MODEL` が明示設定されている環境では、本関数の既定値を
+ * 変えても挙動は変わらない。移行時は各環境の env を必ず確認すること
+ * (`docs/gemini-model-migration-runbook.md`)。
+ */
 export function getGeminiModel(): string {
-  return readEnv("GEMINI_MODEL", "gemini-2.5-flash") ?? "gemini-2.5-flash";
+  return readEnv("GEMINI_MODEL", "gemini-3.6-flash") ?? "gemini-3.6-flash";
 }
 
 /**
