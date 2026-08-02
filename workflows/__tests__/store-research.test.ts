@@ -56,6 +56,8 @@ describe("classifyForWorkflowRetry (retry方針の分類、Plan v3.2 §17)", () 
 
   it.each<AiClientError>([
     { kind: "max_tokens" },
+    { kind: "api_error", status: 400 },
+    { kind: "api_error", status: 404 },
     { kind: "api_error", status: 500 },
     { kind: "unknown", message: "x" },
   ])("その他のkind($kind)はFatalError(安全側)になる", (err) => {
@@ -72,14 +74,44 @@ describe("classifyForWorkflowRetry (retry方針の分類、Plan v3.2 §17)", () 
     const result = classifyForWorkflowRetry("文字列でthrow");
     expect(result).toBeInstanceOf(FatalError);
   });
+
+  it("api_error(503)はRetryableError(最大1 retry)になる(observability bug修正 smoke testで発見、Plan §17)", () => {
+    const err: AiClientError = { kind: "api_error", status: 503 };
+    const result = classifyForWorkflowRetry(err);
+    expect(result).toBeInstanceOf(RetryableError);
+  });
+
+  it.each([400, 404, 500, 502, 504])(
+    "api_error(%i)はHTTP statusをmessageに保持したままFatalErrorになる",
+    (status) => {
+      const err: AiClientError = { kind: "api_error", status };
+      const result = classifyForWorkflowRetry(err);
+      expect(result).toBeInstanceOf(FatalError);
+      expect(result.message).toContain(`api_error:${status}`);
+    },
+  );
+
+  it("api_error(503)のRetryableErrorメッセージにもHTTP statusが残る", () => {
+    const err: AiClientError = { kind: "api_error", status: 503 };
+    const result = classifyForWorkflowRetry(err);
+    expect(result.message).toContain("api_error:503");
+  });
+
+  it("生成したmessageにSDKの生メッセージ・request ID・API keyを含まない(sanitized kind + statusのみ)", () => {
+    const err: AiClientError = { kind: "api_error", status: 404 };
+    const result = classifyForWorkflowRetry(err);
+    // 定型文 + kind + status 以外の外部由来テキストが混入していないことを、
+    // 既知の定型文パターンとの完全一致で検証する。
+    expect(result.message).toBe("Gemini呼出が失敗しました(api_error:404)");
+  });
 });
 
 describe("deriveErrorKind (error_kind導出)", () => {
-  it("FatalErrorは'fatal'になる", () => {
+  it("sanitized kindを含まないFatalErrorは'fatal'になる(loadStoreStep等Gemini以外由来)", () => {
     expect(deriveErrorKind(new FatalError("x"))).toBe("fatal");
   });
 
-  it("RetryableErrorは'retryable_exhausted'になる", () => {
+  it("sanitized kindを含まないRetryableErrorは'retryable_exhausted'になる", () => {
     expect(deriveErrorKind(new RetryableError("x"))).toBe("retryable_exhausted");
   });
 
@@ -88,8 +120,38 @@ describe("deriveErrorKind (error_kind導出)", () => {
     expect(deriveErrorKind(err)).toBe("rate_limit");
   });
 
+  it("AiClientError(api_error)はHTTP statusを含む形になる", () => {
+    const err: AiClientError = { kind: "api_error", status: 404 };
+    expect(deriveErrorKind(err)).toBe("api_error:404");
+  });
+
   it("それ以外はunknownになる", () => {
     expect(deriveErrorKind(new Error("x"))).toBe("unknown");
     expect(deriveErrorKind("plain string")).toBe("unknown");
+  });
+
+  describe("observability bug修正(smoke testで発見): classifyForWorkflowRetryの出力からHTTP statusを復元できる", () => {
+    it.each([400, 404, 500])("FatalError化したapi_error(%i)は'fatal:api_error:%i'になる", (status) => {
+      const classified = classifyForWorkflowRetry({ kind: "api_error", status } as AiClientError);
+      expect(deriveErrorKind(classified)).toBe(`fatal:api_error:${status}`);
+    });
+
+    it("RetryableError化して力尽きたapi_error(503)は'retryable_exhausted:api_error:503'になる", () => {
+      const classified = classifyForWorkflowRetry({
+        kind: "api_error",
+        status: 503,
+      } as AiClientError);
+      expect(deriveErrorKind(classified)).toBe("retryable_exhausted:api_error:503");
+    });
+
+    it("RetryableError化して力尽きたrate_limitは'retryable_exhausted:rate_limit'になる", () => {
+      const classified = classifyForWorkflowRetry({ kind: "rate_limit" } as AiClientError);
+      expect(deriveErrorKind(classified)).toBe("retryable_exhausted:rate_limit");
+    });
+
+    it("FatalError化したauth_errorは'fatal:auth_error'になる", () => {
+      const classified = classifyForWorkflowRetry({ kind: "auth_error" } as AiClientError);
+      expect(deriveErrorKind(classified)).toBe("fatal:auth_error");
+    });
   });
 });

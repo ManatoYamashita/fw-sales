@@ -51,9 +51,26 @@ import { nowIso } from "@/lib/utils/date";
 const STAGE_TIMEOUT_MS = 240_000;
 
 /**
+ * `classifyForWorkflowRetry` が `FatalError`/`RetryableError` のメッセージへ埋め込む
+ * sanitized kind トークンの正規表現(`deriveErrorKind` 側の抽出と対になる)。
+ *
+ * `api_error` のみ `api_error:<status>` の形で HTTP status を保持する(observability bug
+ * 修正、smoke test #2 で発見。以前は `err.status` が message 生成時に握り潰されており、
+ * 400/404/500/503 等の区別が `store_research_runs.error_message` からできなかった)。
+ * ここに載せてよいのは正規化済みの kind と HTTP status のみで、SDK の生メッセージ・
+ * request ID・API key は一切含めない。
+ */
+const SANITIZED_KIND_PATTERN =
+  /\((auth_error|missing_api_key|rate_limit|timeout|network_error|max_tokens|api_error:\d{3}|unknown)\)/;
+
+/**
  * `AiClientError` を Workflow の retry 意味論(`FatalError` / `RetryableError`)へ変換する。
  * 純関数としてexportし、単体テストで直接検証する(実際の "use step" コンパイルを
  * 経由せずロジックだけを確認できるようにするため)。
+ *
+ * 503 (service unavailable) は Plan v3.2 §17 のとおり 429 / timeout / network_error と
+ * 同じ「最大1 retry」対象。`api_error` の他ステータス(400/404/500 等)は安全側に倒し
+ * retry しない(FatalError)。
  */
 export function classifyForWorkflowRetry(err: unknown): Error {
   if (isAiClientError(err)) {
@@ -68,8 +85,16 @@ export function classifyForWorkflowRetry(err: unknown): Error {
       case "missing_api_key":
       case "auth_error":
         return new FatalError(`Gemini呼出が認証エラーで失敗しました(${err.kind})`);
+      case "api_error": {
+        if (err.status === 503) {
+          return new RetryableError(
+            `Gemini呼出が一時的に失敗しました(api_error:503)。1回だけ再試行します。`,
+            { retryAfter: "5s" },
+          );
+        }
+        return new FatalError(`Gemini呼出が失敗しました(api_error:${err.status})`);
+      }
       case "max_tokens":
-      case "api_error":
       case "unknown":
       default:
         return new FatalError(`Gemini呼出が失敗しました(${err.kind})`);
@@ -78,11 +103,30 @@ export function classifyForWorkflowRetry(err: unknown): Error {
   return new FatalError(err instanceof Error ? err.message : "不明なエラーで失敗しました");
 }
 
-/** エラーオブジェクトから `store_research_runs.error_kind` へ書き込む短い文字列を導出する。 */
+/**
+ * エラーオブジェクトから `store_research_runs.error_kind` へ書き込む短い文字列を導出する。
+ *
+ * `FatalError`/`RetryableError` は `classifyForWorkflowRetry` が埋め込んだ sanitized kind
+ * (HTTP status 込み)をメッセージから抽出し、`"fatal:api_error:404"` /
+ * `"retryable_exhausted:api_error:503"` のように prefix + kind の形で返す。抽出できない
+ * 場合(`loadStoreStep`/`markStageStep`等、Gemini呼出以外が投げた `FatalError` 等)は
+ * 従来どおり `"fatal"` / `"retryable_exhausted"` にフォールバックする。
+ *
+ * 抽出元の message は本関数自身が `classifyForWorkflowRetry` で組み立てた定型文のみであり、
+ * SDK の生メッセージ・request ID・API key を含まない(安全性は生成側で担保済み)。
+ */
 export function deriveErrorKind(err: unknown): string {
-  if (err instanceof FatalError) return "fatal";
-  if (err instanceof RetryableError) return "retryable_exhausted";
-  if (isAiClientError(err)) return err.kind;
+  if (err instanceof FatalError) {
+    const match = err.message.match(SANITIZED_KIND_PATTERN);
+    return match?.[1] !== undefined ? `fatal:${match[1]}` : "fatal";
+  }
+  if (err instanceof RetryableError) {
+    const match = err.message.match(SANITIZED_KIND_PATTERN);
+    return match?.[1] !== undefined ? `retryable_exhausted:${match[1]}` : "retryable_exhausted";
+  }
+  if (isAiClientError(err)) {
+    return err.kind === "api_error" ? `api_error:${err.status}` : err.kind;
+  }
   return "unknown";
 }
 
