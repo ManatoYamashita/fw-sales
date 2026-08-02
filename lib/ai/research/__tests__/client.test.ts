@@ -71,6 +71,19 @@ describe("runSourceDiscovery (Stage1)", () => {
     expect(config.responseJsonSchema).toBeUndefined();
   });
 
+  it("診断情報取得のためtoolConfig.includeServerSideToolInvocationsを有効化する(fix/ai-research-poc-like-retrieval)", async () => {
+    mockGenerateContent.mockResolvedValue({
+      text: "[QUERY]test[/QUERY]",
+      candidates: [{}],
+      usageMetadata: {},
+    });
+
+    await createResearchGeminiClient().runSourceDiscovery("p", AbortSignal.timeout(1000));
+
+    const { config } = lastCallArgs();
+    expect(config.toolConfig).toEqual({ includeServerSideToolInvocations: true });
+  });
+
   it("groundingMetadataとusageMetadataを抽出して返す", async () => {
     mockGenerateContent.mockResolvedValue({
       text: "discovery text",
@@ -90,7 +103,7 @@ describe("runSourceDiscovery (Stage1)", () => {
     expect(result.usageMetadata?.promptTokenCount).toBe(100);
   });
 
-  it("groundingMetadataが無い場合はnullを返す(併用時のgroundingMetadata欠落を許容)", async () => {
+  it("groundingMetadataが無い場合はnullを返す(Spike 0.2で実証済みの実機挙動、Stage1を失敗扱いにしない)", async () => {
     mockGenerateContent.mockResolvedValue({
       text: "discovery text",
       candidates: [{}],
@@ -104,6 +117,50 @@ describe("runSourceDiscovery (Stage1)", () => {
 
     expect(result.groundingMetadata).toBeNull();
     expect(result.usageMetadata).toBeNull();
+  });
+
+  it("server-side tool invocation partsからsearchCallCount/searchQueryCountを抽出する", async () => {
+    mockGenerateContent.mockResolvedValue({
+      text: "discovery text",
+      candidates: [
+        {
+          content: {
+            parts: [
+              { toolCall: { toolType: "GOOGLE_SEARCH_WEB", args: { queries: ["a", "b", "c"] } } },
+              { toolResponse: {} },
+              { toolCall: { toolType: "GOOGLE_SEARCH_WEB", args: { queries: ["d"] } } },
+              { toolResponse: {} },
+              { text: "自由記述テキスト" },
+            ],
+          },
+        },
+      ],
+      usageMetadata: {},
+    });
+
+    const result = await createResearchGeminiClient().runSourceDiscovery(
+      "p",
+      AbortSignal.timeout(1000),
+    );
+
+    expect(result.searchCallCount).toBe(2);
+    expect(result.searchQueryCount).toBe(4);
+  });
+
+  it("toolCallが無い場合はsearchCallCount/searchQueryCountとも0になる", async () => {
+    mockGenerateContent.mockResolvedValue({
+      text: "discovery text",
+      candidates: [{ content: { parts: [{ text: "自由記述のみ" }] } }],
+      usageMetadata: {},
+    });
+
+    const result = await createResearchGeminiClient().runSourceDiscovery(
+      "p",
+      AbortSignal.timeout(1000),
+    );
+
+    expect(result.searchCallCount).toBe(0);
+    expect(result.searchQueryCount).toBe(0);
   });
 
   it("応答が空ならunknownエラーを投げる", async () => {

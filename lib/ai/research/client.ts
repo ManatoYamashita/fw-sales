@@ -36,6 +36,15 @@ export interface Stage1CallResult {
   text: string;
   groundingMetadata: GroundingMetadataLike | null;
   usageMetadata: UsageMetadataLike | null;
+  /**
+   * Google Search のserver-side tool call回数(fix/ai-research-poc-like-retrieval で追加)。
+   * `groundingMetadata` が欠落する場合でも(Spike 0.2で実証済みの実機挙動)、
+   * 「Searchを呼ばなかった」のか「呼んだが結果が空だった」のかを事後に区別するための
+   * 最低限の診断情報。検索クエリ文字列そのものは保存しない(件数のみ)。
+   */
+  searchCallCount: number;
+  /** 上記tool callに含まれた検索クエリの合計件数。 */
+  searchQueryCount: number;
 }
 
 export interface Stage2CallResult {
@@ -52,6 +61,30 @@ export interface ResearchGeminiClient {
     params: { prompt: string; jsonSchema: Record<string, unknown> },
     signal: AbortSignal,
   ): Promise<Stage2CallResult>;
+}
+
+/**
+ * server-side tool invocation parts(`toolConfig.includeServerSideToolInvocations`有効時に
+ * 含まれる)から、Google Searchの呼出回数・クエリ件数のみを抽出する。
+ * クエリ文字列そのものはここで破棄し、件数だけを返す(個人情報・生レスポンス非保存の方針)。
+ */
+function extractSearchDiagnostics(
+  parts: unknown,
+): { searchCallCount: number; searchQueryCount: number } {
+  if (!Array.isArray(parts)) return { searchCallCount: 0, searchQueryCount: 0 };
+
+  let searchCallCount = 0;
+  let searchQueryCount = 0;
+  for (const part of parts as Array<{ toolCall?: { args?: Record<string, unknown> } }>) {
+    const args = part.toolCall?.args;
+    if (!args) continue;
+    searchCallCount += 1;
+    const queries = args.queries;
+    if (Array.isArray(queries)) {
+      searchQueryCount += queries.length;
+    }
+  }
+  return { searchCallCount, searchQueryCount };
 }
 
 function extractUsageMetadata(um: unknown): UsageMetadataLike | null {
@@ -83,6 +116,9 @@ export function createResearchGeminiClient(): ResearchGeminiClient {
           contents: [{ role: "user", parts: [{ text: prompt }] }],
           config: {
             tools: [{ googleSearch: {} }],
+            // Search診断情報(searchCallCount/searchQueryCount)取得のため有効化。
+            // groundingMetadataの代替source of truthにはしない(あくまで診断用)。
+            toolConfig: { includeServerSideToolInvocations: true },
             maxOutputTokens: getResearchMaxOutputTokens(),
             abortSignal: signal,
           },
@@ -94,10 +130,16 @@ export function createResearchGeminiClient(): ResearchGeminiClient {
         }
 
         const candidate = response.candidates?.[0];
+        const { searchCallCount, searchQueryCount } = extractSearchDiagnostics(
+          candidate?.content?.parts,
+        );
+
         return {
           text,
           groundingMetadata: (candidate?.groundingMetadata as GroundingMetadataLike | undefined) ?? null,
           usageMetadata: extractUsageMetadata(response.usageMetadata),
+          searchCallCount,
+          searchQueryCount,
         };
       } catch (err) {
         throw normalizeSdkError(err);

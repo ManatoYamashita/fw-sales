@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildAdoptedBasicInfoField,
   classifyResearchQueue,
+  formatReviewProgressLabel,
   getReviewableItems,
   getUndecidedReviewableItems,
   isReviewableItem,
@@ -106,6 +107,28 @@ function makeRun(overrides: Partial<StoreResearchRun> = {}): StoreResearchRun {
     ...overrides,
   };
 }
+
+describe("formatReviewProgressLabel", () => {
+  it("not_foundが多いrunでも実際の除外件数を正しく表示する(バグ修正の回帰テスト、fix/ai-research-poc-like-retrieval)", () => {
+    const label = formatReviewProgressLabel(53, 0, 0);
+    expect(label).toContain("0 / 0 件");
+    expect(label).toContain("計53件はレビュー対象外");
+    expect(label).toContain("確認できず");
+    expect(label).toContain("ヒアリング必要");
+    expect(label).toContain("外部データ必要");
+  });
+
+  it("通常runの件数表示が正しい", () => {
+    const label = formatReviewProgressLabel(53, 36, 10);
+    expect(label).toContain("10 / 36 件");
+    expect(label).toContain("計17件はレビュー対象外");
+  });
+
+  it("旧文言の誤り(ヒアリング必要・外部データ必要のみ列挙)を含まない", () => {
+    const label = formatReviewProgressLabel(53, 0, 0);
+    expect(label).not.toBe("レビュー進捗: 0 / 0 件 (ヒアリング必要・外部データ必要 計53件は対象外)");
+  });
+});
 
 describe("isReviewableItem / getReviewableItems", () => {
   it.each(["confirmed", "inferred", "conflict"] as const)("%s は reviewable", (status) => {

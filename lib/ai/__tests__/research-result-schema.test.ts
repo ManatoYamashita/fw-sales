@@ -69,11 +69,24 @@ describe("スキーマの基本的な妥当性検証", () => {
     expect(result.success).toBe(true);
   });
 
-  it("discovery_provenance が google_grounding 以外なら拒否する (モデル自由生成URL不採用の型的保証)", () => {
+  it("discovery_provenance に定義されていない値は拒否する", () => {
     const result = SourceRegistryEntrySchema.safeParse(
       makeSource({ discovery_provenance: "model_generated" as never }),
     );
     expect(result.success).toBe(false);
+  });
+
+  it("discovery_provenance = gemini_search_candidate / known_store_data を受理する(fix/ai-research-poc-like-retrieval で追加)", () => {
+    expect(
+      SourceRegistryEntrySchema.safeParse(
+        makeSource({ discovery_provenance: "gemini_search_candidate" }),
+      ).success,
+    ).toBe(true);
+    expect(
+      SourceRegistryEntrySchema.safeParse(
+        makeSource({ discovery_provenance: "known_store_data" }),
+      ).success,
+    ).toBe(true);
   });
 
   it("正常な ResearchItem を受理する", () => {

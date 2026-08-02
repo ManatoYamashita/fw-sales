@@ -50,9 +50,20 @@ export const URL_CONTEXT_STATUSES = ["not_attempted", "success", "error"] as con
 export type UrlContextStatus = (typeof URL_CONTEXT_STATUSES)[number];
 
 /**
- * Source Registry の由来。現状は Google Search grounding metadata 由来のみ
- * (モデルが自由生成した URL は登録しない、Plan v3.2 §8)。将来の由来追加に
- * 備えて union として定義するが、現時点では単一値のみ許可する。
+ * Source Registry の由来(fix/ai-research-poc-like-retrieval で拡張、Spike 0.2/0.3の
+ * 実証結果を反映)。
+ *
+ * - `google_grounding`: Stage1 の公式 `groundingMetadata.groundingChunks` 由来
+ *   (後方互換のため維持。ただし実機検証(Spike 0.2)では2店舗・SDK 2バージョンとも
+ *   一貫して空だったため、このprovenanceは事実上ほぼ観測されない見込み)。
+ * - `gemini_search_candidate`: Stage1 のモデル自由記述 `[SOURCE]` ブロック由来の
+ *   **候補**URL。「Geminiが候補として発見した」という意味のみで、信頼済みという
+ *   意味は一切持たない。confirmedの根拠にできるのは、Stage2 URL Contextで実際に
+ *   本文取得に成功した(`url_context_status==="success"`)場合のみ
+ *   (`validateResearchItemStatus` が既存ロジックのまま担保する)。
+ * - `known_store_data`: アプリが既に保持する店舗の公開URL(`stores.site_url`/
+ *   `stores.instagram_url`)由来。Geminiより信頼度が高いseedだが、これも
+ *   URLが存在するだけでconfirmedにはならない(同様にStage2 URL Context取得成功が必須)。
  *
  * Google Places 由来の値(`store_name`/`address`/`cuisine_genre`/`phone`/
  * `review_avg`/`review_count`)は本 Source Registry には**登録しない**
@@ -60,7 +71,11 @@ export type UrlContextStatus = (typeof URL_CONTEXT_STATUSES)[number];
  * confirmed 根拠は `validateResearchItemStatus` の `placesVerifiedKeys`
  * コンテキストで別経路として扱う(下記)。
  */
-export const DISCOVERY_PROVENANCES = ["google_grounding"] as const;
+export const DISCOVERY_PROVENANCES = [
+  "google_grounding",
+  "gemini_search_candidate",
+  "known_store_data",
+] as const;
 export type DiscoveryProvenance = (typeof DISCOVERY_PROVENANCES)[number];
 
 export const SourceRegistryEntrySchema = z.object({

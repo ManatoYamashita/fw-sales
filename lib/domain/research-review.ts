@@ -34,6 +34,22 @@ export function getReviewableItems(items: readonly ResearchItem[]): ResearchItem
   return items.filter(isReviewableItem);
 }
 
+/**
+ * レビュー進捗文言を組み立てる(fix/ai-research-poc-like-retrieval でバグ修正)。
+ *
+ * 旧文言「ヒアリング必要・外部データ必要 計N件は対象外」は、Nに`not_found`
+ * (確認できず)も含まれるにもかかわらずカテゴリ名を2つしか列挙しておらず、
+ * 実態と乖離していた(`not_found`が多いrunほど顕在化する表示バグ)。
+ */
+export function formatReviewProgressLabel(
+  totalItemCount: number,
+  reviewableCount: number,
+  decidedCount: number,
+): string {
+  const excludedCount = totalItemCount - reviewableCount;
+  return `レビュー進捗: ${decidedCount} / ${reviewableCount} 件 (確認できず・ヒアリング必要・外部データ必要 計${excludedCount}件はレビュー対象外)`;
+}
+
 /** reviewable item のうちまだ `review_decisions` に記録が無いものを返す。 */
 export function getUndecidedReviewableItems(
   items: readonly ResearchItem[],

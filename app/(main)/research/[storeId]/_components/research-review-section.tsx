@@ -8,6 +8,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { AlertTriangle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -24,7 +25,12 @@ import {
   CATEGORY_LABELS,
   type CategoryKey,
 } from "@/lib/domain/basic-info-items";
-import { getReviewableItems, getUndecidedReviewableItems, isReviewableItem } from "@/lib/domain/research-review";
+import {
+  formatReviewProgressLabel,
+  getReviewableItems,
+  getUndecidedReviewableItems,
+  isReviewableItem,
+} from "@/lib/domain/research-review";
 import { formatDateTime, nowIso } from "@/lib/utils/date";
 import type { Store } from "@/types/store";
 import type { ResearchItem, StoreResearchRun } from "@/types/research-run";
@@ -152,10 +158,24 @@ export function ResearchReviewSection({ store, run, onUpdate, onRestart, restart
         </div>
       </div>
       <Card.Body className="space-y-4">
+        {run.warnings.length > 0 && (
+          <div className="space-y-1 rounded-md border border-warning/40 bg-warning/10 p-3">
+            {run.warnings.map((warning, i) => (
+              <p key={i} className="flex items-start gap-1.5 text-xs text-warning">
+                <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                <span>{warning}</span>
+              </p>
+            ))}
+          </div>
+        )}
+
         {!reviewCompleted && (
           <p className="text-sm text-muted-foreground">
-            レビュー進捗: {reviewableItems.length - undecided.length} / {reviewableItems.length} 件
-            (ヒアリング必要・外部データ必要 計{items.length - reviewableItems.length}件は対象外)
+            {formatReviewProgressLabel(
+              items.length,
+              reviewableItems.length,
+              reviewableItems.length - undecided.length,
+            )}
           </p>
         )}
 
