@@ -1,11 +1,13 @@
 /**
- * AI 店舗調査パイプラインのオーケストレーション(AI 店舗調査再設計 Plan v3.2 §8, PR2)。
+ * AI 店舗調査パイプラインのオーケストレーション(AI 店舗調査再設計 Plan v3.2 §8, PR2、
+ * fix/ai-research-poc-like-retrieval で Stage2 統合・Source Registry方針転換)。
  *
  * PR2 のスコープは各Stageを独立した呼び出し可能関数として提供することまで。
  * Vercel Workflow 上のstepとしての結線(PR3)や、Places軽量再同期の実行(Stage0の
  * 実際のAPI呼出)はここでは行わない。`derivePlacesVerifiedKeys` は
  * `stores.basic_info` の**現在のスナップショット**を受け取るだけで、Places API を
- * 呼び出さない(`lib/ai/research/places-verified.ts` 参照)。
+ * 呼び出さない(`lib/ai/research/places-verified.ts` 参照)。Stage0の実ライブ呼出は
+ * `lib/ai/research/places-stage0.ts`(fix/ai-research-poc-like-retrieval で新設)。
  *
  * 各関数は個別に呼び出し可能な設計にしている(PR3 で Workflow の各 step が
  * それぞれを呼ぶ想定)。
@@ -15,7 +17,7 @@ import "server-only";
 
 import { RESEARCH_POLICY_ITEMS } from "@/lib/domain/research-policy";
 import { buildSourceRegistry, type GroundingMetadataLike } from "./source-registry";
-import { buildStage1Prompt, buildStage2Prompt, selectItemsForTrack, type StoreIdentity, type Stage2Track } from "./prompts";
+import { buildStage1Prompt, buildStage2Prompt, selectAiResearchItems, type StoreIdentity } from "./prompts";
 import { buildStage2JsonSchema, buildStage2ResponseZodSchema } from "./schema-builder";
 import { createResearchGeminiClient, type UsageMetadataLike, type UrlContextMetadataLike } from "./client";
 import {
@@ -32,6 +34,10 @@ export interface Stage1Outcome {
   sourceRegistry: SourceRegistryEntry[];
   discoveryText: string;
   usageMetadata: UsageMetadataLike | null;
+  /** Google Search server-side tool call回数(診断用、fix/ai-research-poc-like-retrieval)。 */
+  searchCallCount: number;
+  /** 上記に含まれた検索クエリの合計件数(診断用)。 */
+  searchQueryCount: number;
 }
 
 export async function runStage1(
@@ -46,11 +52,13 @@ export async function runStage1(
     sourceRegistry: buildSourceRegistry(result.groundingMetadata, result.text),
     discoveryText: result.text,
     usageMetadata: result.usageMetadata,
+    searchCallCount: result.searchCallCount,
+    searchQueryCount: result.searchQueryCount,
   };
 }
 
 /* ------------------------------------------------------------------ */
-/*  Stage 2: FACT / ANALYSIS(URL Context + Structured Output)          */
+/*  Stage 2: FACT / FACT_OR_HEARING / ANALYSIS(URL Context + Structured Output、単一call) */
 /* ------------------------------------------------------------------ */
 
 export interface Stage2Outcome {
@@ -61,24 +69,23 @@ export interface Stage2Outcome {
   parseWarning: string | null;
 }
 
+/**
+ * Stage2: AI対象項目(FACT + FACT_OR_HEARING + ANALYSIS、計42項目)を1回のGemini呼出で
+ * 生成する(fix/ai-research-poc-like-retrieval、PoCと同様の単一call構成へ回帰)。
+ */
 export async function runStage2(
   params: {
     store: StoreIdentity;
-    track: Stage2Track;
     sourceRegistry: readonly SourceRegistryEntry[];
   },
   signal: AbortSignal,
 ): Promise<Stage2Outcome> {
-  const { store, track, sourceRegistry } = params;
-  const items = selectItemsForTrack(RESEARCH_POLICY_ITEMS, track);
+  const { store, sourceRegistry } = params;
+  const items = selectAiResearchItems(RESEARCH_POLICY_ITEMS);
   const allowedKeys = items.map((i) => i.key);
   const registryIds = sourceRegistry.map((s) => s.id);
 
-  if (allowedKeys.length === 0) {
-    return { items: [], urlContextMetadata: null, usageMetadata: null, parseWarning: null };
-  }
-
-  const prompt = buildStage2Prompt({ store, track, items, sourceRegistry });
+  const prompt = buildStage2Prompt({ store, items, sourceRegistry });
   const jsonSchema = buildStage2JsonSchema({ allowedKeys, registryIds });
   const client = createResearchGeminiClient();
 
@@ -92,7 +99,7 @@ export async function runStage2(
       items: [],
       urlContextMetadata: result.urlContextMetadata,
       usageMetadata: result.usageMetadata,
-      parseWarning: `Stage2(${track})の応答をJSONとして解釈できませんでした。`,
+      parseWarning: "Stage2の応答をJSONとして解釈できませんでした。",
     };
   }
 
@@ -103,7 +110,7 @@ export async function runStage2(
       items: [],
       urlContextMetadata: result.urlContextMetadata,
       usageMetadata: result.usageMetadata,
-      parseWarning: `Stage2(${track})の応答がスキーマに準拠しませんでした: ${parsed.error.issues[0]?.message ?? "unknown"}`,
+      parseWarning: `Stage2の応答がスキーマに準拠しませんでした: ${parsed.error.issues[0]?.message ?? "unknown"}`,
     };
   }
 
@@ -145,9 +152,9 @@ export function buildNonAiItems(): ResearchItem[] {
 /* ------------------------------------------------------------------ */
 
 /**
- * Stage2-FACT/ANALYSIS それぞれの `urlContextMetadata` を Source Registry に反映する。
+ * Stage2 の `urlContextMetadata` を Source Registry に反映する。
  * `retrievedUrl` が `grounding_redirect_url` と一致するエントリの `url_context_status` を
- * 更新する。いずれのStage2呼び出しからも参照されなかったエントリは `not_attempted` のまま。
+ * 更新する。参照されなかったエントリは `not_attempted` のまま。
  *
  * 純関数。入力を変更せず、新しい配列を返す。
  */
@@ -161,8 +168,7 @@ export function applyUrlContextStatus(
     for (const entry of ucm.urlMetadata) {
       if (!entry.retrievedUrl) continue;
       const isSuccess = entry.status === "URL_RETRIEVAL_STATUS_SUCCESS";
-      // 一度でも成功していれば成功を優先する(FACT/ANALYSIS両方が同じURLを試み、
-      // 片方が成功片方が失敗した場合に、成功の実績を優先的に信頼する)。
+      // 一度でも成功していれば成功を優先する。
       const existing = statusByUrl.get(entry.retrievedUrl);
       if (existing === "success") continue;
       statusByUrl.set(entry.retrievedUrl, isSuccess ? "success" : "error");
@@ -181,20 +187,19 @@ export function applyUrlContextStatus(
 /* ------------------------------------------------------------------ */
 
 export interface FinalizeParams {
-  factItems: readonly ResearchItem[];
-  analysisItems: readonly ResearchItem[];
+  aiItems: readonly ResearchItem[];
   nonAiItems: readonly ResearchItem[];
   sourceRegistry: readonly SourceRegistryEntry[];
   placesVerifiedKeys?: ReadonlySet<string>;
 }
 
 /**
- * Stage2-FACT / Stage2-ANALYSIS / HEARING系項目を統合し、deterministic validation
+ * Stage2(AI対象項目)/ HEARING系項目を統合し、deterministic validation
  * (`applyDeterministicValidation`, PR1)を適用した最終結果を返す。
  */
 export function finalizeResearchItems(params: FinalizeParams): ResearchItem[] {
-  const { factItems, analysisItems, nonAiItems, sourceRegistry, placesVerifiedKeys } = params;
-  const merged = [...factItems, ...analysisItems, ...nonAiItems];
+  const { aiItems, nonAiItems, sourceRegistry, placesVerifiedKeys } = params;
+  const merged = [...aiItems, ...nonAiItems];
   return merged.map((item) =>
     applyDeterministicValidation(item, { sourceRegistry, placesVerifiedKeys }),
   );

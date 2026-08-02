@@ -13,9 +13,10 @@ import { describe, it, expect, vi } from "vitest";
 import { FatalError, RetryableError } from "workflow";
 import type { AiClientError } from "@/lib/ai/client";
 
-// store-research.ts は "use step" 関数内で repos / pipeline / resolver / places-verified を
-// 参照するため、モジュールの静的 import が DB 接続 (`@/lib/repositories`) を要求する。
-// 本テストは純関数(`classifyForWorkflowRetry` / `deriveErrorKind`)のみを検証するため、
+// store-research.ts は "use step" 関数内で repos / pipeline / source-registry /
+// places-stage0 / places-verified / basic-info-merge を参照するため、モジュールの
+// 静的 import が DB 接続 (`@/lib/repositories`) を要求する。本テストは純関数
+// (`classifyForWorkflowRetry` / `deriveErrorKind`)のみを検証するため、
 // これらを軽量モックに差し替えて DB 接続を避ける。
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/repositories", () => ({ repos: {} }));
@@ -26,11 +27,19 @@ vi.mock("@/lib/ai/research/pipeline", () => ({
   applyUrlContextStatus: vi.fn(),
   finalizeResearchItems: vi.fn(),
 }));
-vi.mock("@/lib/ai/research/source-url-resolver", () => ({
-  resolveGroundingRedirectUrl: vi.fn(),
+vi.mock("@/lib/ai/research/source-registry", () => ({
+  buildKnownStoreDataEntries: vi.fn(),
+  buildKnownStoreDataUrls: vi.fn(),
+  mergeKnownStoreDataIntoRegistry: vi.fn(),
+}));
+vi.mock("@/lib/ai/research/places-stage0", () => ({
+  runStage0PlacesResync: vi.fn(),
 }));
 vi.mock("@/lib/ai/research/places-verified", () => ({
   derivePlacesVerifiedKeys: vi.fn(),
+}));
+vi.mock("@/lib/domain/basic-info-merge", () => ({
+  mergeBasicInfo: vi.fn(),
 }));
 
 const { classifyForWorkflowRetry, deriveErrorKind } = await import("../store-research");

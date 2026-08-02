@@ -1,12 +1,13 @@
 /**
- * プロンプト構築の単体検証(AI 店舗調査再設計 Plan v3.2 §8, PR2)。
+ * プロンプト構築の単体検証(AI 店舗調査再設計 Plan v3.2 §8, PR2、
+ * fix/ai-research-poc-like-retrieval で Stage2 統合に合わせ更新)。
  */
 
 import { describe, it, expect } from "vitest";
 import {
   buildStage1Prompt,
   buildStage2Prompt,
-  selectItemsForTrack,
+  selectAiResearchItems,
 } from "../prompts";
 import { RESEARCH_POLICY_ITEMS } from "@/lib/domain/research-policy";
 import type { SourceRegistryEntry } from "@/lib/ai/research-result-schema";
@@ -30,36 +31,30 @@ describe("buildStage1Prompt", () => {
   });
 });
 
-describe("selectItemsForTrack", () => {
-  it("FACTトラックはFACTとFACT_OR_HEARINGを含む", () => {
-    const items = selectItemsForTrack(RESEARCH_POLICY_ITEMS, "FACT");
+describe("selectAiResearchItems", () => {
+  it("FACT / FACT_OR_HEARING / ANALYSISを含み、HEARING_ONLY / EXTERNAL_DATA_REQUIREDを含まない", () => {
+    const items = selectAiResearchItems(RESEARCH_POLICY_ITEMS);
     const keys = new Set(items.map((i) => i.key));
     expect(keys.has("business_hours_holidays")).toBe(true); // FACT
     expect(keys.has("owner_profile")).toBe(true); // FACT_OR_HEARING
-    expect(keys.has("market_demand")).toBe(false); // ANALYSIS
+    expect(keys.has("market_demand")).toBe(true); // ANALYSIS
     expect(keys.has("revenue")).toBe(false); // HEARING_ONLY
+    expect(keys.has("search_volume")).toBe(false); // EXTERNAL_DATA_REQUIRED
   });
 
-  it("ANALYSISトラックはANALYSISのみを含む", () => {
-    const items = selectItemsForTrack(RESEARCH_POLICY_ITEMS, "ANALYSIS");
-    const keys = new Set(items.map((i) => i.key));
-    expect(keys.has("market_demand")).toBe(true);
-    expect(keys.has("business_hours_holidays")).toBe(false);
-  });
-
-  it("FACT+ANALYSISの合計はHEARING_ONLY/EXTERNAL_DATA_REQUIREDを除いた件数と一致する", () => {
-    const fact = selectItemsForTrack(RESEARCH_POLICY_ITEMS, "FACT");
-    const analysis = selectItemsForTrack(RESEARCH_POLICY_ITEMS, "ANALYSIS");
-    const aiCallCount = RESEARCH_POLICY_ITEMS.filter(
+  it("件数はHEARING_ONLY/EXTERNAL_DATA_REQUIREDを除いた件数と一致する(単一call統合、fix/ai-research-poc-like-retrieval)", () => {
+    const items = selectAiResearchItems(RESEARCH_POLICY_ITEMS);
+    const expectedCount = RESEARCH_POLICY_ITEMS.filter(
       (i) => i.research_policy !== "HEARING_ONLY" && i.research_policy !== "EXTERNAL_DATA_REQUIRED",
     ).length;
-    expect(fact.length + analysis.length).toBe(aiCallCount);
+    expect(items.length).toBe(expectedCount);
   });
 
-  it("各項目にlabelが解決される", () => {
-    const items = selectItemsForTrack(RESEARCH_POLICY_ITEMS, "FACT");
+  it("各項目にlabelとresearch_policyが解決される", () => {
+    const items = selectAiResearchItems(RESEARCH_POLICY_ITEMS);
     const businessHours = items.find((i) => i.key === "business_hours_holidays");
     expect(businessHours?.label).toBe("営業時間・定休日");
+    expect(businessHours?.research_policy).toBe("FACT");
   });
 });
 
@@ -77,58 +72,44 @@ describe("buildStage2Prompt", () => {
     },
   ];
 
-  it("FACTトラックのプロンプトにconfirmed/conflict/not_foundの指示を含む", () => {
-    const prompt = buildStage2Prompt({
-      store: STORE,
-      track: "FACT",
-      items: [{ key: "business_hours_holidays", label: "営業時間・定休日" }],
-      sourceRegistry: registry,
-    });
+  const combinedItems = [
+    { key: "business_hours_holidays", label: "営業時間・定休日", research_policy: "FACT" },
+    { key: "market_demand", label: "市場需要", research_policy: "ANALYSIS" },
+  ];
+
+  it("FACT/ANALYSIS両方の判定基準を1つのプロンプトに含む(Stage2統合)", () => {
+    const prompt = buildStage2Prompt({ store: STORE, items: combinedItems, sourceRegistry: registry });
     expect(prompt).toContain("inferred");
     expect(prompt).toContain("S01");
     expect(prompt).toContain("URLそのものを");
+    expect(prompt).toContain("有料広告");
+    expect(prompt).toContain("非常に高い");
   });
 
   it("prompt injection対策の指示を含む", () => {
-    const prompt = buildStage2Prompt({
-      store: STORE,
-      track: "FACT",
-      items: [{ key: "business_hours_holidays", label: "営業時間・定休日" }],
-      sourceRegistry: registry,
-    });
+    const prompt = buildStage2Prompt({ store: STORE, items: combinedItems, sourceRegistry: registry });
     expect(prompt).toContain("信頼できない外部データ");
     expect(prompt).toContain("従わないでください");
   });
 
-  it("ANALYSISトラックのプロンプトに過去の誤判定回避指示を含む", () => {
-    const prompt = buildStage2Prompt({
-      store: STORE,
-      track: "ANALYSIS",
-      items: [{ key: "market_demand", label: "市場需要" }],
-      sourceRegistry: registry,
-    });
-    expect(prompt).toContain("有料広告");
-    expect(prompt).toContain("市場需要");
-    expect(prompt).toContain("非常に高い");
-  });
-
   it("Source Registryが空の場合の案内文を含む", () => {
-    const prompt = buildStage2Prompt({
-      store: STORE,
-      track: "FACT",
-      items: [{ key: "business_hours_holidays", label: "営業時間・定休日" }],
-      sourceRegistry: [],
-    });
+    const prompt = buildStage2Prompt({ store: STORE, items: combinedItems, sourceRegistry: [] });
     expect(prompt).toContain("情報源が発見されませんでした");
   });
 
   it("Google Searchを使わない旨を明記する", () => {
-    const prompt = buildStage2Prompt({
-      store: STORE,
-      track: "FACT",
-      items: [{ key: "business_hours_holidays", label: "営業時間・定休日" }],
-      sourceRegistry: registry,
-    });
+    const prompt = buildStage2Prompt({ store: STORE, items: combinedItems, sourceRegistry: registry });
     expect(prompt).toContain("Web検索は使用しないこと");
+  });
+
+  it("項目一覧をFACT/FACT_OR_HEARINGとANALYSISでグループ化する", () => {
+    const prompt = buildStage2Prompt({ store: STORE, items: combinedItems, sourceRegistry: registry });
+    expect(prompt).toContain("FACT / FACT_OR_HEARING項目");
+    expect(prompt).toContain("ANALYSIS項目");
+  });
+
+  it("known_store_data等の候補URLが含まれうる旨の注記を含む", () => {
+    const prompt = buildStage2Prompt({ store: STORE, items: combinedItems, sourceRegistry: registry });
+    expect(prompt).toContain("候補");
   });
 });
