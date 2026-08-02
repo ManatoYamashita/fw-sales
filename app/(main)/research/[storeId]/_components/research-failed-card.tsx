@@ -7,8 +7,14 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import type { StoreResearchRun } from "@/types/research-run";
 
-function errorMessage(run: StoreResearchRun): string {
-  if (run.error_kind === "retryable_exhausted") {
+/**
+ * `run.error_kind` は `workflows/store-research.ts:deriveErrorKind` が
+ * `"retryable_exhausted"` または `"retryable_exhausted:api_error:503"` のように
+ * prefix + sanitized kind の形で返すため、前方一致で判定する(完全一致にすると
+ * HTTP status 付与後の値を取りこぼす、observability bug 修正で発見)。
+ */
+export function errorMessage(run: Pick<StoreResearchRun, "error_kind" | "error_message">): string {
+  if (run.error_kind?.startsWith("retryable_exhausted") === true) {
     return "AI 調査が一時的なエラーで失敗しました(再試行済み)。再度お試しください。";
   }
   if (run.error_message) return run.error_message;
