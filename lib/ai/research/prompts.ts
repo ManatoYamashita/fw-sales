@@ -113,13 +113,19 @@ export interface Stage2ItemSpec {
  * `research-policy.ts` の一覧から、Stage2(AI呼出)が担当する全項目
  * (FACT / FACT_OR_HEARING / ANALYSIS)を抽出する。HEARING_ONLY /
  * EXTERNAL_DATA_REQUIRED は `pipeline.ts:buildNonAiItems` が別途機械生成する。
+ *
+ * `excludeKeys`(feat/ai-research-quality-refinement)は、Stage0のGoogle Placesで
+ * 既にdeterministicに確定済みのkey(`pipeline.ts:buildDeterministicPlacesItems`参照、
+ * 例: review_avg/review_count)をGeminiへ投げる項目一覧から除外するためのもの。
+ * hallucinationリスクとStage2出力トークンを削減する副次効果もある。
  */
 export function selectAiResearchItems(
   policyItems: readonly { key: string; research_policy: string }[],
+  excludeKeys?: ReadonlySet<string>,
 ): Stage2ItemSpec[] {
   const aiPolicies = new Set(["FACT", "FACT_OR_HEARING", "ANALYSIS"]);
   return policyItems
-    .filter((item) => aiPolicies.has(item.research_policy))
+    .filter((item) => aiPolicies.has(item.research_policy) && !excludeKeys?.has(item.key))
     .map((item) => {
       const def = BASIC_INFO_ITEM_BY_KEY.get(item.key);
       return { key: item.key, label: def?.label ?? item.key, research_policy: item.research_policy };
@@ -180,7 +186,40 @@ Web上の断片的事実を根拠に論理的な推論を行ってよい項目�
    してはいけません。複数の強い需要シグナル(具体的な数値、複数の独立した情報源の一致)が
    揃わない限り "inferred" にとどめてください。
 3. Google口コミ評価(review_avg/review_count)にRetty等の**他媒体の評価を混入させない**でください。
-   媒体名を必ず区別してください。`;
+   媒体名を必ず区別してください。
+4. 「満席・行列」等の口コミが数件あるだけで需要を「強い」「非常に高い」と表現しないでください。
+   具体的な数値や複数の独立した情報源の一致がある場合を除き、「一定の需要が示唆される」
+   「需要がある可能性」程度の較正された表現に留めてください。`;
+
+/** feat/ai-research-quality-refinement: phone(電話番号)のconflict誤判定を防ぐ指示。 */
+const PHONE_ROLE_INSTRUCTION = `## 電話番号(phone)の判定に関する注意
+複数の電話番号が見つかり、かつ用途が明確に異なる場合(例: 店舗直通番号 / 予約専用番号 /
+代表転送番号)は、単純に"conflict"にしないでください。canonical値を1つ選び(店舗直通番号を
+優先)、他の番号はevidence内へ補足として記載してください。用途自体が不明で本当に内容が
+矛盾する場合のみ"conflict"としてください。`;
+
+/** feat/ai-research-quality-refinement: average_spend_day_nightが明示価格を探さず推測に頼るのを防ぐ指示。 */
+const AVERAGE_SPEND_INSTRUCTION = `## 客単価(average_spend_day_night)の判定に関する注意
+まずグルメサイト・予約サイトに明示された予算帯を探してください。明示的な価格帯の記載が
+あれば"confirmed"としてください。メニュー構成等からの推測は、明示的な価格帯が見つからない
+場合の代替手段としてのみ使ってください。「推測できるから」という理由でWebの明示値の確認を
+省略することは禁止します。`;
+
+/** feat/ai-research-quality-refinement: 複数のサブ情報を含む項目のall-or-nothing判定を防ぐ指示。 */
+const COMPOSITE_FIELD_INSTRUCTION = `## 複数の情報を含む項目の書き方(重要)
+「最寄り駅・距離・乗降客数」のように複数のサブ情報を含む項目は、一部が確認できなくても
+項目全体を"not_found"にしないでください。確認できた部分だけを書き、不明な部分は「未確認」と
+明記してください。例:
+最寄り駅: 柏駅
+アクセス: 西口徒歩約3分
+乗降客数: 未確認
+確認できた部分の根拠が判定基準(FACT/ANALYSISの判定基準)を満たしていれば、その部分を
+根拠にconfirmed/inferredとして扱ってください。`;
+
+/** feat/ai-research-quality-refinement: opening_dateのFACT化に伴う、逆算推測の禁止指示。 */
+const OPENING_DATE_INSTRUCTION = `## オープン日(opening_date)の判定に関する注意
+公式サイト・地域記事・グルメサイト・予約サイト等に明示されたオープン日があれば"confirmed"と
+してください。口コミの投稿日の古さ等から開店時期を逆算して推測することは禁止します。`;
 
 /**
  * Stage2: FACT + FACT_OR_HEARING + ANALYSIS を1回のStructured Outputで生成する
@@ -216,6 +255,25 @@ export function buildStage2Prompt(params: BuildStage2PromptParams): string {
       : null;
 
   const reviewDrivenItems = items.filter((i) => REVIEW_DRIVEN_ITEM_KEYS.has(i.key));
+
+  const itemKeys = new Set(items.map((i) => i.key));
+  const perItemInstructions = [
+    itemKeys.has("phone") ? PHONE_ROLE_INSTRUCTION : null,
+    itemKeys.has("average_spend_day_night") ? AVERAGE_SPEND_INSTRUCTION : null,
+    itemKeys.has("opening_date") ? OPENING_DATE_INSTRUCTION : null,
+    itemKeys.has("nearest_station") || itemKeys.has("average_spend_day_night")
+      ? COMPOSITE_FIELD_INSTRUCTION
+      : null,
+  ]
+    .filter((s): s is string => s !== null)
+    .join("\n\n");
+
+  const observedPresenceKeys = new Set(["own_net_exposure", "exposure_gap"]);
+  const hasObservedPresenceItems = items.some((i) => observedPresenceKeys.has(i.key));
+  const observedWebPresenceText = sourceRegistry
+    .filter((s) => s.url_context_status === "success")
+    .map((s) => `- ${s.source_type}: ${s.title}`)
+    .join("\n");
 
   const factItems = items.filter(
     (i) => i.research_policy === "FACT" || i.research_policy === "FACT_OR_HEARING",
@@ -267,6 +325,10 @@ ${
   searchNotesText
     ? `\n# 検索時に得られた補助情報(Search Notes)\nStage1のGoogle Search実行時に得られた検索結果由来の補助情報です。URL Contextで本文を\n直接取得できた場合より**一段弱い根拠**として扱ってください(本文取得に成功した場合は\nそちらを優先すること)。ただし、対応するURLの本文取得が失敗・未実施の場合でも、\n以下の情報が明示的な値であれば判定の参考にしてよいです。\n\n${searchNotesText}\n`
     : ""
+}${
+  hasObservedPresenceItems
+    ? `\n# 実際に確認できたWeb露出(Observed Web Presence、重要)\n以下は今回実際に本文取得(URL Context)に成功した情報源です。own_net_exposure・\nexposure_gapの判定では、ここに列挙された媒体を「未掲載」「掲載強化余地あり」と矛盾する\n形で述べないでください:\n${observedWebPresenceText || "(本文取得に成功した情報源はありません)"}\n`
+    : ""
 }
 # 店舗同定
 上記URLの内容を取得した際、住所・電話番号・店舗名が対象店舗と一致するか必ず確認してください。
@@ -281,7 +343,7 @@ ${itemListText}
 ${FACT_INSTRUCTIONS}
 
 ${ANALYSIS_INSTRUCTIONS}
-${
+${perItemInstructions ? `\n${perItemInstructions}\n` : ""}${
   reviewDrivenItems.length > 0
     ? `\n## 口コミ・レビューの活用方法(重要)\n以下の項目では、グルメサイト・口コミサイトの内容やSearch Notesの口コミ由来情報\n(review_signal/negative_review_signal/usage_signal)を積極的に分析へ使ってください:\n${reviewDrivenItems.map((i) => `- ${i.key}: ${i.label}`).join("\n")}\n\n- 単発の言及であれば「一部で〜という声があります」のように書いてください。\n- 複数の口コミで繰り返し見られる傾向であれば「複数の口コミで〜への言及が見られます」の\n  ように書いてください。口コミ全文の引用はせず、要点を営業担当がそのまま使える\n  短い文章に要約してください。\n- 口コミを根拠として使う場合もsource_idsに対応する情報源のidを含めてください。\n- 「満席」「行列」等の数件の言及だけで市場需要をconfirmedにしない、という既存ルールは\n  維持してください(上記のANALYSIS判定基準を参照)。\n`
     : ""

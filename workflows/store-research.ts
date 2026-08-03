@@ -54,6 +54,7 @@ import {
   runStage1,
   runStage2,
   buildNonAiItems,
+  buildDeterministicPlacesItems,
   applyUrlContextStatus,
   finalizeResearchItems,
 } from "@/lib/ai/research/pipeline";
@@ -67,7 +68,7 @@ import { derivePlacesVerifiedKeys } from "@/lib/ai/research/places-verified";
 import { mergeBasicInfo } from "@/lib/domain/basic-info-merge";
 import { isAiClientError } from "@/lib/ai/client";
 import type { StoreIdentity } from "@/lib/ai/research/prompts";
-import type { SourceRegistryEntry, ResearchItem } from "@/lib/ai/research-result-schema";
+import type { SourceRegistryEntry, ResearchItem, SearchFact } from "@/lib/ai/research-result-schema";
 import type { SearchNote } from "@/lib/ai/research/source-registry";
 import type { BasicInfo } from "@/types/basic-info";
 import { nowIso } from "@/lib/utils/date";
@@ -183,12 +184,17 @@ async function markStageStep(
 markStageStep.maxRetries = 1;
 
 /**
- * Stage0: Google Places 軽量再同期(best-effort、`google_place_id` が無ければ即座に空を返す)。
- * 失敗してもWorkflow全体をfailedにしない(`maxRetries = 0`、warningのみ記録)。
+ * Stage0: Google Places 軽量再同期(best-effort)。`google_place_id` が有れば Place Details を、
+ * 無ければ Text Search fallback(strong matchのみ採用)を試みる
+ * (feat/ai-research-quality-refinement)。失敗してもWorkflow全体をfailedにしない
+ * (`maxRetries = 0`、warningのみ記録)。
  */
-async function stage0PlacesStep(googlePlaceId: string | null): Promise<Stage0PlacesResult> {
+async function stage0PlacesStep(
+  googlePlaceId: string | null,
+  store: StoreIdentity,
+): Promise<Stage0PlacesResult> {
   "use step";
-  return runStage0PlacesResync(googlePlaceId, nowIso());
+  return runStage0PlacesResync({ googlePlaceId, store, now: nowIso() });
 }
 stage0PlacesStep.maxRetries = 0;
 
@@ -219,11 +225,12 @@ async function stage2Step(
   store: StoreIdentity,
   sourceRegistry: SourceRegistryEntry[],
   searchNotes: SearchNote[],
+  excludeKeys: string[],
 ) {
   "use step";
   try {
     return await runStage2(
-      { store, sourceRegistry, searchNotes },
+      { store, sourceRegistry, searchNotes, excludeKeys: new Set(excludeKeys) },
       AbortSignal.timeout(STAGE_TIMEOUT_MS),
     );
   } catch (err) {
@@ -294,9 +301,16 @@ export async function storeResearchWorkflow(
     await markStageStep(runId, "discovering");
 
     // Stage0: Places軽量再同期(best-effort)。in-memoryでのみ利用し、DBへは書き込まない。
-    const stage0 = await stage0PlacesStep(googlePlaceId);
+    // google_place_idが無い場合はText Search fallback(strong matchのみ採用)を試みる
+    // (feat/ai-research-quality-refinement)。
+    const stage0 = await stage0PlacesStep(googlePlaceId, store);
     const effectiveBasicInfo = mergeBasicInfo(basicInfo, stage0.placesBasicInfo, "places", nowIso());
     const placesVerifiedKeySet = derivePlacesVerifiedKeys(effectiveBasicInfo);
+
+    // Google Placesがdeterministicに確定済みのkey(review_avg/review_count)は、
+    // Gemini対象から除外しdeterministic itemとして直接合成する(feat/ai-research-quality-refinement)。
+    const deterministicPlacesItems = buildDeterministicPlacesItems(effectiveBasicInfo, placesVerifiedKeySet);
+    const deterministicKeys = deterministicPlacesItems.map((item) => item.key);
 
     // Stage1: Source Discovery(Google Search)。
     const stage1 = await stage1Step(store);
@@ -309,14 +323,24 @@ export async function storeResearchWorkflow(
     await markStageStep(runId, "researching");
 
     // Stage2: URL Context + Structured Output(単一call)。Stage1のSearch Notesも渡す。
-    const stage2Result = await stage2Step(store, mergedRegistry, stage1.searchNotes);
+    const stage2Result = await stage2Step(store, mergedRegistry, stage1.searchNotes, deterministicKeys);
 
     const finalRegistry = applyUrlContextStatus(mergedRegistry, [stage2Result.urlContextMetadata]);
+
+    // Stage1のSearch Notes(store_fact、key/value構造化済み)をSource RegistryのIDへ解決する
+    // (feat/ai-research-quality-refinement、Tier BのSearchFact照合に使う)。
+    const registryIdByUrl = new Map(finalRegistry.map((s) => [s.grounding_redirect_url, s.id]));
+    const searchFacts: SearchFact[] = stage1.searchNotes
+      .filter((n): n is SearchNote & { key: string; value: string } => !!n.key && !!n.value)
+      .map((n) => ({ sourceId: registryIdByUrl.get(n.sourceUrl), key: n.key, value: n.value }))
+      .filter((f): f is SearchFact => f.sourceId !== undefined);
+
     const finalItems = finalizeResearchItems({
-      aiItems: stage2Result.items,
+      aiItems: [...stage2Result.items, ...deterministicPlacesItems],
       nonAiItems: buildNonAiItems(),
       sourceRegistry: finalRegistry,
       placesVerifiedKeys: placesVerifiedKeySet,
+      searchFacts,
     });
 
     const warnings: string[] = [];

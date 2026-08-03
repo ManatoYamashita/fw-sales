@@ -35,6 +35,7 @@
 
 import type { SourceRegistryEntry, SourceType } from "@/lib/ai/research-result-schema";
 import { SOURCE_TYPES } from "@/lib/ai/research-result-schema";
+import { getResearchPolicy } from "@/lib/domain/research-policy";
 
 /** `@google/genai` の `GroundingChunk` を模した最小限の形状。SDK型への直接依存を避ける。 */
 export interface GroundingChunkLike {
@@ -77,6 +78,14 @@ export interface SearchNote {
   sourceUrl: string;
   kind: SearchNoteKind;
   summary: string;
+  /**
+   * `kind==="store_fact"`の場合のみ意味を持つ構造化フィールド(feat/ai-research-quality-refinement)。
+   * `key`は53項目のkeyのいずれか、`value`は確認できた具体的な値。両方揃わない場合は
+   * undefinedのまま(Tier Bの`SearchFact`照合には使えないが、`summary`は引き続き
+   * プロンプト表示用に利用できる)。
+   */
+  key?: string;
+  value?: string;
 }
 
 /** 1件のSearch Note summaryの最大文字数(prompt肥大化防止、レビュー全文コピペ禁止)。 */
@@ -140,14 +149,30 @@ export function parseSearchNotes(text: string): SearchNote[] {
     if (!sourceUrl || !isValidCandidateUrl(sourceUrl)) continue;
     if (!isSearchNoteKind(kind)) continue;
     if (!summary) continue;
-    notes.push({
+
+    const note: SearchNote = {
       sourceUrl,
       kind,
       summary:
         summary.length > MAX_SEARCH_NOTE_SUMMARY_LENGTH
           ? `${summary.slice(0, MAX_SEARCH_NOTE_SUMMARY_LENGTH)}…`
           : summary,
-    });
+    };
+
+    // kind==="store_fact"の場合のみ、key/valueを構造化フィールドとして付与する
+    // (feat/ai-research-quality-refinement、Tier BのSearchFact照合に使う)。
+    // keyは53項目のkeyのいずれかであることを検証し、不一致・未知keyは破棄する
+    // (捏造されたkeyをTier B判定に紛れ込ませない安全側)。
+    if (kind === "store_fact") {
+      const key = extractField(body, "key");
+      const value = extractField(body, "value");
+      if (key && value && getResearchPolicy(key) !== undefined) {
+        note.key = key;
+        note.value = value;
+      }
+    }
+
+    notes.push(note);
   }
   return notes;
 }

@@ -218,4 +218,60 @@ describe("buildStage2Prompt", () => {
       expect(prompt).not.toContain("口コミ・レビューの活用方法");
     });
   });
+
+  describe("項目別prompt較正(feat/ai-research-quality-refinement)", () => {
+    it("phoneが含まれる場合は電話番号roleの指示を含む", () => {
+      const items = [{ key: "phone", label: "電話番号", research_policy: "FACT" }];
+      const prompt = buildStage2Prompt({ store: STORE, items, sourceRegistry: registry });
+      expect(prompt).toContain("電話番号(phone)の判定に関する注意");
+      expect(prompt).toContain("店舗直通番号");
+    });
+
+    it("phoneが含まれない場合は電話番号roleの指示を含まない", () => {
+      const items = [{ key: "business_hours_holidays", label: "営業時間・定休日", research_policy: "FACT" }];
+      const prompt = buildStage2Prompt({ store: STORE, items, sourceRegistry: registry });
+      expect(prompt).not.toContain("電話番号(phone)の判定に関する注意");
+    });
+
+    it("average_spend_day_nightが含まれる場合は明示価格優先の指示を含む", () => {
+      const items = [{ key: "average_spend_day_night", label: "客単価", research_policy: "ANALYSIS" }];
+      const prompt = buildStage2Prompt({ store: STORE, items, sourceRegistry: registry });
+      expect(prompt).toContain("まずグルメサイト・予約サイトに明示された予算帯を探してください");
+    });
+
+    it("opening_dateが含まれる場合は逆算推測禁止の指示を含む", () => {
+      const items = [{ key: "opening_date", label: "オープン日", research_policy: "FACT" }];
+      const prompt = buildStage2Prompt({ store: STORE, items, sourceRegistry: registry });
+      expect(prompt).toContain("口コミの投稿日の古さ等から開店時期を逆算して推測することは禁止");
+    });
+
+    it("nearest_stationが含まれる場合はcomposite fieldの部分表現指示を含む", () => {
+      const items = [{ key: "nearest_station", label: "最寄り駅", research_policy: "FACT" }];
+      const prompt = buildStage2Prompt({ store: STORE, items, sourceRegistry: registry });
+      expect(prompt).toContain("複数の情報を含む項目の書き方");
+      expect(prompt).toContain("未確認");
+    });
+
+    it("own_net_exposure/exposure_gapが含まれる場合、url_context成功済みsourceを列挙するObserved Web Presenceを含む", () => {
+      const registryWithSuccess = [
+        { ...registry[0]!, url_context_status: "success" as const, source_type: "gourmet_site" as const },
+      ];
+      const items = [{ key: "own_net_exposure", label: "自店のネット露出状況", research_policy: "ANALYSIS" }];
+      const prompt = buildStage2Prompt({ store: STORE, items, sourceRegistry: registryWithSuccess });
+      expect(prompt).toContain("実際に確認できたWeb露出");
+      expect(prompt).toContain("gourmet_site");
+    });
+
+    it("own_net_exposure/exposure_gapが含まれない場合はObserved Web Presenceを含まない", () => {
+      const items = [{ key: "business_hours_holidays", label: "営業時間・定休日", research_policy: "FACT" }];
+      const prompt = buildStage2Prompt({ store: STORE, items, sourceRegistry: registry });
+      expect(prompt).not.toContain("実際に確認できたWeb露出");
+    });
+
+    it("市場需要の強度表現の較正指示を含む", () => {
+      const items = [{ key: "market_demand", label: "市場需要", research_policy: "ANALYSIS" }];
+      const prompt = buildStage2Prompt({ store: STORE, items, sourceRegistry: registry });
+      expect(prompt).toContain("一定の需要が示唆される");
+    });
+  });
 });

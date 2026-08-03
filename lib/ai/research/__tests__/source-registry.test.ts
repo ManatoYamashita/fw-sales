@@ -420,6 +420,37 @@ summary: 一部口コミで料理提供までの時間への指摘が見られ�
     ).join("\n");
     expect(parseSearchNotes(blocks)).toHaveLength(20);
   });
+
+  describe("key/value構造化(feat/ai-research-quality-refinement、SearchFact照合用)", () => {
+    it("kind=store_factでkey/valueが有効な53項目keyならkey/valueを付与する", () => {
+      const text = `[SEARCH_NOTE]\nsource_url: ${REDIRECT_A}\nkind: store_fact\nkey: nearest_station\nvalue: 柏駅西口より徒歩約3分\nsummary: 最寄り駅情報\n[/SEARCH_NOTE]`;
+      const notes = parseSearchNotes(text);
+      expect(notes[0]!.key).toBe("nearest_station");
+      expect(notes[0]!.value).toBe("柏駅西口より徒歩約3分");
+    });
+
+    it("keyが53項目に存在しない場合はkey/valueを付与しない(summaryは維持)", () => {
+      const text = `[SEARCH_NOTE]\nsource_url: ${REDIRECT_A}\nkind: store_fact\nkey: not_a_real_key\nvalue: x\nsummary: y\n[/SEARCH_NOTE]`;
+      const notes = parseSearchNotes(text);
+      expect(notes[0]!.key).toBeUndefined();
+      expect(notes[0]!.value).toBeUndefined();
+      expect(notes[0]!.summary).toBe("y");
+    });
+
+    it("kindがstore_fact以外の場合はkey/valueを付与しない", () => {
+      const text = `[SEARCH_NOTE]\nsource_url: ${REDIRECT_A}\nkind: review_signal\nkey: nearest_station\nvalue: x\nsummary: y\n[/SEARCH_NOTE]`;
+      const notes = parseSearchNotes(text);
+      expect(notes[0]!.key).toBeUndefined();
+      expect(notes[0]!.value).toBeUndefined();
+    });
+
+    it("key/valueフィールドが無いstore_factブロックはsummaryのみ保持する", () => {
+      const text = `[SEARCH_NOTE]\nsource_url: ${REDIRECT_A}\nkind: store_fact\nsummary: y\n[/SEARCH_NOTE]`;
+      const notes = parseSearchNotes(text);
+      expect(notes[0]!.key).toBeUndefined();
+      expect(notes[0]!.summary).toBe("y");
+    });
+  });
 });
 
 describe("buildSourceRegistry の多様性capping (feat/ai-research-source-diversity)", () => {

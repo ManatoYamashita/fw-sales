@@ -16,7 +16,7 @@
  */
 
 import { z } from "zod";
-import { RESEARCH_POLICIES, getResearchPolicy } from "@/lib/domain/research-policy";
+import { RESEARCH_POLICIES, getResearchPolicy, type ResearchPolicy } from "@/lib/domain/research-policy";
 
 /* ------------------------------------------------------------------ */
 /*  Source Registry (Plan v3.2 §10, §11)                               */
@@ -123,6 +123,18 @@ export const ResearchItemCandidateSchema = z.object({
 });
 export type ResearchItemCandidate = z.infer<typeof ResearchItemCandidateSchema>;
 
+/**
+ * confirmedを維持する根拠の由来(feat/ai-research-quality-refinement、内部トラッキング用)。
+ * UIへの表示は別PRのスコープ。confirmed以外のstatusでは意味を持たないため付与しない。
+ *
+ * - `places`: `placesVerifiedKeys`(Google Places検証済み)経由でconfirmed。
+ * - `url_context`: `url_context_status==="success"`のsourceのみでconfirmed。
+ * - `search_note`: Tier B(`SearchFact`一致 + source trust matrix許可)のみでconfirmed。
+ * - `mixed`: 上記のうち複数の経路が同時に該当する場合。
+ */
+export const EVIDENCE_BASES = ["places", "url_context", "search_note", "mixed"] as const;
+export type EvidenceBasis = (typeof EVIDENCE_BASES)[number];
+
 export const ResearchItemSchema = z.object({
   /** `BASIC_INFO_ITEMS` の key と一致。 */
   key: z.string(),
@@ -142,6 +154,8 @@ export const ResearchItemSchema = z.object({
   warning: z.string().nullable().optional(),
   /** status="conflict" 時のみ使用。 */
   candidates: z.array(ResearchItemCandidateSchema).nullable().optional(),
+  /** confirmed維持の根拠由来(feat/ai-research-quality-refinement、内部トラッキング用、UI非表示)。 */
+  evidence_basis: z.enum(EVIDENCE_BASES).nullable().optional(),
 });
 export type ResearchItem = z.infer<typeof ResearchItemSchema>;
 
@@ -358,6 +372,42 @@ export function validateConflictShape(item: ResearchItem): ResearchItem {
 /*  confirmed の deterministic validation (Plan v3.2 §10 末尾, §13)      */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Stage1のGoogle Search実行時に得られた構造化事実(feat/ai-research-quality-refinement)。
+ * `[SEARCH_NOTE]`の`kind: store_fact`かつ`key`/`value`が明示されたものを、Source Registryの
+ * `id`へ解決(sourceUrl→id)した後の形。生URLは持たない(既存のsource_ids参照方式と統一)。
+ */
+export interface SearchFact {
+  /** Source Registry の id (例: "S03")。 */
+  sourceId: string;
+  /** `BASIC_INFO_ITEMS`/`RESEARCH_POLICY_ITEMS` の key と一致。 */
+  key: string;
+  /** 確認できた具体的な値(自由文字列)。 */
+  value: string;
+}
+
+/**
+ * Tier B「reliable secondary evidence」の対象key単位の許可source_type
+ * (feat/ai-research-quality-refinement、旧`RELIABLE_SECONDARY_FACT_KEYS`固定リストを置換)。
+ *
+ * `url_context_status==="success"`が無くても、`SearchFact`(key一致・具体的value有り)と
+ * 組み合わせてconfirmedを許可するsource_typeをkeyごとに定義する。`review_avg`/`review_count`は
+ * 意図的に登録しない(Google Places由来のdeterministic itemとしてGemini対象外になるため)。
+ */
+export const SOURCE_TRUST_MATRIX: Readonly<Record<string, readonly SourceType[]>> = {
+  opening_date: ["official_site", "local_official", "article", "gourmet_site", "reservation_site"],
+  business_hours_holidays: ["gourmet_site", "reservation_site", "official_site"],
+  seat_count: ["official_site", "gourmet_site", "reservation_site"],
+  average_spend_day_night: ["gourmet_site", "reservation_site"],
+  cuisine_genre: ["gourmet_site", "reservation_site"],
+  alacarte_course: ["gourmet_site", "reservation_site"],
+  phone: ["gourmet_site", "reservation_site"],
+  nearest_station: ["official_site", "gourmet_site", "reservation_site", "local_official", "article"],
+  floor_level: ["gourmet_site", "reservation_site"],
+  reservation_tool: ["gourmet_site", "reservation_site"],
+  media_coverage: ["article", "local_official", "gourmet_site", "reservation_site", "official_site"],
+};
+
 /** `validateResearchItemStatus` の判定コンテキスト。 */
 export interface ResearchValidationContext {
   /** Stage1 + Stage1.5 で構築した Source Registry(Web Source専用)。 */
@@ -376,6 +426,12 @@ export interface ResearchValidationContext {
    * 独立した2経路で扱う(Plan v3.2 PR1 fresh review A の第一候補方式)。
    */
   placesVerifiedKeys?: ReadonlySet<string>;
+  /**
+   * Stage1のSearch Notes由来の構造化事実(feat/ai-research-quality-refinement)。
+   * Tier B(下記)の判定にのみ使う。単なるsource_type一致だけではconfirmedを許可しない
+   * (「URLが存在するだけではそのkeyの根拠にしない」という設計思想)。
+   */
+  searchFacts?: readonly SearchFact[];
 }
 
 /**
@@ -386,10 +442,13 @@ export interface ResearchValidationContext {
  *    検証済み、Plan v3.2 PR1 fresh review A)。
  * 2. `source_ids` が `url_context_status==="success"` の Source Registry エントリを
  *    少なくとも1件含む(Web調査で本文取得に成功した根拠がある)。
- * 3. Tier B「reliable secondary evidence」(feat/ai-research-source-diversity):
- *    `item.key` が `RELIABLE_SECONDARY_FACT_KEYS` に含まれ、`source_ids` が
- *    `gourmet_site`/`reservation_site` の Source Registry エントリを少なくとも
- *    1件含む(本文取得成功は必須としない)。`review_avg`/`review_count` は対象外。
+ * 3. Tier B「reliable secondary evidence」(feat/ai-research-quality-refinement):
+ *    `item.key`が`SOURCE_TRUST_MATRIX`に定義されており、`context.searchFacts`に
+ *    (a) `key`が一致し (b) `sourceId`が`item.source_ids`に含まれ (c) その
+ *    Source Registryエントリの`source_type`が許可済み、を満たす`SearchFact`が
+ *    存在する(本文取得成功は必須としない)。単なる「対象source_typeのURLが
+ *    source_idsに存在するだけ」では confirmed を許可しない。`review_avg`/
+ *    `review_count`は`SOURCE_TRUST_MATRIX`に登録しないため対象外。
  *
  * いずれも満たさない場合は research_policy ごとに定めた降格先へ機械的に降格する:
  *
@@ -402,11 +461,17 @@ export interface ResearchValidationContext {
  *   フォールバックとして各policyの既定status(hearing_required /
  *   external_data_required)に倒す。
  *
+ * no-infoステータス(not_found/hearing_required/external_data_required)への降格時は
+ * `value`/`confidence`/`candidates`を`null`化する(feat/ai-research-quality-refinement、
+ * 「確認できず」なのに具体的な値が残る矛盾を防ぐ)。ANALYSIS→inferredの降格のみ、
+ * 弱い根拠付きの推定値として`value`/`confidence`を維持する。
+ *
  * 「Google Searchだけで見つかりURL Contextで本文取得できなかったsource」は
  * 検証対象から除外される(= confirmedの根拠として使わない、Plan v3.2 §5)。
  *
- * 呼び出し前提: `enforceResearchPolicy` / `sanitizeSourceIds` / `validateConflictShape`
- * を先に適用済みであること(`applyDeterministicValidation` はこの順序を保証する)。
+ * 呼び出し前提: `enforceResearchPolicy` / `enforceStatusForPolicy` / `sanitizeSourceIds` /
+ * `validateConflictShape` を先に適用済みであること(`applyDeterministicValidation` は
+ * この順序を保証する)。
  *
  * 純関数。入力を変更せず、新しい `ResearchItem` を返す。
  */
@@ -423,9 +488,10 @@ export function validateResearchItemStatus(
     item.research_policy === "HEARING_ONLY" ||
     item.research_policy === "EXTERNAL_DATA_REQUIRED"
   ) {
+    const downgradedStatus = getConfirmedDowngradeStatus(item.research_policy);
     return {
-      ...item,
-      status: getConfirmedDowngradeStatus(item.research_policy),
+      ...nullifyForNoInfoStatus(item, downgradedStatus),
+      status: downgradedStatus,
       warning: appendWarning(
         item.warning,
         `research_policy=${item.research_policy}の項目はAIがconfirmedと判定できないため自動的に格下げしました。`,
@@ -433,7 +499,7 @@ export function validateResearchItemStatus(
     };
   }
 
-  if (context.placesVerifiedKeys?.has(item.key)) return item;
+  const isPlacesVerified = context.placesVerifiedKeys?.has(item.key) ?? false;
 
   const verifiedIds = new Set(
     context.sourceRegistry
@@ -441,19 +507,31 @@ export function validateResearchItemStatus(
       .map((entry) => entry.id),
   );
   const hasVerifiedSource = item.source_ids.some((id) => verifiedIds.has(id));
-  if (hasVerifiedSource) return item;
 
-  // Tier B: reliable secondary evidence(feat/ai-research-source-diversity)。
-  // gourmet_site/reservation_siteはURL Context本文取得に失敗しやすいが、Stage1の
-  // Google Search時点で明示的に確認できることが多い限定項目については、本文取得
-  // 成功が無くてもconfirmedを維持する(review_avg/review_countは対象外)。
-  if (RELIABLE_SECONDARY_FACT_KEYS.has(item.key)) {
-    const secondaryIds = new Set(
-      context.sourceRegistry
-        .filter((entry) => RELIABLE_SECONDARY_SOURCE_TYPES.has(entry.source_type))
-        .map((entry) => entry.id),
-    );
-    if (item.source_ids.some((id) => secondaryIds.has(id))) return item;
+  // Tier B: reliable secondary evidence(feat/ai-research-quality-refinement)。
+  // gourmet_site/reservation_site等はURL Context本文取得に失敗しやすいが、Stage1の
+  // Google Search時点でSearchFactとして具体的な値が確認できることがある。
+  // 単なるsource_type一致ではなく、keyが一致するSearchFactの存在を必須とする。
+  const allowedSourceTypes = SOURCE_TRUST_MATRIX[item.key];
+  const hasSearchFactMatch =
+    allowedSourceTypes !== undefined &&
+    (context.searchFacts ?? []).some((fact) => {
+      if (fact.key !== item.key || !item.source_ids.includes(fact.sourceId)) return false;
+      const entry = context.sourceRegistry.find((e) => e.id === fact.sourceId);
+      return entry !== undefined && allowedSourceTypes.includes(entry.source_type);
+    });
+
+  if (isPlacesVerified || hasVerifiedSource || hasSearchFactMatch) {
+    type SingleBasis = Exclude<EvidenceBasis, "mixed">;
+    const bases = (
+      [
+        isPlacesVerified ? "places" : null,
+        hasVerifiedSource ? "url_context" : null,
+        hasSearchFactMatch ? "search_note" : null,
+      ] as const
+    ).filter((b): b is SingleBasis => b !== null);
+    const evidence_basis: EvidenceBasis = bases.length > 1 ? "mixed" : bases[0]!;
+    return { ...item, evidence_basis };
   }
 
   const downgradedStatus = getConfirmedDowngradeStatus(item.research_policy);
@@ -461,43 +539,21 @@ export function validateResearchItemStatus(
     "AIはconfirmedと判定しましたが、根拠となる情報源の本文取得が確認できなかったため自動的に格下げしました。";
 
   return {
-    ...item,
+    ...nullifyForNoInfoStatus(item, downgradedStatus),
     status: downgradedStatus,
     warning: appendWarning(item.warning, downgradeNote),
   };
 }
 
 /**
- * Tier B「reliable secondary evidence」対象項目(feat/ai-research-source-diversity)。
- *
- * `url_context_status==="success"`(本文取得成功)が無くても、`gourmet_site`/
- * `reservation_site`のSource Registryエントリを根拠にしている場合はconfirmedを
- * 維持してよい、客観的な店舗スペック項目の限定リスト。食べログ・ホットペッパー等の
- * 大手グルメ/予約サイトはURL Context本文取得に失敗しやすい(bot対策等)一方、
- * Stage1のGoogle Search時点で店舗スペックが明示的に確認できることが多いため、
- * この限られた項目・source_typeの組み合わせに限り例外を許可する。
- *
- * `review_avg`/`review_count`(Google口コミ評価)は意図的に含めない
- * (Google以外の媒体評価をGoogle評価の根拠に代用してはいけないため)。
+ * no-infoステータス(not_found/hearing_required/external_data_required)へ降格する際、
+ * `value`/`confidence`/`candidates`を`null`化する(feat/ai-research-quality-refinement)。
+ * `inferred`への降格のみ、弱い根拠付きの推定値として現状維持する(唯一の例外)。
  */
-const RELIABLE_SECONDARY_FACT_KEYS: ReadonlySet<string> = new Set([
-  "opening_date",
-  "business_hours_holidays",
-  "seat_count",
-  "average_spend_day_night",
-  "cuisine_genre",
-  "alacarte_course",
-  "phone",
-  "nearest_station",
-  "floor_level",
-  "reservation_tool",
-]);
-
-/** Tier B対象の`source_type`(グルメサイト・予約サイトのみ)。 */
-const RELIABLE_SECONDARY_SOURCE_TYPES: ReadonlySet<SourceType> = new Set([
-  "gourmet_site",
-  "reservation_site",
-]);
+function nullifyForNoInfoStatus(item: ResearchItem, targetStatus: ResearchStatus): ResearchItem {
+  if (targetStatus === "inferred") return item;
+  return { ...item, value: null, confidence: null, candidates: undefined };
+}
 
 /** research_policy ごとの confirmed 降格先。 */
 function getConfirmedDowngradeStatus(
@@ -517,11 +573,77 @@ function getConfirmedDowngradeStatus(
   }
 }
 
+/* ------------------------------------------------------------------ */
+/*  research_policy と status の整合性 (feat/ai-research-quality-refinement) */
+/* ------------------------------------------------------------------ */
+
+/**
+ * research_policy ごとに許可される status の集合。`Record<ResearchPolicy, ...>` の
+ * 型注釈により5値全てのキーを型レベルで強制する(1つでも欠けるとコンパイルエラー)。
+ */
+const ALLOWED_STATUSES_BY_POLICY: Record<ResearchPolicy, readonly ResearchStatus[]> = {
+  FACT: ["confirmed", "conflict", "not_found"],
+  ANALYSIS: ["confirmed", "inferred", "conflict", "not_found"],
+  FACT_OR_HEARING: ["confirmed", "hearing_required"],
+  HEARING_ONLY: ["hearing_required"],
+  EXTERNAL_DATA_REQUIRED: ["external_data_required"],
+};
+
+/**
+ * research_policyとstatusの組み合わせ自体が不正な場合のfallback先。
+ *
+ * `getConfirmedDowngradeStatus`(confirmedだが根拠不十分、という別シナリオ用で
+ * ANALYSISに対し`inferred`を返す)とは意図的に別関数にしている。こちらは
+ * 「AIの主張するstatus自体が policy と矛盾している」という、値の信頼性そのものが
+ * 疑わしいシナリオのため、ANALYSISであっても`inferred`(弱い根拠付きの推定値を
+ * 維持する想定の値)ではなく`not_found`へ倒す、より保守的な判断をする。
+ */
+function getInvalidStatusFallback(policy: ResearchPolicy): ResearchStatus {
+  switch (policy) {
+    case "FACT":
+    case "ANALYSIS":
+      return "not_found";
+    case "FACT_OR_HEARING":
+      return "hearing_required";
+    case "HEARING_ONLY":
+      return "hearing_required";
+    case "EXTERNAL_DATA_REQUIRED":
+      return "external_data_required";
+  }
+}
+
+/**
+ * `item.status`が(補正済みの)`item.research_policy`に対して許可されない値の場合、
+ * `getInvalidStatusFallback`が返す既定status(常にnot_found/hearing_required/
+ * external_data_requiredのいずれか)へ補正する。「ヒアリング必要なのにAI推測値が
+ * 残る」状態を作らないため、`value`/`confidence`/`candidates`は無条件でnull化する。
+ *
+ * 呼び出し前提: `enforceResearchPolicy`を先に適用済みであること
+ * (`applyDeterministicValidation`はこの順序を保証する)。
+ *
+ * 純関数。入力を変更せず、新しい `ResearchItem` を返す。
+ */
+export function enforceStatusForPolicy(item: ResearchItem): ResearchItem {
+  const allowed = ALLOWED_STATUSES_BY_POLICY[item.research_policy];
+  if (allowed.includes(item.status)) return item;
+
+  const fallback = getInvalidStatusFallback(item.research_policy);
+  return {
+    ...nullifyForNoInfoStatus(item, fallback),
+    status: fallback,
+    warning: appendWarning(
+      item.warning,
+      `research_policy=${item.research_policy}に対し不正なstatus(${item.status})だったため${fallback}へ補正しました。`,
+    ),
+  };
+}
+
 /**
  * 1項目に対し、決定的な検証パイプラインを順序どおりに適用する:
- * `enforceResearchPolicy` → `sanitizeSourceIds` → `validateConflictShape` →
- * `validateResearchItemStatus`。この順序には意味があり、後段は前段の是正結果を
- * 前提とする(例: confirmed判定は sanitize 済みの source_ids のみを見る)。
+ * `enforceResearchPolicy` → `enforceStatusForPolicy` → `sanitizeSourceIds` →
+ * `validateConflictShape` → `validateResearchItemStatus`。この順序には意味があり、
+ * 後段は前段の是正結果を前提とする(例: confirmed判定は sanitize 済みの
+ * source_ids のみを見る)。
  *
  * 純関数。入力を変更せず、新しい `ResearchItem` を返す。
  */
@@ -530,7 +652,8 @@ export function applyDeterministicValidation(
   context: ResearchValidationContext,
 ): ResearchItem {
   const policyEnforced = enforceResearchPolicy(item);
-  const sourceIdsSanitized = sanitizeSourceIds(policyEnforced, context.sourceRegistry);
+  const statusEnforced = enforceStatusForPolicy(policyEnforced);
+  const sourceIdsSanitized = sanitizeSourceIds(statusEnforced, context.sourceRegistry);
   const conflictValidated = validateConflictShape(sourceIdsSanitized);
   return validateResearchItemStatus(conflictValidated, context);
 }

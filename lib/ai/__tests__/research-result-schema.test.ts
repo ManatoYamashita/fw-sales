@@ -10,6 +10,7 @@ import {
   ReviewDecisionSchema,
   isValidReviewDecisionForItem,
   enforceResearchPolicy,
+  enforceStatusForPolicy,
   sanitizeSourceIds,
   validateConflictShape,
   validateResearchItemStatus,
@@ -242,6 +243,68 @@ describe("enforceResearchPolicy (PR1 fresh review B: research_policy trust bound
   });
 });
 
+describe("enforceStatusForPolicy (feat/ai-research-quality-refinement: policy/status整合性の強制)", () => {
+  it("FACTの許容status(confirmed/conflict/not_found)ならそのまま返す", () => {
+    for (const status of ["confirmed", "conflict", "not_found"] as const) {
+      const item = makeItem({ research_policy: "FACT", status });
+      expect(enforceStatusForPolicy(item).status).toBe(status);
+    }
+  });
+
+  it("ANALYSISの許容status(confirmed/inferred/conflict/not_found)ならそのまま返す", () => {
+    for (const status of ["confirmed", "inferred", "conflict", "not_found"] as const) {
+      const item = makeItem({ research_policy: "ANALYSIS", status });
+      expect(enforceStatusForPolicy(item).status).toBe(status);
+    }
+  });
+
+  it("FACT_OR_HEARINGにinferredが混入した場合、hearing_requiredへ補正しvalue/confidence/candidatesをnull化する(owner_snsで発見された実バグの再発防止)", () => {
+    const item = makeItem({
+      research_policy: "FACT_OR_HEARING",
+      status: "inferred" as never,
+      confidence: 50,
+      candidates: [makeCandidate()],
+    });
+    const result = enforceStatusForPolicy(item);
+    expect(result.status).toBe("hearing_required");
+    expect(result.value).toBeNull();
+    expect(result.confidence).toBeNull();
+    expect(result.candidates).toBeUndefined();
+    expect(result.warning).toContain("補正");
+  });
+
+  it("FACTにhearing_requiredが混入した場合、not_foundへ補正する(ANALYSISのinferredへは倒さない、より保守的なfallback)", () => {
+    const item = makeItem({ research_policy: "FACT", status: "hearing_required" as never });
+    const result = enforceStatusForPolicy(item);
+    expect(result.status).toBe("not_found");
+  });
+
+  it("ANALYSISにhearing_requiredが混入した場合もnot_foundへ補正する(inferredへは倒さない)", () => {
+    const item = makeItem({ research_policy: "ANALYSIS", status: "hearing_required" as never });
+    const result = enforceStatusForPolicy(item);
+    expect(result.status).toBe("not_found");
+  });
+
+  it("HEARING_ONLYの許容statusはhearing_requiredのみ", () => {
+    const item = makeItem({ research_policy: "HEARING_ONLY", status: "confirmed" });
+    const result = enforceStatusForPolicy(item);
+    expect(result.status).toBe("hearing_required");
+  });
+
+  it("EXTERNAL_DATA_REQUIREDの許容statusはexternal_data_requiredのみ", () => {
+    const item = makeItem({ research_policy: "EXTERNAL_DATA_REQUIRED", status: "confirmed" });
+    const result = enforceStatusForPolicy(item);
+    expect(result.status).toBe("external_data_required");
+  });
+
+  it("純関数であり入力を変更しない", () => {
+    const item = makeItem({ research_policy: "FACT_OR_HEARING", status: "inferred" as never });
+    const original = { ...item };
+    enforceStatusForPolicy(item);
+    expect(item).toEqual(original);
+  });
+});
+
 describe("sanitizeSourceIds (PR1 fresh review C: source_ids防御)", () => {
   it("存在するsource_idはそのまま保持する", () => {
     const item = makeItem({ source_ids: ["S01"] });
@@ -337,26 +400,38 @@ describe("validateResearchItemStatus (confirmed の deterministic validation)", 
     expect(result.warning).toBeUndefined();
   });
 
-  it("FACT項目: 検証済みsourceが無ければ not_found へ降格する", () => {
-    const item = makeItem({ research_policy: "FACT", source_ids: ["S01"] });
+  it("FACT項目: 検証済みsourceが無ければ not_found へ降格し、value/confidence/candidatesをnull化する(feat/ai-research-quality-refinement)", () => {
+    const item = makeItem({
+      research_policy: "FACT",
+      source_ids: ["S01"],
+      confidence: 80,
+      candidates: [makeCandidate()],
+    });
     const registry = [makeSource({ id: "S01", url_context_status: "error" })];
     const result = validateResearchItemStatus(item, { sourceRegistry: registry });
     expect(result.status).toBe("not_found");
     expect(result.warning).toContain("格下げ");
+    expect(result.value).toBeNull();
+    expect(result.confidence).toBeNull();
+    expect(result.candidates).toBeUndefined();
   });
 
-  it("ANALYSIS項目: 検証済みsourceが無ければ inferred へ降格する", () => {
-    const item = makeItem({ research_policy: "ANALYSIS", source_ids: ["S01"] });
+  it("ANALYSIS項目: 検証済みsourceが無ければ inferred へ降格し、value/confidenceは維持する(唯一の例外)", () => {
+    const item = makeItem({ research_policy: "ANALYSIS", source_ids: ["S01"], confidence: 60 });
     const registry = [makeSource({ id: "S01", url_context_status: "not_attempted" })];
     const result = validateResearchItemStatus(item, { sourceRegistry: registry });
     expect(result.status).toBe("inferred");
+    expect(result.value).toBe(item.value);
+    expect(result.confidence).toBe(60);
   });
 
-  it("FACT_OR_HEARING項目: 検証済みsourceが無ければ hearing_required へ降格する", () => {
-    const item = makeItem({ research_policy: "FACT_OR_HEARING", source_ids: ["S01"] });
+  it("FACT_OR_HEARING項目: 検証済みsourceが無ければ hearing_required へ降格し、value/confidenceをnull化する", () => {
+    const item = makeItem({ research_policy: "FACT_OR_HEARING", source_ids: ["S01"], confidence: 70 });
     const registry = [makeSource({ id: "S01", url_context_status: "error" })];
     const result = validateResearchItemStatus(item, { sourceRegistry: registry });
     expect(result.status).toBe("hearing_required");
+    expect(result.value).toBeNull();
+    expect(result.confidence).toBeNull();
   });
 
   it("Google Searchのみで見つかりURL Context未取得のsourceは根拠として使わない", () => {
@@ -390,27 +465,9 @@ describe("validateResearchItemStatus (confirmed の deterministic validation)", 
     expect(result.status).toBe("external_data_required");
   });
 
-  describe("Tier B: reliable secondary evidence (feat/ai-research-source-diversity)", () => {
-    it("gourmet_siteのsourceはurl_context_status success無しでも対象keyならconfirmedを維持する", () => {
+  describe("Tier B: reliable secondary evidence (feat/ai-research-quality-refinement、SearchFact必須へ厳格化)", () => {
+    it("gourmet_siteのsourceは、key一致のSearchFactが無ければurl_context_status success無しではconfirmedを維持しない", () => {
       const item = makeItem({ key: "business_hours_holidays", source_ids: ["S01"] });
-      const registry = [
-        makeSource({ id: "S01", source_type: "gourmet_site", url_context_status: "error" }),
-      ];
-      const result = validateResearchItemStatus(item, { sourceRegistry: registry });
-      expect(result.status).toBe("confirmed");
-    });
-
-    it("reservation_siteのsourceも同様にconfirmedを維持する", () => {
-      const item = makeItem({ key: "seat_count", research_policy: "FACT", source_ids: ["S01"] });
-      const registry = [
-        makeSource({ id: "S01", source_type: "reservation_site", url_context_status: "not_attempted" }),
-      ];
-      const result = validateResearchItemStatus(item, { sourceRegistry: registry });
-      expect(result.status).toBe("confirmed");
-    });
-
-    it("対象外key(review_avg)はgourmet_siteのみでは維持されない(Google評価の他媒体代用防止)", () => {
-      const item = makeItem({ key: "review_avg", source_ids: ["S01"] });
       const registry = [
         makeSource({ id: "S01", source_type: "gourmet_site", url_context_status: "error" }),
       ];
@@ -418,7 +475,56 @@ describe("validateResearchItemStatus (confirmed の deterministic validation)", 
       expect(result.status).not.toBe("confirmed");
     });
 
-    it("対象外key(review_count)も同様にgourmet_siteのみでは維持されない", () => {
+    it("gourmet_siteのsource + key一致のSearchFactがあればconfirmedを維持する", () => {
+      const item = makeItem({ key: "business_hours_holidays", source_ids: ["S01"] });
+      const registry = [
+        makeSource({ id: "S01", source_type: "gourmet_site", url_context_status: "error" }),
+      ];
+      const result = validateResearchItemStatus(item, {
+        sourceRegistry: registry,
+        searchFacts: [{ sourceId: "S01", key: "business_hours_holidays", value: "17:00-24:00" }],
+      });
+      expect(result.status).toBe("confirmed");
+      expect(result.evidence_basis).toBe("search_note");
+    });
+
+    it("reservation_siteのsource + SearchFactも同様にconfirmedを維持する", () => {
+      const item = makeItem({ key: "seat_count", research_policy: "FACT", source_ids: ["S01"] });
+      const registry = [
+        makeSource({ id: "S01", source_type: "reservation_site", url_context_status: "not_attempted" }),
+      ];
+      const result = validateResearchItemStatus(item, {
+        sourceRegistry: registry,
+        searchFacts: [{ sourceId: "S01", key: "seat_count", value: "40席" }],
+      });
+      expect(result.status).toBe("confirmed");
+    });
+
+    it("SearchFactのkeyが対象itemのkeyと不一致なら維持されない", () => {
+      const item = makeItem({ key: "seat_count", research_policy: "FACT", source_ids: ["S01"] });
+      const registry = [
+        makeSource({ id: "S01", source_type: "reservation_site", url_context_status: "not_attempted" }),
+      ];
+      const result = validateResearchItemStatus(item, {
+        sourceRegistry: registry,
+        searchFacts: [{ sourceId: "S01", key: "business_hours_holidays", value: "17:00-24:00" }],
+      });
+      expect(result.status).not.toBe("confirmed");
+    });
+
+    it("対象外key(review_avg)はSearchFactがあってもSOURCE_TRUST_MATRIX未登録のため維持されない(Google評価の他媒体代用防止)", () => {
+      const item = makeItem({ key: "review_avg", source_ids: ["S01"] });
+      const registry = [
+        makeSource({ id: "S01", source_type: "gourmet_site", url_context_status: "error" }),
+      ];
+      const result = validateResearchItemStatus(item, {
+        sourceRegistry: registry,
+        searchFacts: [{ sourceId: "S01", key: "review_avg", value: "3.8" }],
+      });
+      expect(result.status).not.toBe("confirmed");
+    });
+
+    it("対象外key(review_count)も同様に維持されない", () => {
       const item = makeItem({
         key: "review_count",
         research_policy: "FACT",
@@ -427,28 +533,96 @@ describe("validateResearchItemStatus (confirmed の deterministic validation)", 
       const registry = [
         makeSource({ id: "S01", source_type: "gourmet_site", url_context_status: "error" }),
       ];
-      const result = validateResearchItemStatus(item, { sourceRegistry: registry });
+      const result = validateResearchItemStatus(item, {
+        sourceRegistry: registry,
+        searchFacts: [{ sourceId: "S01", key: "review_count", value: "120" }],
+      });
       expect(result.status).not.toBe("confirmed");
     });
 
-    it("対象keyでもsource_typeがgourmet_site/reservation_site以外(article等)なら維持されない", () => {
-      const item = makeItem({ key: "business_hours_holidays", source_ids: ["S01"] });
-      const registry = [makeSource({ id: "S01", source_type: "article", url_context_status: "error" })];
-      const result = validateResearchItemStatus(item, { sourceRegistry: registry });
+    it("対象keyでもsource_typeがSOURCE_TRUST_MATRIX許可外(例: competitor)なら維持されない", () => {
+      const item = makeItem({ key: "average_spend_day_night", research_policy: "ANALYSIS", source_ids: ["S01"] });
+      const registry = [
+        makeSource({ id: "S01", source_type: "competitor", url_context_status: "error" }),
+      ];
+      const result = validateResearchItemStatus(item, {
+        sourceRegistry: registry,
+        searchFacts: [{ sourceId: "S01", key: "average_spend_day_night", value: "4000円" }],
+      });
       expect(result.status).not.toBe("confirmed");
     });
 
-    it("opening_date(FACT_OR_HEARING)もTier B対象keyとして扱われる", () => {
+    it("opening_date(FACT、feat/ai-research-quality-refinementでFACT_OR_HEARINGから変更)もTier B対象keyとして扱われ、articleも許可source_typeに含む", () => {
       const item = makeItem({
         key: "opening_date",
-        research_policy: "FACT_OR_HEARING",
+        research_policy: "FACT",
         source_ids: ["S01"],
       });
       const registry = [
-        makeSource({ id: "S01", source_type: "gourmet_site", url_context_status: "not_attempted" }),
+        makeSource({ id: "S01", source_type: "article", url_context_status: "not_attempted" }),
+      ];
+      const result = validateResearchItemStatus(item, {
+        sourceRegistry: registry,
+        searchFacts: [{ sourceId: "S01", key: "opening_date", value: "2024年6月21日" }],
+      });
+      expect(result.status).toBe("confirmed");
+    });
+
+    it("media_coverageも他keyと同様、単なるarticleの存在だけではconfirmedにならない(v3で特例撤廃)", () => {
+      const item = makeItem({ key: "media_coverage", research_policy: "FACT", source_ids: ["S01"] });
+      const registry = [
+        makeSource({ id: "S01", source_type: "article", url_context_status: "not_attempted" }),
       ];
       const result = validateResearchItemStatus(item, { sourceRegistry: registry });
+      expect(result.status).not.toBe("confirmed");
+    });
+
+    it("media_coverageはkey一致のSearchFactがあればconfirmedになる", () => {
+      const item = makeItem({ key: "media_coverage", research_policy: "FACT", source_ids: ["S01"] });
+      const registry = [
+        makeSource({ id: "S01", source_type: "article", url_context_status: "not_attempted" }),
+      ];
+      const result = validateResearchItemStatus(item, {
+        sourceRegistry: registry,
+        searchFacts: [{ sourceId: "S01", key: "media_coverage", value: "柏つうしんに開店記事掲載" }],
+      });
       expect(result.status).toBe("confirmed");
+    });
+  });
+
+  describe("evidence_basis (feat/ai-research-quality-refinement)", () => {
+    it("url_context成功のみで維持された場合はurl_contextになる", () => {
+      const item = makeItem({ source_ids: ["S01"] });
+      const registry = [makeSource({ id: "S01", url_context_status: "success" })];
+      const result = validateResearchItemStatus(item, { sourceRegistry: registry });
+      expect(result.evidence_basis).toBe("url_context");
+    });
+
+    it("placesVerifiedKeysのみで維持された場合はplacesになる", () => {
+      const item = makeItem({ key: "review_avg", source_ids: [] });
+      const result = validateResearchItemStatus(item, {
+        sourceRegistry: [],
+        placesVerifiedKeys: new Set(["review_avg"]),
+      });
+      expect(result.evidence_basis).toBe("places");
+    });
+
+    it("url_context成功とSearchFact一致の両方が該当する場合はmixedになる", () => {
+      const item = makeItem({ key: "business_hours_holidays", source_ids: ["S01"] });
+      const registry = [
+        makeSource({ id: "S01", source_type: "gourmet_site", url_context_status: "success" }),
+      ];
+      const result = validateResearchItemStatus(item, {
+        sourceRegistry: registry,
+        searchFacts: [{ sourceId: "S01", key: "business_hours_holidays", value: "17:00-24:00" }],
+      });
+      expect(result.evidence_basis).toBe("mixed");
+    });
+
+    it("confirmed以外のstatusではevidence_basisを付与しない", () => {
+      const item = makeItem({ status: "inferred" });
+      const result = validateResearchItemStatus(item, { sourceRegistry: [] });
+      expect(result.evidence_basis).toBeUndefined();
     });
   });
 
@@ -506,6 +680,23 @@ describe("applyDeterministicValidation (パイプライン統合)", () => {
 
     expect(result.research_policy).toBe("FACT");
     expect(result.status).toBe("confirmed"); // Places検証済みのため維持
+  });
+
+  it("enforceStatusForPolicyがenforceResearchPolicyの直後に適用される(owner_snsで発見された実バグの再発防止、feat/ai-research-quality-refinement)", () => {
+    // owner_sns の正しいpolicyはFACT。AIがFACT_OR_HEARINGだと誤判断しstatus=hearing_requiredを
+    // 返した場合、policy補正(FACTへ)の後もstatusがFACTの許容外(hearing_requiredはFACT非対応)
+    // のまま残ってはいけない。
+    const item = makeItem({
+      key: "owner_sns",
+      research_policy: "FACT_OR_HEARING" as never,
+      status: "hearing_required" as never,
+      value: null,
+      source_ids: [],
+    });
+    const result = applyDeterministicValidation(item, { sourceRegistry: [] });
+
+    expect(result.research_policy).toBe("FACT");
+    expect(result.status).toBe("not_found"); // FACTの許容外statusはnot_foundへ補正
   });
 });
 

@@ -2,8 +2,9 @@
  * research_policy 定義表の単体検証(AI 店舗調査再設計 Plan v3.2 §7, PR1)
  *
  * `RESEARCH_POLICY_ITEMS` が `BASIC_INFO_ITEMS` と完全なkey集合一致を持つこと、
- * および Plan v3.2 §7 の集計(FACT=20 / ANALYSIS=17 / FACT_OR_HEARING=5 /
- * HEARING_ONLY=10 / EXTERNAL_DATA_REQUIRED=1、合計53)を検証する。
+ * および集計(FACT=20 / ANALYSIS=17 / FACT_OR_HEARING=4 / HEARING_ONLY=10 /
+ * EXTERNAL_DATA_REQUIRED=2、合計53、feat/ai-research-quality-refinementで
+ * opening_date→FACT・population_day_night→EXTERNAL_DATA_REQUIREDへ変更)を検証する。
  */
 
 import { describe, it, expect } from "vitest";
@@ -43,25 +44,33 @@ describe("RESEARCH_POLICY_ITEMS", () => {
     }
   });
 
-  it("項目単位の実カウントと一致する (FACT=19 / ANALYSIS=18 / FACT_OR_HEARING=5 / HEARING_ONLY=10 / EXTERNAL_DATA_REQUIRED=1)", () => {
-    // 注: Plan v3.2 §7 の要約行は「FACT=20 / ANALYSIS=17」と記載しているが、
-    // 同章の53項目一覧表(1項目ずつの割当)を実カウントすると FACT=19 /
-    // ANALYSIS=18 が正しい(location_feature 等、v3反映時の再割当で要約行の
-    // 更新が漏れたと判断)。本テストは一覧表(Source of Truth)側の実カウントを
-    // 正として検証する。要約行の訂正は別途 Plan ファイル側で行う。
+  it("項目単位の実カウントと一致する (FACT=20 / ANALYSIS=17 / FACT_OR_HEARING=4 / HEARING_ONLY=10 / EXTERNAL_DATA_REQUIRED=2)", () => {
+    // feat/ai-research-quality-refinement での変更:
+    // - opening_date: FACT_OR_HEARING → FACT(公開された客観的事実のため)
+    // - population_day_night: ANALYSIS → EXTERNAL_DATA_REQUIRED(人流統計は専用
+    //   データソース無しに正確な値を得られず、「繁華街だから人口が多い」という
+    //   定性的推測を許してしまっていたため)
     const counts: Record<string, number> = {};
     for (const item of RESEARCH_POLICY_ITEMS) {
       counts[item.research_policy] = (counts[item.research_policy] ?? 0) + 1;
     }
 
-    expect(counts.FACT).toBe(19);
-    expect(counts.ANALYSIS).toBe(18);
-    expect(counts.FACT_OR_HEARING).toBe(5);
+    expect(counts.FACT).toBe(20);
+    expect(counts.ANALYSIS).toBe(17);
+    expect(counts.FACT_OR_HEARING).toBe(4);
     expect(counts.HEARING_ONLY).toBe(10);
-    expect(counts.EXTERNAL_DATA_REQUIRED).toBe(1);
+    expect(counts.EXTERNAL_DATA_REQUIRED).toBe(2);
 
     const total = Object.values(counts).reduce((sum, n) => sum + n, 0);
     expect(total).toBe(53);
+  });
+
+  it("opening_date は FACT である (feat/ai-research-quality-refinement: 公開された客観的事実のため)", () => {
+    expect(getResearchPolicy("opening_date")).toBe("FACT");
+  });
+
+  it("population_day_night は EXTERNAL_DATA_REQUIRED である (feat/ai-research-quality-refinement: 人流統計は専用データソースが必要)", () => {
+    expect(getResearchPolicy("population_day_night")).toBe("EXTERNAL_DATA_REQUIRED");
   });
 
   it("search_volume は EXTERNAL_DATA_REQUIRED である (⚠PoC問題対応、Plan §7)", () => {
