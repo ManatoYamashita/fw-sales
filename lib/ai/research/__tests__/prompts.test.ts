@@ -11,6 +11,7 @@ import {
 } from "../prompts";
 import { RESEARCH_POLICY_ITEMS } from "@/lib/domain/research-policy";
 import type { SourceRegistryEntry } from "@/lib/ai/research-result-schema";
+import type { SearchNote } from "@/lib/ai/research/source-registry";
 
 const STORE = { name: "YELLOW PIZZA", address: "神奈川県横浜市港北区菊名1-7-2", phone: "045-642-7213", genre: "イタリアン" };
 
@@ -28,6 +29,28 @@ describe("buildStage1Prompt", () => {
     const prompt = buildStage1Prompt(STORE);
     expect(prompt).toContain("信頼できない外部データ");
     expect(prompt).toContain("53項目の調査結果そのものは");
+  });
+
+  it("目的別に多様な検索クエリ例を含む(feat/ai-research-source-diversity)", () => {
+    const prompt = buildStage1Prompt(STORE);
+    expect(prompt).toContain("店舗名 + 食べログ");
+    expect(prompt).toContain("店舗名 + 口コミ");
+    expect(prompt).toContain("店舗名 + 評判");
+  });
+
+  it("公式サイトのみで探索を打ち切らない旨の指示を含む", () => {
+    const prompt = buildStage1Prompt(STORE);
+    expect(prompt).toContain("公式サイトが見つかったからといって探索を打ち切らないでください");
+  });
+
+  it("[SEARCH_NOTE]の出力形式を含む", () => {
+    const prompt = buildStage1Prompt(STORE);
+    expect(prompt).toContain("[SEARCH_NOTE]");
+    expect(prompt).toContain("source_url");
+    expect(prompt).toContain("store_fact");
+    expect(prompt).toContain("review_signal");
+    expect(prompt).toContain("negative_review_signal");
+    expect(prompt).toContain("usage_signal");
   });
 });
 
@@ -117,5 +140,82 @@ describe("buildStage2Prompt", () => {
     const prompt = buildStage2Prompt({ store: STORE, items: combinedItems, sourceRegistry: registry });
     expect(prompt).toContain("1〜2文");
     expect(prompt).not.toContain("判定を緩め");
+  });
+
+  describe("複数情報源の活用・Search Notes・口コミ活用(feat/ai-research-source-diversity)", () => {
+    it("公式サイトのみに偏らないよう指示する", () => {
+      const prompt = buildStage2Prompt({ store: STORE, items: combinedItems, sourceRegistry: registry });
+      expect(prompt).toContain("公式サイトの情報だけで全項目を済ませないでください");
+    });
+
+    it("Source Registryに一致するsearchNotesはSearch Notesセクションへ含める", () => {
+      const searchNotes: SearchNote[] = [
+        {
+          sourceUrl: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/x",
+          kind: "review_signal",
+          summary: "原始焼きのライブ感を評価する口コミが複数見られる",
+        },
+      ];
+      const prompt = buildStage2Prompt({
+        store: STORE,
+        items: combinedItems,
+        sourceRegistry: registry,
+        searchNotes,
+      });
+      expect(prompt).toContain("Search Notes");
+      expect(prompt).toContain("原始焼きのライブ感を評価する口コミが複数見られる");
+      expect(prompt).toContain("S01");
+    });
+
+    it("Source Registryに存在しないURLのsearchNotesは含めない(引用不能なため)", () => {
+      const searchNotes: SearchNote[] = [
+        {
+          sourceUrl: "https://example.com/not-in-registry",
+          kind: "store_fact",
+          summary: "登録されていない情報源由来のnote",
+        },
+      ];
+      const prompt = buildStage2Prompt({
+        store: STORE,
+        items: combinedItems,
+        sourceRegistry: registry,
+        searchNotes,
+      });
+      expect(prompt).not.toContain("登録されていない情報源由来のnote");
+    });
+
+    it("searchNotesが空/未指定でもエラーにならない", () => {
+      expect(() =>
+        buildStage2Prompt({ store: STORE, items: combinedItems, sourceRegistry: registry }),
+      ).not.toThrow();
+    });
+
+    it("口コミ関連項目が含まれる場合は口コミ活用ガイダンスを含む", () => {
+      const itemsWithReview = [
+        ...combinedItems,
+        { key: "review_tendency", label: "口コミ傾向", research_policy: "ANALYSIS" },
+        { key: "negative_reviews", label: "ネガティブ口コミ", research_policy: "FACT" },
+      ];
+      const prompt = buildStage2Prompt({
+        store: STORE,
+        items: itemsWithReview,
+        sourceRegistry: registry,
+      });
+      expect(prompt).toContain("口コミ・レビューの活用方法");
+      expect(prompt).toContain("一部で〜という声");
+      expect(prompt).toContain("複数の口コミで〜への言及");
+    });
+
+    it("口コミ関連項目が無い場合は口コミ活用ガイダンスを含まない", () => {
+      const itemsWithoutReview = [
+        { key: "business_hours_holidays", label: "営業時間・定休日", research_policy: "FACT" },
+      ];
+      const prompt = buildStage2Prompt({
+        store: STORE,
+        items: itemsWithoutReview,
+        sourceRegistry: registry,
+      });
+      expect(prompt).not.toContain("口コミ・レビューの活用方法");
+    });
   });
 });

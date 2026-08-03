@@ -68,6 +68,7 @@ import { mergeBasicInfo } from "@/lib/domain/basic-info-merge";
 import { isAiClientError } from "@/lib/ai/client";
 import type { StoreIdentity } from "@/lib/ai/research/prompts";
 import type { SourceRegistryEntry, ResearchItem } from "@/lib/ai/research-result-schema";
+import type { SearchNote } from "@/lib/ai/research/source-registry";
 import type { BasicInfo } from "@/types/basic-info";
 import { nowIso } from "@/lib/utils/date";
 
@@ -214,10 +215,17 @@ persistSourceRegistryStep.maxRetries = 1;
  * Stage2: AI対象項目(FACT + FACT_OR_HEARING + ANALYSIS)を1回のGemini呼出で生成する
  * (fix/ai-research-poc-like-retrieval、PoCと同様の単一call構成)。
  */
-async function stage2Step(store: StoreIdentity, sourceRegistry: SourceRegistryEntry[]) {
+async function stage2Step(
+  store: StoreIdentity,
+  sourceRegistry: SourceRegistryEntry[],
+  searchNotes: SearchNote[],
+) {
   "use step";
   try {
-    return await runStage2({ store, sourceRegistry }, AbortSignal.timeout(STAGE_TIMEOUT_MS));
+    return await runStage2(
+      { store, sourceRegistry, searchNotes },
+      AbortSignal.timeout(STAGE_TIMEOUT_MS),
+    );
   } catch (err) {
     throw classifyForWorkflowRetry(err);
   }
@@ -300,8 +308,8 @@ export async function storeResearchWorkflow(
 
     await markStageStep(runId, "researching");
 
-    // Stage2: URL Context + Structured Output(単一call)。
-    const stage2Result = await stage2Step(store, mergedRegistry);
+    // Stage2: URL Context + Structured Output(単一call)。Stage1のSearch Notesも渡す。
+    const stage2Result = await stage2Step(store, mergedRegistry, stage1.searchNotes);
 
     const finalRegistry = applyUrlContextStatus(mergedRegistry, [stage2Result.urlContextMetadata]);
     const finalItems = finalizeResearchItems({

@@ -57,6 +57,21 @@ describe("runStage1", () => {
     expect(result.searchQueryCount).toBe(5);
   });
 
+  it("[SEARCH_NOTE]ブロックをsearchNotesとして返す(feat/ai-research-source-diversity)", async () => {
+    mockRunSourceDiscovery.mockResolvedValue({
+      text: `[SOURCE]\nurl: https://vertexaisearch.cloud.google.com/grounding-api-redirect/x\ntitle: 食べログ\ntype: gourmet_site\nwhy_useful: y\n[/SOURCE]\n[SEARCH_NOTE]\nsource_url: https://vertexaisearch.cloud.google.com/grounding-api-redirect/x\nkind: review_signal\nsummary: 複数の口コミで鮮魚が評価されている\n[/SEARCH_NOTE]`,
+      groundingMetadata: null,
+      usageMetadata: null,
+      searchCallCount: 1,
+      searchQueryCount: 1,
+    });
+
+    const result = await runStage1(STORE, AbortSignal.timeout(1000));
+
+    expect(result.searchNotes).toHaveLength(1);
+    expect(result.searchNotes[0]!.kind).toBe("review_signal");
+  });
+
   it("groundingMetadataも候補も無ければ空のSource Registryを返す(例外を投げない)", async () => {
     mockRunSourceDiscovery.mockResolvedValue({
       text: "何も見つかりませんでした",
@@ -162,6 +177,35 @@ describe("runStage2 (統合、FACT+FACT_OR_HEARING+ANALYSISを1回で扱う)", (
     const result = await runStage2({ store: STORE, sourceRegistry: REGISTRY }, AbortSignal.timeout(1000));
 
     expect(result.parseWarning).not.toBeNull();
+  });
+
+  it("searchNotesをStage2プロンプトへ渡す(feat/ai-research-source-diversity)", async () => {
+    mockRunStructuredUrlContext.mockResolvedValue({
+      rawText: JSON.stringify({
+        store_identification: { matched_name: "x", matched_address: "y", identification_note: "z" },
+        items: [],
+      }),
+      urlContextMetadata: null,
+      usageMetadata: null,
+    });
+
+    await runStage2(
+      {
+        store: STORE,
+        sourceRegistry: REGISTRY,
+        searchNotes: [
+          {
+            sourceUrl: REGISTRY[0]!.grounding_redirect_url,
+            kind: "review_signal",
+            summary: "複数の口コミで鮮魚が評価されている",
+          },
+        ],
+      },
+      AbortSignal.timeout(1000),
+    );
+
+    const promptArg = mockRunStructuredUrlContext.mock.calls.at(-1)![0].prompt as string;
+    expect(promptArg).toContain("複数の口コミで鮮魚が評価されている");
   });
 
   it("clientがmax_tokensエラーを投げた場合はparseWarningへ握りつぶさず、そのまま伝播する(fix/ai-research-stage2-max-tokens)", async () => {
