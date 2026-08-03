@@ -340,7 +340,7 @@ export async function storeResearchWorkflow(
     // own_net_exposure/exposure_gapの自己矛盾防止・media_coverageの解釈漏れ補正
     // (feat/ai-research-final-quality)。Stage2完了後のfinalRegistryから
     // deterministicに構築するため、追加のGemini呼出は発生しない。
-    const mediaCorrectedItems = upgradeMediaCoverageFromRegistry(stage2Result.items, finalRegistry);
+    const mediaCorrectedItems = upgradeMediaCoverageFromRegistry(stage2Result.items, finalRegistry, searchFacts);
     const aiItemsWithContext = appendConfirmedMediaContext(mediaCorrectedItems, finalRegistry);
 
     const finalItems = finalizeResearchItems({

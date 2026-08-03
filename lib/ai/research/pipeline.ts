@@ -269,11 +269,22 @@ export function appendConfirmedMediaContext(
   if (confirmedTitles.length === 0) return items.slice();
 
   const targetKeys = new Set(["own_net_exposure", "exposure_gap"]);
-  const supplement = `(このrunで実際に本文を確認できた情報源: ${confirmedTitles.join("、")})`;
+  const mediaList = confirmedTitles.join("、");
+  const evidenceSupplement = `(このrunで実際に本文を確認できた情報源: ${mediaList})`;
+  // FACT部分(掲載媒体名)をvalueの先頭にdeterministicに配置する(feat/ai-research-final-trust-boundary)。
+  // AIのANALYSIS文章自体(推論・評価の部分)は維持するが、「どの媒体に掲載されているか」という
+  // 事実部分をAIの自由記述に委ねず、finalRegistryの実測値で先頭に明示することで、
+  // 「実際は確認できたのに未掲載/伸びしろありと矛盾して述べる」リスクを下げる。
+  const factPrefix = `確認できた掲載媒体: ${mediaList}。`;
 
-  return items.map((item) =>
-    targetKeys.has(item.key) ? { ...item, evidence: `${item.evidence} ${supplement}` } : item,
-  );
+  return items.map((item) => {
+    if (!targetKeys.has(item.key)) return item;
+    return {
+      ...item,
+      value: item.value ? `${factPrefix} ${item.value}` : item.value,
+      evidence: `${item.evidence} ${evidenceSupplement}`,
+    };
+  });
 }
 
 /** `media_coverage`の「確認できた掲載媒体」対象source_type(公式サイト・SNSは自店発信のため除く)。 */
@@ -285,30 +296,52 @@ const MEDIA_COVERAGE_SOURCE_TYPES: ReadonlySet<SourceType> = new Set([
 ]);
 
 /**
- * `media_coverage`をAIが`not_found`/`inferred`と判定した場合でも、実際に本文取得に
- * 成功した第三者媒体(グルメサイト・予約サイト・地域記事等)があればdeterministicに
- * `confirmed`へ補正する(feat/ai-research-final-quality)。モデルが既に`confirmed`と
- * 判定していた場合は上書きしない(モデル自身の判断を尊重、二重に強い主張をしない)。
- * 対象媒体が1件も無い場合は何もしない(AIの判定をそのまま維持)。
+ * `media_coverage`のvalue/evidence/source_idsを、実際に検証できた第三者媒体
+ * (グルメサイト・予約サイト・地域記事等)からdeterministicに構築する
+ * (feat/ai-research-final-trust-boundary)。
+ *
+ * 発見された実バグ: AIが`confirmed`と判定した場合、旧実装は「モデル自身の判断を尊重」
+ * してAIの`value`テキストをそのまま素通ししていたが、`value`は`source_ids`とは独立した
+ * 自由文字列であり、`pruneUnverifiedSourceIds`による`source_ids`配列の刈り込みでは
+ * `value`テキスト自体(例:「ぐるなび、ホットペッパー、じゃらん、地域記事X、地域記事Yに掲載」)
+ * は一切修正されない。そのため「実際に検証できたのは2媒体なのにvalueには5媒体が
+ * 列挙されている」という不整合が起きていた。
+ *
+ * 対応: 検証済み媒体(url_context成功、またはkey=media_coverageのSearchFact一致)が
+ * 1件以上ある場合、AIの判定に関わらず`value`/`evidence`/`source_ids`を常に
+ * deterministicに再構築する。検証済み媒体が0件の場合は何もせず、AIの判定(および
+ * 後続の`applyDeterministicValidation`によるTier A/B判定)にそのまま委ねる。
  */
 export function upgradeMediaCoverageFromRegistry(
   items: readonly ResearchItem[],
   finalRegistry: readonly SourceRegistryEntry[],
+  searchFacts: readonly SearchFact[] = [],
 ): ResearchItem[] {
-  const confirmedMedia = finalRegistry.filter(
-    (entry) => entry.url_context_status === "success" && MEDIA_COVERAGE_SOURCE_TYPES.has(entry.source_type),
+  const searchFactSourceIds = new Set(
+    searchFacts.filter((fact) => fact.key === "media_coverage").map((fact) => fact.sourceId),
   );
-  if (confirmedMedia.length === 0) return items.slice();
+  const verifiedMedia = finalRegistry.filter(
+    (entry) =>
+      MEDIA_COVERAGE_SOURCE_TYPES.has(entry.source_type) &&
+      (entry.url_context_status === "success" || searchFactSourceIds.has(entry.id)),
+  );
+  if (verifiedMedia.length === 0) return items.slice();
+
+  const hasUrlContextSuccess = verifiedMedia.some((entry) => entry.url_context_status === "success");
+  const hasSearchFactOnly = verifiedMedia.some(
+    (entry) => searchFactSourceIds.has(entry.id) && entry.url_context_status !== "success",
+  );
+  const evidence_basis = hasUrlContextSuccess && hasSearchFactOnly ? "mixed" : hasUrlContextSuccess ? "url_context" : "search_note";
 
   return items.map((item) => {
-    if (item.key !== "media_coverage" || item.status === "confirmed") return item;
+    if (item.key !== "media_coverage") return item;
     return {
       ...item,
       status: "confirmed" as const,
-      value: confirmedMedia.map((entry) => entry.title).join("、"),
-      evidence: "実際に本文取得に成功した掲載媒体を確認しました。",
-      source_ids: confirmedMedia.map((entry) => entry.id),
-      evidence_basis: "url_context" as const,
+      value: verifiedMedia.map((entry) => entry.title).join("、"),
+      evidence: "実際に確認できた掲載媒体を列挙しています。",
+      source_ids: verifiedMedia.map((entry) => entry.id),
+      evidence_basis: evidence_basis as "mixed" | "url_context" | "search_note",
       warning: undefined,
       candidates: undefined,
     };

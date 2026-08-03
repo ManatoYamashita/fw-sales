@@ -476,16 +476,29 @@ describe("appendConfirmedMediaContext (feat/ai-research-final-quality、Observed
     expect(result[1]!.evidence).toContain("ホットペッパー");
   });
 
-  it("対象外keyのevidenceは変更しない", () => {
+  it("valueの先頭にdeterministicなFACT部分(確認できた掲載媒体)を付加する(feat/ai-research-final-trust-boundary、value/verified sourceのズレ修正)", () => {
+    const items = [makeItem("own_net_exposure", "e")];
+    const result = appendConfirmedMediaContext(items, registryWithSuccess);
+    expect(result[0]!.value).toBe("確認できた掲載媒体: ホットペッパー。 v");
+  });
+
+  it("対象外keyのevidence/valueは変更しない", () => {
     const items = [makeItem("market_demand", "元のevidence")];
     const result = appendConfirmedMediaContext(items, registryWithSuccess);
     expect(result[0]!.evidence).toBe("元のevidence");
+    expect(result[0]!.value).toBe("v");
   });
 
   it("url_context成功のsourceが無い場合は何もしない", () => {
     const items = [makeItem("own_net_exposure", "元のevidence")];
     const result = appendConfirmedMediaContext(items, []);
     expect(result[0]!.evidence).toBe("元のevidence");
+  });
+
+  it("valueがnullの場合はプレフィックスを付加しない", () => {
+    const items = [{ ...makeItem("own_net_exposure"), value: null }];
+    const result = appendConfirmedMediaContext(items, registryWithSuccess);
+    expect(result[0]!.value).toBeNull();
   });
 });
 
@@ -519,19 +532,60 @@ describe("upgradeMediaCoverageFromRegistry (feat/ai-research-final-quality)", ()
     expect(result[0]!.evidence_basis).toBe("url_context");
   });
 
-  it("既にAIがconfirmedと判定済みなら上書きしない", () => {
+  it("AIが既にconfirmedと判定済みでも、検証済み媒体があればvalue/source_idsをdeterministicに再構築する(feat/ai-research-final-trust-boundary、value/source_ids不整合の実バグ再発防止)", () => {
     const items = [
       {
         key: "media_coverage",
         research_policy: "FACT" as const,
         status: "confirmed" as const,
-        value: "AIの判定値",
+        value: "AIが自称する未検証の5媒体名",
         evidence: "AIのevidence",
-        source_ids: ["S99"],
+        source_ids: ["S99"], // 未検証の捏造id
       },
     ];
     const result = upgradeMediaCoverageFromRegistry(items, [gourmetSuccess]);
-    expect(result[0]!.value).toBe("AIの判定値");
+    expect(result[0]!.value).toBe("ホットペッパーグルメ");
+    expect(result[0]!.source_ids).toEqual(["S01"]);
+  });
+
+  it("key一致のSearchFactのみ(url_context成功なし)でもvalueを構築し、evidence_basisはsearch_noteになる", () => {
+    const errorSource = { ...gourmetSuccess, id: "S02", url_context_status: "error" as const, title: "じゃらんnet" };
+    const items = [
+      {
+        key: "media_coverage",
+        research_policy: "FACT" as const,
+        status: "not_found" as const,
+        value: null,
+        evidence: "見つからなかった",
+        source_ids: [],
+      },
+    ];
+    const result = upgradeMediaCoverageFromRegistry(items, [errorSource], [
+      { sourceId: "S02", key: "media_coverage", value: "じゃらんnetに掲載" },
+    ]);
+    expect(result[0]!.status).toBe("confirmed");
+    expect(result[0]!.value).toBe("じゃらんnet");
+    expect(result[0]!.evidence_basis).toBe("search_note");
+  });
+
+  it("url_context成功とSearchFact一致の両方がある場合、evidence_basisはmixedになる", () => {
+    const searchFactOnly = { ...gourmetSuccess, id: "S02", url_context_status: "error" as const, title: "じゃらんnet" };
+    const items = [
+      {
+        key: "media_coverage",
+        research_policy: "FACT" as const,
+        status: "not_found" as const,
+        value: null,
+        evidence: "見つからなかった",
+        source_ids: [],
+      },
+    ];
+    const result = upgradeMediaCoverageFromRegistry(items, [gourmetSuccess, searchFactOnly], [
+      { sourceId: "S02", key: "media_coverage", value: "じゃらんnetに掲載" },
+    ]);
+    expect(result[0]!.evidence_basis).toBe("mixed");
+    expect(result[0]!.value).toContain("ホットペッパーグルメ");
+    expect(result[0]!.value).toContain("じゃらんnet");
   });
 
   it("成功済みの対象媒体が無ければ何もしない", () => {

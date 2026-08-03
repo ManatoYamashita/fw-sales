@@ -29,6 +29,18 @@ const STATUS_TONES: Record<string, "success" | "warning" | "destructive"> = {
   conflict: "destructive",
 };
 
+/**
+ * confirmed維持の根拠由来を表す平易な文言(feat/ai-research-final-trust-boundary)。
+ * `research-source-badge.tsx`の✓/⚠/✕(Source Registry単位、本文取得成否)とは別に、
+ * ResearchItem単位で「何を根拠にconfirmedとしたか」を区別する。
+ */
+const EVIDENCE_BASIS_LABELS: Record<string, string> = {
+  places: "📍 Google Placesで確認",
+  url_context: "✓ ページ本文で確認",
+  search_note: "🔎 検索結果情報で確認",
+  mixed: "✓🔎 ページ本文+検索結果情報で確認",
+};
+
 export interface DecideInput {
   decision: ReviewDecisionType;
   selectedCandidateId?: string;
@@ -110,6 +122,9 @@ export function ResearchItemCard({ item, label, sourceRegistry, decision, busy, 
           <p className="text-xs text-muted-foreground">{item.evidence}</p>
           {item.confidence !== null && item.confidence !== undefined && (
             <p className="text-xs text-muted-foreground">確信度: {item.confidence}%</p>
+          )}
+          {item.evidence_basis && (
+            <p className="text-xs text-muted-foreground">{EVIDENCE_BASIS_LABELS[item.evidence_basis]}</p>
           )}
           <SourceBadgeList sourceIds={item.source_ids} sourceRegistry={sourceRegistry} />
         </div>

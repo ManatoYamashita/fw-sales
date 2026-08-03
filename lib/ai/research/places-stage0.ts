@@ -125,22 +125,39 @@ export function diagnosePlacesMatch(
 }
 
 /**
- * 日本住所の最小限の表記ゆれ吸収(feat/ai-research-searchfact-places-match)。
+ * ハイフン様Unicode文字(全角ハイフン・各種ダッシュ・MINUS SIGN等)をASCIIハイフンへ
+ * 統一する(feat/ai-research-final-trust-boundary)。
+ *
+ * 実際のGoogle Places Text Search応答を実APIで確認した結果、Google側の住所区切り文字が
+ * `U+2212`(MINUS SIGN、数学記号)であり、`NFKC`正規化では変換されない
+ * (`NFKC`が変換するのは全角ハイフン`U+FF0D`等の互換分解対象のみで、`U+2212`は対象外)
+ * ことが判明した。この結果、`NFKC`だけでは正規化後も
+ * `候補側:"...1-1−12..."`(末尾がU+2212混入)と`店舗側:"...1-1-12..."`(全てASCII)が
+ * 一致しなかった(実データで確認済み、以前の実装ではここが原因で住所不一致になっていた)。
+ */
+function unifyDashLikeChars(raw: string): string {
+  return raw.replace(/[‐‑‒–—−－]/g, "-");
+}
+
+/**
+ * 日本住所の最小限の表記ゆれ吸収(feat/ai-research-searchfact-places-match、
+ * feat/ai-research-final-trust-boundaryでダッシュ文字統一を追加)。
  *
  * 実際のGoogle Places候補データで検証済み: Google側`formattedAddress`
- * (例:「日本、〒277-0852 千葉県柏市旭町１丁目１－１２」全角数字・「丁目」表記)と
- * fw-sales側`stores.address`(例:「〒2770852 千葉県 柏市 旭町1-1-12」半角ハイフン区切り)は、
- * 以下を行わない限り単純な部分一致では一致しない:
+ * (例:「日本、〒277-0852 千葉県柏市旭町１丁目１−１２」全角数字・「丁目」表記・
+ * MINUS SIGN区切り)と fw-sales側`stores.address`
+ * (例:「〒2770852 千葉県 柏市 旭町1-1-12」半角ハイフン区切り)は、以下を行わない限り
+ * 単純な部分一致では一致しない:
  * 1. `normalizeFormattedAddress`(既存、`lib/places/to-store-input.ts`)で
  *    先頭の「日本、」・郵便番号prefixを除去
- * 2. `NFKC`正規化で全角数字・全角ハイフンを半角化
- * 3. 空白除去
- * 4. 「丁目」「番地」「番」「号」をハイフンへ統一(住所の意味的同一性推定等の
+ * 2. `NFKC`正規化で全角数字を半角化
+ * 3. ハイフン様Unicode文字(`unifyDashLikeChars`)をASCIIハイフンへ統一
+ * 4. 空白除去
+ * 5. 「丁目」「番地」「番」「号」をハイフンへ統一(住所の意味的同一性推定等の
  *    過剰な曖昧化はしない、表記統一のみ)
  */
 function normalizeJapaneseAddressForMatch(raw: string): string {
-  return normalizeFormattedAddress(raw)
-    .normalize("NFKC")
+  return unifyDashLikeChars(normalizeFormattedAddress(raw).normalize("NFKC"))
     .replace(/\s+/g, "")
     .replace(/[丁目番地号]/g, "-")
     .replace(/-+/g, "-")
