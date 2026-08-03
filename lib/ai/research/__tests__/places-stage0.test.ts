@@ -24,6 +24,7 @@ const {
   deriveSearchIdentityName,
   isNameMatch,
   pickStrongPlaceMatch,
+  diagnosePlacesMatch,
   classifyPlacesError,
 } = await import("../places-stage0");
 
@@ -136,6 +137,74 @@ describe("pickStrongPlaceMatch (feat/ai-research-quality-refinement)", () => {
     );
     expect(result).not.toBeNull();
   });
+
+  describe("日本住所の表記ゆれ吸収(feat/ai-research-searchfact-places-match、実APIで確認済みの実例)", () => {
+    it("Google側の「日本、〒xxx-xxxx」prefix + 全角数字「丁目」表記と、fw-sales側の半角ハイフン表記が一致する", () => {
+      // 実際のText Search 1回で確認した実データ形式(炉端ジュン)。
+      // Google: "日本、〒277-0852 千葉県柏市旭町１丁目１－１２ 1F"
+      // store : "〒2770852 千葉県 柏市 旭町1-1-12 1F"
+      const store = {
+        name: "炉端ジュン",
+        address: "〒2770852 千葉県 柏市 旭町1-1-12 1F",
+        phone: "04-7199-7985",
+      };
+      const result = pickStrongPlaceMatch(
+        [
+          {
+            ...PLACE_RESULT,
+            name: "東北メシ炉端ジュン",
+            formattedAddress: "日本、〒277-0852 千葉県柏市旭町１丁目１－１２ 1F",
+            phone: "",
+          },
+        ],
+        store,
+      );
+      expect(result).not.toBeNull();
+    });
+
+    it("丁目・番地・号を含む住所表記でも一致する", () => {
+      const store = { name: "テスト店", address: "東京都渋谷区道玄坂1-2-3", phone: "" };
+      const result = pickStrongPlaceMatch(
+        [{ ...PLACE_RESULT, name: "テスト店", formattedAddress: "日本、〒150-0043 東京都渋谷区道玄坂１丁目２番地３号", phone: "" }],
+        store,
+      );
+      expect(result).not.toBeNull();
+    });
+
+    it("番地・住所自体が異なる場合は一致しない(過剰な曖昧化はしない)", () => {
+      const store = { name: "テスト店", address: "東京都渋谷区道玄坂1-2-3", phone: "" };
+      const result = pickStrongPlaceMatch(
+        [{ ...PLACE_RESULT, name: "テスト店", formattedAddress: "日本、〒150-0043 東京都渋谷区道玄坂４丁目５番地６号", phone: "" }],
+        store,
+      );
+      expect(result).toBeNull();
+    });
+  });
+});
+
+describe("diagnosePlacesMatch (feat/ai-research-searchfact-places-match)", () => {
+  it("候補0件の場合はplaces_search_no_matchを返す", () => {
+    expect(diagnosePlacesMatch([], STORE)).toBe("places_search_no_match");
+  });
+
+  it("strong matchが0件(名前・住所・電話いずれも不一致)の場合はplaces_search_no_matchを返す", () => {
+    const result = diagnosePlacesMatch(
+      [{ ...PLACE_RESULT, name: "全く別の店舗", formattedAddress: "東京都", phone: "" }],
+      STORE,
+    );
+    expect(result).toBe("places_search_no_match");
+  });
+
+  it("strong matchが複数件の場合はplaces_search_ambiguousを返す", () => {
+    const result = diagnosePlacesMatch(
+      [
+        { ...PLACE_RESULT, placeId: "places/a", name: "炉端ジュン" },
+        { ...PLACE_RESULT, placeId: "places/b", name: "炉端ジュン" },
+      ],
+      STORE,
+    );
+    expect(result).toBe("places_search_ambiguous");
+  });
 });
 
 describe("runStage0PlacesResync", () => {
@@ -199,16 +268,16 @@ describe("runStage0PlacesResync", () => {
       expect(result.warning).toBeNull();
     });
 
-    it("曖昧(0件)の場合は不採用、warningも出さず従来どおり続行する", async () => {
+    it("曖昧(0件)の場合は不採用、sanitizedなno-match診断warningを返す(feat/ai-research-searchfact-places-match)", async () => {
       mockSearchPlaces.mockResolvedValue([]);
 
       const result = await runStage0PlacesResync({ googlePlaceId: null, store: STORE, now: NOW });
 
       expect(result.placesBasicInfo).toEqual({});
-      expect(result.warning).toBeNull();
+      expect(result.warning).toContain("places_search_no_match");
     });
 
-    it("曖昧(複数候補)の場合は不採用", async () => {
+    it("曖昧(複数候補)の場合は不採用、sanitizedなambiguous診断warningを返す", async () => {
       mockSearchPlaces.mockResolvedValue([
         { ...PLACE_RESULT, placeId: "places/a", name: "炉端ジュン" },
         { ...PLACE_RESULT, placeId: "places/b", name: "炉端ジュン" },
@@ -217,7 +286,9 @@ describe("runStage0PlacesResync", () => {
       const result = await runStage0PlacesResync({ googlePlaceId: null, store: STORE, now: NOW });
 
       expect(result.placesBasicInfo).toEqual({});
-      expect(result.warning).toBeNull();
+      expect(result.warning).toContain("places_search_ambiguous");
+      expect(result.warning).not.toContain("places/a"); // 候補の個別情報は含めない
+      expect(result.warning).not.toContain("炉端ジュン");
     });
 
     it("Text Search失敗時もresearch継続のため例外を投げず、warningを返す(feat/ai-research-final-quality: sanitized kindを含む)", async () => {

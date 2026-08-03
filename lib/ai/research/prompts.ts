@@ -91,13 +91,25 @@ why_useful: (この情報源が調査に有用な理由、1文)
 さらに、検索結果(検索結果ページのスニペットや一覧)から直接読み取れた有用な情報があれば、
 以下の形式で残してください(このステージではURL本文の詳細な取得はまだ行いません。
 検索時点で確認できた範囲の情報を短く要約するだけで構いません):
+
+kindが store_fact の場合(営業時間・席数・客単価・最寄り駅・オープン日等、具体的な値を
+確認できた場合)は、必ず key/value も含めてください:
 [SEARCH_NOTE]
 source_url: (この情報の出典URL、上記[SOURCE]のurlのいずれかと一致させること)
-kind: (store_fact | review_signal | negative_review_signal | usage_signal のいずれか)
+kind: store_fact
+key: (対象項目のkey。例: seat_count、nearest_station、average_spend_day_night、opening_date等)
+value: (確認できた具体的な値。例: "49席"、"JR柏駅西口より徒歩約3分"、"通常平均4,000円"、"2024年6月21日")
+summary: (確認できた内容の要約、1〜2文程度)
+[/SEARCH_NOTE]
+
+kindが review_signal / negative_review_signal / usage_signal の場合、key/valueは不要です:
+[SEARCH_NOTE]
+source_url: (この情報の出典URL)
+kind: (review_signal | negative_review_signal | usage_signal のいずれか)
 summary: (確認できた内容の要約、1〜2文程度。口コミ全文の引用や大量コピペはしないこと)
 [/SEARCH_NOTE]
 
-- store_fact: 営業時間・席数・客単価等、客観的な店舗スペック情報。
+- store_fact: 営業時間・席数・客単価等、客観的な店舗スペック情報(key/value必須)。
 - review_signal: 好意的な口コミ・評判の傾向。
 - negative_review_signal: 不満・改善点として言及された傾向。
 - usage_signal: デート・宴会・仕事帰り等、実際の利用シーンの言及。
