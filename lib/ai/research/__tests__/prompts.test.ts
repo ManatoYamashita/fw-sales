@@ -59,6 +59,20 @@ describe("buildStage1Prompt", () => {
     expect(prompt).toContain("negative_review_signal");
     expect(prompt).toContain("usage_signal");
   });
+
+  it("kind=store_factにはkey/valueが必須である旨と具体例を含む(feat/ai-research-searchfact-places-match、prompt/schema不整合の修正)", () => {
+    const prompt = buildStage1Prompt(STORE);
+    expect(prompt).toContain("kindが store_fact の場合");
+    expect(prompt).toContain("key: (対象項目のkey");
+    expect(prompt).toContain("value: (確認できた具体的な値");
+    expect(prompt).toContain("seat_count");
+    expect(prompt).toContain("nearest_station");
+  });
+
+  it("review_signal/negative_review_signal/usage_signalはkey/value不要と明記する", () => {
+    const prompt = buildStage1Prompt(STORE);
+    expect(prompt).toContain("review_signal / negative_review_signal / usage_signal の場合、key/valueは不要です");
+  });
 });
 
 describe("selectAiResearchItems", () => {

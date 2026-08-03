@@ -27,6 +27,7 @@ import "server-only";
 
 import { getPlaceById, searchPlaces } from "@/lib/places/google";
 import { placeResultToBasicInfo } from "@/lib/places/to-basic-info";
+import { normalizeFormattedAddress } from "@/lib/places/to-store-input";
 import type { PlaceResult } from "@/lib/places/types";
 import type { BasicInfo } from "@/types/basic-info";
 
@@ -78,6 +79,24 @@ export function isNameMatch(placeName: string, searchIdentityName: string): bool
 }
 
 /**
+ * 店舗名一致 + (住所一致 or 電話一致) を満たす候補のみを抽出する
+ * (`pickStrongPlaceMatch`/`diagnosePlacesMatch`共通のcore filter)。
+ */
+function findStrongMatches(
+  candidates: readonly PlaceResult[],
+  store: { name: string; address: string; phone: string },
+): PlaceResult[] {
+  const searchIdentityName = deriveSearchIdentityName(store.name);
+  return candidates.filter((p) => {
+    if (!isNameMatch(p.name, searchIdentityName)) return false;
+    const addressMatches = store.address.trim() !== "" && isAddressMatch(p.formattedAddress, store.address);
+    const phoneMatches =
+      store.phone.trim() !== "" && p.phone.trim() !== "" && normalizePhone(p.phone) === normalizePhone(store.phone);
+    return addressMatches || phoneMatches;
+  });
+}
+
+/**
  * 候補の中から店舗名一致 + (住所一致 or 電話一致) を満たす候補が**一意に**定まる
  * 場合のみ返す。0件・複数件(曖昧)の場合はnullを返し、採用しない
  * (feat/ai-research-quality-refinement、ユーザー要望どおり曖昧候補は採用禁止)。
@@ -86,20 +105,51 @@ export function pickStrongPlaceMatch(
   candidates: readonly PlaceResult[],
   store: { name: string; address: string; phone: string },
 ): PlaceResult | null {
-  const searchIdentityName = deriveSearchIdentityName(store.name);
-  const strongMatches = candidates.filter((p) => {
-    if (!isNameMatch(p.name, searchIdentityName)) return false;
-    const addressMatches = store.address.trim() !== "" && isAddressMatch(p.formattedAddress, store.address);
-    const phoneMatches =
-      store.phone.trim() !== "" && p.phone.trim() !== "" && normalizePhone(p.phone) === normalizePhone(store.phone);
-    return addressMatches || phoneMatches;
-  });
+  const strongMatches = findStrongMatches(candidates, store);
   return strongMatches.length === 1 ? strongMatches[0]! : null;
 }
 
+/**
+ * `pickStrongPlaceMatch`がnullを返した理由をsanitizedに分類する
+ * (feat/ai-research-searchfact-places-match)。候補店舗名等の個別情報は
+ * 一切含めず、種別のみを返す(UI/warningへ候補一覧を露出しないため)。
+ */
+export type PlacesMatchDiagnosticKind = "places_search_no_match" | "places_search_ambiguous";
+
+export function diagnosePlacesMatch(
+  candidates: readonly PlaceResult[],
+  store: { name: string; address: string; phone: string },
+): PlacesMatchDiagnosticKind {
+  const strongMatches = findStrongMatches(candidates, store);
+  return strongMatches.length > 1 ? "places_search_ambiguous" : "places_search_no_match";
+}
+
+/**
+ * 日本住所の最小限の表記ゆれ吸収(feat/ai-research-searchfact-places-match)。
+ *
+ * 実際のGoogle Places候補データで検証済み: Google側`formattedAddress`
+ * (例:「日本、〒277-0852 千葉県柏市旭町１丁目１－１２」全角数字・「丁目」表記)と
+ * fw-sales側`stores.address`(例:「〒2770852 千葉県 柏市 旭町1-1-12」半角ハイフン区切り)は、
+ * 以下を行わない限り単純な部分一致では一致しない:
+ * 1. `normalizeFormattedAddress`(既存、`lib/places/to-store-input.ts`)で
+ *    先頭の「日本、」・郵便番号prefixを除去
+ * 2. `NFKC`正規化で全角数字・全角ハイフンを半角化
+ * 3. 空白除去
+ * 4. 「丁目」「番地」「番」「号」をハイフンへ統一(住所の意味的同一性推定等の
+ *    過剰な曖昧化はしない、表記統一のみ)
+ */
+function normalizeJapaneseAddressForMatch(raw: string): string {
+  return normalizeFormattedAddress(raw)
+    .normalize("NFKC")
+    .replace(/\s+/g, "")
+    .replace(/[丁目番地号]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
 function isAddressMatch(placeAddress: string, storeAddress: string): boolean {
-  const a = placeAddress.replace(/\s+/g, "");
-  const b = storeAddress.replace(/\s+/g, "");
+  const a = normalizeJapaneseAddressForMatch(placeAddress);
+  const b = normalizeJapaneseAddressForMatch(storeAddress);
   if (!a || !b) return false;
   return a.includes(b) || b.includes(a);
 }
@@ -162,7 +212,13 @@ export async function runStage0PlacesResync(params: {
     if (!matched) {
       // 曖昧(0件 or 複数件)の場合は不採用。従来どおりWeb調査へfallbackする
       // (無理に埋めない、Plan v3.2の自動Text Searchスコープ外方針の精神を維持)。
-      return { placesBasicInfo: {}, warning: null };
+      // API自体は成功しているため、完全silentにせずsanitizedな診断種別のみ記録する
+      // (feat/ai-research-searchfact-places-match、候補店舗名等は一切含めない)。
+      const diagnostic = diagnosePlacesMatch(candidates, store);
+      return {
+        placesBasicInfo: {},
+        warning: `Google Places候補が一意に特定できませんでした (${diagnostic})。既存情報のみで調査を続行します。`,
+      };
     }
     return { placesBasicInfo: placeResultToBasicInfo(matched, now), warning: null };
   } catch (err) {

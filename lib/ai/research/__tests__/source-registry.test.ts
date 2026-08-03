@@ -429,6 +429,25 @@ summary: 一部口コミで料理提供までの時間への指摘が見られ�
       expect(notes[0]!.value).toBe("柏駅西口より徒歩約3分");
     });
 
+    it("seat_count: 49席のようなStage1実出力例をparseできる(feat/ai-research-searchfact-places-match)", () => {
+      const text = `[SEARCH_NOTE]\nsource_url: ${REDIRECT_A}\nkind: store_fact\nkey: seat_count\nvalue: 49席\nsummary: 総席数49席と掲載\n[/SEARCH_NOTE]`;
+      const notes = parseSearchNotes(text);
+      expect(notes[0]!.key).toBe("seat_count");
+      expect(notes[0]!.value).toBe("49席");
+    });
+
+    it("average_spend_day_night/opening_dateの実出力例もparseできる", () => {
+      const text = [
+        `[SEARCH_NOTE]\nsource_url: ${REDIRECT_A}\nkind: store_fact\nkey: average_spend_day_night\nvalue: 通常平均4,000円\nsummary: 予算帯の掲載\n[/SEARCH_NOTE]`,
+        `[SEARCH_NOTE]\nsource_url: ${REDIRECT_B}\nkind: store_fact\nkey: opening_date\nvalue: 2024年6月21日\nsummary: 開店日の掲載\n[/SEARCH_NOTE]`,
+      ].join("\n");
+      const notes = parseSearchNotes(text);
+      expect(notes[0]!.key).toBe("average_spend_day_night");
+      expect(notes[0]!.value).toBe("通常平均4,000円");
+      expect(notes[1]!.key).toBe("opening_date");
+      expect(notes[1]!.value).toBe("2024年6月21日");
+    });
+
     it("keyが53項目に存在しない場合はkey/valueを付与しない(summaryは維持)", () => {
       const text = `[SEARCH_NOTE]\nsource_url: ${REDIRECT_A}\nkind: store_fact\nkey: not_a_real_key\nvalue: x\nsummary: y\n[/SEARCH_NOTE]`;
       const notes = parseSearchNotes(text);
