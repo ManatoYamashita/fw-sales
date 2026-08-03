@@ -59,4 +59,15 @@ export interface ResearchRunRepository {
 
   /** 部分更新する。存在しない `id` の場合は `null`。 */
   update(id: string, patch: StoreResearchRunPatch): Promise<StoreResearchRun | null>;
+
+  /**
+   * 行ロック付き(`SELECT ... FOR UPDATE`)で1行取得する(feat/research-review-write-integrity、
+   * MAJOR10)。同一runに対する複数のレビュー書込み操作(採用/却下/スキップ、一括採用、
+   * レビュー完了)が並行実行された場合の lost update を防ぐために使う。
+   *
+   * `repos.transaction()` の `tx.researchRun` 経由で呼ぶこと。トランザクション外
+   * (`repos.researchRun.getForUpdate`)で呼んでもロックは当該SELECT文の実行後
+   * 即座に解放されるため、複数操作の直列化という目的を果たさない。
+   */
+  getForUpdate(id: string): Promise<StoreResearchRun | null>;
 }
