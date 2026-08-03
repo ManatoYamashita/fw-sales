@@ -180,6 +180,26 @@ describe("pickStrongPlaceMatch (feat/ai-research-quality-refinement)", () => {
       expect(result).toBeNull();
     });
 
+    it("番地相当の具体的な数字が無い(町丁目までしか無い)短い住所は、包含判定だけでは一致とみなさない(fix/ai-research-final-audit-hardening、監査で発見: 同じ町丁目の別建物への誤マッチ防止)", () => {
+      // stores.addressが旧データ等で丁目までしか登録されておらず番地が無い場合、
+      // 包含判定(a.includes(b))は同じ町丁目内の「別の建物」のformattedAddressにも
+      // 常にマッチしてしまう。番地相当の数字-数字パターンを両者に要求することで
+      // この過剰マッチを防ぐ。
+      const store = { name: "テスト店", address: "東京都渋谷区道玄坂1丁目", phone: "" };
+      const result = pickStrongPlaceMatch(
+        [
+          {
+            ...PLACE_RESULT,
+            name: "テスト店",
+            formattedAddress: "日本、〒150-0043 東京都渋谷区道玄坂１丁目９９番地９９号",
+            phone: "",
+          },
+        ],
+        store,
+      );
+      expect(result).toBeNull();
+    });
+
     it("Google側の区切り文字がU+2212(MINUS SIGN)の場合でも一致する(feat/ai-research-final-trust-boundary、実APIで確認した実際のバグ再現)", () => {
       // 実際のText Search 1回で確認した実データ(炉端ジュン、2026-08-04)。
       // 従来はNFKC正規化のみに依存していたが、GoogleはU+2212(MINUS SIGN、数学記号)を

@@ -170,6 +170,12 @@ export async function recordReviewDecisionAction(
   if (selectedCandidateId !== undefined && typeof selectedCandidateId !== "string") {
     return failure("パラメータが不正です");
   }
+  // 空文字は「未指定」ではなく明示的に不正値として拒否する(fix/ai-research-final-audit-hardening、
+  // 監査で発見: 以前は isValidReviewDecisionForItem が候補一覧に "" が実在しないことに
+  // よって偶然弾いていただけで、明示的なruntime検証ではなかった)。
+  if (selectedCandidateId !== undefined && selectedCandidateId.trim() === "") {
+    return failure("パラメータが不正です");
+  }
   if (editedValue !== undefined && typeof editedValue !== "string") {
     return failure("パラメータが不正です");
   }

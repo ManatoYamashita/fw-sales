@@ -26,6 +26,7 @@ const {
   runStage2,
   buildNonAiItems,
   buildDeterministicPlacesItems,
+  deriveDeterministicPlacesConfirmedKeys,
   applyUrlContextStatus,
   appendConfirmedMediaContext,
   upgradeMediaCoverageFromRegistry,
@@ -419,6 +420,27 @@ describe("buildDeterministicPlacesItems (feat/ai-research-quality-refinement)", 
   });
 });
 
+describe("deriveDeterministicPlacesConfirmedKeys (feat/ai-research-final-audit-hardening、BLOCKER2保護のテストカバレッジ欠落を修正)", () => {
+  it("derivePlacesVerifiedKeysが返しうる最大6keyのうち、review_avg/review_countのみを残す", () => {
+    // このテストはBLOCKER2(store_name/address/cuisine_genre/phoneが値の中身を見ずに
+    // key一致だけでconfirmedバイパスされてしまうバグ)の防御そのものを固定する回帰
+    // テスト。以前はworkflows/store-research.ts内にインラインでしか存在せず、
+    // Workflow全体がテストではmockされるため検知不能だった。
+    const result = deriveDeterministicPlacesConfirmedKeys(
+      new Set(["store_name", "address", "cuisine_genre", "phone", "review_avg", "review_count"]),
+    );
+    expect(result).toEqual(new Set(["review_avg", "review_count"]));
+  });
+
+  it("入力が空集合なら空集合を返す", () => {
+    expect(deriveDeterministicPlacesConfirmedKeys(new Set())).toEqual(new Set());
+  });
+
+  it("DETERMINISTIC_PLACES_KEYS以外のkeyしか無ければ空集合を返す", () => {
+    expect(deriveDeterministicPlacesConfirmedKeys(new Set(["store_name", "phone"]))).toEqual(new Set());
+  });
+});
+
 describe("runStage2 excludeKeys (feat/ai-research-quality-refinement)", () => {
   it("excludeKeysで指定したkeyはGeminiへの項目一覧・プロンプトから除外する", async () => {
     const excludeKeys = new Set(["review_avg", "review_count"]);
@@ -682,7 +704,16 @@ describe("upgradeMediaCoverageFromRegistry (feat/ai-research-final-quality)", ()
   });
 
   it("key一致のSearchFactのみ(url_context成功なし)でもvalueを構築し、evidence_basisはsearch_noteになる", () => {
-    const errorSource = { ...gourmetSuccess, id: "S02", url_context_status: "error" as const, title: "じゃらんnet" };
+    // SearchFactのみの経路(Tier B相当)はderiveTrustedSourceTypeによる既知hostname
+    // 判定が必須なため、既知ポータル(jalan.net)のURLを使う(fix/ai-research-final-audit-hardening、
+    // 以前はexample.com(未知hostname)でも自己申告typeを信用してしまうバグがあった)。
+    const errorSource = {
+      ...gourmetSuccess,
+      id: "S02",
+      url_context_status: "error" as const,
+      title: "じゃらんnet",
+      grounding_redirect_url: "https://www.jalan.net/kankou/spt_guide000000.html",
+    };
     const items = [
       {
         key: "media_coverage",
@@ -702,7 +733,13 @@ describe("upgradeMediaCoverageFromRegistry (feat/ai-research-final-quality)", ()
   });
 
   it("url_context成功とSearchFact一致の両方がある場合、evidence_basisはmixedになる", () => {
-    const searchFactOnly = { ...gourmetSuccess, id: "S02", url_context_status: "error" as const, title: "じゃらんnet" };
+    const searchFactOnly = {
+      ...gourmetSuccess,
+      id: "S02",
+      url_context_status: "error" as const,
+      title: "じゃらんnet",
+      grounding_redirect_url: "https://www.jalan.net/kankou/spt_guide000000.html",
+    };
     const items = [
       {
         key: "media_coverage",
@@ -750,5 +787,114 @@ describe("upgradeMediaCoverageFromRegistry (feat/ai-research-final-quality)", ()
     ];
     const result = upgradeMediaCoverageFromRegistry(items, [officialOnly]);
     expect(result[0]!.status).toBe("not_found");
+  });
+
+  it("url_context成功が無い場合、SearchFactのみでは自己申告source_typeを信用しない(fix/ai-research-final-audit-hardening、CONFIRMED BUG修正: 未知hostnameのspoof防止)", () => {
+    // grounding_redirect_urlのhostnameが既知ポータル(tabelog.com等)でもknown_store_dataでもない
+    // 「example.com」の場合、Stage1モデルが自己申告したsource_type:"gourmet_site"を
+    // SearchFactのみの経路(url_context未成功)で信用してはならない(Tier B trust matrixと
+    // 同じ境界をderiveTrustedSourceTypeで強制する)。
+    const untrustedHostSearchFactOnly = {
+      ...gourmetSuccess,
+      id: "S02",
+      url_context_status: "error" as const,
+      grounding_redirect_url: "https://example.com/untrusted",
+      title: "自己申告グルメサイト",
+    };
+    const items = [
+      {
+        key: "media_coverage",
+        research_policy: "FACT" as const,
+        status: "not_found" as const,
+        value: null,
+        evidence: "見つからなかった",
+        source_ids: [],
+      },
+    ];
+    const result = upgradeMediaCoverageFromRegistry(items, [untrustedHostSearchFactOnly], [
+      { sourceId: "S02", key: "media_coverage", value: "掲載あり" },
+    ]);
+    expect(result[0]!.status).toBe("not_found");
+  });
+
+  it("known_store_data(信頼済み)のSearchFactのみのsourceは自己申告source_typeでも信用する", () => {
+    const knownStoreDataSource = {
+      ...gourmetSuccess,
+      id: "S02",
+      url_context_status: "error" as const,
+      discovery_provenance: "known_store_data" as const,
+      grounding_redirect_url: "https://example.com/official-instagram",
+      title: "公式Instagram経由の媒体情報",
+    };
+    const items = [
+      {
+        key: "media_coverage",
+        research_policy: "FACT" as const,
+        status: "not_found" as const,
+        value: null,
+        evidence: "見つからなかった",
+        source_ids: [],
+      },
+    ];
+    const result = upgradeMediaCoverageFromRegistry(items, [knownStoreDataSource], [
+      { sourceId: "S02", key: "media_coverage", value: "掲載あり" },
+    ]);
+    expect(result[0]!.status).toBe("confirmed");
+  });
+
+  it("url_context成功が0件でも、既知hostnameの複数媒体をSearchFactのみで集約confirmedできる(finalizeResearchItemsを経由した回帰テスト、fix/ai-research-final-audit-hardening、CONFIRMED BUG修正)", () => {
+    // 監査で発見した実バグ: upgradeMediaCoverageFromRegistryがconfirmedへ補正しても、
+    // 後続のfinalizeResearchItems(applyDeterministicValidation)がTier Bの
+    // 「同一keyのSearchFact値が全て一致すること」制約を無条件に適用していたため、
+    // 2件以上の異なる媒体(各々valueテキストが異なるのは通常のGemini出力で必発)が
+    // あると、集約結果ごとnot_foundへ格下げされ消えていた。
+    const tabelog = {
+      id: "S01",
+      title: "食べログ",
+      grounding_redirect_url: "https://tabelog.com/kanagawa/A1234/A123456/12345678/",
+      resolved_url: null,
+      resolve_status: "skipped" as const,
+      source_type: "gourmet_site" as const,
+      discovery_provenance: "gemini_search_candidate" as const,
+      url_context_status: "error" as const,
+    };
+    const jalan = {
+      id: "S02",
+      title: "じゃらんnet",
+      grounding_redirect_url: "https://www.jalan.net/kankou/spt_guide000000.html",
+      resolved_url: null,
+      resolve_status: "skipped" as const,
+      source_type: "reservation_site" as const,
+      discovery_provenance: "gemini_search_candidate" as const,
+      url_context_status: "error" as const,
+    };
+    const searchFacts = [
+      { sourceId: "S01", key: "media_coverage", value: "食べログに掲載あり" },
+      { sourceId: "S02", key: "media_coverage", value: "じゃらんnetの店舗ページあり" },
+    ];
+    const aiItems = [
+      {
+        key: "media_coverage",
+        research_policy: "FACT" as const,
+        status: "not_found" as const,
+        value: null,
+        evidence: "見つからなかった",
+        source_ids: [],
+      },
+    ];
+
+    const upgraded = upgradeMediaCoverageFromRegistry(aiItems, [tabelog, jalan], searchFacts);
+    const finalItems = finalizeResearchItems({
+      aiItems: upgraded,
+      nonAiItems: [],
+      sourceRegistry: [tabelog, jalan],
+      searchFacts,
+    });
+
+    const mediaCoverageItem = finalItems.find((i) => i.key === "media_coverage")!;
+    expect(mediaCoverageItem.status).toBe("confirmed");
+    expect(mediaCoverageItem.value).toContain("食べログ");
+    expect(mediaCoverageItem.value).toContain("じゃらんnet");
+    expect(mediaCoverageItem.source_ids.sort()).toEqual(["S01", "S02"]);
   });
 });

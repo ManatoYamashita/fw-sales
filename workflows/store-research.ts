@@ -55,7 +55,7 @@ import {
   runStage2,
   buildNonAiItems,
   buildDeterministicPlacesItems,
-  DETERMINISTIC_PLACES_KEYS,
+  deriveDeterministicPlacesConfirmedKeys,
   applyUrlContextStatus,
   upgradeMediaCoverageFromRegistry,
   appendConfirmedMediaContext,
@@ -327,11 +327,7 @@ export async function storeResearchWorkflow(
     // 生成には引き続き広いplacesVerifiedKeySetを使い、trust boundary(finalizeResearchItems)
     // へはDETERMINISTIC_PLACES_KEYSのみに絞った集合を渡す。
     const placesVerifiedKeySet = derivePlacesVerifiedKeys(effectiveBasicInfo);
-    const placesConfirmedBypassKeys = new Set(
-      [...placesVerifiedKeySet].filter((key) =>
-        (DETERMINISTIC_PLACES_KEYS as readonly string[]).includes(key),
-      ),
-    );
+    const placesConfirmedBypassKeys = deriveDeterministicPlacesConfirmedKeys(placesVerifiedKeySet);
 
     // Google Placesがdeterministicに確定済みのkey(review_avg/review_count)は、
     // Gemini対象から除外しdeterministic itemとして直接合成する(feat/ai-research-quality-refinement)。

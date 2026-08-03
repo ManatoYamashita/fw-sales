@@ -495,6 +495,28 @@ const PRIMARY_SOURCE_REQUIRED_KEYS: ReadonlySet<string> = new Set([
 ]);
 const PRIMARY_SOURCE_TYPES: ReadonlySet<SourceType> = new Set(["official_site", "official_sns"]);
 
+/**
+ * Tier B(SearchFact)判定で「同一keyに複数の異なるSearchFact値」を対立する事実では
+ * なく複数媒体の並立として扱ってよいkey(fix/ai-research-final-audit-hardening、
+ * 監査で発見したCONFIRMED BUGの修正)。
+ *
+ * 通常のTier B対象key(例: seat_count)は、異なるsourceが異なるvalueを報告した場合、
+ * どちらが正しいか機械的に判断できないためconfirmedにしない(false positiveを防ぐ、
+ * BLOCKER3)。しかし`media_coverage`は「どの媒体に掲載されているか」という列挙型の
+ * 項目であり、`pipeline.ts:upgradeMediaCoverageFromRegistry`が複数の検証済み媒体を
+ * 集約してvalue/source_idsを構築する。各SearchFactは異なる媒体それぞれについての
+ * 独立した証拠であって、同一の事実に対する対立する主張ではないため、この項目に
+ * 限り distinct-value 制約を適用しない(`upgradeMediaCoverageFromRegistry`が既に
+ * `deriveTrustedSourceType`で個々のsourceを信頼境界チェック済みであることが前提)。
+ *
+ * 監修前の実バグ: url_context成功が1件も無く、SearchFactのみで検証された媒体が
+ * 2件以上(かつそれぞれ異なる自由文字列valueを持つ、通常のGemini出力では必発)の
+ * 場合、本チェックが無いと`hasSearchFactMatch`が常にfalseになり、
+ * `upgradeMediaCoverageFromRegistry`が正しく集約したconfirmedな複数媒体情報が
+ * 丸ごとnot_foundへ格下げされ消えていた。
+ */
+const MULTI_SOURCE_AGGREGATION_KEYS: ReadonlySet<string> = new Set(["media_coverage"]);
+
 /** `validateResearchItemStatus` の判定コンテキスト。 */
 export interface ResearchValidationContext {
   /** Stage1 + Stage1.5 で構築した Source Registry(Web Source専用)。 */
@@ -633,7 +655,9 @@ export function validateResearchItemStatus(
           return trustedType !== undefined && allowedSourceTypes.includes(trustedType);
         });
   const distinctFactValues = new Set(trustedFactsForKey.map((f) => f.value.trim()));
-  const hasSearchFactMatch = trustedFactsForKey.length > 0 && distinctFactValues.size === 1;
+  const isAggregationKey = MULTI_SOURCE_AGGREGATION_KEYS.has(item.key);
+  const hasSearchFactMatch =
+    trustedFactsForKey.length > 0 && (isAggregationKey || distinctFactValues.size === 1);
 
   if (isPlacesVerified || hasVerifiedSource || hasSearchFactMatch) {
     type SingleBasis = Exclude<EvidenceBasis, "mixed">;
@@ -650,7 +674,11 @@ export function validateResearchItemStatus(
     // ではなくSearchFact側の値をcanonicalとしてvalueを再構築する(BLOCKER3)。
     // Places/URL Contextによる裏付けが同時にある場合(mixed/url_context/places)は、
     // より強い根拠(実データ確認)であるAIのvalueをそのまま維持する。
-    if (evidence_basis === "search_note") {
+    // `isAggregationKey`(例: media_coverage)は、この関数を呼ぶ前段の
+    // `pipeline.ts:upgradeMediaCoverageFromRegistry`が既に複数sourceを集約した
+    // canonical value/source_idsを構築済みのため、ここで単一factの値へ
+    // 差し替えると集約結果が壊れる(fix/ai-research-final-audit-hardening)。
+    if (evidence_basis === "search_note" && !isAggregationKey) {
       const canonicalValue = trustedFactsForKey[0]!.value;
       const factSourceIds = Array.from(new Set(trustedFactsForKey.map((f) => f.sourceId)));
       return {

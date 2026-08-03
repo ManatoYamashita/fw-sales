@@ -197,8 +197,16 @@ export interface AdoptOptions {
  * 直接証明するものではないため、editedValueが元の値と異なる場合は
  * confidenceを引き継がず、source_quoteも「人間が編集した」ことを示す文言に置き換える。
  * editedValueが元の値と同一(実質未編集)の場合は、従来どおりAIの根拠をそのまま使う。
+ *
+ * 監査で発見(fix/ai-research-final-audit-hardening): 上記のconfidence/source_quoteの
+ * 置き換えだけでは不十分で、`source_urls`が編集後もAI元item/candidateのsource_idsから
+ * 無条件に解決され続けていた。これは「元の値(例: 4,000円)の根拠として実在するURL」を、
+ * 人間が上書きした別の値(例: 5,000円)の根拠であるかのようにUI(`basic-info-field-row.tsx`)や
+ * sales-asset生成プロンプト(`lib/ai/basic-info-prompt.ts`)へ渡してしまう誤帰属(misattribution)
+ * バグだった。他のmanual入力経路(`updateBasicInfoFieldAction`)がsource_urlsを
+ * 一切持たないのと同じく、編集時はsource_urlsも空にして「直接的な出典なし」を正しく表す。
  */
-const EDITED_SOURCE_QUOTE = "人間が編集した値です(出典・根拠は編集前の値に対するものです)。";
+const EDITED_SOURCE_QUOTE = "人間が編集した値です(直接の出典URLはありません)。";
 
 export function buildAdoptedBasicInfoField(
   item: ResearchItem,
@@ -221,7 +229,7 @@ export function buildAdoptedBasicInfoField(
       value: options.editedValue ?? candidate.value,
       tier: "A",
       confidence: wasEdited ? undefined : (item.confidence ?? undefined),
-      source_urls: resolveSourceUrls(candidate.source_ids, sourceRegistry),
+      source_urls: wasEdited ? undefined : resolveSourceUrls(candidate.source_ids, sourceRegistry),
       source_quote: wasEdited ? EDITED_SOURCE_QUOTE : candidate.evidence,
       filled_by: "manual",
       updated_at: now,
@@ -233,7 +241,7 @@ export function buildAdoptedBasicInfoField(
     value: options.editedValue ?? item.value,
     tier: item.status === "confirmed" ? "A" : "B",
     confidence: wasEdited ? undefined : (item.confidence ?? undefined),
-    source_urls: resolveSourceUrls(item.source_ids, sourceRegistry),
+    source_urls: wasEdited ? undefined : resolveSourceUrls(item.source_ids, sourceRegistry),
     source_quote: wasEdited ? EDITED_SOURCE_QUOTE : item.evidence,
     filled_by: "manual",
     updated_at: now,
