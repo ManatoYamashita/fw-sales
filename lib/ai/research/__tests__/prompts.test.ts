@@ -306,5 +306,18 @@ describe("buildStage2Prompt", () => {
       expect(prompt).toContain("単に店舗ページやネット予約枠が存在するだけ");
       expect(prompt).toContain("一切なりません");
     });
+
+    it("own_net_exposure/exposure_gapが含まれる場合、absence-of-evidence guardの指示を含む(feat/ai-research-final-trust-boundary)", () => {
+      const items = [{ key: "own_net_exposure", label: "自店のネット露出状況", research_policy: "ANALYSIS" }];
+      const prompt = buildStage2Prompt({ store: STORE, items, sourceRegistry: registry });
+      expect(prompt).toContain("「確認できない」ことの扱いに関する注意");
+      expect(prompt).toContain("それ自体が「不足している」「弱い」「伸びしろがある」という証拠には");
+    });
+
+    it("own_net_exposure/exposure_gapが含まれない場合はabsence-of-evidence guardを含まない", () => {
+      const items = [{ key: "business_hours_holidays", label: "営業時間・定休日", research_policy: "FACT" }];
+      const prompt = buildStage2Prompt({ store: STORE, items, sourceRegistry: registry });
+      expect(prompt).not.toContain("「確認できない」ことの扱いに関する注意");
+    });
   });
 });

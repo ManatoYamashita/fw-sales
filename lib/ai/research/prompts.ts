@@ -254,6 +254,15 @@ const SNS_UPDATE_FREQUENCY_INSTRUCTION = `## SNS更新頻度(sns_update_frequenc
 複数件直接確認できた場合のみ、そこから算出した頻度で"confirmed"としてください。
 直接確認できなければ"not_found"としてください。`;
 
+/** feat/ai-research-final-trust-boundary: 「確認できない」ことを「不足している」根拠にしない指示。 */
+const ABSENCE_OF_EVIDENCE_GUARD_INSTRUCTION = `## 「確認できない」ことの扱いに関する注意(own_net_exposure/exposure_gap)
+Google口コミ評価・件数(review_avg/review_count)やSNS更新頻度等が「確認できなかった
+(not_found)」ことは、それ自体が「不足している」「弱い」「伸びしろがある」という証拠には
+なりません。確認できないことと実際に不足していることは別の事柄です。他の項目が
+not_foundだったことを理由に「発信頻度に伸びしろがある」「口コミ獲得を強化すべき」等と
+断定・推定しないでください。own_net_exposure・exposure_gapの判定は、実際に確認できた
+情報のみを根拠にしてください。`;
+
 /**
  * Stage2: FACT + FACT_OR_HEARING + ANALYSIS を1回のStructured Outputで生成する
  * combinedプロンプト(URL Context単独、Google Searchは使わない)。
@@ -299,6 +308,9 @@ export function buildStage2Prompt(params: BuildStage2PromptParams): string {
       : null,
     itemKeys.has("media_coverage") ? MEDIA_COVERAGE_INSTRUCTION : null,
     itemKeys.has("sns_update_frequency") ? SNS_UPDATE_FREQUENCY_INSTRUCTION : null,
+    itemKeys.has("own_net_exposure") || itemKeys.has("exposure_gap")
+      ? ABSENCE_OF_EVIDENCE_GUARD_INSTRUCTION
+      : null,
   ]
     .filter((s): s is string => s !== null)
     .join("\n\n");

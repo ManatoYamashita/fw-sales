@@ -179,6 +179,34 @@ describe("pickStrongPlaceMatch (feat/ai-research-quality-refinement)", () => {
       );
       expect(result).toBeNull();
     });
+
+    it("Google側の区切り文字がU+2212(MINUS SIGN)の場合でも一致する(feat/ai-research-final-trust-boundary、実APIで確認した実際のバグ再現)", () => {
+      // 実際のText Search 1回で確認した実データ(炉端ジュン、2026-08-04)。
+      // 従来はNFKC正規化のみに依存していたが、GoogleはU+2212(MINUS SIGN、数学記号)を
+      // 区切り文字に使うことがあり、NFKCはこれをASCIIハイフンへ変換しない
+      // (NFKCが変換するのは全角ハイフンU+FF0D等の互換分解対象のみ)ため、
+      // 正規化後も住所が一致しないという実バグがあった。
+      const store = {
+        name: "炉端ジュン",
+        address: "〒2770852 千葉県 柏市 旭町1-1-12 1F",
+        phone: "04-7199-7985",
+      };
+      // 実際のGoogle応答で確認されたMINUS SIGN(U+2212)を明示的にエスケープで指定する
+      // (見た目が似たハイフン系文字と混同しないよう、コピペではなくunicodeエスケープを使う)。
+      const minusSign = "−";
+      const result = pickStrongPlaceMatch(
+        [
+          {
+            ...PLACE_RESULT,
+            name: "東北メシ炉端ジュン",
+            formattedAddress: `日本、〒277-0852 千葉県柏市旭町１丁目１${minusSign}12 1F`,
+            phone: "",
+          },
+        ],
+        store,
+      );
+      expect(result).not.toBeNull();
+    });
   });
 });
 
