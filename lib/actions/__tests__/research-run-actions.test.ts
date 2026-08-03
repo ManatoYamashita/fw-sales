@@ -544,6 +544,63 @@ describe("recordReviewDecisionAction", () => {
     expect(result.ok).toBe(false);
     expect(mockResearchRunGet).not.toHaveBeenCalled();
   });
+
+  it("runId/storeId/itemKeyが空文字(型は正しいが空)ならruntimeで拒否する(fix/ai-research-final-audit-hardening、欠落していたテストケース)", async () => {
+    const run = makeRun();
+    mockResearchRunGet.mockResolvedValue(run);
+
+    const blankRunId = await recordReviewDecisionAction({
+      runId: "",
+      storeId: run.store_id,
+      itemKey: "business_hours_holidays",
+      decision: "adopted",
+    });
+    expect(blankRunId.ok).toBe(false);
+
+    const blankStoreId = await recordReviewDecisionAction({
+      runId: run.id,
+      storeId: "",
+      itemKey: "business_hours_holidays",
+      decision: "adopted",
+    });
+    expect(blankStoreId.ok).toBe(false);
+
+    const blankItemKey = await recordReviewDecisionAction({
+      runId: run.id,
+      storeId: run.store_id,
+      itemKey: "",
+      decision: "adopted",
+    });
+    expect(blankItemKey.ok).toBe(false);
+
+    expect(mockResearchRunGet).not.toHaveBeenCalled();
+  });
+
+  it("selectedCandidateIdが空文字ならruntimeで明示的に拒否する(fix/ai-research-final-audit-hardening、以前は候補一覧に存在しないことによる偶然の拒否のみだった)", async () => {
+    const run = makeRun({
+      result: [
+        makeItem({
+          status: "conflict",
+          value: null,
+          candidates: [
+            { candidate_id: "c1", label: "候補A", value: "v1", evidence: "e1", source_ids: ["S01"] },
+          ],
+        }),
+      ],
+    });
+    mockResearchRunGet.mockResolvedValue(run);
+
+    const result = await recordReviewDecisionAction({
+      runId: run.id,
+      storeId: run.store_id,
+      itemKey: "business_hours_holidays",
+      decision: "adopted",
+      selectedCandidateId: "",
+    });
+
+    expect(result.ok).toBe(false);
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
 });
 
 describe("bulkAdoptConfirmedAction", () => {

@@ -299,7 +299,7 @@ describe("buildAdoptedBasicInfoField", () => {
     expect(field.value).toBe("手動で修正した値");
   });
 
-  it("editedValueが元の値と異なる場合、AIのconfidenceを引き継がずsource_quoteを編集済み文言へ置き換える(feat/research-review-write-integrity、追加修正F)", () => {
+  it("editedValueが元の値と異なる場合、AIのconfidence/source_urlsを引き継がずsource_quoteを編集済み文言へ置き換える(feat/research-review-write-integrity、追加修正F)", () => {
     const item = makeItem({ status: "confirmed", confidence: 90, evidence: "AIの根拠テキスト" });
     const field = buildAdoptedBasicInfoField(item, registry, now, {
       editedValue: "手動で修正した値",
@@ -310,16 +310,47 @@ describe("buildAdoptedBasicInfoField", () => {
     expect(field.source_quote).toContain("人間が編集した値");
   });
 
-  it("editedValueが元の値と同一(実質未編集)ならAIのconfidence/evidenceをそのまま使う", () => {
+  it("editedValueが元の値と異なる場合、元の値の根拠だったsource_urlsを編集後の値に誤帰属させない(fix/ai-research-final-audit-hardening、CONFIRMED BUG修正)", () => {
+    // AIのitemは「17:00〜24:00」の根拠としてS01(https://example.com/a)を持つ。
+    // 人間がこれを「10:00〜18:00」へ編集した場合、S01は編集後の値の根拠ではないため
+    // source_urlsへ残してはならない(残すと、UI/sales-asset生成プロンプトが
+    // 「10:00〜18:00の出典はhttps://example.com/a」という誤った証跡を提示してしまう)。
+    const item = makeItem({ status: "confirmed", source_ids: ["S01"] });
+    const field = buildAdoptedBasicInfoField(item, registry, now, {
+      editedValue: "10:00〜18:00",
+    });
+    expect(field.source_urls).toBeUndefined();
+  });
+
+  it("inferred項目をeditedValueで編集した場合もconfidence/source_urlsを引き継がない(欠落していたテストケース)", () => {
+    const item = makeItem({
+      status: "inferred",
+      value: "4,000円",
+      confidence: 60,
+      evidence: "AIの推定根拠",
+      source_ids: ["S01"],
+    });
+    const field = buildAdoptedBasicInfoField(item, registry, now, {
+      editedValue: "5,000円",
+    });
+    expect(field.value).toBe("5,000円");
+    expect(field.tier).toBe("B");
+    expect(field.confidence).toBeUndefined();
+    expect(field.source_urls).toBeUndefined();
+    expect(field.source_quote).toContain("人間が編集した値");
+  });
+
+  it("editedValueが元の値と同一(実質未編集)ならAIのconfidence/evidence/source_urlsをそのまま使う", () => {
     const item = makeItem({ status: "confirmed", value: "17:00〜24:00", confidence: 90, evidence: "AIの根拠テキスト" });
     const field = buildAdoptedBasicInfoField(item, registry, now, {
       editedValue: "17:00〜24:00",
     });
     expect(field.confidence).toBe(90);
     expect(field.source_quote).toBe("AIの根拠テキスト");
+    expect(field.source_urls).toEqual(["https://example.com/a"]);
   });
 
-  it("conflict候補選択+editedValueが候補値と異なる場合もconfidence/source_quoteを編集済み扱いにする", () => {
+  it("conflict候補選択+editedValueが候補値と異なる場合もconfidence/source_quote/source_urlsを編集済み扱いにする", () => {
     const item = makeItem({
       status: "conflict",
       value: null,
@@ -335,6 +366,7 @@ describe("buildAdoptedBasicInfoField", () => {
     expect(field.value).toBe("編集後の値");
     expect(field.confidence).toBeUndefined();
     expect(field.source_quote).toContain("人間が編集した値");
+    expect(field.source_urls).toBeUndefined();
   });
 
   it("conflictで候補選択時はtier Aかつ候補のevidence/source_idsを使う", () => {

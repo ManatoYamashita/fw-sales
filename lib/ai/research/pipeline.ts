@@ -22,6 +22,7 @@ import { buildStage2JsonSchema, buildStage2ResponseZodSchema } from "./schema-bu
 import { createResearchGeminiClient, type UsageMetadataLike, type UrlContextMetadataLike } from "./client";
 import {
   applyDeterministicValidation,
+  deriveTrustedSourceType,
   type ResearchItem,
   type SearchFact,
   type SourceRegistryEntry,
@@ -247,6 +248,29 @@ export function buildDeterministicPlacesItems(
   return items;
 }
 
+/**
+ * `derivePlacesVerifiedKeys`が返しうる最大6key(store_name/address/cuisine_genre/phone/
+ * review_avg/review_count)から、`finalizeResearchItems`のtrust boundary
+ * (`validateResearchItemStatus`の`placesVerifiedKeys`)へ渡してよい集合を導出する
+ * (feat/ai-research-final-audit-hardening、監査で発見したテストカバレッジの欠落を修正)。
+ *
+ * この絞り込みはBLOCKER2(値の中身を見ずにkey一致だけでstore_name/address/
+ * cuisine_genre/phoneがconfirmed維持されてしまうバグ)の修正そのものであり、
+ * 以前は`workflows/store-research.ts`の中に直接インライン実装されていたため、
+ * Vercel Workflow自体は統合テストで丸ごとmockされ、この1行の絞り込みロジックには
+ * 単体テストが存在しなかった(将来のリファクタで`placesVerifiedKeySet`をそのまま
+ * 渡すよう変更されても検知できない状態だった)。純関数として切り出しテスト可能にする。
+ */
+export function deriveDeterministicPlacesConfirmedKeys(
+  placesVerifiedKeys: ReadonlySet<string>,
+): Set<string> {
+  return new Set(
+    [...placesVerifiedKeys].filter((key) =>
+      (DETERMINISTIC_PLACES_KEYS as readonly string[]).includes(key),
+    ),
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /*  Source Registry への url_context_status 反映                        */
 /* ------------------------------------------------------------------ */
@@ -363,11 +387,21 @@ export function upgradeMediaCoverageFromRegistry(
   const searchFactSourceIds = new Set(
     searchFacts.filter((fact) => fact.key === "media_coverage").map((fact) => fact.sourceId),
   );
-  const verifiedMedia = finalRegistry.filter(
-    (entry) =>
-      MEDIA_COVERAGE_SOURCE_TYPES.has(entry.source_type) &&
-      (entry.url_context_status === "success" || searchFactSourceIds.has(entry.id)),
-  );
+  // 監査で発見(fix/ai-research-final-audit-hardening、CONFIRMED BUG): url_context成功
+  // なしでSearchFactのみを根拠にする場合、以前はentry.source_type(Stage1モデルの
+  // 自己申告)をそのまま信用していた。これはresearch-result-schema.tsのTier B trust
+  // matrix(`deriveTrustedSourceType`)が要求する「known_store_data、または既知
+  // hostnameのみ信頼」という境界をこの関数だけ迂回してしまっていた(Section E)。
+  // url_context成功済みのentryは本文取得という別の裏付けがあるため自己申告typeで
+  // よいが、SearchFactのみの場合は`deriveTrustedSourceType`を必須にする。
+  const verifiedMedia = finalRegistry.filter((entry) => {
+    if (entry.url_context_status === "success") {
+      return MEDIA_COVERAGE_SOURCE_TYPES.has(entry.source_type);
+    }
+    if (!searchFactSourceIds.has(entry.id)) return false;
+    const trustedType = deriveTrustedSourceType(entry);
+    return trustedType !== undefined && MEDIA_COVERAGE_SOURCE_TYPES.has(trustedType);
+  });
   if (verifiedMedia.length === 0) return items.slice();
 
   const hasUrlContextSuccess = verifiedMedia.some((entry) => entry.url_context_status === "success");

@@ -164,10 +164,29 @@ function normalizeJapaneseAddressForMatch(raw: string): string {
     .replace(/^-|-$/g, "");
 }
 
+/**
+ * 番地・号相当の具体的な数字-数字パターン(例: "1-2-3"の一部)を含むか判定する
+ * (feat/ai-research-final-audit-hardening、監査で発見)。
+ *
+ * `isAddressMatch`の包含判定(`a.includes(b) || b.includes(a)`)は、`isNameMatch`の
+ * 短い名前ガード(`b.length < 2`)に相当する下限が無かった。市区町村・町丁目までしか
+ * 無い短い住所文字列(例: DBの`stores.address`が旧データで丁目までしか登録されて
+ * いない場合)は、同じ町丁目内の別の建物のformattedAddressにも常に包含されて
+ * しまい、`isNameMatch`(こちらも同名チェーン等で緩い)と組み合わさると別店舗を
+ * 誤ってstrong matchとして採用しうる。番地相当の数字-数字パターンを両者に要求する
+ * ことで、町丁目レベルの過剰マッチを防ぐ(`isNameMatch`と同じ「最小限の具体性」
+ * ガードの考え方)。
+ */
+function hasBanchiLevelSpecificity(normalized: string): boolean {
+  return /\d+-\d+/.test(normalized);
+}
+
 function isAddressMatch(placeAddress: string, storeAddress: string): boolean {
   const a = normalizeJapaneseAddressForMatch(placeAddress);
   const b = normalizeJapaneseAddressForMatch(storeAddress);
   if (!a || !b) return false;
+  if (a === b) return true;
+  if (!hasBanchiLevelSpecificity(a) || !hasBanchiLevelSpecificity(b)) return false;
   return a.includes(b) || b.includes(a);
 }
 
