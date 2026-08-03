@@ -289,10 +289,17 @@ export function buildStage2Prompt(params: BuildStage2PromptParams): string {
   const searchNotesText =
     matchedNotes.length > 0
       ? matchedNotes
-          .map(
-            ({ note, sourceId }) =>
-              `- ${sourceId} [${SEARCH_NOTE_KIND_LABEL[note.kind]}]: ${note.summary}`,
-          )
+          .map(({ note, sourceId }) => {
+            const kindLabel = SEARCH_NOTE_KIND_LABEL[note.kind];
+            // kind="store_fact"でkey/valueが構造化済みの場合、summaryだけでなく
+            // key/valueも明示する(feat/ai-research-pre-smoke-hardening、MAJOR7)。
+            // Stage2がこのitem.keyと直接照合できるようにするため。
+            const keyValueSuffix =
+              note.key !== undefined && note.value !== undefined
+                ? ` [${note.key} = ${note.value}]`
+                : "";
+            return `- ${sourceId} [${kindLabel}]${keyValueSuffix}: ${note.summary}`;
+          })
           .join("\n")
       : null;
 
@@ -363,7 +370,7 @@ ${sourceListText}
 情報源だけに判定が偏らないよう、各項目ごとに最も適切な情報源を個別に検討してください。
 ${
   searchNotesText
-    ? `\n# 検索時に得られた補助情報(Search Notes)\nStage1のGoogle Search実行時に得られた検索結果由来の補助情報です。URL Contextで本文を\n直接取得できた場合より**一段弱い根拠**として扱ってください(本文取得に成功した場合は\nそちらを優先すること)。ただし、対応するURLの本文取得が失敗・未実施の場合でも、\n以下の情報が明示的な値であれば判定の参考にしてよいです。\n\n${searchNotesText}\n`
+    ? `\n# 検索時に得られた補助情報(Search Notes)\nStage1のGoogle Search実行時に得られた検索結果由来の補助情報です。URL Contextで本文を\n直接取得できた場合より**一段弱い根拠**として扱ってください(本文取得に成功した場合は\nそちらを優先すること)。対応するURLの本文取得が失敗・未実施の場合でも、以下の情報が\n明示的な値であれば判定の参考にしてよく、その場合は対応するsource_id(例: "S03")を\nsource_idsに含めてください(本文を直接確認していなくても、このSearch Noteを根拠に\n使った場合はそのsource_idを含めること)。\n\n${searchNotesText}\n`
     : ""
 }
 # 店舗同定
@@ -392,8 +399,12 @@ ${items.length}件すべてについて回答するため、各項目の evidenc
 
 # 出典の参照方法(重要)
 出典は上記Source Registryの **id のみ**(例: "S01")で参照してください。URLそのものを
-出力に含めないでください。実際に内容を確認できたURLのみをsource_idsに含めてください
-(確認していないURLのidを含めないこと)。
+出力に含めないでください。source_idsに含めてよいのは次のいずれかの場合のみです:
+(A) URL Contextで実際に本文を確認し、そのitemの根拠として使った場合。
+(B) Search Notesとして明示的に提供された情報を、そのitemの根拠として使った場合
+(本文取得の成否は問いません)。
+上記(A)(B)のいずれにも該当しない(単に一覧に存在するだけで根拠として使っていない)
+source_idは含めないでください。
 
 情報源間で判定が食い違う場合(status="conflict")は、candidatesに候補ごとの
 value/evidence/source_idsを分けて記載してください。`;

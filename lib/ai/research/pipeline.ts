@@ -74,13 +74,55 @@ export interface Stage2Outcome {
   items: ResearchItem[];
   urlContextMetadata: UrlContextMetadataLike | null;
   usageMetadata: UsageMetadataLike | null;
-  /** Zod検証に失敗した場合の警告(部分成功を許容するため例外は投げない)。 */
-  parseWarning: string | null;
 }
 
 /**
- * Stage2: AI対象項目(FACT + FACT_OR_HEARING + ANALYSIS、計42項目)を1回のGemini呼出で
- * 生成する(fix/ai-research-poc-like-retrieval、PoCと同様の単一call構成へ回帰)。
+ * Stage2の応答がJSON parse・schema検証・件数/key集合の一致(coverage)のいずれかで
+ * 失敗したことを表すsanitizedなエラー(feat/ai-research-pre-smoke-hardening、BLOCKER1)。
+ *
+ * 旧実装は失敗時に`items: []` + `parseWarning`を返し例外を投げなかったため、
+ * Stage2が丸ごと失敗してもWorkflowはsucceededとして保存できてしまっていた
+ * (HEARING_ONLY/EXTERNAL_DATA_REQUIRED項目とPlaces由来項目のみの「成功」結果に
+ * なる)。本クラスを投げることで`stage2Step`(workflows/store-research.ts)が
+ * `classifyForWorkflowRetry`経由でfailedへ倒す。message には生のGemini応答本文を
+ * 一切含めない(sanitizedなreasonのみ)。自動的なGemini再callは追加しない
+ * (ユーザーが再調査を選べればよい、という既存方針を維持)。
+ */
+export class Stage2InvalidOutputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "Stage2InvalidOutputError";
+  }
+}
+
+/**
+ * Stage2応答のcoverage(件数・key集合・重複)を検証する(feat/ai-research-pre-smoke-hardening、
+ * BLOCKER1)。期待件数は常にそのrunの`allowedKeys.length`から動的に導出し、
+ * 固定値をハードコードしない。
+ */
+function validateStage2Coverage(
+  items: readonly { key: string }[],
+  allowedKeys: readonly string[],
+): string | null {
+  const keys = items.map((i) => i.key);
+  const keySet = new Set(keys);
+  if (keys.length !== keySet.size) {
+    return "重複したkeyが含まれていました";
+  }
+  const allowedKeySet = new Set(allowedKeys);
+  if (keys.length !== allowedKeys.length || keys.some((k) => !allowedKeySet.has(k))) {
+    return `期待されるkey集合(${allowedKeys.length}件)と一致しませんでした(実際: ${keys.length}件)`;
+  }
+  return null;
+}
+
+/**
+ * Stage2: AI対象項目(FACT + FACT_OR_HEARING + ANALYSIS、そのrunで実際に選択された件数)を
+ * 1回のGemini呼出で生成する(fix/ai-research-poc-like-retrieval、PoCと同様の単一call構成へ回帰)。
+ *
+ * JSON parse失敗・schema検証失敗・coverage不一致のいずれかが発生した場合、
+ * `Stage2InvalidOutputError`を投げる(feat/ai-research-pre-smoke-hardening、BLOCKER1、
+ * 「部分成功」としてsucceededにしない)。
  */
 export async function runStage2(
   params: {
@@ -111,30 +153,25 @@ export async function runStage2(
   try {
     parsedJson = JSON.parse(result.rawText);
   } catch {
-    return {
-      items: [],
-      urlContextMetadata: result.urlContextMetadata,
-      usageMetadata: result.usageMetadata,
-      parseWarning: "Stage2の応答をJSONとして解釈できませんでした。",
-    };
+    throw new Stage2InvalidOutputError("Stage2の応答をJSONとして解釈できませんでした。");
   }
 
   const zodSchema = buildStage2ResponseZodSchema(allowedKeys, registryIds);
   const parsed = zodSchema.safeParse(parsedJson);
   if (!parsed.success) {
-    return {
-      items: [],
-      urlContextMetadata: result.urlContextMetadata,
-      usageMetadata: result.usageMetadata,
-      parseWarning: `Stage2の応答がスキーマに準拠しませんでした: ${parsed.error.issues[0]?.message ?? "unknown"}`,
-    };
+    throw new Stage2InvalidOutputError("Stage2の応答がスキーマに準拠しませんでした。");
+  }
+
+  const resultItems = parsed.data.items as ResearchItem[];
+  const coverageError = validateStage2Coverage(resultItems, allowedKeys);
+  if (coverageError !== null) {
+    throw new Stage2InvalidOutputError(`Stage2の応答が不完全でした: ${coverageError}`);
   }
 
   return {
-    items: parsed.data.items as ResearchItem[],
+    items: resultItems,
     urlContextMetadata: result.urlContextMetadata,
     usageMetadata: result.usageMetadata,
-    parseWarning: null,
   };
 }
 
@@ -263,8 +300,14 @@ export function appendConfirmedMediaContext(
   items: readonly ResearchItem[],
   finalRegistry: readonly SourceRegistryEntry[],
 ): ResearchItem[] {
+  // MAJOR9(feat/ai-research-pre-smoke-hardening): url_context_status==="success"というだけで
+  // 無条件に列挙すると、competitor/public_data/other等の自店と無関係なsourceが
+  // 「確認できた掲載媒体」として own_net_exposure/exposure_gap のvalueへ混入する。
+  // media_coverage側と同じ`MEDIA_COVERAGE_SOURCE_TYPES`で絞り込む。
   const confirmedTitles = finalRegistry
-    .filter((entry) => entry.url_context_status === "success")
+    .filter(
+      (entry) => entry.url_context_status === "success" && MEDIA_COVERAGE_SOURCE_TYPES.has(entry.source_type),
+    )
     .map((entry) => entry.title);
   if (confirmedTitles.length === 0) return items.slice();
 

@@ -30,9 +30,28 @@ const {
   appendConfirmedMediaContext,
   upgradeMediaCoverageFromRegistry,
   finalizeResearchItems,
+  Stage2InvalidOutputError,
 } = await import("../pipeline");
+const { selectAiResearchItems } = await import("../prompts");
+const { RESEARCH_POLICY_ITEMS } = await import("@/lib/domain/research-policy");
 
 const STORE = { name: "YELLOW PIZZA", address: "神奈川県横浜市港北区菊名1-7-2", phone: "045-642-7213", genre: "イタリアン" };
+
+/**
+ * `runStage2`のcoverage検証(feat/ai-research-pre-smoke-hardening、BLOCKER1)は
+ * items件数・key集合がそのrunのallowedKeysと厳密に一致することを要求する。
+ * テストのモック応答を、実際に使われるallowedKeysに合わせて機械的に生成するヘルパー。
+ */
+function fullItemsForAllowedKeys(excludeKeys?: Set<string>) {
+  return selectAiResearchItems(RESEARCH_POLICY_ITEMS, excludeKeys).map((i) => ({
+    key: i.key,
+    research_policy: "FACT",
+    status: "not_found",
+    value: null,
+    evidence: "e",
+    source_ids: [],
+  }));
+}
 
 beforeEach(() => {
   mockRunSourceDiscovery.mockReset();
@@ -104,6 +123,15 @@ describe("runStage2 (統合、FACT+FACT_OR_HEARING+ANALYSISを1回で扱う)", (
     },
   ];
 
+  // business_hours_holidays 以外のAI対象keyを全てexcludeKeysに含めることで、
+  // allowedKeysを1件(business_hours_holidays)だけに絞り、coverage検証
+  // (feat/ai-research-pre-smoke-hardening、BLOCKER1)を単純なモック応答でも満たせるようにする。
+  const ALL_EXCEPT_HOURS = new Set(
+    selectAiResearchItems(RESEARCH_POLICY_ITEMS)
+      .map((i) => i.key)
+      .filter((k) => k !== "business_hours_holidays"),
+  );
+
   it("正常なJSON応答をパース・検証してitemsを返す", async () => {
     mockRunStructuredUrlContext.mockResolvedValue({
       rawText: JSON.stringify({
@@ -123,9 +151,11 @@ describe("runStage2 (統合、FACT+FACT_OR_HEARING+ANALYSISを1回で扱う)", (
       usageMetadata: { totalTokenCount: 500 },
     });
 
-    const result = await runStage2({ store: STORE, sourceRegistry: REGISTRY }, AbortSignal.timeout(1000));
+    const result = await runStage2(
+      { store: STORE, sourceRegistry: REGISTRY, excludeKeys: ALL_EXCEPT_HOURS },
+      AbortSignal.timeout(1000),
+    );
 
-    expect(result.parseWarning).toBeNull();
     expect(result.items).toHaveLength(1);
     expect(result.items[0]!.key).toBe("business_hours_holidays");
   });
@@ -134,7 +164,7 @@ describe("runStage2 (統合、FACT+FACT_OR_HEARING+ANALYSISを1回で扱う)", (
     mockRunStructuredUrlContext.mockResolvedValue({
       rawText: JSON.stringify({
         store_identification: { matched_name: "x", matched_address: "y", identification_note: "z" },
-        items: [],
+        items: fullItemsForAllowedKeys(),
       }),
       urlContextMetadata: null,
       usageMetadata: null,
@@ -145,20 +175,19 @@ describe("runStage2 (統合、FACT+FACT_OR_HEARING+ANALYSISを1回で扱う)", (
     expect(mockRunStructuredUrlContext).toHaveBeenCalledTimes(1);
   });
 
-  it("不正なJSON文字列はparseWarningを返し、例外を投げない(partial failure耐性)", async () => {
+  it("不正なJSON文字列はStage2InvalidOutputErrorを投げる(feat/ai-research-pre-smoke-hardening、BLOCKER1: 部分成功をsucceededにしない)", async () => {
     mockRunStructuredUrlContext.mockResolvedValue({
       rawText: "{ this is not valid json",
       urlContextMetadata: null,
       usageMetadata: null,
     });
 
-    const result = await runStage2({ store: STORE, sourceRegistry: REGISTRY }, AbortSignal.timeout(1000));
-
-    expect(result.parseWarning).toContain("JSON");
-    expect(result.items).toEqual([]);
+    await expect(
+      runStage2({ store: STORE, sourceRegistry: REGISTRY }, AbortSignal.timeout(1000)),
+    ).rejects.toBeInstanceOf(Stage2InvalidOutputError);
   });
 
-  it("スキーマ不一致(不正なsource_id等)もparseWarningを返す", async () => {
+  it("スキーマ不一致(不正なsource_id等)もStage2InvalidOutputErrorを投げる", async () => {
     mockRunStructuredUrlContext.mockResolvedValue({
       rawText: JSON.stringify({
         store_identification: { matched_name: "x", matched_address: "y", identification_note: "z" },
@@ -177,16 +206,103 @@ describe("runStage2 (統合、FACT+FACT_OR_HEARING+ANALYSISを1回で扱う)", (
       usageMetadata: null,
     });
 
-    const result = await runStage2({ store: STORE, sourceRegistry: REGISTRY }, AbortSignal.timeout(1000));
+    await expect(
+      runStage2(
+        { store: STORE, sourceRegistry: REGISTRY, excludeKeys: ALL_EXCEPT_HOURS },
+        AbortSignal.timeout(1000),
+      ),
+    ).rejects.toBeInstanceOf(Stage2InvalidOutputError);
+  });
 
-    expect(result.parseWarning).not.toBeNull();
+  it("keyが不足している(coverage不一致)場合もStage2InvalidOutputErrorを投げる(BLOCKER1)", async () => {
+    mockRunStructuredUrlContext.mockResolvedValue({
+      rawText: JSON.stringify({
+        store_identification: { matched_name: "x", matched_address: "y", identification_note: "z" },
+        items: [], // business_hours_holidaysが欠落
+      }),
+      urlContextMetadata: null,
+      usageMetadata: null,
+    });
+
+    await expect(
+      runStage2(
+        { store: STORE, sourceRegistry: REGISTRY, excludeKeys: ALL_EXCEPT_HOURS },
+        AbortSignal.timeout(1000),
+      ),
+    ).rejects.toBeInstanceOf(Stage2InvalidOutputError);
+  });
+
+  it("同一keyが重複している場合もStage2InvalidOutputErrorを投げる(BLOCKER1)", async () => {
+    const dup = {
+      key: "business_hours_holidays",
+      research_policy: "FACT",
+      status: "not_found",
+      value: null,
+      evidence: "e",
+      source_ids: [],
+    };
+    mockRunStructuredUrlContext.mockResolvedValue({
+      rawText: JSON.stringify({
+        store_identification: { matched_name: "x", matched_address: "y", identification_note: "z" },
+        items: [dup, dup],
+      }),
+      urlContextMetadata: null,
+      usageMetadata: null,
+    });
+
+    await expect(
+      runStage2(
+        { store: STORE, sourceRegistry: REGISTRY, excludeKeys: ALL_EXCEPT_HOURS },
+        AbortSignal.timeout(1000),
+      ),
+    ).rejects.toBeInstanceOf(Stage2InvalidOutputError);
+  });
+
+  it("未知のkeyが混入している(allowedKeysに無い)場合もStage2InvalidOutputErrorを投げる(BLOCKER1)", async () => {
+    mockRunStructuredUrlContext.mockResolvedValue({
+      rawText: JSON.stringify({
+        store_identification: { matched_name: "x", matched_address: "y", identification_note: "z" },
+        items: [
+          {
+            key: "business_hours_holidays",
+            research_policy: "FACT",
+            status: "not_found",
+            value: null,
+            evidence: "e",
+            source_ids: [],
+          },
+          {
+            // allowedKeysに含めていない(excludeKeysで除外済みの)key
+            key: "seat_count",
+            research_policy: "FACT",
+            status: "not_found",
+            value: null,
+            evidence: "e",
+            source_ids: [],
+          },
+        ],
+      }),
+      urlContextMetadata: null,
+      usageMetadata: null,
+    });
+
+    await expect(
+      runStage2(
+        {
+          store: STORE,
+          sourceRegistry: REGISTRY,
+          excludeKeys: new Set([...ALL_EXCEPT_HOURS, "seat_count"]),
+        },
+        AbortSignal.timeout(1000),
+      ),
+    ).rejects.toBeInstanceOf(Stage2InvalidOutputError);
   });
 
   it("searchNotesをStage2プロンプトへ渡す(feat/ai-research-source-diversity)", async () => {
     mockRunStructuredUrlContext.mockResolvedValue({
       rawText: JSON.stringify({
         store_identification: { matched_name: "x", matched_address: "y", identification_note: "z" },
-        items: [],
+        items: fullItemsForAllowedKeys(),
       }),
       urlContextMetadata: null,
       usageMetadata: null,
@@ -211,7 +327,7 @@ describe("runStage2 (統合、FACT+FACT_OR_HEARING+ANALYSISを1回で扱う)", (
     expect(promptArg).toContain("複数の口コミで鮮魚が評価されている");
   });
 
-  it("clientがmax_tokensエラーを投げた場合はparseWarningへ握りつぶさず、そのまま伝播する(fix/ai-research-stage2-max-tokens)", async () => {
+  it("clientがmax_tokensエラーを投げた場合はそのまま伝播する(fix/ai-research-stage2-max-tokens)", async () => {
     mockRunStructuredUrlContext.mockRejectedValue({ kind: "max_tokens" });
 
     await expect(
@@ -223,7 +339,7 @@ describe("runStage2 (統合、FACT+FACT_OR_HEARING+ANALYSISを1回で扱う)", (
     mockRunStructuredUrlContext.mockResolvedValue({
       rawText: JSON.stringify({
         store_identification: { matched_name: "x", matched_address: "y", identification_note: "z" },
-        items: [],
+        items: fullItemsForAllowedKeys(),
       }),
       urlContextMetadata: null,
       usageMetadata: null,
@@ -232,8 +348,7 @@ describe("runStage2 (統合、FACT+FACT_OR_HEARING+ANALYSISを1回で扱う)", (
     const result = await runStage2({ store: STORE, sourceRegistry: [] }, AbortSignal.timeout(1000));
 
     expect(mockRunStructuredUrlContext).toHaveBeenCalled();
-    expect(result.parseWarning).toBeNull();
-    expect(result.items).toEqual([]);
+    expect(result.items.length).toBeGreaterThan(0);
   });
 });
 
@@ -306,17 +421,18 @@ describe("buildDeterministicPlacesItems (feat/ai-research-quality-refinement)", 
 
 describe("runStage2 excludeKeys (feat/ai-research-quality-refinement)", () => {
   it("excludeKeysで指定したkeyはGeminiへの項目一覧・プロンプトから除外する", async () => {
+    const excludeKeys = new Set(["review_avg", "review_count"]);
     mockRunStructuredUrlContext.mockResolvedValue({
       rawText: JSON.stringify({
         store_identification: { matched_name: "x", matched_address: "y", identification_note: "z" },
-        items: [],
+        items: fullItemsForAllowedKeys(excludeKeys),
       }),
       urlContextMetadata: null,
       usageMetadata: null,
     });
 
     await runStage2(
-      { store: STORE, sourceRegistry: [], excludeKeys: new Set(["review_avg", "review_count"]) },
+      { store: STORE, sourceRegistry: [], excludeKeys },
       AbortSignal.timeout(1000),
     );
 
@@ -499,6 +615,23 @@ describe("appendConfirmedMediaContext (feat/ai-research-final-quality、Observed
     const items = [{ ...makeItem("own_net_exposure"), value: null }];
     const result = appendConfirmedMediaContext(items, registryWithSuccess);
     expect(result[0]!.value).toBeNull();
+  });
+
+  it("competitor/public_data等の自店と無関係なsourceは「確認できた掲載媒体」に混入しない(feat/ai-research-pre-smoke-hardening、MAJOR9)", () => {
+    const competitorSuccess = {
+      id: "S02",
+      title: "競合店Xの紹介記事",
+      grounding_redirect_url: "https://example.com/competitor",
+      resolved_url: null,
+      resolve_status: "skipped" as const,
+      source_type: "competitor" as const,
+      discovery_provenance: "gemini_search_candidate" as const,
+      url_context_status: "success" as const,
+    };
+    const items = [makeItem("own_net_exposure", "元のevidence")];
+    const result = appendConfirmedMediaContext(items, [competitorSuccess]);
+    expect(result[0]!.evidence).toBe("元のevidence");
+    expect(result[0]!.value).toBe("v");
   });
 });
 

@@ -211,6 +211,30 @@ describe("buildStage2Prompt", () => {
       ).not.toThrow();
     });
 
+    it("kind=store_factでkey/valueが構造化済みならSearch Notes表示にも明示する(feat/ai-research-pre-smoke-hardening、MAJOR7)", () => {
+      const searchNotes: SearchNote[] = [
+        {
+          sourceUrl: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/x",
+          kind: "store_fact",
+          summary: "席数は49席",
+          key: "seat_count",
+          value: "49席",
+        },
+      ];
+      const prompt = buildStage2Prompt({
+        store: STORE,
+        items: combinedItems,
+        sourceRegistry: registry,
+        searchNotes,
+      });
+      expect(prompt).toContain("seat_count = 49席");
+    });
+
+    it("本文取得未確認でもSearch Notesを根拠に使った場合はsource_idを含めてよい旨を明示する(MAJOR7、prompt/runtime矛盾の解消)", () => {
+      const prompt = buildStage2Prompt({ store: STORE, items: combinedItems, sourceRegistry: registry });
+      expect(prompt).toContain("Search Notesとして明示的に提供された情報を、そのitemの根拠として使った場合");
+    });
+
     it("口コミ関連項目が含まれる場合は口コミ活用ガイダンスを含む", () => {
       const itemsWithReview = [
         ...combinedItems,
