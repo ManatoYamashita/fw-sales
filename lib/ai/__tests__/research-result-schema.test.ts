@@ -390,6 +390,68 @@ describe("validateResearchItemStatus (confirmed の deterministic validation)", 
     expect(result.status).toBe("external_data_required");
   });
 
+  describe("Tier B: reliable secondary evidence (feat/ai-research-source-diversity)", () => {
+    it("gourmet_siteのsourceはurl_context_status success無しでも対象keyならconfirmedを維持する", () => {
+      const item = makeItem({ key: "business_hours_holidays", source_ids: ["S01"] });
+      const registry = [
+        makeSource({ id: "S01", source_type: "gourmet_site", url_context_status: "error" }),
+      ];
+      const result = validateResearchItemStatus(item, { sourceRegistry: registry });
+      expect(result.status).toBe("confirmed");
+    });
+
+    it("reservation_siteのsourceも同様にconfirmedを維持する", () => {
+      const item = makeItem({ key: "seat_count", research_policy: "FACT", source_ids: ["S01"] });
+      const registry = [
+        makeSource({ id: "S01", source_type: "reservation_site", url_context_status: "not_attempted" }),
+      ];
+      const result = validateResearchItemStatus(item, { sourceRegistry: registry });
+      expect(result.status).toBe("confirmed");
+    });
+
+    it("対象外key(review_avg)はgourmet_siteのみでは維持されない(Google評価の他媒体代用防止)", () => {
+      const item = makeItem({ key: "review_avg", source_ids: ["S01"] });
+      const registry = [
+        makeSource({ id: "S01", source_type: "gourmet_site", url_context_status: "error" }),
+      ];
+      const result = validateResearchItemStatus(item, { sourceRegistry: registry });
+      expect(result.status).not.toBe("confirmed");
+    });
+
+    it("対象外key(review_count)も同様にgourmet_siteのみでは維持されない", () => {
+      const item = makeItem({
+        key: "review_count",
+        research_policy: "FACT",
+        source_ids: ["S01"],
+      });
+      const registry = [
+        makeSource({ id: "S01", source_type: "gourmet_site", url_context_status: "error" }),
+      ];
+      const result = validateResearchItemStatus(item, { sourceRegistry: registry });
+      expect(result.status).not.toBe("confirmed");
+    });
+
+    it("対象keyでもsource_typeがgourmet_site/reservation_site以外(article等)なら維持されない", () => {
+      const item = makeItem({ key: "business_hours_holidays", source_ids: ["S01"] });
+      const registry = [makeSource({ id: "S01", source_type: "article", url_context_status: "error" })];
+      const result = validateResearchItemStatus(item, { sourceRegistry: registry });
+      expect(result.status).not.toBe("confirmed");
+    });
+
+    it("opening_date(FACT_OR_HEARING)もTier B対象keyとして扱われる", () => {
+      const item = makeItem({
+        key: "opening_date",
+        research_policy: "FACT_OR_HEARING",
+        source_ids: ["S01"],
+      });
+      const registry = [
+        makeSource({ id: "S01", source_type: "gourmet_site", url_context_status: "not_attempted" }),
+      ];
+      const result = validateResearchItemStatus(item, { sourceRegistry: registry });
+      expect(result.status).toBe("confirmed");
+    });
+  });
+
   describe("placesVerifiedKeys (PR1 fresh review A: Places confirmed validation)", () => {
     it("placesVerifiedKeysに含まれるkeyはSource Registryが空でもconfirmedを維持する", () => {
       const item = makeItem({ key: "review_avg", source_ids: [] });

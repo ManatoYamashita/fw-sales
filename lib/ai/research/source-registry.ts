@@ -57,6 +57,34 @@ export interface ParsedSourceBlock {
 const MAX_SOURCE_REGISTRY_ENTRIES = 15;
 
 /**
+ * Stage1 Search Notes(`[SEARCH_NOTE]`ブロック)の種別
+ * (feat/ai-research-source-diversity、口コミ・グルメサイト由来の情報活用強化)。
+ *
+ * - `store_fact`: 営業時間・席数・客単価等、客観的な店舗スペック情報。
+ * - `review_signal`: 好意的な口コミ傾向・利用シーンの言及。
+ * - `negative_review_signal`: 不満・改善点として言及された口コミ傾向。
+ * - `usage_signal`: デート・宴会・仕事帰り等、実際の利用シーンの言及。
+ */
+export const SEARCH_NOTE_KINDS = [
+  "store_fact",
+  "review_signal",
+  "negative_review_signal",
+  "usage_signal",
+] as const;
+export type SearchNoteKind = (typeof SEARCH_NOTE_KINDS)[number];
+
+export interface SearchNote {
+  sourceUrl: string;
+  kind: SearchNoteKind;
+  summary: string;
+}
+
+/** 1件のSearch Note summaryの最大文字数(prompt肥大化防止、レビュー全文コピペ禁止)。 */
+const MAX_SEARCH_NOTE_SUMMARY_LENGTH = 200;
+/** Search Notesの最大件数(prompt肥大化防止)。 */
+const MAX_SEARCH_NOTES = 20;
+
+/**
  * Stage1 モデル応答の自由記述テキストから `[SOURCE]...[/SOURCE]` ブロックを抽出する。
  * PoC (`gemini-research-poc/run-standard-research.mjs` の `parseDiscoveredSources`) と
  * 同一の書式を踏襲する。
@@ -83,6 +111,45 @@ function extractField(block: string, fieldName: string): string | null {
   const re = new RegExp(`^\\s*${fieldName}:\\s*(.+)$`, "mi");
   const m = block.match(re);
   return m?.[1]?.trim() ?? null;
+}
+
+function isSearchNoteKind(raw: string | null): raw is SearchNoteKind {
+  return raw !== null && (SEARCH_NOTE_KINDS as readonly string[]).includes(raw);
+}
+
+/**
+ * Stage1 モデル応答の自由記述テキストから `[SEARCH_NOTE]...[/SEARCH_NOTE]` ブロックを抽出する
+ * (feat/ai-research-source-diversity)。
+ *
+ * Google Search実行時に得られた検索結果由来の補助情報(URL Context本文取得より一段弱い根拠)。
+ * `kind`が未知の値のブロックは破棄する(想定外の分類をStage2へ渡さない安全側)。
+ * `summary`は{@link MAX_SEARCH_NOTE_SUMMARY_LENGTH}文字で切り詰め、
+ * 全体件数も{@link MAX_SEARCH_NOTES}件までに制限する(prompt肥大化防止、
+ * レビュー全文・生のAPI応答を保存しない方針)。
+ */
+export function parseSearchNotes(text: string): SearchNote[] {
+  const notes: SearchNote[] = [];
+  const blockRe = /\[SEARCH_NOTE\]([\s\S]*?)\[\/SEARCH_NOTE\]/g;
+  let match: RegExpExecArray | null;
+  while ((match = blockRe.exec(text)) !== null) {
+    if (notes.length >= MAX_SEARCH_NOTES) break;
+    const body = match[1] ?? "";
+    const sourceUrl = extractField(body, "source_url");
+    const kind = extractField(body, "kind");
+    const summary = extractField(body, "summary");
+    if (!sourceUrl || !isValidCandidateUrl(sourceUrl)) continue;
+    if (!isSearchNoteKind(kind)) continue;
+    if (!summary) continue;
+    notes.push({
+      sourceUrl,
+      kind,
+      summary:
+        summary.length > MAX_SEARCH_NOTE_SUMMARY_LENGTH
+          ? `${summary.slice(0, MAX_SEARCH_NOTE_SUMMARY_LENGTH)}…`
+          : summary,
+    });
+  }
+  return notes;
 }
 
 function toSourceType(raw: string): SourceType {
@@ -127,6 +194,125 @@ function assignSequentialIds(drafts: readonly DraftEntry[]): SourceRegistryEntry
     ...draft,
     id: `S${String(index + 1).padStart(2, "0")}`,
   }));
+}
+
+/**
+ * Source Registryの用途別バケット(feat/ai-research-source-diversity)。
+ * 「reviews/social」専用の`source_type`は存在しないため、口コミサイトの多くが
+ * 分類される`gourmet_site`/`reservation_site`へ統合する。
+ */
+type SourceBucket = "official" | "gourmet_reservation" | "article_local" | "competitor" | "other";
+
+function bucketOf(sourceType: SourceType): SourceBucket {
+  switch (sourceType) {
+    case "official_site":
+    case "official_sns":
+      return "official";
+    case "gourmet_site":
+    case "reservation_site":
+      return "gourmet_reservation";
+    case "article":
+    case "local_official":
+      return "article_local";
+    case "competitor":
+      return "competitor";
+    case "google":
+    case "public_data":
+    case "other":
+      return "other";
+  }
+}
+
+/**
+ * 各バケットのソフト上限(目安、ユーザー要望の「official 1〜3 / gourmet・reservation
+ * 3〜5 / reviews・social 2〜4(gourmet_reservationへ統合) / local article 1〜3 /
+ * competitor 2〜3」に基づく)。あくまでソフト上限であり、他バケットに空きがあれば
+ * `capWithDiversity`のbackfillで埋め戻される(全体枠を無駄にしない)。
+ */
+const BUCKET_SOFT_CAPS: Record<SourceBucket, number> = {
+  official: 3,
+  gourmet_reservation: 5,
+  article_local: 3,
+  competitor: 3,
+  other: 2,
+};
+
+/** 同一hostnameからの候補が枠を独占しないためのソフト上限。 */
+const MAX_PER_DOMAIN = 3;
+
+function hostnameOf(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
+}
+
+/**
+ * 特定バケット(典型的には公式サイトのみ)がSource Registryの枠を独占しないよう、
+ * バケットごと・ドメインごとのソフト上限を適用しつつ選択する(feat/ai-research-source-diversity、
+ * 「公式サイトのみで枠を消費しない」「見つからないカテゴリを無理に埋める必要はない」の両立)。
+ *
+ * 発見順(優先順)を尊重しつつ1パス目でソフト上限内のもののみ採用し、
+ * 上限超過で見送った候補は2パス目で残り枠に達するまで順に埋め戻す
+ * (多様な候補がある場合はバケット偏重を防ぎ、無い場合は全体枠15件を無駄にしない)。
+ *
+ * 純関数。
+ */
+function capWithDiversity(drafts: readonly DraftEntry[], max: number): DraftEntry[] {
+  const bucketCounts: Record<SourceBucket, number> = {
+    official: 0,
+    gourmet_reservation: 0,
+    article_local: 0,
+    competitor: 0,
+    other: 0,
+  };
+  const domainCounts = new Map<string, number>();
+  const admitted: DraftEntry[] = [];
+  const deferredByBucket: Record<SourceBucket, DraftEntry[]> = {
+    official: [],
+    gourmet_reservation: [],
+    article_local: [],
+    competitor: [],
+    other: [],
+  };
+
+  for (const draft of drafts) {
+    if (admitted.length >= max) break;
+    const bucket = bucketOf(draft.source_type);
+    const domain = hostnameOf(draft.grounding_redirect_url);
+    const domainCount = domainCounts.get(domain) ?? 0;
+    if (bucketCounts[bucket] < BUCKET_SOFT_CAPS[bucket] && domainCount < MAX_PER_DOMAIN) {
+      admitted.push(draft);
+      bucketCounts[bucket] += 1;
+      domainCounts.set(domain, domainCount + 1);
+    } else {
+      deferredByBucket[bucket].push(draft);
+    }
+  }
+
+  // 残り枠はバケットのround-robinで埋め戻す(発見順の先頭バケットが独占しないように)。
+  const bucketOrder: readonly SourceBucket[] = [
+    "official",
+    "gourmet_reservation",
+    "article_local",
+    "competitor",
+    "other",
+  ];
+  let addedInRound = true;
+  while (admitted.length < max && addedInRound) {
+    addedInRound = false;
+    for (const bucket of bucketOrder) {
+      if (admitted.length >= max) break;
+      const draft = deferredByBucket[bucket].shift();
+      if (draft !== undefined) {
+        admitted.push(draft);
+        addedInRound = true;
+      }
+    }
+  }
+
+  return admitted;
 }
 
 /**
@@ -191,7 +377,7 @@ export function buildSourceRegistry(
     });
   }
 
-  return assignSequentialIds(drafts.slice(0, MAX_SOURCE_REGISTRY_ENTRIES));
+  return assignSequentialIds(capWithDiversity(drafts, MAX_SOURCE_REGISTRY_ENTRIES));
 }
 
 /** `known_store_data` 由来のURL入力(呼び出し側が `stores.site_url` 等から組み立てる)。 */
@@ -242,12 +428,14 @@ export function mergeKnownStoreDataIntoRegistry(
   registry: readonly SourceRegistryEntry[],
   knownEntries: readonly DraftEntry[],
 ): SourceRegistryEntry[] {
-  if (knownEntries.length === 0) return assignSequentialIds(registry.map(stripId));
+  if (knownEntries.length === 0) {
+    return assignSequentialIds(capWithDiversity(registry.map(stripId), MAX_SOURCE_REGISTRY_ENTRIES));
+  }
 
   const knownUrls = new Set(knownEntries.map((e) => e.grounding_redirect_url));
   const rest = registry.filter((e) => !knownUrls.has(e.grounding_redirect_url)).map(stripId);
   const merged: DraftEntry[] = [...knownEntries, ...rest];
-  return assignSequentialIds(merged.slice(0, MAX_SOURCE_REGISTRY_ENTRIES));
+  return assignSequentialIds(capWithDiversity(merged, MAX_SOURCE_REGISTRY_ENTRIES));
 }
 
 function stripId(entry: SourceRegistryEntry): DraftEntry {

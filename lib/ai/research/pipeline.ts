@@ -16,7 +16,7 @@
 import "server-only";
 
 import { RESEARCH_POLICY_ITEMS } from "@/lib/domain/research-policy";
-import { buildSourceRegistry, type GroundingMetadataLike } from "./source-registry";
+import { buildSourceRegistry, parseSearchNotes, type GroundingMetadataLike, type SearchNote } from "./source-registry";
 import { buildStage1Prompt, buildStage2Prompt, selectAiResearchItems, type StoreIdentity } from "./prompts";
 import { buildStage2JsonSchema, buildStage2ResponseZodSchema } from "./schema-builder";
 import { createResearchGeminiClient, type UsageMetadataLike, type UrlContextMetadataLike } from "./client";
@@ -38,6 +38,11 @@ export interface Stage1Outcome {
   searchCallCount: number;
   /** 上記に含まれた検索クエリの合計件数(診断用)。 */
   searchQueryCount: number;
+  /**
+   * Stage1のGoogle Search実行時に得られた補助情報(feat/ai-research-source-diversity)。
+   * URL Context本文取得より一段弱い根拠として、Stage2プロンプトへ受け渡す。
+   */
+  searchNotes: SearchNote[];
 }
 
 export async function runStage1(
@@ -54,6 +59,7 @@ export async function runStage1(
     usageMetadata: result.usageMetadata,
     searchCallCount: result.searchCallCount,
     searchQueryCount: result.searchQueryCount,
+    searchNotes: parseSearchNotes(result.text),
   };
 }
 
@@ -77,15 +83,16 @@ export async function runStage2(
   params: {
     store: StoreIdentity;
     sourceRegistry: readonly SourceRegistryEntry[];
+    searchNotes?: readonly SearchNote[];
   },
   signal: AbortSignal,
 ): Promise<Stage2Outcome> {
-  const { store, sourceRegistry } = params;
+  const { store, sourceRegistry, searchNotes = [] } = params;
   const items = selectAiResearchItems(RESEARCH_POLICY_ITEMS);
   const allowedKeys = items.map((i) => i.key);
   const registryIds = sourceRegistry.map((s) => s.id);
 
-  const prompt = buildStage2Prompt({ store, items, sourceRegistry });
+  const prompt = buildStage2Prompt({ store, items, sourceRegistry, searchNotes });
   const jsonSchema = buildStage2JsonSchema({ allowedKeys, registryIds });
   const client = createResearchGeminiClient();
 
@@ -205,4 +212,4 @@ export function finalizeResearchItems(params: FinalizeParams): ResearchItem[] {
   );
 }
 
-export type { GroundingMetadataLike };
+export type { GroundingMetadataLike, SearchNote };

@@ -386,6 +386,10 @@ export interface ResearchValidationContext {
  *    検証済み、Plan v3.2 PR1 fresh review A)。
  * 2. `source_ids` が `url_context_status==="success"` の Source Registry エントリを
  *    少なくとも1件含む(Web調査で本文取得に成功した根拠がある)。
+ * 3. Tier B「reliable secondary evidence」(feat/ai-research-source-diversity):
+ *    `item.key` が `RELIABLE_SECONDARY_FACT_KEYS` に含まれ、`source_ids` が
+ *    `gourmet_site`/`reservation_site` の Source Registry エントリを少なくとも
+ *    1件含む(本文取得成功は必須としない)。`review_avg`/`review_count` は対象外。
  *
  * いずれも満たさない場合は research_policy ごとに定めた降格先へ機械的に降格する:
  *
@@ -439,6 +443,19 @@ export function validateResearchItemStatus(
   const hasVerifiedSource = item.source_ids.some((id) => verifiedIds.has(id));
   if (hasVerifiedSource) return item;
 
+  // Tier B: reliable secondary evidence(feat/ai-research-source-diversity)。
+  // gourmet_site/reservation_siteはURL Context本文取得に失敗しやすいが、Stage1の
+  // Google Search時点で明示的に確認できることが多い限定項目については、本文取得
+  // 成功が無くてもconfirmedを維持する(review_avg/review_countは対象外)。
+  if (RELIABLE_SECONDARY_FACT_KEYS.has(item.key)) {
+    const secondaryIds = new Set(
+      context.sourceRegistry
+        .filter((entry) => RELIABLE_SECONDARY_SOURCE_TYPES.has(entry.source_type))
+        .map((entry) => entry.id),
+    );
+    if (item.source_ids.some((id) => secondaryIds.has(id))) return item;
+  }
+
   const downgradedStatus = getConfirmedDowngradeStatus(item.research_policy);
   const downgradeNote =
     "AIはconfirmedと判定しましたが、根拠となる情報源の本文取得が確認できなかったため自動的に格下げしました。";
@@ -449,6 +466,38 @@ export function validateResearchItemStatus(
     warning: appendWarning(item.warning, downgradeNote),
   };
 }
+
+/**
+ * Tier B「reliable secondary evidence」対象項目(feat/ai-research-source-diversity)。
+ *
+ * `url_context_status==="success"`(本文取得成功)が無くても、`gourmet_site`/
+ * `reservation_site`のSource Registryエントリを根拠にしている場合はconfirmedを
+ * 維持してよい、客観的な店舗スペック項目の限定リスト。食べログ・ホットペッパー等の
+ * 大手グルメ/予約サイトはURL Context本文取得に失敗しやすい(bot対策等)一方、
+ * Stage1のGoogle Search時点で店舗スペックが明示的に確認できることが多いため、
+ * この限られた項目・source_typeの組み合わせに限り例外を許可する。
+ *
+ * `review_avg`/`review_count`(Google口コミ評価)は意図的に含めない
+ * (Google以外の媒体評価をGoogle評価の根拠に代用してはいけないため)。
+ */
+const RELIABLE_SECONDARY_FACT_KEYS: ReadonlySet<string> = new Set([
+  "opening_date",
+  "business_hours_holidays",
+  "seat_count",
+  "average_spend_day_night",
+  "cuisine_genre",
+  "alacarte_course",
+  "phone",
+  "nearest_station",
+  "floor_level",
+  "reservation_tool",
+]);
+
+/** Tier B対象の`source_type`(グルメサイト・予約サイトのみ)。 */
+const RELIABLE_SECONDARY_SOURCE_TYPES: ReadonlySet<SourceType> = new Set([
+  "gourmet_site",
+  "reservation_site",
+]);
 
 /** research_policy ごとの confirmed 降格先。 */
 function getConfirmedDowngradeStatus(
