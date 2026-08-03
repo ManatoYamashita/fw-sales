@@ -25,6 +25,7 @@ const {
   runStage1,
   runStage2,
   buildNonAiItems,
+  buildDeterministicPlacesItems,
   applyUrlContextStatus,
   finalizeResearchItems,
 } = await import("../pipeline");
@@ -237,12 +238,19 @@ describe("runStage2 (統合、FACT+FACT_OR_HEARING+ANALYSISを1回で扱う)", (
 describe("buildNonAiItems", () => {
   it("HEARING_ONLY/EXTERNAL_DATA_REQUIRED項目をAPI呼出無しで生成する", () => {
     const items = buildNonAiItems();
-    // Plan v3.2 §7 集計: HEARING_ONLY=10, EXTERNAL_DATA_REQUIRED=1
-    expect(items).toHaveLength(11);
+    // feat/ai-research-quality-refinement: population_day_nightがANALYSIS→
+    // EXTERNAL_DATA_REQUIRDへ変更されたため、HEARING_ONLY=10 / EXTERNAL_DATA_REQUIRED=2 = 12件
+    expect(items).toHaveLength(12);
     for (const item of items) {
       expect(item.source_ids).toEqual([]);
       expect(["hearing_required", "external_data_required"]).toContain(item.status);
     }
+  });
+
+  it("population_day_nightはexternal_data_requiredになる(feat/ai-research-quality-refinement)", () => {
+    const items = buildNonAiItems();
+    const populationDayNight = items.find((i) => i.key === "population_day_night");
+    expect(populationDayNight?.status).toBe("external_data_required");
   });
 
   it("search_volumeはexternal_data_requiredになる", () => {
@@ -255,6 +263,64 @@ describe("buildNonAiItems", () => {
     const items = buildNonAiItems();
     const revenue = items.find((i) => i.key === "revenue");
     expect(revenue?.status).toBe("hearing_required");
+  });
+});
+
+describe("buildDeterministicPlacesItems (feat/ai-research-quality-refinement)", () => {
+  const basicInfo = {
+    review_avg: { value: "4.2", tier: "A" as const, filled_by: "places" as const, updated_at: "2026-08-03T00:00:00.000Z" },
+    review_count: { value: "120", tier: "A" as const, filled_by: "places" as const, updated_at: "2026-08-03T00:00:00.000Z" },
+    store_name: { value: "炉端ジュン", tier: "A" as const, filled_by: "places" as const, updated_at: "2026-08-03T00:00:00.000Z" },
+  };
+
+  it("placesVerifiedKeysに含まれるreview_avg/review_countのみconfirmedなItemを合成する", () => {
+    const items = buildDeterministicPlacesItems(basicInfo, new Set(["review_avg", "review_count"]));
+    expect(items).toHaveLength(2);
+    const reviewAvg = items.find((i) => i.key === "review_avg");
+    expect(reviewAvg?.status).toBe("confirmed");
+    expect(reviewAvg?.value).toBe("4.2");
+    expect(reviewAvg?.evidence_basis).toBe("places");
+    expect(reviewAvg?.source_ids).toEqual([]);
+  });
+
+  it("store_nameのようなDETERMINISTIC_PLACES_KEYS対象外keyはplacesVerifiedKeysに含まれていても合成しない", () => {
+    const items = buildDeterministicPlacesItems(basicInfo, new Set(["store_name", "review_avg", "review_count"]));
+    expect(items.find((i) => i.key === "store_name")).toBeUndefined();
+  });
+
+  it("placesVerifiedKeysが空なら何も合成しない", () => {
+    const items = buildDeterministicPlacesItems(basicInfo, new Set());
+    expect(items).toEqual([]);
+  });
+
+  it("値が空のkeyは合成しない", () => {
+    const items = buildDeterministicPlacesItems(
+      { review_avg: { value: null, tier: "A" as const, filled_by: "places" as const, updated_at: "x" } },
+      new Set(["review_avg"]),
+    );
+    expect(items).toEqual([]);
+  });
+});
+
+describe("runStage2 excludeKeys (feat/ai-research-quality-refinement)", () => {
+  it("excludeKeysで指定したkeyはGeminiへの項目一覧・プロンプトから除外する", async () => {
+    mockRunStructuredUrlContext.mockResolvedValue({
+      rawText: JSON.stringify({
+        store_identification: { matched_name: "x", matched_address: "y", identification_note: "z" },
+        items: [],
+      }),
+      urlContextMetadata: null,
+      usageMetadata: null,
+    });
+
+    await runStage2(
+      { store: STORE, sourceRegistry: [], excludeKeys: new Set(["review_avg", "review_count"]) },
+      AbortSignal.timeout(1000),
+    );
+
+    const promptArg = mockRunStructuredUrlContext.mock.calls.at(-1)![0].prompt as string;
+    expect(promptArg).not.toContain("review_avg:");
+    expect(promptArg).not.toContain("review_count:");
   });
 });
 
@@ -336,8 +402,9 @@ describe("finalizeResearchItems", () => {
       sourceRegistry: registry,
     });
 
-    // AI項目1件(検証済みsourceあり) + 11件のHEARING系
-    expect(result).toHaveLength(12);
+    // AI項目1件(検証済みsourceあり) + 12件のHEARING/EXTERNAL_DATA_REQUIRED系
+    // (feat/ai-research-quality-refinement: population_day_night分の+1を含む)
+    expect(result).toHaveLength(13);
     const businessHours = result.find((i) => i.key === "business_hours_holidays");
     expect(businessHours?.status).toBe("confirmed");
   });

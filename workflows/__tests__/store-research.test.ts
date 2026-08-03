@@ -24,6 +24,7 @@ vi.mock("@/lib/ai/research/pipeline", () => ({
   runStage1: vi.fn(),
   runStage2: vi.fn(),
   buildNonAiItems: vi.fn(),
+  buildDeterministicPlacesItems: vi.fn(),
   applyUrlContextStatus: vi.fn(),
   finalizeResearchItems: vi.fn(),
 }));

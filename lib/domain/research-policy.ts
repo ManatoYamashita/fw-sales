@@ -60,7 +60,7 @@ export const RESEARCH_POLICY_ITEMS: readonly ResearchPolicyItemDef[] = [
   // category_1_basic (14)
   { key: "store_name", research_policy: "FACT" },
   { key: "address", research_policy: "FACT" },
-  { key: "opening_date", research_policy: "FACT_OR_HEARING" },
+  { key: "opening_date", research_policy: "FACT" }, // feat/ai-research-quality-refinement: 客観的公開事実のためFACT_OR_HEARINGから変更
   { key: "business_hours_holidays", research_policy: "FACT" },
   { key: "average_spend_day_night", research_policy: "ANALYSIS" },
   { key: "seat_count", research_policy: "FACT" },
@@ -78,7 +78,7 @@ export const RESEARCH_POLICY_ITEMS: readonly ResearchPolicyItemDef[] = [
   { key: "nearest_station", research_policy: "FACT" },
   { key: "floor_level", research_policy: "FACT" },
   { key: "trade_area", research_policy: "ANALYSIS" },
-  { key: "population_day_night", research_policy: "ANALYSIS" },
+  { key: "population_day_night", research_policy: "EXTERNAL_DATA_REQUIRED" }, // feat/ai-research-quality-refinement: 人流統計は専用データソース無しに正確な値を得られないためANALYSISから変更
   { key: "visit_method", research_policy: "ANALYSIS" },
 
   // category_3_menu (4) — 店主のプロフィール・想い

@@ -15,7 +15,7 @@
 
 import "server-only";
 
-import { RESEARCH_POLICY_ITEMS } from "@/lib/domain/research-policy";
+import { RESEARCH_POLICY_ITEMS, getResearchPolicy } from "@/lib/domain/research-policy";
 import { buildSourceRegistry, parseSearchNotes, type GroundingMetadataLike, type SearchNote } from "./source-registry";
 import { buildStage1Prompt, buildStage2Prompt, selectAiResearchItems, type StoreIdentity } from "./prompts";
 import { buildStage2JsonSchema, buildStage2ResponseZodSchema } from "./schema-builder";
@@ -23,8 +23,10 @@ import { createResearchGeminiClient, type UsageMetadataLike, type UrlContextMeta
 import {
   applyDeterministicValidation,
   type ResearchItem,
+  type SearchFact,
   type SourceRegistryEntry,
 } from "@/lib/ai/research-result-schema";
+import type { BasicInfo } from "@/types/basic-info";
 
 /* ------------------------------------------------------------------ */
 /*  Stage 1: Source Discovery                                          */
@@ -84,11 +86,17 @@ export async function runStage2(
     store: StoreIdentity;
     sourceRegistry: readonly SourceRegistryEntry[];
     searchNotes?: readonly SearchNote[];
+    /**
+     * Stage0のGoogle Placesでdeterministicに確定済みのkey(feat/ai-research-quality-refinement、
+     * 例: review_avg/review_count)。Geminiへ投げる項目一覧から除外し、hallucinationリスクと
+     * 出力トークンを削減する(`buildDeterministicPlacesItems`参照)。
+     */
+    excludeKeys?: ReadonlySet<string>;
   },
   signal: AbortSignal,
 ): Promise<Stage2Outcome> {
-  const { store, sourceRegistry, searchNotes = [] } = params;
-  const items = selectAiResearchItems(RESEARCH_POLICY_ITEMS);
+  const { store, sourceRegistry, searchNotes = [], excludeKeys } = params;
+  const items = selectAiResearchItems(RESEARCH_POLICY_ITEMS, excludeKeys);
   const allowedKeys = items.map((i) => i.key);
   const registryIds = sourceRegistry.map((s) => s.id);
 
@@ -155,6 +163,53 @@ export function buildNonAiItems(): ResearchItem[] {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Google Places由来のdeterministic item(feat/ai-research-quality-refinement） */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Google Placesがdeterministicに確定できるkey(review_avg/review_count限定)。
+ *
+ * 店舗名/住所/業種/電話番号はGemini + 既存`placesVerifiedKeys`バイパスで実測上すでに
+ * confirmedできており、Placesで一律上書きすると電話番号のroleの違い(店舗直通/予約専用等、
+ * Stage2プロンプトの較正対象)のような有用な情報を失うリスクがあるため対象外とする。
+ * `review_avg`/`review_count`はWeb調査でGeminiが正確に再現しづらく(Google公式評価を
+ * 直接掲載する第三者サイトが少ない)、Places側で確定できるなら常にそちらを優先すべき
+ * 数少ない項目のため、この2keyに限定してGemini対象からも除外する
+ * (`runStage2`の`excludeKeys`と対で使う)。
+ */
+export const DETERMINISTIC_PLACES_KEYS = ["review_avg", "review_count"] as const;
+
+/**
+ * Stage0でGoogle Placesが確認済みの`review_avg`/`review_count`から、AI呼出無しで
+ * confirmedなResearchItemを直接合成する(feat/ai-research-quality-refinement)。
+ * `placesVerifiedKeys`に含まれないkey、または値が空のkeyはスキップする
+ * (`derivePlacesVerifiedKeys`が`filled_by==="places"`かつ非空の場合のみ含めるため、
+ * manual保護は`effectiveBasicInfo`の生成側(`mergeBasicInfo`)が既に担保している)。
+ */
+export function buildDeterministicPlacesItems(
+  effectiveBasicInfo: BasicInfo,
+  placesVerifiedKeys: ReadonlySet<string>,
+): ResearchItem[] {
+  const items: ResearchItem[] = [];
+  for (const key of DETERMINISTIC_PLACES_KEYS) {
+    if (!placesVerifiedKeys.has(key)) continue;
+    const field = effectiveBasicInfo[key];
+    if (!field?.value) continue;
+    items.push({
+      key,
+      research_policy: getResearchPolicy(key)!,
+      status: "confirmed",
+      value: field.value,
+      evidence: "Google Placesで確認済みの情報です。",
+      source_ids: [],
+      confidence: 100,
+      evidence_basis: "places",
+    });
+  }
+  return items;
+}
+
+/* ------------------------------------------------------------------ */
 /*  Source Registry への url_context_status 反映                        */
 /* ------------------------------------------------------------------ */
 
@@ -198,6 +253,8 @@ export interface FinalizeParams {
   nonAiItems: readonly ResearchItem[];
   sourceRegistry: readonly SourceRegistryEntry[];
   placesVerifiedKeys?: ReadonlySet<string>;
+  /** Tier B判定に使うSearchFact(feat/ai-research-quality-refinement)。 */
+  searchFacts?: readonly SearchFact[];
 }
 
 /**
@@ -205,10 +262,10 @@ export interface FinalizeParams {
  * (`applyDeterministicValidation`, PR1)を適用した最終結果を返す。
  */
 export function finalizeResearchItems(params: FinalizeParams): ResearchItem[] {
-  const { aiItems, nonAiItems, sourceRegistry, placesVerifiedKeys } = params;
+  const { aiItems, nonAiItems, sourceRegistry, placesVerifiedKeys, searchFacts } = params;
   const merged = [...aiItems, ...nonAiItems];
   return merged.map((item) =>
-    applyDeterministicValidation(item, { sourceRegistry, placesVerifiedKeys }),
+    applyDeterministicValidation(item, { sourceRegistry, placesVerifiedKeys, searchFacts }),
   );
 }
 
