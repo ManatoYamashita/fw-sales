@@ -20,7 +20,7 @@ vi.mock("@google/genai", () => {
       void _opts;
     }
   }
-  return { GoogleGenAI: MockGoogleGenAI };
+  return { GoogleGenAI: MockGoogleGenAI, FinishReason: { STOP: "STOP", MAX_TOKENS: "MAX_TOKENS" } };
 });
 
 const { createResearchGeminiClient } = await import("../client");
@@ -269,5 +269,67 @@ describe("runStructuredUrlContext (Stage2)", () => {
         AbortSignal.timeout(1000),
       ),
     ).rejects.toMatchObject({ kind: "unknown" });
+  });
+
+  it("finishReason=MAX_TOKENSならmax_tokensエラーを投げる(partial JSONをJSON.parseへ渡さない、fix/ai-research-stage2-max-tokens)", async () => {
+    mockGenerateContent.mockResolvedValue({
+      text: '{"items": [{"key": "business_hours_holidays", "status": "confirmed"', // 打ち切られた不完全なJSON
+      candidates: [{ finishReason: "MAX_TOKENS", urlContextMetadata: { urlMetadata: [] } }],
+      usageMetadata: { totalTokenCount: 16384, thoughtsTokenCount: 14000, candidatesTokenCount: 2000 },
+    });
+
+    await expect(
+      createResearchGeminiClient().runStructuredUrlContext(
+        { prompt: "p", jsonSchema: JSON_SCHEMA },
+        AbortSignal.timeout(1000),
+      ),
+    ).rejects.toMatchObject({ kind: "max_tokens" });
+  });
+
+  it("finishReason=STOPなら通常どおり処理を続行する(MAX_TOKENS誤検出しない)", async () => {
+    mockGenerateContent.mockResolvedValue({
+      text: '{"items":[]}',
+      candidates: [{ finishReason: "STOP", urlContextMetadata: { urlMetadata: [] } }],
+      usageMetadata: {},
+    });
+
+    const result = await createResearchGeminiClient().runStructuredUrlContext(
+      { prompt: "p", jsonSchema: JSON_SCHEMA },
+      AbortSignal.timeout(1000),
+    );
+
+    expect(result.rawText).toBe('{"items":[]}');
+  });
+
+  it("既定のRESEARCH_MAX_OUTPUT_TOKENSは16384(実機smoke testで8192上限到達を確認、fix/ai-research-stage2-max-tokens)", async () => {
+    mockGenerateContent.mockResolvedValue({
+      text: "{}",
+      candidates: [{ finishReason: "STOP" }],
+      usageMetadata: {},
+    });
+
+    await createResearchGeminiClient().runStructuredUrlContext(
+      { prompt: "p", jsonSchema: JSON_SCHEMA },
+      AbortSignal.timeout(1000),
+    );
+
+    expect(lastCallArgs().config.maxOutputTokens).toBe(16384);
+  });
+
+  it("RESEARCH_MAX_OUTPUT_TOKENS環境変数で上書きできる", async () => {
+    process.env.RESEARCH_MAX_OUTPUT_TOKENS = "20000";
+    mockGenerateContent.mockResolvedValue({
+      text: "{}",
+      candidates: [{ finishReason: "STOP" }],
+      usageMetadata: {},
+    });
+
+    await createResearchGeminiClient().runStructuredUrlContext(
+      { prompt: "p", jsonSchema: JSON_SCHEMA },
+      AbortSignal.timeout(1000),
+    );
+
+    expect(lastCallArgs().config.maxOutputTokens).toBe(20000);
+    delete process.env.RESEARCH_MAX_OUTPUT_TOKENS;
   });
 });

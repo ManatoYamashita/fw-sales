@@ -7,9 +7,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { getGeminiModel } from "../env";
+import { getGeminiModel, getResearchMaxOutputTokens } from "../env";
 
-const KEYS = ["GEMINI_MODEL"] as const;
+const KEYS = ["GEMINI_MODEL", "RESEARCH_MAX_OUTPUT_TOKENS"] as const;
 
 let saved: Record<string, string | undefined>;
 
@@ -48,5 +48,16 @@ describe("getGeminiModel", () => {
   it("前後の空白は trim される (readEnv 仕様)", () => {
     process.env.GEMINI_MODEL = "  gemini-3.5-flash-lite  ";
     expect(getGeminiModel()).toBe("gemini-3.5-flash-lite");
+  });
+});
+
+describe("getResearchMaxOutputTokens (fix/ai-research-stage2-max-tokens)", () => {
+  it("未設定なら16384 (Stage2統合後の実機smoke testでthoughts+candidatesが8192上限に到達し失敗した実測に基づく引き上げ)", () => {
+    expect(getResearchMaxOutputTokens()).toBe(16384);
+  });
+
+  it("RESEARCH_MAX_OUTPUT_TOKENS設定時はその値を返す", () => {
+    process.env.RESEARCH_MAX_OUTPUT_TOKENS = "24576";
+    expect(getResearchMaxOutputTokens()).toBe(24576);
   });
 });

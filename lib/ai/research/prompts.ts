@@ -11,6 +11,11 @@
  * fix/ai-research-poc-like-retrieval での変更: Stage2をFACT/ANALYSISの2並列callから
  * PoCと同様の単一callへ統合(FACT + FACT_OR_HEARING + ANALYSISを1プロンプトで扱う)。
  * Gemini API呼出をrunあたりStage1・Stage2の原則2回に戻す。
+ *
+ * fix/ai-research-stage2-max-tokens での変更: Stage2 combined化に伴い42項目分の
+ * evidenceが冗長になるとGemini 3系のthinking token込みでmaxOutputTokens上限に達し、
+ * JSON出力が打ち切られる事象を実機smoke testで確認した(判定基準は変更せず、evidenceの
+ * 文章量のみ1〜2文へ簡潔化する指示を追加)。
  */
 
 import { BASIC_INFO_ITEM_BY_KEY } from "@/lib/domain/basic-info-items";
@@ -188,6 +193,12 @@ ${itemListText}
 ${FACT_INSTRUCTIONS}
 
 ${ANALYSIS_INSTRUCTIONS}
+
+# 出力の簡潔さ(重要)
+${items.length}件すべてについて回答するため、各項目の evidence は要点のみ**1〜2文**で
+簡潔に記載してください(長い引用や冗長な説明は避けること)。value も必要以上に長い文章に
+しないでください。ただし、判定基準(confirmed/inferred等の分類の厳密さ)や情報量そのものを
+削ることは絶対にしないでください。簡潔さは文章表現の問題であり、判定の緩さとは無関係です。
 
 # 出典の参照方法(重要)
 出典は上記Source Registryの **id のみ**(例: "S01")で参照してください。URLそのものを

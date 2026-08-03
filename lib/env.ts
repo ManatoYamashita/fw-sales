@@ -104,13 +104,17 @@ export function getResearchGeminiModel(): string {
  * AI 店舗調査の1回の生成で許す出力トークン上限。
  *
  * 営業資産生成(`MAX_OUTPUT_TOKENS = 4096`, `lib/ai/client.ts`)より大きい既定値
- * (8192)を暫定的に設定する。Stage2(FACT/ANALYSIS)は最大25項目程度を1回の
- * 応答で返すため、単一のMarkdownブロックより出力が大きくなりやすいという
- * 構造的な違いに基づく判断であり、実測はまだ行っていない
- * (Plan v3.2 §26 未決事項)。`RESEARCH_MAX_OUTPUT_TOKENS` で上書き可能。
+ * (16384)を設定する。Stage2はFACT/FACT_OR_HEARING/ANALYSIS計42項目を1回の
+ * Structured Output応答で返す(fix/ai-research-poc-like-retrieval でFACT/ANALYSIS
+ * 2call構成から単一callへ統合)。Gemini 3系はthinkingが既定で有効で、thinking
+ * tokenもこの出力枠を消費するため、実機smoke testで
+ * `thoughtsTokenCount + candidatesTokenCount` が8192の上限にほぼ到達し
+ * (8185/8192)、JSON出力が打ち切られ Stage2 全体が失敗する事象を確認した
+ * (2026-08-03 Preview smoke test)。この実測を踏まえ8192→16384へ引き上げる。
+ * `RESEARCH_MAX_OUTPUT_TOKENS` で上書き可能。
  */
 export function getResearchMaxOutputTokens(): number {
-  return readPositiveInt("RESEARCH_MAX_OUTPUT_TOKENS", 8192);
+  return readPositiveInt("RESEARCH_MAX_OUTPUT_TOKENS", 16384);
 }
 
 /**
