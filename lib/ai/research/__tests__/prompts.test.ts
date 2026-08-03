@@ -43,6 +43,13 @@ describe("buildStage1Prompt", () => {
     expect(prompt).toContain("公式サイトが見つかったからといって探索を打ち切らないでください");
   });
 
+  it("最低限の探索カテゴリ(coverage floor)を含む(feat/ai-research-final-quality)", () => {
+    const prompt = buildStage1Prompt(STORE);
+    expect(prompt).toContain("最低限、以下のカテゴリすべてについて一度は検索を試みてください");
+    expect(prompt).toContain("オープン日・沿革");
+    expect(prompt).toContain("口コミ・評判(ネガティブな言及含む)");
+  });
+
   it("[SEARCH_NOTE]の出力形式を含む", () => {
     const prompt = buildStage1Prompt(STORE);
     expect(prompt).toContain("[SEARCH_NOTE]");
@@ -252,26 +259,38 @@ describe("buildStage2Prompt", () => {
       expect(prompt).toContain("未確認");
     });
 
-    it("own_net_exposure/exposure_gapが含まれる場合、url_context成功済みsourceを列挙するObserved Web Presenceを含む", () => {
+    it("Observed Web Presenceブロックは含まない(feat/ai-research-final-quality、Stage2実行前は常に空になる時系列バグのため撤去)", () => {
       const registryWithSuccess = [
         { ...registry[0]!, url_context_status: "success" as const, source_type: "gourmet_site" as const },
       ];
       const items = [{ key: "own_net_exposure", label: "自店のネット露出状況", research_policy: "ANALYSIS" }];
       const prompt = buildStage2Prompt({ store: STORE, items, sourceRegistry: registryWithSuccess });
-      expect(prompt).toContain("実際に確認できたWeb露出");
-      expect(prompt).toContain("gourmet_site");
+      expect(prompt).not.toContain("実際に確認できたWeb露出");
     });
 
-    it("own_net_exposure/exposure_gapが含まれない場合はObserved Web Presenceを含まない", () => {
-      const items = [{ key: "business_hours_holidays", label: "営業時間・定休日", research_policy: "FACT" }];
+    it("media_coverageが含まれる場合、TV/雑誌に限定しない旨の指示を含む", () => {
+      const items = [{ key: "media_coverage", label: "確認できた掲載媒体・メディア露出", research_policy: "FACT" }];
       const prompt = buildStage2Prompt({ store: STORE, items, sourceRegistry: registry });
-      expect(prompt).not.toContain("実際に確認できたWeb露出");
+      expect(prompt).toContain("「メディア」をTV・雑誌等の伝統的な媒体に限定しないでください");
+    });
+
+    it("sns_update_frequencyが含まれる場合、公式サイト自体の更新と混同しない旨の指示を含む", () => {
+      const items = [{ key: "sns_update_frequency", label: "SNS更新頻度", research_policy: "FACT" }];
+      const prompt = buildStage2Prompt({ store: STORE, items, sourceRegistry: registry });
+      expect(prompt).toContain("公式サイト自体の更新頻度をSNS更新頻度の根拠にしないでください");
     });
 
     it("市場需要の強度表現の較正指示を含む", () => {
       const items = [{ key: "market_demand", label: "市場需要", research_policy: "ANALYSIS" }];
       const prompt = buildStage2Prompt({ store: STORE, items, sourceRegistry: registry });
       expect(prompt).toContain("一定の需要が示唆される");
+    });
+
+    it("competitor_paid_adsについて、ポータルページ・ネット予約の存在だけでは根拠にならない旨を明記する(feat/ai-research-final-quality)", () => {
+      const items = [{ key: "competitor_paid_ads", label: "ライバル有料広告活用有無", research_policy: "ANALYSIS" }];
+      const prompt = buildStage2Prompt({ store: STORE, items, sourceRegistry: registry });
+      expect(prompt).toContain("単に店舗ページやネット予約枠が存在するだけ");
+      expect(prompt).toContain("一切なりません");
     });
   });
 });

@@ -19,8 +19,13 @@ vi.mock("@/lib/places/google", () => ({
   searchPlaces: mockSearchPlaces,
 }));
 
-const { runStage0PlacesResync, deriveSearchIdentityName, isNameMatch, pickStrongPlaceMatch } =
-  await import("../places-stage0");
+const {
+  runStage0PlacesResync,
+  deriveSearchIdentityName,
+  isNameMatch,
+  pickStrongPlaceMatch,
+  classifyPlacesError,
+} = await import("../places-stage0");
 
 const NOW = "2026-08-03T00:00:00.000Z";
 
@@ -215,7 +220,7 @@ describe("runStage0PlacesResync", () => {
       expect(result.warning).toBeNull();
     });
 
-    it("Text Search失敗時もresearch継続のため例外を投げず、warningを返す", async () => {
+    it("Text Search失敗時もresearch継続のため例外を投げず、warningを返す(feat/ai-research-final-quality: sanitized kindを含む)", async () => {
       mockSearchPlaces.mockRejectedValue(new Error("Places API エラー (500): internal"));
 
       const result = await runStage0PlacesResync({ googlePlaceId: null, store: STORE, now: NOW });
@@ -223,6 +228,35 @@ describe("runStage0PlacesResync", () => {
       expect(result.placesBasicInfo).toEqual({});
       expect(result.warning).not.toBeNull();
       expect(result.warning).not.toContain("internal");
+      expect(result.warning).toContain("api_error:500");
     });
+  });
+
+  it("getPlaceById失敗時もsanitized kindを含むwarningを返す", async () => {
+    mockGetPlaceById.mockRejectedValue(new Error("Places API エラー (403): forbidden detail"));
+
+    const result = await runStage0PlacesResync({ googlePlaceId: "places/x", store: STORE, now: NOW });
+
+    expect(result.warning).toContain("api_error:403");
+    expect(result.warning).not.toContain("forbidden detail");
+  });
+});
+
+describe("classifyPlacesError (feat/ai-research-final-quality)", () => {
+  it("GOOGLE_PLACES_API_KEY未設定エラーはmissing_api_keyになる", () => {
+    expect(classifyPlacesError(new Error("GOOGLE_PLACES_API_KEY が設定されていません"))).toBe(
+      "missing_api_key",
+    );
+  });
+
+  it("HTTPステータス付きエラーはapi_error:<status>になる(生レスポンス本文は含まない)", () => {
+    expect(classifyPlacesError(new Error("Places API エラー (403): secret detail here"))).toBe(
+      "api_error:403",
+    );
+  });
+
+  it("ステータス不明・分類不能なエラーはunknownになる", () => {
+    expect(classifyPlacesError(new Error("something else"))).toBe("unknown");
+    expect(classifyPlacesError("plain string")).toBe("unknown");
   });
 });

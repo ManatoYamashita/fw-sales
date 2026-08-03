@@ -25,6 +25,7 @@ import {
   type ResearchItem,
   type SearchFact,
   type SourceRegistryEntry,
+  type SourceType,
 } from "@/lib/ai/research-result-schema";
 import type { BasicInfo } from "@/types/basic-info";
 
@@ -241,6 +242,76 @@ export function applyUrlContextStatus(
     const status = statusByUrl.get(entry.grounding_redirect_url);
     if (!status || status === entry.url_context_status) return entry;
     return { ...entry, url_context_status: status };
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/*  own_net_exposure / media_coverage の post-Stage2 deterministic補正      */
+/*  (feat/ai-research-final-quality)                                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Stage2プロンプト構築時点(`buildStage2Prompt`呼出時)では、そのrun自身のURL Context
+ * 結果がまだ存在しない(Stage2実行前)ため、「実際に確認できたWeb露出」をプロンプトへ
+ * 含める設計は原理的に機能しない(常に空になる、fix/ai-research-quality-refinementで
+ * 導入し feat/ai-research-final-quality で撤去した"Observed Web Presence"ブロックの
+ * バグ)。この関数はStage2完了後の`finalRegistry`(url_context_status反映済み)から
+ * 実際に本文取得へ成功した情報源を求め、`own_net_exposure`/`exposure_gap`のevidenceへ
+ * 補足として追記する。追加のGemini呼出は行わない(deterministicな後処理のみ)。
+ */
+export function appendConfirmedMediaContext(
+  items: readonly ResearchItem[],
+  finalRegistry: readonly SourceRegistryEntry[],
+): ResearchItem[] {
+  const confirmedTitles = finalRegistry
+    .filter((entry) => entry.url_context_status === "success")
+    .map((entry) => entry.title);
+  if (confirmedTitles.length === 0) return items.slice();
+
+  const targetKeys = new Set(["own_net_exposure", "exposure_gap"]);
+  const supplement = `(このrunで実際に本文を確認できた情報源: ${confirmedTitles.join("、")})`;
+
+  return items.map((item) =>
+    targetKeys.has(item.key) ? { ...item, evidence: `${item.evidence} ${supplement}` } : item,
+  );
+}
+
+/** `media_coverage`の「確認できた掲載媒体」対象source_type(公式サイト・SNSは自店発信のため除く)。 */
+const MEDIA_COVERAGE_SOURCE_TYPES: ReadonlySet<SourceType> = new Set([
+  "gourmet_site",
+  "reservation_site",
+  "article",
+  "local_official",
+]);
+
+/**
+ * `media_coverage`をAIが`not_found`/`inferred`と判定した場合でも、実際に本文取得に
+ * 成功した第三者媒体(グルメサイト・予約サイト・地域記事等)があればdeterministicに
+ * `confirmed`へ補正する(feat/ai-research-final-quality)。モデルが既に`confirmed`と
+ * 判定していた場合は上書きしない(モデル自身の判断を尊重、二重に強い主張をしない)。
+ * 対象媒体が1件も無い場合は何もしない(AIの判定をそのまま維持)。
+ */
+export function upgradeMediaCoverageFromRegistry(
+  items: readonly ResearchItem[],
+  finalRegistry: readonly SourceRegistryEntry[],
+): ResearchItem[] {
+  const confirmedMedia = finalRegistry.filter(
+    (entry) => entry.url_context_status === "success" && MEDIA_COVERAGE_SOURCE_TYPES.has(entry.source_type),
+  );
+  if (confirmedMedia.length === 0) return items.slice();
+
+  return items.map((item) => {
+    if (item.key !== "media_coverage" || item.status === "confirmed") return item;
+    return {
+      ...item,
+      status: "confirmed" as const,
+      value: confirmedMedia.map((entry) => entry.title).join("、"),
+      evidence: "実際に本文取得に成功した掲載媒体を確認しました。",
+      source_ids: confirmedMedia.map((entry) => entry.id),
+      evidence_basis: "url_context" as const,
+      warning: undefined,
+      candidates: undefined,
+    };
   });
 }
 

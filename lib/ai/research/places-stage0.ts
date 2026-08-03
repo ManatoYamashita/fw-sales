@@ -109,6 +109,23 @@ function normalizePhone(phone: string): string {
 }
 
 /**
+ * Places API失敗時の生エラー(`lib/places/google.ts`が投げる`Error`)から、
+ * secretや生レスポンス本文を含まないsanitizedな種別文字列を導出する
+ * (feat/ai-research-final-quality、PR #187のGemini観測性修正と同じ方針)。
+ *
+ * `lib/places/google.ts`は`Error("Places API エラー (${status}): ${text}")`
+ * 形式で投げるため、ここではstatusコードのみを抽出し、`text`(Google APIの
+ * 生レスポンス本文)は一切含めない。判定できない場合は"unknown"。
+ */
+export function classifyPlacesError(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  if (message.includes("GOOGLE_PLACES_API_KEY")) return "missing_api_key";
+  const statusMatch = message.match(/エラー \((\d{3})\)/);
+  if (statusMatch) return `api_error:${statusMatch[1]}`;
+  return "unknown";
+}
+
+/**
  * `google_place_id` が存在する場合は Place Details を1回取得する。
  * 存在しない場合は Text Search を1回実行し、strong matchが一意に定まった場合のみ採用する
  * (feat/ai-research-quality-refinement)。いずれの経路でもPlaces呼出は1回/runを超えない。
@@ -130,10 +147,10 @@ export async function runStage0PlacesResync(params: {
         };
       }
       return { placesBasicInfo: placeResultToBasicInfo(place, now), warning: null };
-    } catch {
+    } catch (err) {
       return {
         placesBasicInfo: {},
-        warning: "Google Places再同期に失敗しました。既存情報のみで調査を続行します。",
+        warning: `Google Places再同期に失敗しました (${classifyPlacesError(err)})。既存情報のみで調査を続行します。`,
       };
     }
   }
@@ -148,10 +165,10 @@ export async function runStage0PlacesResync(params: {
       return { placesBasicInfo: {}, warning: null };
     }
     return { placesBasicInfo: placeResultToBasicInfo(matched, now), warning: null };
-  } catch {
+  } catch (err) {
     return {
       placesBasicInfo: {},
-      warning: "Google Places検索に失敗しました。既存情報のみで調査を続行します。",
+      warning: `Google Places検索に失敗しました (${classifyPlacesError(err)})。既存情報のみで調査を続行します。`,
     };
   }
 }
