@@ -552,7 +552,32 @@ export function validateResearchItemStatus(
  */
 function nullifyForNoInfoStatus(item: ResearchItem, targetStatus: ResearchStatus): ResearchItem {
   if (targetStatus === "inferred") return item;
-  return { ...item, value: null, confidence: null, candidates: undefined };
+  return {
+    ...item,
+    value: null,
+    confidence: null,
+    candidates: undefined,
+    evidence: deterministicEvidenceForNoInfoStatus(targetStatus),
+  };
+}
+
+/**
+ * no-infoステータスへ降格・補正した際、statusと矛盾しないevidenceへ置き換える
+ * (feat/ai-research-final-quality)。AIが元status前提で書いたevidence(例:
+ * 「...のためヒアリングが必要です」)が、機械補正後のstatus(例: not_found)と
+ * 矛盾したまま残る実バグの再発防止。
+ */
+function deterministicEvidenceForNoInfoStatus(status: ResearchStatus): string {
+  switch (status) {
+    case "not_found":
+      return "Web上で確認できませんでした。";
+    case "hearing_required":
+      return "Web上の本人発信で確認できないため、営業時のヒアリングが必要です。";
+    case "external_data_required":
+      return "現在のWeb調査方式では正確な値を取得できないため、対象外です。";
+    default:
+      return "";
+  }
 }
 
 /** research_policy ごとの confirmed 降格先。 */
@@ -655,7 +680,62 @@ export function applyDeterministicValidation(
   const statusEnforced = enforceStatusForPolicy(policyEnforced);
   const sourceIdsSanitized = sanitizeSourceIds(statusEnforced, context.sourceRegistry);
   const conflictValidated = validateConflictShape(sourceIdsSanitized);
-  return validateResearchItemStatus(conflictValidated, context);
+  const statusValidated = validateResearchItemStatus(conflictValidated, context);
+  return pruneUnverifiedSourceIds(statusValidated, context);
+}
+
+/**
+ * confirmed維持の判定自体には他の検証済みsourceで十分な場合でも、実際には検証に
+ * 寄与していない(url_context成功でもkey一致のSearchFactでもない)source_idsが
+ * 混在したままUIへ表示されないよう、最終段で刈り込む(feat/ai-research-final-quality)。
+ *
+ * 「1件でも正しいsourceがあればconfirmedを維持してよい」ことと「無関係・未検証の
+ * sourceまでUIの根拠として見せる」ことは別の問題であり、本関数は後者のみを扱う。
+ * `validateResearchItemStatus`が既にconfirmed可否を判定した**後**に適用するため、
+ * 判定結果自体は変えない(表示のノイズ削減のみ)。全件除去されてしまう場合は
+ * (根拠が丸ごと消えて見えるほうが不自然なため)除去せず元のまま残す。
+ *
+ * 純関数。入力を変更せず、新しい `ResearchItem` を返す。
+ */
+export function pruneUnverifiedSourceIds(
+  item: ResearchItem,
+  context: ResearchValidationContext,
+): ResearchItem {
+  const verifiedIds = new Set(
+    context.sourceRegistry
+      .filter((entry) => entry.url_context_status === "success")
+      .map((entry) => entry.id),
+  );
+  const searchFactIdsForKey = new Set(
+    (context.searchFacts ?? []).filter((fact) => fact.key === item.key).map((fact) => fact.sourceId),
+  );
+  const isKept = (id: string): boolean => verifiedIds.has(id) || searchFactIdsForKey.has(id);
+
+  const filteredSourceIds =
+    item.source_ids.length === 0
+      ? item.source_ids
+      : (() => {
+          const filtered = item.source_ids.filter(isKept);
+          return filtered.length > 0 ? filtered : item.source_ids;
+        })();
+
+  const filteredCandidates = item.candidates?.map((candidate) => {
+    if (candidate.source_ids.length === 0) return candidate;
+    const filtered = candidate.source_ids.filter(isKept);
+    return filtered.length > 0 ? { ...candidate, source_ids: filtered } : candidate;
+  });
+
+  const sourceIdsChanged = filteredSourceIds !== item.source_ids;
+  const candidatesChanged =
+    filteredCandidates !== undefined &&
+    filteredCandidates.some((c, i) => c !== item.candidates?.[i]);
+
+  if (!sourceIdsChanged && !candidatesChanged) return item;
+  return {
+    ...item,
+    source_ids: filteredSourceIds,
+    candidates: candidatesChanged ? filteredCandidates : item.candidates,
+  };
 }
 
 /** `applyDeterministicValidation` を複数項目へ一括適用する。 */

@@ -15,6 +15,7 @@ import {
   validateConflictShape,
   validateResearchItemStatus,
   applyDeterministicValidation,
+  pruneUnverifiedSourceIds,
   validateResearchItems,
   type ResearchItem,
   type ResearchItemCandidate,
@@ -271,6 +272,7 @@ describe("enforceStatusForPolicy (feat/ai-research-quality-refinement: policy/st
     expect(result.confidence).toBeNull();
     expect(result.candidates).toBeUndefined();
     expect(result.warning).toContain("補正");
+    expect(result.evidence).toBe("Web上の本人発信で確認できないため、営業時のヒアリングが必要です。");
   });
 
   it("FACTにhearing_requiredが混入した場合、not_foundへ補正する(ANALYSISのinferredへは倒さない、より保守的なfallback)", () => {
@@ -414,24 +416,27 @@ describe("validateResearchItemStatus (confirmed の deterministic validation)", 
     expect(result.value).toBeNull();
     expect(result.confidence).toBeNull();
     expect(result.candidates).toBeUndefined();
+    expect(result.evidence).toBe("Web上で確認できませんでした。"); // feat/ai-research-final-quality: 元evidenceの矛盾表現を残さない
   });
 
-  it("ANALYSIS項目: 検証済みsourceが無ければ inferred へ降格し、value/confidenceは維持する(唯一の例外)", () => {
+  it("ANALYSIS項目: 検証済みsourceが無ければ inferred へ降格し、value/confidence/evidenceは維持する(唯一の例外)", () => {
     const item = makeItem({ research_policy: "ANALYSIS", source_ids: ["S01"], confidence: 60 });
     const registry = [makeSource({ id: "S01", url_context_status: "not_attempted" })];
     const result = validateResearchItemStatus(item, { sourceRegistry: registry });
     expect(result.status).toBe("inferred");
     expect(result.value).toBe(item.value);
     expect(result.confidence).toBe(60);
+    expect(result.evidence).toBe(item.evidence);
   });
 
-  it("FACT_OR_HEARING項目: 検証済みsourceが無ければ hearing_required へ降格し、value/confidenceをnull化する", () => {
+  it("FACT_OR_HEARING項目: 検証済みsourceが無ければ hearing_required へ降格し、value/confidenceをnull化・evidenceを整合させる", () => {
     const item = makeItem({ research_policy: "FACT_OR_HEARING", source_ids: ["S01"], confidence: 70 });
     const registry = [makeSource({ id: "S01", url_context_status: "error" })];
     const result = validateResearchItemStatus(item, { sourceRegistry: registry });
     expect(result.status).toBe("hearing_required");
     expect(result.value).toBeNull();
     expect(result.confidence).toBeNull();
+    expect(result.evidence).toBe("Web上の本人発信で確認できないため、営業時のヒアリングが必要です。");
   });
 
   it("Google Searchのみで見つかりURL Context未取得のsourceは根拠として使わない", () => {
@@ -697,6 +702,69 @@ describe("applyDeterministicValidation (パイプライン統合)", () => {
 
     expect(result.research_policy).toBe("FACT");
     expect(result.status).toBe("not_found"); // FACTの許容外statusはnot_foundへ補正
+    expect(result.evidence).toBe("Web上で確認できませんでした。"); // owner_snsのevidence不整合バグの再発防止
+  });
+});
+
+describe("pruneUnverifiedSourceIds (feat/ai-research-final-quality、Source IDノイズ除去)", () => {
+  it("url_context成功・SearchFact一致いずれでもないsource_idを除去する", () => {
+    const item = makeItem({
+      status: "confirmed",
+      source_ids: ["S01", "S02"], // S01=success(正当), S02=error(ノイズ)
+    });
+    const registry = [
+      makeSource({ id: "S01", url_context_status: "success" }),
+      makeSource({ id: "S02", url_context_status: "error" }),
+    ];
+    const result = pruneUnverifiedSourceIds(item, { sourceRegistry: registry });
+    expect(result.source_ids).toEqual(["S01"]);
+  });
+
+  it("key一致のSearchFactがあるsource_idは除去しない(Tier B根拠として正当)", () => {
+    const item = makeItem({ key: "seat_count", status: "confirmed", source_ids: ["S01"] });
+    const registry = [makeSource({ id: "S01", source_type: "gourmet_site", url_context_status: "error" })];
+    const result = pruneUnverifiedSourceIds(item, {
+      sourceRegistry: registry,
+      searchFacts: [{ sourceId: "S01", key: "seat_count", value: "40席" }],
+    });
+    expect(result.source_ids).toEqual(["S01"]);
+  });
+
+  it("全件が未検証の場合は除去しない(根拠が丸ごと消えるほうが不自然なため)", () => {
+    const item = makeItem({ status: "confirmed", source_ids: ["S01"] });
+    const registry = [makeSource({ id: "S01", url_context_status: "error" })];
+    const result = pruneUnverifiedSourceIds(item, { sourceRegistry: registry });
+    expect(result.source_ids).toEqual(["S01"]);
+  });
+
+  it("candidates内のsource_idsも同様に刈り込む", () => {
+    const item = makeItem({
+      status: "conflict",
+      source_ids: [],
+      candidates: [makeCandidate({ source_ids: ["S01", "S02"] })],
+    });
+    const registry = [
+      makeSource({ id: "S01", url_context_status: "success" }),
+      makeSource({ id: "S02", url_context_status: "not_attempted" }),
+    ];
+    const result = pruneUnverifiedSourceIds(item, { sourceRegistry: registry });
+    expect(result.candidates?.[0]?.source_ids).toEqual(["S01"]);
+  });
+
+  it("applyDeterministicValidationのパイプラインに組み込まれている(exterior_interiorでの実例再現)", () => {
+    const item = makeItem({
+      key: "exterior_interior",
+      research_policy: "ANALYSIS",
+      status: "confirmed",
+      source_ids: ["S01", "S10"], // S10はurl_context失敗の無関係page(求人ページ等)
+    });
+    const registry = [
+      makeSource({ id: "S01", url_context_status: "success" }),
+      makeSource({ id: "S10", source_type: "other", url_context_status: "error" }),
+    ];
+    const result = applyDeterministicValidation(item, { sourceRegistry: registry });
+    expect(result.status).toBe("confirmed");
+    expect(result.source_ids).toEqual(["S01"]); // S10のノイズが除去される
   });
 });
 

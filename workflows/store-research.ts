@@ -56,6 +56,8 @@ import {
   buildNonAiItems,
   buildDeterministicPlacesItems,
   applyUrlContextStatus,
+  upgradeMediaCoverageFromRegistry,
+  appendConfirmedMediaContext,
   finalizeResearchItems,
 } from "@/lib/ai/research/pipeline";
 import {
@@ -335,8 +337,14 @@ export async function storeResearchWorkflow(
       .map((n) => ({ sourceId: registryIdByUrl.get(n.sourceUrl), key: n.key, value: n.value }))
       .filter((f): f is SearchFact => f.sourceId !== undefined);
 
+    // own_net_exposure/exposure_gapの自己矛盾防止・media_coverageの解釈漏れ補正
+    // (feat/ai-research-final-quality)。Stage2完了後のfinalRegistryから
+    // deterministicに構築するため、追加のGemini呼出は発生しない。
+    const mediaCorrectedItems = upgradeMediaCoverageFromRegistry(stage2Result.items, finalRegistry);
+    const aiItemsWithContext = appendConfirmedMediaContext(mediaCorrectedItems, finalRegistry);
+
     const finalItems = finalizeResearchItems({
-      aiItems: [...stage2Result.items, ...deterministicPlacesItems],
+      aiItems: [...aiItemsWithContext, ...deterministicPlacesItems],
       nonAiItems: buildNonAiItems(),
       sourceRegistry: finalRegistry,
       placesVerifiedKeys: placesVerifiedKeySet,
