@@ -15,7 +15,7 @@
 
 import "server-only";
 
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, FinishReason } from "@google/genai";
 import { readEnv, getResearchGeminiModel, getResearchMaxOutputTokens } from "@/lib/env";
 import { normalizeSdkError, makeError, type AiClientError } from "@/lib/ai/client";
 import type { GroundingMetadataLike } from "./source-registry";
@@ -166,12 +166,23 @@ export function createResearchGeminiClient(): ResearchGeminiClient {
           },
         });
 
+        const candidate = response.candidates?.[0];
+
+        // 長さ上限による打ち切りを、空応答/JSON parse失敗より先に専用分類へ落とす。
+        // Gemini 3系はthinkingが既定で有効で、thinking tokenも出力枠(maxOutputTokens)を
+        // 消費するため、42項目Combinedの出力途中でJSON が閉じられないまま打ち切られうる
+        // (実機smoke testで thoughtsTokenCount+candidatesTokenCount が上限に到達し、
+        // 後続のJSON.parseが構文エラーになる事象を確認済み)。ここで検出しないと
+        // 「JSON parse failure」と「出力token上限」が区別できなくなる。
+        if (candidate?.finishReason === FinishReason.MAX_TOKENS) {
+          throw makeError({ kind: "max_tokens" });
+        }
+
         const rawText = response.text;
         if (typeof rawText !== "string" || rawText.length === 0) {
           throw makeError({ kind: "unknown", message: "Stage2 の応答が空でした" });
         }
 
-        const candidate = response.candidates?.[0];
         const ucm = candidate?.urlContextMetadata as
           | { urlMetadata?: { retrievedUrl?: string | null; urlRetrievalStatus?: string | null }[] }
           | undefined;

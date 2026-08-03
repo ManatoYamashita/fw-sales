@@ -164,6 +164,14 @@ describe("runStage2 (統合、FACT+FACT_OR_HEARING+ANALYSISを1回で扱う)", (
     expect(result.parseWarning).not.toBeNull();
   });
 
+  it("clientがmax_tokensエラーを投げた場合はparseWarningへ握りつぶさず、そのまま伝播する(fix/ai-research-stage2-max-tokens)", async () => {
+    mockRunStructuredUrlContext.mockRejectedValue({ kind: "max_tokens" });
+
+    await expect(
+      runStage2({ store: STORE, sourceRegistry: REGISTRY }, AbortSignal.timeout(1000)),
+    ).rejects.toMatchObject({ kind: "max_tokens" });
+  });
+
   it("sourceRegistryが空でもAPI呼出自体は行う(Source Registry空時の案内はprompts.tsが担当)", async () => {
     mockRunStructuredUrlContext.mockResolvedValue({
       rawText: JSON.stringify({

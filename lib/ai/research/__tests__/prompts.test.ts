@@ -112,4 +112,10 @@ describe("buildStage2Prompt", () => {
     const prompt = buildStage2Prompt({ store: STORE, items: combinedItems, sourceRegistry: registry });
     expect(prompt).toContain("候補");
   });
+
+  it("evidenceを簡潔にする指示を含む(MAX_TOKENS対策、fix/ai-research-stage2-max-tokens)が、判定基準を弱める文言は含まない", () => {
+    const prompt = buildStage2Prompt({ store: STORE, items: combinedItems, sourceRegistry: registry });
+    expect(prompt).toContain("1〜2文");
+    expect(prompt).not.toContain("判定を緩め");
+  });
 });
