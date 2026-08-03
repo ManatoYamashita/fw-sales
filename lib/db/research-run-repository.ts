@@ -165,6 +165,17 @@ export function makeResearchRunRepo(
       return rows.map((row) => row.store_id);
     },
 
+    async getForUpdate(id) {
+      const rows = await executor
+        .select()
+        .from(storeResearchRuns)
+        .where(eq(storeResearchRuns.id, id))
+        .for("update")
+        .limit(1);
+      const row = rows[0];
+      return row ? fromDbRow(row) : null;
+    },
+
     async update(id, patch: StoreResearchRunPatch) {
       const current = await executor
         .select()

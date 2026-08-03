@@ -21,6 +21,7 @@ const {
   mockUpdate,
   mockRevalidateTag,
   mockGetCurrentSession,
+  mockTransaction,
 } = vi.hoisted(() => ({
   mockStart: vi.fn(),
   mockStoreGet: vi.fn(),
@@ -31,6 +32,10 @@ const {
   mockUpdate: vi.fn(),
   mockRevalidateTag: vi.fn(),
   mockGetCurrentSession: vi.fn(),
+  // feat/research-review-write-integrity(MAJOR10): review系Actionは
+  // repos.transaction(async (tx) => ...) 経由でgetForUpdate/get/updateを呼ぶ。
+  // 実装はこのブロックの外側(他のmockが変数として参照可能になった後)で設定する。
+  mockTransaction: vi.fn(),
 }));
 
 vi.mock("workflow/api", () => ({ start: mockStart }));
@@ -44,8 +49,23 @@ vi.mock("@/lib/repositories", () => ({
       create: mockCreate,
       update: mockUpdate,
     },
+    transaction: mockTransaction,
   },
 }));
+
+// テストではtxへ同じmock関数をそのまま渡し、既存のmockXxx.mockResolvedValue(...)設定が
+// トランザクション内呼出(tx.researchRun.getForUpdate等)にもそのまま効くようにする。
+mockTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) =>
+  fn({
+    store: { get: mockStoreGet, update: mockStoreUpdate },
+    researchRun: {
+      getForUpdate: mockResearchRunGet,
+      get: mockResearchRunGet,
+      create: mockCreate,
+      update: mockUpdate,
+    },
+  }),
+);
 vi.mock("next/cache", () => ({ revalidateTag: mockRevalidateTag }));
 vi.mock("@/lib/supabase/server", () => ({ getCurrentSession: mockGetCurrentSession }));
 
@@ -415,6 +435,114 @@ describe("recordReviewDecisionAction", () => {
     });
 
     expect(result.ok).toBe(false);
+  });
+
+  it("既に判断済みのitemKeyへの再判断は拒否する(feat/research-review-write-integrity、MAJOR10: immutable設計)", async () => {
+    const run = makeRun({
+      review_decisions: {
+        business_hours_holidays: { decision: "adopted", decided_at: "2026-08-01T00:30:00.000Z" },
+      },
+    });
+    mockResearchRunGet.mockResolvedValue(run);
+
+    const result = await recordReviewDecisionAction({
+      runId: run.id,
+      storeId: run.store_id,
+      itemKey: "business_hours_holidays",
+      decision: "rejected",
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("既に判断済み");
+    expect(mockStoreUpdate).not.toHaveBeenCalled();
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it("editedValueが空文字ならcanonicalへ保存せず拒否する(MAJOR11)", async () => {
+    const run = makeRun();
+    mockResearchRunGet.mockResolvedValue(run);
+
+    const result = await recordReviewDecisionAction({
+      runId: run.id,
+      storeId: run.store_id,
+      itemKey: "business_hours_holidays",
+      decision: "adopted",
+      editedValue: "",
+    });
+
+    expect(result.ok).toBe(false);
+    expect(mockStoreUpdate).not.toHaveBeenCalled();
+  });
+
+  it("editedValueが空白のみでも拒否する(MAJOR11)", async () => {
+    const run = makeRun();
+    mockResearchRunGet.mockResolvedValue(run);
+
+    const result = await recordReviewDecisionAction({
+      runId: run.id,
+      storeId: run.store_id,
+      itemKey: "business_hours_holidays",
+      decision: "adopted",
+      editedValue: "   ",
+    });
+
+    expect(result.ok).toBe(false);
+    expect(mockStoreUpdate).not.toHaveBeenCalled();
+  });
+
+  it("editedValueの前後の空白はtrimして保存する", async () => {
+    const run = makeRun();
+    mockResearchRunGet.mockResolvedValue(run);
+
+    const result = await recordReviewDecisionAction({
+      runId: run.id,
+      storeId: run.store_id,
+      itemKey: "business_hours_holidays",
+      decision: "adopted",
+      editedValue: "  17:00-23:00  ",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(mockStoreUpdate).toHaveBeenCalledWith(
+      run.store_id,
+      expect.objectContaining({
+        basic_info: expect.objectContaining({
+          business_hours_holidays: expect.objectContaining({ value: "17:00-23:00" }),
+        }),
+      }),
+    );
+  });
+
+  it("decisionが不正な値(未知のenum)ならruntimeで拒否する(追加修正E)", async () => {
+    const run = makeRun();
+    mockResearchRunGet.mockResolvedValue(run);
+
+    const result = await recordReviewDecisionAction({
+      runId: run.id,
+      storeId: run.store_id,
+      itemKey: "business_hours_holidays",
+      // @ts-expect-error 不正値をruntime検証するためのテスト
+      decision: "not_a_real_decision",
+    });
+
+    expect(result.ok).toBe(false);
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it("runId/storeId/itemKeyが文字列以外ならruntimeで拒否する(追加修正E)", async () => {
+    const run = makeRun();
+    mockResearchRunGet.mockResolvedValue(run);
+
+    const result = await recordReviewDecisionAction({
+      // @ts-expect-error 不正型をruntime検証するためのテスト
+      runId: 123,
+      storeId: run.store_id,
+      itemKey: "business_hours_holidays",
+      decision: "adopted",
+    });
+
+    expect(result.ok).toBe(false);
+    expect(mockResearchRunGet).not.toHaveBeenCalled();
   });
 });
 

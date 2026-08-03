@@ -299,6 +299,44 @@ describe("buildAdoptedBasicInfoField", () => {
     expect(field.value).toBe("手動で修正した値");
   });
 
+  it("editedValueが元の値と異なる場合、AIのconfidenceを引き継がずsource_quoteを編集済み文言へ置き換える(feat/research-review-write-integrity、追加修正F)", () => {
+    const item = makeItem({ status: "confirmed", confidence: 90, evidence: "AIの根拠テキスト" });
+    const field = buildAdoptedBasicInfoField(item, registry, now, {
+      editedValue: "手動で修正した値",
+    });
+    expect(field.value).toBe("手動で修正した値");
+    expect(field.confidence).toBeUndefined();
+    expect(field.source_quote).not.toBe("AIの根拠テキスト");
+    expect(field.source_quote).toContain("人間が編集した値");
+  });
+
+  it("editedValueが元の値と同一(実質未編集)ならAIのconfidence/evidenceをそのまま使う", () => {
+    const item = makeItem({ status: "confirmed", value: "17:00〜24:00", confidence: 90, evidence: "AIの根拠テキスト" });
+    const field = buildAdoptedBasicInfoField(item, registry, now, {
+      editedValue: "17:00〜24:00",
+    });
+    expect(field.confidence).toBe(90);
+    expect(field.source_quote).toBe("AIの根拠テキスト");
+  });
+
+  it("conflict候補選択+editedValueが候補値と異なる場合もconfidence/source_quoteを編集済み扱いにする", () => {
+    const item = makeItem({
+      status: "conflict",
+      value: null,
+      confidence: 80,
+      candidates: [
+        { candidate_id: "c1", label: "候補A", value: "候補A値", evidence: "候補A根拠", source_ids: ["S01"] },
+      ],
+    });
+    const field = buildAdoptedBasicInfoField(item, registry, now, {
+      selectedCandidateId: "c1",
+      editedValue: "編集後の値",
+    });
+    expect(field.value).toBe("編集後の値");
+    expect(field.confidence).toBeUndefined();
+    expect(field.source_quote).toContain("人間が編集した値");
+  });
+
   it("conflictで候補選択時はtier Aかつ候補のevidence/source_idsを使う", () => {
     const item = makeItem({
       status: "conflict",

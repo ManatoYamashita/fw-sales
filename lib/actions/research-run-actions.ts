@@ -30,7 +30,11 @@ import {
   isReviewableItem,
   isRunStuck,
 } from "@/lib/domain/research-review";
-import { isValidReviewDecisionForItem } from "@/lib/ai/research-result-schema";
+import {
+  isValidReviewDecisionForItem,
+  ReviewDecisionSchema,
+  REVIEW_DECISION_TYPES,
+} from "@/lib/ai/research-result-schema";
 import type {
   ReviewDecision,
   ReviewDecisionType,
@@ -139,6 +143,16 @@ export interface RecordReviewDecisionInput {
  * 「採用した項目のみ mergeBasicInfo(..., "manual") で stores.basic_info へ即時反映」
  * (Plan §4)の実装。却下・スキップは `review_decisions` の記録のみで `basic_info` は
  * 変更しない。
+ *
+ * feat/research-review-write-integrity(MAJOR10・MAJOR11)での変更:
+ * - `repos.transaction` + `getForUpdate`(`SELECT ... FOR UPDATE`)でrun行をロックし、
+ *   basic_info書込みとreview_decisions書込みを1トランザクションで原子化する。
+ *   同一runへの並行操作(採用/却下/スキップ、一括採用、レビュー完了)を直列化する。
+ * - 一度`review_decisions`に記録済みのitemKeyへの再判断は拒否する(immutable設計。
+ *   採用後の訂正はbasic_info編集導線で行う想定)。
+ * - `editedValue`は空文字・空白のみを拒否する(canonicalなbasic_infoへ空値を
+ *   保存させない)。
+ * - inputはTypeScriptの型だけを信頼せず、runtimeでも検証する。
  */
 export async function recordReviewDecisionAction(
   input: RecordReviewDecisionInput,
@@ -147,18 +161,25 @@ export async function recordReviewDecisionAction(
   if (!session) return failure("ログインが必要です");
 
   const { runId, storeId, itemKey, decision, selectedCandidateId, editedValue } = input;
-  if (!runId || !storeId || !itemKey) return failure("パラメータが不正です");
-
-  const run = await repos.researchRun.get(runId);
-  if (!run || run.store_id !== storeId) return failure("調査結果が見つかりません");
-  if (run.status !== "succeeded") return failure("この調査はまだレビューできません");
-  if (run.review_completed_at !== null) return failure("このレビューは既に完了しています");
-
-  const item = (run.result ?? []).find((i) => i.key === itemKey);
-  if (!item) return failure("対象の項目が見つかりません");
-  if (!isReviewableItem(item)) return failure("この項目はレビュー対象外です");
+  if (typeof runId !== "string" || runId.trim() === "") return failure("パラメータが不正です");
+  if (typeof storeId !== "string" || storeId.trim() === "") return failure("パラメータが不正です");
+  if (typeof itemKey !== "string" || itemKey.trim() === "") return failure("パラメータが不正です");
+  if (!(REVIEW_DECISION_TYPES as readonly string[]).includes(decision)) {
+    return failure("パラメータが不正です");
+  }
+  if (selectedCandidateId !== undefined && typeof selectedCandidateId !== "string") {
+    return failure("パラメータが不正です");
+  }
+  if (editedValue !== undefined && typeof editedValue !== "string") {
+    return failure("パラメータが不正です");
+  }
 
   const now = nowIso();
+  const trimmedEditedValue = editedValue !== undefined ? editedValue.trim() : undefined;
+  if (trimmedEditedValue !== undefined && trimmedEditedValue === "") {
+    return failure("値を入力してください");
+  }
+
   const reviewDecision: ReviewDecision =
     decision === "adopted"
       ? {
@@ -167,44 +188,72 @@ export async function recordReviewDecisionAction(
           ...(selectedCandidateId !== undefined
             ? { selected_candidate_id: selectedCandidateId }
             : {}),
-          ...(editedValue !== undefined ? { edited_value: editedValue } : {}),
+          ...(trimmedEditedValue !== undefined ? { edited_value: trimmedEditedValue } : {}),
         }
       : { decision, decided_at: now };
 
-  if (!isValidReviewDecisionForItem(reviewDecision, item)) {
-    return failure("不正な選択です");
-  }
-  if (item.status === "conflict" && reviewDecision.decision === "adopted" && !selectedCandidateId) {
-    // isValidReviewDecisionForItem は selected_candidate_id 未指定を一般に許容するため
-    // (rejected/skipped は候補選択不要)、conflict項目のadoptedにのみ本チェックを追加する。
-    // 候補未選択のまま basic_info へ value:null を manual 書込みしてしまう抜け道を塞ぐ。
-    return failure("競合している項目は候補を選択してください");
-  }
+  // Zodによるruntime再検証(discriminated union .strict()で不正な組み合わせを弾く、
+  // feat/research-review-write-integrity 追加修正E)。
+  const parsedDecision = ReviewDecisionSchema.safeParse(reviewDecision);
+  if (!parsedDecision.success) return failure("不正な選択です");
 
-  const mergedDecisions: ReviewDecisions = { ...run.review_decisions, [itemKey]: reviewDecision };
+  return repos.transaction(async (tx) => {
+    const run = await tx.researchRun.getForUpdate(runId);
+    if (!run || run.store_id !== storeId) return failure("調査結果が見つかりません");
+    if (run.status !== "succeeded") return failure("この調査はまだレビューできません");
+    if (run.review_completed_at !== null) return failure("このレビューは既に完了しています");
 
-  if (reviewDecision.decision === "adopted") {
-    const store = await repos.store.get(storeId);
-    if (!store) return failure("店舗が見つかりません");
+    const item = (run.result ?? []).find((i) => i.key === itemKey);
+    if (!item) return failure("対象の項目が見つかりません");
+    if (!isReviewableItem(item)) return failure("この項目はレビュー対象外です");
 
-    let field;
-    try {
-      field = buildAdoptedBasicInfoField(item, run.source_registry, now, {
-        selectedCandidateId,
-        editedValue,
-      });
-    } catch {
-      return failure("項目の反映に失敗しました");
+    // MAJOR10: 一度記録した判断はimmutable。採用後の訂正はbasic_info編集導線で行う。
+    if (run.review_decisions[itemKey] !== undefined) {
+      return failure("この項目は既に判断済みです");
     }
 
-    const mergedBasicInfo = mergeBasicInfo(store.basic_info, { [itemKey]: field }, "manual", now);
-    await repos.store.update(storeId, { basic_info: mergedBasicInfo });
-  }
+    if (!isValidReviewDecisionForItem(parsedDecision.data, item)) {
+      return failure("不正な選択です");
+    }
+    if (
+      item.status === "conflict" &&
+      parsedDecision.data.decision === "adopted" &&
+      !selectedCandidateId
+    ) {
+      // isValidReviewDecisionForItem は selected_candidate_id 未指定を一般に許容するため
+      // (rejected/skippedは候補選択不要)、conflict項目のadoptedにのみ本チェックを追加する。
+      // 候補未選択のまま basic_info へ value:null を manual 書込みしてしまう抜け道を塞ぐ。
+      return failure("競合している項目は候補を選択してください");
+    }
 
-  await repos.researchRun.update(runId, { review_decisions: mergedDecisions });
-  revalidateTag(CACHE_TAGS.store(storeId), "max");
+    const mergedDecisions: ReviewDecisions = {
+      ...run.review_decisions,
+      [itemKey]: parsedDecision.data,
+    };
 
-  return success({ reviewDecisions: mergedDecisions });
+    if (parsedDecision.data.decision === "adopted") {
+      const store = await tx.store.get(storeId);
+      if (!store) return failure("店舗が見つかりません");
+
+      let field;
+      try {
+        field = buildAdoptedBasicInfoField(item, run.source_registry, now, {
+          selectedCandidateId,
+          editedValue: trimmedEditedValue,
+        });
+      } catch {
+        return failure("項目の反映に失敗しました");
+      }
+
+      const mergedBasicInfo = mergeBasicInfo(store.basic_info, { [itemKey]: field }, "manual", now);
+      await tx.store.update(storeId, { basic_info: mergedBasicInfo });
+    }
+
+    await tx.researchRun.update(runId, { review_decisions: mergedDecisions });
+    revalidateTag(CACHE_TAGS.store(storeId), "max");
+
+    return success({ reviewDecisions: mergedDecisions });
+  });
 }
 
 /**
@@ -220,40 +269,46 @@ export async function bulkAdoptConfirmedAction(input: {
   if (!session) return failure("ログインが必要です");
 
   const { runId, storeId } = input;
-  if (!runId || !storeId) return failure("パラメータが不正です");
+  if (typeof runId !== "string" || runId.trim() === "") return failure("パラメータが不正です");
+  if (typeof storeId !== "string" || storeId.trim() === "") return failure("パラメータが不正です");
 
-  const run = await repos.researchRun.get(runId);
-  if (!run || run.store_id !== storeId) return failure("調査結果が見つかりません");
-  if (run.status !== "succeeded") return failure("この調査はまだレビューできません");
-  if (run.review_completed_at !== null) return failure("このレビューは既に完了しています");
+  // feat/research-review-write-integrity(MAJOR10): getForUpdateでrun行をロックし、
+  // recordReviewDecisionAction/completeReviewActionと同一runへの並行操作を直列化する。
+  // basic_info書込みとreview_decisions書込みも1トランザクションで原子化する。
+  return repos.transaction(async (tx) => {
+    const run = await tx.researchRun.getForUpdate(runId);
+    if (!run || run.store_id !== storeId) return failure("調査結果が見つかりません");
+    if (run.status !== "succeeded") return failure("この調査はまだレビューできません");
+    if (run.review_completed_at !== null) return failure("このレビューは既に完了しています");
 
-  const targets = (run.result ?? []).filter(
-    (item) => item.status === "confirmed" && run.review_decisions[item.key] === undefined,
-  );
-  if (targets.length === 0) {
-    return success({ reviewDecisions: run.review_decisions, adoptedCount: 0 }, "対象がありません");
-  }
+    const targets = (run.result ?? []).filter(
+      (item) => item.status === "confirmed" && run.review_decisions[item.key] === undefined,
+    );
+    if (targets.length === 0) {
+      return success({ reviewDecisions: run.review_decisions, adoptedCount: 0 }, "対象がありません");
+    }
 
-  const store = await repos.store.get(storeId);
-  if (!store) return failure("店舗が見つかりません");
+    const store = await tx.store.get(storeId);
+    if (!store) return failure("店舗が見つかりません");
 
-  const now = nowIso();
-  let basicInfo = store.basic_info;
-  const mergedDecisions: ReviewDecisions = { ...run.review_decisions };
-  for (const item of targets) {
-    const field = buildAdoptedBasicInfoField(item, run.source_registry, now);
-    basicInfo = mergeBasicInfo(basicInfo, { [item.key]: field }, "manual", now);
-    mergedDecisions[item.key] = { decision: "adopted", decided_at: now };
-  }
+    const now = nowIso();
+    let basicInfo = store.basic_info;
+    const mergedDecisions: ReviewDecisions = { ...run.review_decisions };
+    for (const item of targets) {
+      const field = buildAdoptedBasicInfoField(item, run.source_registry, now);
+      basicInfo = mergeBasicInfo(basicInfo, { [item.key]: field }, "manual", now);
+      mergedDecisions[item.key] = { decision: "adopted", decided_at: now };
+    }
 
-  await repos.store.update(storeId, { basic_info: basicInfo });
-  await repos.researchRun.update(runId, { review_decisions: mergedDecisions });
-  revalidateTag(CACHE_TAGS.store(storeId), "max");
+    await tx.store.update(storeId, { basic_info: basicInfo });
+    await tx.researchRun.update(runId, { review_decisions: mergedDecisions });
+    revalidateTag(CACHE_TAGS.store(storeId), "max");
 
-  return success(
-    { reviewDecisions: mergedDecisions, adoptedCount: targets.length },
-    `${targets.length}件を採用しました`,
-  );
+    return success(
+      { reviewDecisions: mergedDecisions, adoptedCount: targets.length },
+      `${targets.length}件を採用しました`,
+    );
+  });
 }
 
 export interface CompleteReviewInput {
@@ -279,40 +334,46 @@ export async function completeReviewAction(
   if (!session) return failure("ログインが必要です");
 
   const { runId, storeId, skipRemaining } = input;
-  if (!runId || !storeId) return failure("パラメータが不正です");
+  if (typeof runId !== "string" || runId.trim() === "") return failure("パラメータが不正です");
+  if (typeof storeId !== "string" || storeId.trim() === "") return failure("パラメータが不正です");
 
-  const run = await repos.researchRun.get(runId);
-  if (!run || run.store_id !== storeId) return failure("調査結果が見つかりません");
-  if (run.status !== "succeeded") return failure("この調査はまだレビューできません");
-  if (run.review_completed_at !== null) return failure("このレビューは既に完了しています");
+  // feat/research-review-write-integrity(MAJOR10): getForUpdateでrun行をロックし、
+  // review_decisions/review_completed_at書込みとstore.stage書込みを1トランザクションで
+  // 原子化する(旧実装は別々のawaitで、片側のみ成功する不整合の余地があった)。
+  return repos.transaction(async (tx) => {
+    const run = await tx.researchRun.getForUpdate(runId);
+    if (!run || run.store_id !== storeId) return failure("調査結果が見つかりません");
+    if (run.status !== "succeeded") return failure("この調査はまだレビューできません");
+    if (run.review_completed_at !== null) return failure("このレビューは既に完了しています");
 
-  const items = run.result ?? [];
-  const undecided = getUndecidedReviewableItems(items, run.review_decisions);
+    const items = run.result ?? [];
+    const undecided = getUndecidedReviewableItems(items, run.review_decisions);
 
-  let mergedDecisions = run.review_decisions;
-  if (undecided.length > 0) {
-    if (!skipRemaining) {
-      return failure(`未対応の項目が${undecided.length}件残っています`);
+    let mergedDecisions = run.review_decisions;
+    if (undecided.length > 0) {
+      if (!skipRemaining) {
+        return failure(`未対応の項目が${undecided.length}件残っています`);
+      }
+      const now = nowIso();
+      mergedDecisions = { ...run.review_decisions };
+      for (const item of undecided) {
+        mergedDecisions[item.key] = { decision: "skipped", decided_at: now };
+      }
     }
-    const now = nowIso();
-    mergedDecisions = { ...run.review_decisions };
-    for (const item of undecided) {
-      mergedDecisions[item.key] = { decision: "skipped", decided_at: now };
-    }
-  }
 
-  await repos.researchRun.update(runId, {
-    review_decisions: mergedDecisions,
-    review_completed_at: nowIso(),
+    await tx.researchRun.update(runId, {
+      review_decisions: mergedDecisions,
+      review_completed_at: nowIso(),
+    });
+
+    const store = await tx.store.get(storeId);
+    if (store && store.stage === "未調査") {
+      await tx.store.update(storeId, { stage: "調査済み" });
+    }
+
+    revalidateTag(CACHE_TAGS.store(storeId), "max");
+    revalidateTag(CACHE_TAGS.stores, "max");
+
+    return success(undefined, "レビューを完了しました");
   });
-
-  const store = await repos.store.get(storeId);
-  if (store && store.stage === "未調査") {
-    await repos.store.update(storeId, { stage: "調査済み" });
-  }
-
-  revalidateTag(CACHE_TAGS.store(storeId), "max");
-  revalidateTag(CACHE_TAGS.stores, "max");
-
-  return success(undefined, "レビューを完了しました");
 }

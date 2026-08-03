@@ -189,7 +189,13 @@ export function ResearchReviewSection({ store, run, onUpdate, onRestart, restart
             要確認のみ表示
           </Button>
           {!reviewCompleted && confirmedUndecidedCount > 0 && (
-            <Button type="button" size="sm" variant="secondary" onClick={onBulkAdopt} disabled={busy}>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={onBulkAdopt}
+              disabled={busy || completing}
+            >
               確認済みを全て採用({confirmedUndecidedCount}件)
             </Button>
           )}
@@ -213,7 +219,7 @@ export function ResearchReviewSection({ store, run, onUpdate, onRestart, restart
                       label={label}
                       sourceRegistry={run.source_registry}
                       decision={run.review_decisions[item.key]}
-                      busy={busy}
+                      busy={busy || completing}
                       onDecide={(input) => onDecide(item, input)}
                     />
                   ) : (
@@ -234,7 +240,12 @@ export function ResearchReviewSection({ store, run, onUpdate, onRestart, restart
         ) : (
           <div className="flex flex-col items-end gap-2 pt-2 border-t border-border">
             {canComplete ? (
-              <Button type="button" variant="primary" onClick={() => onComplete(false)} disabled={completing}>
+              <Button
+                type="button"
+                variant="primary"
+                onClick={() => onComplete(false)}
+                disabled={completing || busy}
+              >
                 {completing ? "処理中…" : "レビュー完了"}
               </Button>
             ) : (
@@ -244,7 +255,7 @@ export function ResearchReviewSection({ store, run, onUpdate, onRestart, restart
                   type="button"
                   variant="secondary"
                   onClick={() => onComplete(true)}
-                  disabled={completing}
+                  disabled={completing || busy}
                 >
                   {completing ? "処理中…" : "未確認項目をスキップしてレビュー完了"}
                 </Button>

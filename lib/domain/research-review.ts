@@ -190,6 +190,16 @@ export interface AdoptOptions {
  *
  * 純関数。入力を変更しない。
  */
+/**
+ * 「編集して採用」で元の値と異なる値が入力された場合、その値の証拠になるのは
+ * AIのevidence/confidenceではなく人間の編集そのものである(feat/research-review-write-integrity、
+ * MAJOR10追加修正F)。元のAI evidenceは「元の値」に対する根拠であり、編集後の値を
+ * 直接証明するものではないため、editedValueが元の値と異なる場合は
+ * confidenceを引き継がず、source_quoteも「人間が編集した」ことを示す文言に置き換える。
+ * editedValueが元の値と同一(実質未編集)の場合は、従来どおりAIの根拠をそのまま使う。
+ */
+const EDITED_SOURCE_QUOTE = "人間が編集した値です(出典・根拠は編集前の値に対するものです)。";
+
 export function buildAdoptedBasicInfoField(
   item: ResearchItem,
   sourceRegistry: readonly SourceRegistryEntry[],
@@ -206,23 +216,25 @@ export function buildAdoptedBasicInfoField(
     if (!candidate) {
       throw new Error(`候補が見つかりません: ${options.selectedCandidateId}`);
     }
+    const wasEdited = options.editedValue !== undefined && options.editedValue !== candidate.value;
     return {
       value: options.editedValue ?? candidate.value,
       tier: "A",
-      confidence: item.confidence ?? undefined,
+      confidence: wasEdited ? undefined : (item.confidence ?? undefined),
       source_urls: resolveSourceUrls(candidate.source_ids, sourceRegistry),
-      source_quote: candidate.evidence,
+      source_quote: wasEdited ? EDITED_SOURCE_QUOTE : candidate.evidence,
       filled_by: "manual",
       updated_at: now,
     };
   }
 
+  const wasEdited = options.editedValue !== undefined && options.editedValue !== item.value;
   return {
     value: options.editedValue ?? item.value,
     tier: item.status === "confirmed" ? "A" : "B",
-    confidence: item.confidence ?? undefined,
+    confidence: wasEdited ? undefined : (item.confidence ?? undefined),
     source_urls: resolveSourceUrls(item.source_ids, sourceRegistry),
-    source_quote: item.evidence,
+    source_quote: wasEdited ? EDITED_SOURCE_QUOTE : item.evidence,
     filled_by: "manual",
     updated_at: now,
   };
