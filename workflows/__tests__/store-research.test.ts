@@ -25,8 +25,14 @@ vi.mock("@/lib/ai/research/pipeline", () => ({
   runStage2: vi.fn(),
   buildNonAiItems: vi.fn(),
   buildDeterministicPlacesItems: vi.fn(),
+  DETERMINISTIC_PLACES_KEYS: ["review_avg", "review_count"],
   applyUrlContextStatus: vi.fn(),
+  upgradeMediaCoverageFromRegistry: vi.fn(),
+  appendConfirmedMediaContext: vi.fn(),
   finalizeResearchItems: vi.fn(),
+  // feat/ai-research-pre-smoke-hardening (BLOCKER1): classifyForWorkflowRetryが
+  // `instanceof Stage2InvalidOutputError`で判定するため、モック側にも実体が必要。
+  Stage2InvalidOutputError: class Stage2InvalidOutputError extends Error {},
 }));
 vi.mock("@/lib/ai/research/source-registry", () => ({
   buildKnownStoreDataEntries: vi.fn(),
@@ -114,6 +120,16 @@ describe("classifyForWorkflowRetry (retry方針の分類、Plan v3.2 §17)", () 
     // 既知の定型文パターンとの完全一致で検証する。
     expect(result.message).toBe("Gemini呼出が失敗しました(api_error:404)");
   });
+
+  it("Stage2InvalidOutputErrorはFatalError(retry 0、自動Gemini再callは追加しない)になる(feat/ai-research-pre-smoke-hardening、BLOCKER1)", async () => {
+    const { Stage2InvalidOutputError } = await import("@/lib/ai/research/pipeline");
+    const err = new Stage2InvalidOutputError("Stage2の応答をJSONとして解釈できませんでした。");
+    const result = classifyForWorkflowRetry(err);
+    expect(result).toBeInstanceOf(FatalError);
+    expect(result.message).toContain("stage2_invalid_output");
+    // 生のGemini応答本文をmessageに含めないこと。
+    expect(result.message).not.toContain("JSONとして解釈できませんでした");
+  });
 });
 
 describe("deriveErrorKind (error_kind導出)", () => {
@@ -138,6 +154,18 @@ describe("deriveErrorKind (error_kind導出)", () => {
   it("それ以外はunknownになる", () => {
     expect(deriveErrorKind(new Error("x"))).toBe("unknown");
     expect(deriveErrorKind("plain string")).toBe("unknown");
+  });
+
+  it("stage2_invalid_output由来のFatalErrorは'fatal:stage2_invalid_output'になる(BLOCKER1)", () => {
+    expect(deriveErrorKind(new FatalError("Stage2の応答検証に失敗しました(stage2_invalid_output)"))).toBe(
+      "fatal:stage2_invalid_output",
+    );
+  });
+
+  it("final_result_invalid由来のFatalErrorは'fatal:final_result_invalid'になる(BLOCKER1)", () => {
+    expect(
+      deriveErrorKind(new FatalError("最終結果の整合性検証に失敗しました(final_result_invalid)")),
+    ).toBe("fatal:final_result_invalid");
   });
 
   describe("observability bug修正(smoke testで発見): classifyForWorkflowRetryの出力からHTTP statusを復元できる", () => {

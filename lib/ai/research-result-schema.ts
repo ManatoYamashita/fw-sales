@@ -16,7 +16,12 @@
  */
 
 import { z } from "zod";
-import { RESEARCH_POLICIES, getResearchPolicy, type ResearchPolicy } from "@/lib/domain/research-policy";
+import {
+  RESEARCH_POLICIES,
+  RESEARCH_POLICY_ITEMS,
+  getResearchPolicy,
+  type ResearchPolicy,
+} from "@/lib/domain/research-policy";
 
 /* ------------------------------------------------------------------ */
 /*  Source Registry (Plan v3.2 §10, §11)                               */
@@ -321,9 +326,11 @@ export function sanitizeSourceIds(
 /**
  * conflict の形状整合性を検証・是正する:
  * - `status !== "conflict"` の項目は `candidates` を持たない(AIが誤って付与しても除去)。
- * - `status === "conflict"` の項目は `candidates` が非空であること。空/欠落なら
- *   confirmedの根拠なしと同様に扱えないため `not_found` へ降格する
- *   (「候補を提示できないのに競合と主張する」という矛盾した状態を許さない)。
+ * - `status === "conflict"` の項目は `candidates` が(重複除去後)**2件以上**、かつ
+ *   異なる `value` が2種類以上存在すること(feat/ai-research-pre-smoke-hardening、
+ *   MAJOR4)。0件・1件、または全candidateが同一valueの場合は「候補を提示できない
+ *   /実質的に競合していないのに競合と主張する」矛盾した状態のため `not_found` へ
+ *   降格する。
  * - `candidate_id` の重複は先勝ちで排除する(`selected_candidate_id` の一意な
  *   参照解決を保証するため)。
  *
@@ -336,17 +343,6 @@ export function validateConflictShape(item: ResearchItem): ResearchItem {
   }
 
   const candidates = item.candidates ?? [];
-  if (candidates.length === 0) {
-    return {
-      ...item,
-      status: "not_found",
-      candidates: undefined,
-      warning: appendWarning(
-        item.warning,
-        "AIがconflictと判定しましたが候補が提示されなかったため無効化しました。",
-      ),
-    };
-  }
 
   const seen = new Set<string>();
   const deduped: ResearchItemCandidate[] = [];
@@ -358,6 +354,19 @@ export function validateConflictShape(item: ResearchItem): ResearchItem {
     }
     seen.add(candidate.candidate_id);
     deduped.push(candidate);
+  }
+
+  const distinctValues = new Set(deduped.map((c) => c.value.trim()));
+  if (deduped.length < 2 || distinctValues.size < 2) {
+    return {
+      ...item,
+      status: "not_found",
+      candidates: undefined,
+      warning: appendWarning(
+        item.warning,
+        "AIがconflictと判定しましたが、実質的に競合する候補(2件以上・異なる値)が揃わなかったため無効化しました。",
+      ),
+    };
   }
 
   if (!hadDuplicate) return item;
@@ -393,12 +402,18 @@ export interface SearchFact {
  * `url_context_status==="success"`が無くても、`SearchFact`(key一致・具体的value有り)と
  * 組み合わせてconfirmedを許可するsource_typeをkeyごとに定義する。`review_avg`/`review_count`は
  * 意図的に登録しない(Google Places由来のdeterministic itemとしてGemini対象外になるため)。
+ *
+ * `average_spend_day_night`は意図的に登録しない(feat/ai-research-pre-smoke-hardening、
+ * 追加修正C)。この項目は「昼/夜」等の複合的なANALYSIS値であり、単一のSearchFactで
+ * AIの複合valueを丸ごと置き換えると情報が失われる(例: SearchFactは昼の価格帯のみを
+ * 確認できたが、AIのvalueは昼・夜両方を含む)。安全に部分置換する仕組みが無い以上、
+ * false positiveよりfalse negativeを優先し、この項目はTier B(SearchFact-only)経路での
+ * confirmedを許可しない(url_context成功による通常経路のみでconfirmed可能)。
  */
 export const SOURCE_TRUST_MATRIX: Readonly<Record<string, readonly SourceType[]>> = {
   opening_date: ["official_site", "local_official", "article", "gourmet_site", "reservation_site"],
   business_hours_holidays: ["gourmet_site", "reservation_site", "official_site"],
   seat_count: ["official_site", "gourmet_site", "reservation_site"],
-  average_spend_day_night: ["gourmet_site", "reservation_site"],
   cuisine_genre: ["gourmet_site", "reservation_site"],
   alacarte_course: ["gourmet_site", "reservation_site"],
   phone: ["gourmet_site", "reservation_site"],
@@ -407,6 +422,78 @@ export const SOURCE_TRUST_MATRIX: Readonly<Record<string, readonly SourceType[]>
   reservation_tool: ["gourmet_site", "reservation_site"],
   media_coverage: ["article", "local_official", "gourmet_site", "reservation_site", "official_site"],
 };
+
+/**
+ * 既知の主要グルメ/予約ポータルのhostname→source_type分類(feat/ai-research-pre-smoke-hardening、
+ * 追加修正B・MAJOR6)。
+ *
+ * `gemini_search_candidate`/`google_grounding`のsource_typeはStage1モデルの自己申告
+ * (`[SOURCE]`ブロックの`type:`フィールド)であり、`google_grounding`由来であっても
+ * `buildSourceRegistry`がenrichment時に同じ自己申告typeを採用するため、
+ * discovery_provenanceだけでは信頼できない。Tier Bで`source_type`を信用してよいのは、
+ * (1) `known_store_data`(アプリ自身がtypeを決定、Stage1モデルを経由しない)、
+ * (2) 以下のhostname classifierで決定的に判定できる既知ポータルのみに限定する。
+ * 巨大なallowlistは作らず、実際にfw-salesの調査で頻出する主要媒体のみを列挙する。
+ */
+const KNOWN_HOSTNAME_SOURCE_TYPES: Readonly<Record<string, SourceType>> = {
+  "tabelog.com": "gourmet_site",
+  "www.tabelog.com": "gourmet_site",
+  "hotpepper.jp": "gourmet_site",
+  "www.hotpepper.jp": "gourmet_site",
+  "gnavi.co.jp": "gourmet_site",
+  "www.gnavi.co.jp": "gourmet_site",
+  "r.gnavi.co.jp": "gourmet_site",
+  "retty.me": "gourmet_site",
+  "www.retty.me": "gourmet_site",
+  "jalan.net": "reservation_site",
+  "www.jalan.net": "reservation_site",
+};
+
+function hostnameOf(url: string): string | null {
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Tier B判定に使ってよい「信頼済みsource_type」を導出する。自己申告の
+ * `entry.source_type`をそのまま信用せず、以下のいずれかの場合のみ返す:
+ * (1) `discovery_provenance === "known_store_data"`(app側が決定、信頼済み)。
+ * (2) `grounding_redirect_url`のhostnameが`KNOWN_HOSTNAME_SOURCE_TYPES`に一致する
+ *     (コード側で決定的に判定できる既知ポータル)。
+ * いずれにも該当しない場合(`gemini_search_candidate`/`google_grounding`でモデルの
+ * 自己申告typeにのみ依存する場合)は`undefined`を返し、Tier B対象外とする
+ * (feat/ai-research-pre-smoke-hardening、MAJOR6・追加修正B)。
+ *
+ * URL Context成功経路(path 2、`hasVerifiedSource`)はこの制約の対象外(本文取得
+ * 成功という別の裏付けがあるため、source_typeの自己申告可否を問わない)。
+ */
+export function deriveTrustedSourceType(entry: SourceRegistryEntry): SourceType | undefined {
+  if (entry.discovery_provenance === "known_store_data") return entry.source_type;
+  const host = hostnameOf(entry.grounding_redirect_url);
+  if (host !== null && KNOWN_HOSTNAME_SOURCE_TYPES[host] !== undefined) {
+    return KNOWN_HOSTNAME_SOURCE_TYPES[host];
+  }
+  return undefined;
+}
+
+/**
+ * FACT_OR_HEARING項目のうち、AI検索では「本人発信の一次情報」が無ければconfirmedを
+ * 認めないべき4項目(feat/ai-research-pre-smoke-hardening、MAJOR5・追加修正A)。
+ * 第三者グルメサイト・記事の本文取得成功だけでは「本人発信」を保証できないため、
+ * 自動的にconfirmedを維持してよいsource_typeを`official_site`/`official_sns`のみに
+ * 限定する。`article`(インタビュー記事等)は将来別途明示的なprovenance設計が
+ * できるまでは含めない(false positiveよりfalse negativeを優先)。
+ */
+const PRIMARY_SOURCE_REQUIRED_KEYS: ReadonlySet<string> = new Set([
+  "owner_profile",
+  "owner_career",
+  "owner_philosophy",
+  "concept",
+]);
+const PRIMARY_SOURCE_TYPES: ReadonlySet<SourceType> = new Set(["official_site", "official_sns"]);
 
 /** `validateResearchItemStatus` の判定コンテキスト。 */
 export interface ResearchValidationContext {
@@ -501,25 +588,52 @@ export function validateResearchItemStatus(
 
   const isPlacesVerified = context.placesVerifiedKeys?.has(item.key) ?? false;
 
+  // path 2: URL Context本文取得成功のsourceのみ根拠にできる。ただし以下は除外する
+  // (feat/ai-research-pre-smoke-hardening):
+  // - MAJOR8: competitor(競合店舗)由来のsourceは自店項目のconfirmed根拠にしない
+  //   (「明らかに不適合」な最小防御。完全な意味照合は今回のスコープ外の残存リスク)。
+  // - MAJOR5: owner_profile/owner_career/owner_philosophy/conceptは、本人発信の
+  //   一次情報(official_site/official_sns)以外の本文取得成功では根拠にしない
+  //   (第三者グルメサイト・記事の取得成功だけでは「本人発信」を保証できないため)。
+  const requiresPrimarySource = PRIMARY_SOURCE_REQUIRED_KEYS.has(item.key);
   const verifiedIds = new Set(
     context.sourceRegistry
-      .filter((entry) => entry.url_context_status === "success")
+      .filter((entry) => {
+        if (entry.url_context_status !== "success") return false;
+        if (entry.source_type === "competitor") return false;
+        if (requiresPrimarySource && !PRIMARY_SOURCE_TYPES.has(entry.source_type)) return false;
+        return true;
+      })
       .map((entry) => entry.id),
   );
   const hasVerifiedSource = item.source_ids.some((id) => verifiedIds.has(id));
 
-  // Tier B: reliable secondary evidence(feat/ai-research-quality-refinement)。
-  // gourmet_site/reservation_site等はURL Context本文取得に失敗しやすいが、Stage1の
-  // Google Search時点でSearchFactとして具体的な値が確認できることがある。
-  // 単なるsource_type一致ではなく、keyが一致するSearchFactの存在を必須とする。
+  // Tier B: reliable secondary evidence(feat/ai-research-quality-refinement、
+  // feat/ai-research-pre-smoke-hardingでSearchFact.valueそのものをtrust boundaryへ
+  // 組み込むよう強化)。gourmet_site/reservation_site等はURL Context本文取得に
+  // 失敗しやすいが、Stage1のGoogle Search時点でSearchFactとして具体的な値が
+  // 確認できることがある。単なるsource_type一致ではなく、(1) keyが一致する
+  // SearchFactの存在、(2) そのsourceの`deriveTrustedSourceType`が許可済みsource_type
+  // であること、の両方を必須とする。自己申告typeのみのsourceは対象外(MAJOR6)。
+  //
+  // SearchFact.value自体もStage1モデルがGoogle Search結果を読んで生成した値であり
+  // 「無条件に真実」ではない(追加修正C)。同一keyについて信頼済みSearchFactの値が
+  // 複数かつ異なる場合は、どちらが正しいか機械的に判断できないためconfirmedにしない
+  // (false positiveよりfalse negativeを優先)。
   const allowedSourceTypes = SOURCE_TRUST_MATRIX[item.key];
-  const hasSearchFactMatch =
-    allowedSourceTypes !== undefined &&
-    (context.searchFacts ?? []).some((fact) => {
-      if (fact.key !== item.key || !item.source_ids.includes(fact.sourceId)) return false;
-      const entry = context.sourceRegistry.find((e) => e.id === fact.sourceId);
-      return entry !== undefined && allowedSourceTypes.includes(entry.source_type);
-    });
+  const trustedFactsForKey =
+    allowedSourceTypes === undefined
+      ? []
+      : (context.searchFacts ?? []).filter((fact) => {
+          if (fact.key !== item.key || fact.value.trim() === "") return false;
+          if (!item.source_ids.includes(fact.sourceId)) return false;
+          const entry = context.sourceRegistry.find((e) => e.id === fact.sourceId);
+          if (entry === undefined) return false;
+          const trustedType = deriveTrustedSourceType(entry);
+          return trustedType !== undefined && allowedSourceTypes.includes(trustedType);
+        });
+  const distinctFactValues = new Set(trustedFactsForKey.map((f) => f.value.trim()));
+  const hasSearchFactMatch = trustedFactsForKey.length > 0 && distinctFactValues.size === 1;
 
   if (isPlacesVerified || hasVerifiedSource || hasSearchFactMatch) {
     type SingleBasis = Exclude<EvidenceBasis, "mixed">;
@@ -531,6 +645,25 @@ export function validateResearchItemStatus(
       ] as const
     ).filter((b): b is SingleBasis => b !== null);
     const evidence_basis: EvidenceBasis = bases.length > 1 ? "mixed" : bases[0]!;
+
+    // Tier B(SearchFact)のみを根拠にconfirmedを維持する場合、AIの自由記述value
+    // ではなくSearchFact側の値をcanonicalとしてvalueを再構築する(BLOCKER3)。
+    // Places/URL Contextによる裏付けが同時にある場合(mixed/url_context/places)は、
+    // より強い根拠(実データ確認)であるAIのvalueをそのまま維持する。
+    if (evidence_basis === "search_note") {
+      const canonicalValue = trustedFactsForKey[0]!.value;
+      const factSourceIds = Array.from(new Set(trustedFactsForKey.map((f) => f.sourceId)));
+      return {
+        ...item,
+        value: canonicalValue,
+        evidence: `Web検索結果で確認できた情報です(${canonicalValue})。`,
+        source_ids: factSourceIds,
+        candidates: undefined,
+        warning: undefined,
+        evidence_basis,
+      };
+    }
+
     return { ...item, evidence_basis };
   }
 
@@ -664,6 +797,59 @@ export function enforceStatusForPolicy(item: ResearchItem): ResearchItem {
 }
 
 /**
+ * status/value/candidatesの最終不変条件(feat/ai-research-pre-smoke-hardening、MAJOR4)。
+ *
+ * これまでの検証関数(`enforceStatusForPolicy`/`validateResearchItemStatus`)は
+ * 「confirmedから降格した場合」等、特定の遷移が発生したときにのみvalueのnull化を
+ * 行っていた。しかしAIが**最初から**policy的には合法だが自己矛盾した応答
+ * (例: `{status: "not_found", value: "17:00-24:00"}`)を返した場合、どの遷移も
+ * 発生しないためnull化されずに素通りしてしまうbugがあった。本関数は遷移の有無に
+ * 関わらず、最終的なstatusとvalue/confidence/candidatesの整合を無条件に強制する:
+ *
+ * - confirmed/inferred: valueがnon-null・trim後non-emptyであること。満たさなければ
+ *   `getInvalidStatusFallback`と同じ考え方でpolicyごとの安全なno-infoステータスへ
+ *   降格する(「値が無いのにconfirmed/inferredを名乗る」状態を許さない)。
+ * - not_found/hearing_required/external_data_required: value/confidence/candidatesを
+ *   無条件でnull化する(既にnull化済みなら何もしない)。
+ * - conflict: 形状の妥当性は`validateConflictShape`が既に保証しているため、
+ *   本関数では変更しない。
+ *
+ * 呼び出し前提: `validateResearchItemStatus`の後に適用すること
+ * (`applyDeterministicValidation`はこの順序を保証する)。
+ *
+ * 純関数。入力を変更せず、新しい `ResearchItem` を返す。
+ */
+export function enforceStatusValueInvariant(item: ResearchItem): ResearchItem {
+  if (
+    item.status === "not_found" ||
+    item.status === "hearing_required" ||
+    item.status === "external_data_required"
+  ) {
+    const alreadyNullified =
+      item.value === null &&
+      (item.confidence === null || item.confidence === undefined) &&
+      (item.candidates === undefined || item.candidates === null);
+    if (alreadyNullified) return item;
+    return nullifyForNoInfoStatus(item, item.status);
+  }
+
+  if (item.status === "confirmed" || item.status === "inferred") {
+    if (item.value !== null && item.value.trim() !== "") return item;
+    const fallback = getInvalidStatusFallback(item.research_policy);
+    return {
+      ...nullifyForNoInfoStatus(item, fallback),
+      status: fallback,
+      warning: appendWarning(
+        item.warning,
+        `status=${item.status}ですが値が空だったため${fallback}へ補正しました。`,
+      ),
+    };
+  }
+
+  return item;
+}
+
+/**
  * 1項目に対し、決定的な検証パイプラインを順序どおりに適用する:
  * `enforceResearchPolicy` → `enforceStatusForPolicy` → `sanitizeSourceIds` →
  * `validateConflictShape` → `validateResearchItemStatus`。この順序には意味があり、
@@ -681,7 +867,8 @@ export function applyDeterministicValidation(
   const sourceIdsSanitized = sanitizeSourceIds(statusEnforced, context.sourceRegistry);
   const conflictValidated = validateConflictShape(sourceIdsSanitized);
   const statusValidated = validateResearchItemStatus(conflictValidated, context);
-  return pruneUnverifiedSourceIds(statusValidated, context);
+  const invariantEnforced = enforceStatusValueInvariant(statusValidated);
+  return pruneUnverifiedSourceIds(invariantEnforced, context);
 }
 
 /**
@@ -748,4 +935,79 @@ export function validateResearchItems(
 
 function appendWarning(existing: string | null | undefined, addition: string): string {
   return existing ? `${addition} ${existing}` : addition;
+}
+
+/* ------------------------------------------------------------------ */
+/*  最終結果の不変条件 (feat/ai-research-pre-smoke-hardening, BLOCKER1)   */
+/* ------------------------------------------------------------------ */
+
+/** `RESEARCH_POLICY_ITEMS`のkey順(canonical順)。件数はハードコードせず動的に導出する。 */
+const CANONICAL_KEY_ORDER: readonly string[] = RESEARCH_POLICY_ITEMS.map((i) => i.key);
+const CANONICAL_KEY_SET: ReadonlySet<string> = new Set(CANONICAL_KEY_ORDER);
+const CANONICAL_KEY_INDEX: ReadonlyMap<string, number> = new Map(
+  CANONICAL_KEY_ORDER.map((key, index) => [key, index]),
+);
+
+/**
+ * 最終itemsを`RESEARCH_POLICY_ITEMS`の並び順(canonical順)へ並べ替える
+ * (feat/ai-research-pre-smoke-hardening、BLOCKER1)。モデルの出力順にUIの表示順を
+ * 依存させないための、保存直前のdeterministicなソート。未知keyは末尾へ回す
+ * (`validateFinalResearchResultIntegrity`が別途これを検出しfailedにするため、
+ * ソート自体は落ちない安全側の実装のみでよい)。
+ *
+ * 純関数。入力配列を変更せず、新しい配列を返す。
+ */
+export function sortResearchItemsToCanonicalOrder(
+  items: readonly ResearchItem[],
+): ResearchItem[] {
+  return [...items].sort((a, b) => {
+    const ai = CANONICAL_KEY_INDEX.get(a.key) ?? CANONICAL_KEY_ORDER.length;
+    const bi = CANONICAL_KEY_INDEX.get(b.key) ?? CANONICAL_KEY_ORDER.length;
+    return ai - bi;
+  });
+}
+
+export interface FinalResultIntegrityViolation {
+  /** sanitizedな種別トークン(エラーメッセージ・observabilityへそのまま使ってよい)。 */
+  kind:
+    | "item_count_mismatch"
+    | "key_set_mismatch"
+    | "duplicate_key"
+    | "unknown_key";
+}
+
+/**
+ * `persistSucceededStep`直前に適用する最終結果の不変条件チェック(feat/ai-research-pre-smoke-hardening、
+ * BLOCKER1)。1つでも違反があれば、そのrunをsucceededとして保存してはならない。
+ *
+ * 検証する件数・key集合は`RESEARCH_POLICY_ITEMS`から動的に導出し、53等の値を
+ * コードへハードコードしない(そのrunのallowedKeys.length等と同じ設計原則)。
+ *
+ * - exactly `RESEARCH_POLICY_ITEMS.length`件であること。
+ * - key集合が`RESEARCH_POLICY_ITEMS`のkey集合と完全一致すること(不足・過剰なし)。
+ * - keyの重複が無いこと。
+ *
+ * 違反が無ければ`null`を返す。純関数。
+ */
+export function validateFinalResearchResultIntegrity(
+  items: readonly ResearchItem[],
+): FinalResultIntegrityViolation | null {
+  const keys = items.map((item) => item.key);
+  const keySet = new Set(keys);
+
+  if (keys.length !== keySet.size) {
+    return { kind: "duplicate_key" };
+  }
+  if (keys.some((key) => !CANONICAL_KEY_SET.has(key))) {
+    return { kind: "unknown_key" };
+  }
+  if (items.length !== CANONICAL_KEY_ORDER.length) {
+    return { kind: "item_count_mismatch" };
+  }
+  for (const key of CANONICAL_KEY_ORDER) {
+    if (!keySet.has(key)) {
+      return { kind: "key_set_mismatch" };
+    }
+  }
+  return null;
 }

@@ -55,10 +55,12 @@ import {
   runStage2,
   buildNonAiItems,
   buildDeterministicPlacesItems,
+  DETERMINISTIC_PLACES_KEYS,
   applyUrlContextStatus,
   upgradeMediaCoverageFromRegistry,
   appendConfirmedMediaContext,
   finalizeResearchItems,
+  Stage2InvalidOutputError,
 } from "@/lib/ai/research/pipeline";
 import {
   buildKnownStoreDataEntries,
@@ -71,6 +73,10 @@ import { mergeBasicInfo } from "@/lib/domain/basic-info-merge";
 import { isAiClientError } from "@/lib/ai/client";
 import type { StoreIdentity } from "@/lib/ai/research/prompts";
 import type { SourceRegistryEntry, ResearchItem, SearchFact } from "@/lib/ai/research-result-schema";
+import {
+  sortResearchItemsToCanonicalOrder,
+  validateFinalResearchResultIntegrity,
+} from "@/lib/ai/research-result-schema";
 import type { SearchNote } from "@/lib/ai/research/source-registry";
 import type { BasicInfo } from "@/types/basic-info";
 import { nowIso } from "@/lib/utils/date";
@@ -87,7 +93,7 @@ const STAGE_TIMEOUT_MS = 240_000;
  * request ID・API key は一切含めない。この観測性・503 retry の修正は本PRでも維持する。
  */
 const SANITIZED_KIND_PATTERN =
-  /\((auth_error|missing_api_key|rate_limit|timeout|network_error|max_tokens|api_error:\d{3}|unknown)\)/;
+  /\((auth_error|missing_api_key|rate_limit|timeout|network_error|max_tokens|api_error:\d{3}|stage2_invalid_output|final_result_invalid|unknown)\)/;
 
 /**
  * `AiClientError` を Workflow の retry 意味論(`FatalError` / `RetryableError`)へ変換する。
@@ -96,6 +102,11 @@ const SANITIZED_KIND_PATTERN =
  * 「最大1 retry」対象。`api_error` の他ステータス(400/404/500 等)は安全側に倒しretryしない。
  */
 export function classifyForWorkflowRetry(err: unknown): Error {
+  if (err instanceof Stage2InvalidOutputError) {
+    // Stage2の応答がJSON parse/schema/coverageのいずれかで失敗した場合(BLOCKER1)。
+    // 自動的なGemini再callは追加しない(ユーザーが再調査を選べればよい)ため retry 0。
+    return new FatalError(`Stage2の応答検証に失敗しました(stage2_invalid_output)`);
+  }
   if (isAiClientError(err)) {
     switch (err.kind) {
       case "rate_limit":
@@ -307,7 +318,20 @@ export async function storeResearchWorkflow(
     // (feat/ai-research-quality-refinement)。
     const stage0 = await stage0PlacesStep(googlePlaceId, store);
     const effectiveBasicInfo = mergeBasicInfo(basicInfo, stage0.placesBasicInfo, "places", nowIso());
+    // derivePlacesVerifiedKeysは最大6key(store_name/address/cuisine_genre/phone/
+    // review_avg/review_count)を返すが、実際にPlaces値から直接生成しているのは
+    // review_avg/review_countの2keyのみ(buildDeterministicPlacesItems参照)。
+    // 6key全てを`finalizeResearchItems`のplacesVerifiedKeysへそのまま渡すと、
+    // AIが生成したstore_name/address/cuisine_genre/phoneのvalueが、値の中身を
+    // 見ずにkey一致だけでconfirmed維持されてしまう(BLOCKER2)。deterministic item
+    // 生成には引き続き広いplacesVerifiedKeySetを使い、trust boundary(finalizeResearchItems)
+    // へはDETERMINISTIC_PLACES_KEYSのみに絞った集合を渡す。
     const placesVerifiedKeySet = derivePlacesVerifiedKeys(effectiveBasicInfo);
+    const placesConfirmedBypassKeys = new Set(
+      [...placesVerifiedKeySet].filter((key) =>
+        (DETERMINISTIC_PLACES_KEYS as readonly string[]).includes(key),
+      ),
+    );
 
     // Google Placesがdeterministicに確定済みのkey(review_avg/review_count)は、
     // Gemini対象から除外しdeterministic itemとして直接合成する(feat/ai-research-quality-refinement)。
@@ -347,13 +371,21 @@ export async function storeResearchWorkflow(
       aiItems: [...aiItemsWithContext, ...deterministicPlacesItems],
       nonAiItems: buildNonAiItems(),
       sourceRegistry: finalRegistry,
-      placesVerifiedKeys: placesVerifiedKeySet,
+      placesVerifiedKeys: placesConfirmedBypassKeys,
       searchFacts,
     });
 
+    // 保存直前のcanonical順ソート + 最終不変条件チェック(feat/ai-research-pre-smoke-hardening、
+    // BLOCKER1)。53項目exact・key重複なし・未知keyなしを満たさない場合は
+    // succeededとして保存せず、failedへ倒す(生の中身はログに残さずsanitizedなkindのみ)。
+    const orderedItems = sortResearchItemsToCanonicalOrder(finalItems);
+    const integrityViolation = validateFinalResearchResultIntegrity(orderedItems);
+    if (integrityViolation !== null) {
+      throw new FatalError(`最終結果の整合性検証に失敗しました(final_result_invalid)`);
+    }
+
     const warnings: string[] = [];
     if (stage0.warning) warnings.push(stage0.warning);
-    if (stage2Result.parseWarning) warnings.push(stage2Result.parseWarning);
     if (finalRegistry.length === 0) {
       warnings.push(
         "Web情報源候補が1件も取得できませんでした(Gemini検索候補・登録済みURLともに0件)。",
@@ -365,7 +397,7 @@ export async function storeResearchWorkflow(
     }
 
     await persistSucceededStep(runId, {
-      items: finalItems,
+      items: orderedItems,
       sourceRegistry: finalRegistry,
       tokenUsage: {
         stage1: stage1.usageMetadata,
