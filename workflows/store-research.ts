@@ -57,6 +57,7 @@ import {
   buildDeterministicPlacesItems,
   deriveDeterministicPlacesConfirmedKeys,
   applyUrlContextStatus,
+  applySourceIdentityVerification,
   upgradeMediaCoverageFromRegistry,
   appendConfirmedMediaContext,
   finalizeResearchItems,
@@ -347,7 +348,16 @@ export async function storeResearchWorkflow(
     // Stage2: URL Context + Structured Output(単一call)。Stage1のSearch Notesも渡す。
     const stage2Result = await stage2Step(store, mergedRegistry, stage1.searchNotes, deterministicKeys);
 
-    const finalRegistry = applyUrlContextStatus(mergedRegistry, [stage2Result.urlContextMetadata]);
+    const urlContextAppliedRegistry = applyUrlContextStatus(mergedRegistry, [stage2Result.urlContextMetadata]);
+    // fix/ai-research-source-identity-integrity: url_context成功=ページ取得成功であり
+    // 「対象店舗のページだった」ことを意味しない(実機smokeで確認した誤ったHotPepper URL
+    // の事故)。Stage2の`source_verifications`とStoreIdentityをコード側で突合し、
+    // `identity_status`をSource Registryへ反映する。追加のGemini呼出は発生しない。
+    const finalRegistry = applySourceIdentityVerification(
+      urlContextAppliedRegistry,
+      stage2Result.sourceVerifications,
+      store,
+    );
 
     // Stage1のSearch Notes(store_fact、key/value構造化済み)をSource RegistryのIDへ解決する
     // (feat/ai-research-quality-refinement、Tier BのSearchFact照合に使う)。
@@ -358,9 +368,10 @@ export async function storeResearchWorkflow(
       .filter((f): f is SearchFact => f.sourceId !== undefined);
 
     // own_net_exposure/exposure_gapの自己矛盾防止・media_coverageの解釈漏れ補正
-    // (feat/ai-research-final-quality)。Stage2完了後のfinalRegistryから
-    // deterministicに構築するため、追加のGemini呼出は発生しない。
-    const mediaCorrectedItems = upgradeMediaCoverageFromRegistry(stage2Result.items, finalRegistry, searchFacts);
+    // (feat/ai-research-final-quality、fix/ai-research-source-identity-integrityで
+    // identity_status必須化)。Stage2完了後のfinalRegistryからdeterministicに構築する
+    // ため、追加のGemini呼出は発生しない。
+    const mediaCorrectedItems = upgradeMediaCoverageFromRegistry(stage2Result.items, finalRegistry);
     const aiItemsWithContext = appendConfirmedMediaContext(mediaCorrectedItems, finalRegistry);
 
     const finalItems = finalizeResearchItems({

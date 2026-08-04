@@ -22,12 +22,15 @@ import { buildStage2JsonSchema, buildStage2ResponseZodSchema } from "./schema-bu
 import { createResearchGeminiClient, type UsageMetadataLike, type UrlContextMetadataLike } from "./client";
 import {
   applyDeterministicValidation,
-  deriveTrustedSourceType,
+  deriveDisplaySourceName,
+  type IdentityStatus,
   type ResearchItem,
   type SearchFact,
   type SourceRegistryEntry,
   type SourceType,
+  type SourceVerification,
 } from "@/lib/ai/research-result-schema";
+import { isAddressMatch, isNameMatch, isTargetStoreMatch } from "./identity-match";
 import type { BasicInfo } from "@/types/basic-info";
 
 /* ------------------------------------------------------------------ */
@@ -75,6 +78,11 @@ export interface Stage2Outcome {
   items: ResearchItem[];
   urlContextMetadata: UrlContextMetadataLike | null;
   usageMetadata: UsageMetadataLike | null;
+  /**
+   * per-source identity verification(fix/ai-research-source-identity-integrity)。
+   * `applySourceIdentityVerification`でSource Registryの`identity_status`へ反映する。
+   */
+  sourceVerifications: SourceVerification[];
 }
 
 /**
@@ -169,10 +177,29 @@ export async function runStage2(
     throw new Stage2InvalidOutputError(`Stage2の応答が不完全でした: ${coverageError}`);
   }
 
+  // FIX12(fix/ai-research-source-identity-integrity): run全体のstore_identificationが
+  // 対象店舗と名前・住所のいずれも明確に不一致な場合、Stage2全体が別店舗を調査して
+  // しまった疑いが強いため succeeded として保存しない。ただしこれはあくまで粗い
+  // safety netであり、個別sourceの`identity_status`判定(`applySourceIdentityVerification`)
+  // を代替しない。false positiveでrunを無駄に失敗させないよう、name/addressの**両方**が
+  // 明確に不一致の場合のみ発火する(片方が空・不明な場合は発火しない)。
+  const identification = parsed.data.store_identification;
+  const nameLooksUnrelated =
+    identification.matched_name.trim() !== "" && !isNameMatch(identification.matched_name, store.name);
+  const addressLooksUnrelated =
+    identification.matched_address.trim() !== "" &&
+    !isAddressMatch(identification.matched_address, store.address);
+  if (nameLooksUnrelated && addressLooksUnrelated) {
+    throw new Stage2InvalidOutputError(
+      "店舗同定に失敗しました(store_identification_mismatch)",
+    );
+  }
+
   return {
     items: resultItems,
     urlContextMetadata: result.urlContextMetadata,
     usageMetadata: result.usageMetadata,
+    sourceVerifications: parsed.data.source_verifications as SourceVerification[],
   };
 }
 
@@ -306,6 +333,80 @@ export function applyUrlContextStatus(
   });
 }
 
+/** `identity_note`の最大文字数(prompt/DB肥大化防止、他のSearch Note系フィールドと同じ方針)。 */
+const MAX_IDENTITY_NOTE_LENGTH = 200;
+
+/**
+ * Stage2の`source_verifications`(モデル自己申告のrelation + 実際に観測した店舗名/住所/電話)を
+ * StoreIdentityとコード側で突合し、Source Registryへ`identity_status`/`identity_note`として
+ * 反映する(fix/ai-research-source-identity-integrity、FIX3・FIX4)。
+ *
+ * `relation==="target_store"`の自己申告は無条件に信用せず、`isTargetStoreMatch`
+ * (`places-stage0.ts`のText Search fallbackと同じ「店名一致 AND (住所一致 OR 電話一致)」
+ * 基準)が成立した場合のみ`target_match`にする。成立しない場合は`uncertain`へ倒す
+ * (false positiveよりfalse negativeを優先。今回の実機smoke事故=誤ったHotPepper URLが
+ * 「target_store」と自己申告されても、observed_name/addressが対象店舗と一致しなければ
+ * ここで弾かれる)。
+ *
+ * `competitor`/`contextual`/`unrelated`/`uncertain`はモデル自己申告をそのまま
+ * `identity_status`へ反映する(競合店舗の正解データを持たないため、target_matchと
+ * 同等の強度のコード側検証はできない。§FIX3参照)。
+ *
+ * 純関数。入力を変更せず、新しい配列を返す。
+ */
+export function applySourceIdentityVerification(
+  sourceRegistry: readonly SourceRegistryEntry[],
+  sourceVerifications: readonly SourceVerification[],
+  store: StoreIdentity,
+): SourceRegistryEntry[] {
+  const verificationById = new Map<string, SourceVerification>();
+  for (const v of sourceVerifications) {
+    // 捏造・未知IDはSource Registry側の集合に存在しないため以下のmapで自然に無視される。
+    // 同一source_idの重複報告は先勝ちで採用する(existing conflictShape等と同じ方針)。
+    if (!verificationById.has(v.source_id)) verificationById.set(v.source_id, v);
+  }
+
+  return sourceRegistry.map((entry) => {
+    const verification = verificationById.get(entry.id);
+    if (!verification) return entry;
+
+    const identityStatus = deriveIdentityStatusFromVerification(verification, store);
+    const note =
+      verification.note.length > MAX_IDENTITY_NOTE_LENGTH
+        ? `${verification.note.slice(0, MAX_IDENTITY_NOTE_LENGTH)}…`
+        : verification.note;
+
+    return { ...entry, identity_status: identityStatus, identity_note: note };
+  });
+}
+
+function deriveIdentityStatusFromVerification(
+  verification: SourceVerification,
+  store: StoreIdentity,
+): IdentityStatus {
+  switch (verification.relation) {
+    case "target_store":
+      return isTargetStoreMatch(
+        {
+          name: verification.observed_name,
+          address: verification.observed_address,
+          phone: verification.observed_phone,
+        },
+        store,
+      )
+        ? "target_match"
+        : "uncertain";
+    case "competitor":
+      return "competitor_match";
+    case "contextual":
+      return "contextual";
+    case "unrelated":
+      return "unrelated";
+    case "uncertain":
+      return "uncertain";
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /*  own_net_exposure / media_coverage の post-Stage2 deterministic補正      */
 /*  (feat/ai-research-final-quality)                                       */
@@ -328,15 +429,26 @@ export function appendConfirmedMediaContext(
   // 無条件に列挙すると、competitor/public_data/other等の自店と無関係なsourceが
   // 「確認できた掲載媒体」として own_net_exposure/exposure_gap のvalueへ混入する。
   // media_coverage側と同じ`MEDIA_COVERAGE_SOURCE_TYPES`で絞り込む。
-  const confirmedTitles = finalRegistry
-    .filter(
-      (entry) => entry.url_context_status === "success" && MEDIA_COVERAGE_SOURCE_TYPES.has(entry.source_type),
-    )
-    .map((entry) => entry.title);
-  if (confirmedTitles.length === 0) return items.slice();
+  // fix/ai-research-source-identity-integrity(FIX10): さらに`identity_status===
+  // "target_match"`も必須にする(url_context成功=ページ取得成功であって対象店舗の
+  // ページだったことを保証しない、実機smoke事故の教訓)。表示名も`entry.title`
+  // (モデル自己申告)ではなく`deriveDisplaySourceName`でhostnameから導出する(FIX9)。
+  const confirmedNames = Array.from(
+    new Set(
+      finalRegistry
+        .filter(
+          (entry) =>
+            entry.url_context_status === "success" &&
+            entry.identity_status === "target_match" &&
+            MEDIA_COVERAGE_SOURCE_TYPES.has(entry.source_type),
+        )
+        .map((entry) => deriveDisplaySourceName(entry)),
+    ),
+  );
+  if (confirmedNames.length === 0) return items.slice();
 
   const targetKeys = new Set(["own_net_exposure", "exposure_gap"]);
-  const mediaList = confirmedTitles.join("、");
+  const mediaList = confirmedNames.join("、");
   const evidenceSupplement = `(このrunで実際に本文を確認できた情報源: ${mediaList})`;
   // FACT部分(掲載媒体名)をvalueの先頭にdeterministicに配置する(feat/ai-research-final-trust-boundary)。
   // AIのANALYSIS文章自体(推論・評価の部分)は維持するが、「どの媒体に掲載されているか」という
@@ -365,60 +477,55 @@ const MEDIA_COVERAGE_SOURCE_TYPES: ReadonlySet<SourceType> = new Set([
 /**
  * `media_coverage`のvalue/evidence/source_idsを、実際に検証できた第三者媒体
  * (グルメサイト・予約サイト・地域記事等)からdeterministicに構築する
- * (feat/ai-research-final-trust-boundary)。
+ * (feat/ai-research-final-trust-boundary、fix/ai-research-source-identity-integrity
+ * でFIX10として再設計)。
  *
- * 発見された実バグ: AIが`confirmed`と判定した場合、旧実装は「モデル自身の判断を尊重」
- * してAIの`value`テキストをそのまま素通ししていたが、`value`は`source_ids`とは独立した
- * 自由文字列であり、`pruneUnverifiedSourceIds`による`source_ids`配列の刈り込みでは
- * `value`テキスト自体(例:「ぐるなび、ホットペッパー、じゃらん、地域記事X、地域記事Yに掲載」)
- * は一切修正されない。そのため「実際に検証できたのは2媒体なのにvalueには5媒体が
- * 列挙されている」という不整合が起きていた。
+ * 発見された実バグ(feat/ai-research-final-trust-boundary): AIが`confirmed`と判定した場合、
+ * 旧実装は「モデル自身の判断を尊重」してAIの`value`テキストをそのまま素通ししていたが、
+ * `value`は`source_ids`とは独立した自由文字列であり、`pruneUnverifiedSourceIds`による
+ * `source_ids`配列の刈り込みでは`value`テキスト自体は一切修正されない。そのため
+ * 「実際に検証できたのは2媒体なのにvalueには5媒体が列挙されている」という不整合が
+ * 起きていた。
  *
- * 対応: 検証済み媒体(url_context成功、またはkey=media_coverageのSearchFact一致)が
- * 1件以上ある場合、AIの判定に関わらず`value`/`evidence`/`source_ids`を常に
- * deterministicに再構築する。検証済み媒体が0件の場合は何もせず、AIの判定(および
- * 後続の`applyDeterministicValidation`によるTier A/B判定)にそのまま委ねる。
+ * 実機smokeで発見した2件目のバグ(fix/ai-research-source-identity-integrity): 上記の
+ * 「検証済み」の定義が`url_context_status==="success"`(または信頼済みhostnameの
+ * SearchFact一致)のみであり、「取得したページが実際に対象店舗の掲載ページだったか」を
+ * 一切確認していなかった。信頼済みhostname(hotpepper.jp等)であっても、実際には全く
+ * 別店舗のページを指すURLが「確認できた掲載媒体」として列挙される事故が発生した。
+ *
+ * 対応: 検証済み媒体の定義を「(1) url_context成功 かつ (2) `identity_status===
+ * "target_match"`(Stage2の`source_verifications`とStoreIdentityの突合で確認済み)」の
+ * 両方を満たす場合に限定する。SearchFactのみ(url_context未成功)の経路は廃止した
+ * (`validateResearchItemStatus`の`isTierBEligible`と同じ方針、known_store_data以外の
+ * SearchFact-onlyエビデンスはtarget項目のconfirmedに使わない、FIX6)。
+ *
+ * `value`の表示名は`deriveDisplaySourceName`でhostnameからdeterministicに導出し、
+ * モデル自己申告の`entry.title`には依存しない(FIX9、モデルtitleと実際のURLが
+ * 食い違っていた実機事故の再発防止)。
  */
 export function upgradeMediaCoverageFromRegistry(
   items: readonly ResearchItem[],
   finalRegistry: readonly SourceRegistryEntry[],
-  searchFacts: readonly SearchFact[] = [],
 ): ResearchItem[] {
-  const searchFactSourceIds = new Set(
-    searchFacts.filter((fact) => fact.key === "media_coverage").map((fact) => fact.sourceId),
+  const verifiedMedia = finalRegistry.filter(
+    (entry) =>
+      MEDIA_COVERAGE_SOURCE_TYPES.has(entry.source_type) &&
+      entry.url_context_status === "success" &&
+      entry.identity_status === "target_match",
   );
-  // 監査で発見(fix/ai-research-final-audit-hardening、CONFIRMED BUG): url_context成功
-  // なしでSearchFactのみを根拠にする場合、以前はentry.source_type(Stage1モデルの
-  // 自己申告)をそのまま信用していた。これはresearch-result-schema.tsのTier B trust
-  // matrix(`deriveTrustedSourceType`)が要求する「known_store_data、または既知
-  // hostnameのみ信頼」という境界をこの関数だけ迂回してしまっていた(Section E)。
-  // url_context成功済みのentryは本文取得という別の裏付けがあるため自己申告typeで
-  // よいが、SearchFactのみの場合は`deriveTrustedSourceType`を必須にする。
-  const verifiedMedia = finalRegistry.filter((entry) => {
-    if (entry.url_context_status === "success") {
-      return MEDIA_COVERAGE_SOURCE_TYPES.has(entry.source_type);
-    }
-    if (!searchFactSourceIds.has(entry.id)) return false;
-    const trustedType = deriveTrustedSourceType(entry);
-    return trustedType !== undefined && MEDIA_COVERAGE_SOURCE_TYPES.has(trustedType);
-  });
   if (verifiedMedia.length === 0) return items.slice();
 
-  const hasUrlContextSuccess = verifiedMedia.some((entry) => entry.url_context_status === "success");
-  const hasSearchFactOnly = verifiedMedia.some(
-    (entry) => searchFactSourceIds.has(entry.id) && entry.url_context_status !== "success",
-  );
-  const evidence_basis = hasUrlContextSuccess && hasSearchFactOnly ? "mixed" : hasUrlContextSuccess ? "url_context" : "search_note";
+  const displayNames = Array.from(new Set(verifiedMedia.map((entry) => deriveDisplaySourceName(entry))));
 
   return items.map((item) => {
     if (item.key !== "media_coverage") return item;
     return {
       ...item,
       status: "confirmed" as const,
-      value: verifiedMedia.map((entry) => entry.title).join("、"),
+      value: displayNames.join("、"),
       evidence: "実際に確認できた掲載媒体を列挙しています。",
       source_ids: verifiedMedia.map((entry) => entry.id),
-      evidence_basis: evidence_basis as "mixed" | "url_context" | "search_note",
+      evidence_basis: "url_context" as const,
       warning: undefined,
       candidates: undefined,
     };
