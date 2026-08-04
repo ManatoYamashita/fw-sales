@@ -83,10 +83,49 @@ export const DISCOVERY_PROVENANCES = [
 ] as const;
 export type DiscoveryProvenance = (typeof DISCOVERY_PROVENANCES)[number];
 
+/**
+ * Source RegistryエントリのURLが実際に「対象店舗のページだった」かどうかの判定結果
+ * (fix/ai-research-source-identity-integrity、実機smokeで発見したCONFIRMED BUGの修正)。
+ *
+ * `url_context_status==="success"` は「URL Contextがそのページの取得に成功した」ことのみを
+ * 意味し、「取得したページが対象店舗について書かれている」ことは一切保証しない。
+ * 実機smokeで、モデルが自己申告した正しそうなtitle(「東北メシ 炉端ジュン」)と、
+ * 実際には完全な別店舗(「カフェ&民泊 三喜遊」)を指す誤ったURLが組み合わさり、
+ * `url_context_status==="success"`のみで「対象店舗の根拠を確認済み」として扱われる
+ * 事故が発生した。本フィールドはStage2の`source_verifications`(モデルがURL本文から
+ * 実際に観測した店舗名・住所・電話番号)とStoreIdentityをコード側で突合した結果を保持し、
+ * `url_context_status`とは独立した第二のtrust boundaryとして機能する。
+ *
+ * - `not_checked`: まだ照合されていない(Stage2が`source_verifications`でこのIDに
+ *   言及しなかった場合、または本フィールド追加以前の既存run)。past runsとの
+ *   後方互換のため`.optional()`(DB migration不要、欠落時は`not_checked`として扱う)。
+ * - `target_match`: 観測された店舗名・住所/電話がStoreIdentityとコード側で一致した。
+ * - `competitor_match`: モデルが競合店舗ページと申告し、対象店舗との一致は求めない
+ *   (競合調査項目の根拠として使う。何と一致すべきかという「正解」が存在しないため、
+ *   target_matchと同じ強度のコード側検証はできない)。
+ * - `contextual`: 対象店舗固有のページではないが、商圏・市場等の文脈情報として有用
+ *   (例: エリア特集記事)。
+ * - `unrelated`: 対象店舗にも競合にも無関係と判定された(今回の事故のケースはこれに
+ *   分類されるべきだった)。
+ * - `uncertain`: モデルが`target_store`と自己申告したが、コード側の名前/住所/電話
+ *   照合が成立しなかった、または観測情報が不足していた。自己申告を無条件に信用せず、
+ *   false positiveよりfalse negativeを優先してこの値に倒す。
+ */
+export const IDENTITY_STATUSES = [
+  "not_checked",
+  "target_match",
+  "competitor_match",
+  "contextual",
+  "unrelated",
+  "uncertain",
+] as const;
+export type IdentityStatus = (typeof IDENTITY_STATUSES)[number];
+
 export const SourceRegistryEntrySchema = z.object({
   /** run内で一意・連番の ID ("S01", "S02", ...)。モデルはこの ID のみを参照する。 */
   id: z.string(),
-  /** groundingChunks[].title 由来(ホスト名相当)。 */
+  /** groundingChunks[].title 由来(ホスト名相当)。モデル自己申告のためUI表示では
+   *  無条件に信用しない(`deriveDisplaySourceName`参照)。 */
   title: z.string(),
   /** groundingChunks[].uri 由来。公式 grounding metadata が Source of Truth。 */
   grounding_redirect_url: z.string(),
@@ -97,8 +136,45 @@ export const SourceRegistryEntrySchema = z.object({
   discovery_provenance: z.enum(DISCOVERY_PROVENANCES),
   /** Stage2 実行後に更新される。confirmed の deterministic validation の判断材料。 */
   url_context_status: z.enum(URL_CONTEXT_STATUSES),
+  /** Stage2の`source_verifications`とStoreIdentityの突合結果。既存runとの後方互換のためoptional。 */
+  identity_status: z.enum(IDENTITY_STATUSES).optional(),
+  /** モデルが報告したverification note(観測できた内容の短い説明)。表示は補助情報に留める。 */
+  identity_note: z.string().optional(),
 });
 export type SourceRegistryEntry = z.infer<typeof SourceRegistryEntrySchema>;
+
+/**
+ * Stage2 Structured Outputの`source_verifications[].relation`(モデル自己申告)。
+ * `target_store`であっても、コード側の名前/住所/電話照合(`isTargetStoreMatch`、
+ * `lib/ai/research/identity-match.ts`)が成立しない限り`identity_status`は
+ * `target_match`にならない(`uncertain`へ倒す)。
+ */
+export const SOURCE_VERIFICATION_RELATIONS = [
+  "target_store",
+  "competitor",
+  "contextual",
+  "unrelated",
+  "uncertain",
+] as const;
+export type SourceVerificationRelation = (typeof SOURCE_VERIFICATION_RELATIONS)[number];
+
+/**
+ * Stage2 Structured Outputへ追加したper-source identity verification
+ * (fix/ai-research-source-identity-integrity)。`observed_*`はプロンプトの店舗情報を
+ * コピーさせず、そのURL本文で実際に確認できた値のみを書かせる(確認できなければnull)。
+ * 既存Gemini call数を増やさないため、Stage2の同一Structured Output内へ追加する
+ * (追加のGemini呼出は発生しない)。
+ */
+export const SourceVerificationSchema = z.object({
+  source_id: z.string(),
+  relation: z.enum(SOURCE_VERIFICATION_RELATIONS),
+  observed_title: z.string().nullable(),
+  observed_name: z.string().nullable(),
+  observed_address: z.string().nullable(),
+  observed_phone: z.string().nullable(),
+  note: z.string(),
+});
+export type SourceVerification = z.infer<typeof SourceVerificationSchema>;
 
 /* ------------------------------------------------------------------ */
 /*  ResearchItem (Plan v3.2 §7, §10)                                   */
@@ -458,6 +534,58 @@ function hostnameOf(url: string): string | null {
 }
 
 /**
+ * 既知hostname→UI表示名(fix/ai-research-source-identity-integrity、FIX9)。
+ * `KNOWN_HOSTNAME_SOURCE_TYPES`とは意図的に別のmapとして持つ(既存の信頼判定ロジックへの
+ * 影響を避けるため)。実機smokeで、モデル自己申告の`entry.title`(「東北メシ 炉端ジュン」)
+ * が実際には全く別店舗のURLに付けられていた事故を踏まえ、UI上の媒体名は可能な限り
+ * hostnameからdeterministicに導出し、モデル自己申告titleを「確認済みソース名」として
+ * 無条件表示しない。
+ */
+const KNOWN_HOSTNAME_DISPLAY_NAMES: Readonly<Record<string, string>> = {
+  "tabelog.com": "食べログ",
+  "www.tabelog.com": "食べログ",
+  "hotpepper.jp": "ホットペッパーグルメ",
+  "www.hotpepper.jp": "ホットペッパーグルメ",
+  "gnavi.co.jp": "楽天ぐるなび",
+  "www.gnavi.co.jp": "楽天ぐるなび",
+  "r.gnavi.co.jp": "楽天ぐるなび",
+  "retty.me": "Retty",
+  "www.retty.me": "Retty",
+  "jalan.net": "じゃらんnet",
+  "www.jalan.net": "じゃらんnet",
+};
+
+/**
+ * UI表示用のsource名を導出する。`known_store_data`はアプリ自身が付けた固定文言
+ * (`buildKnownStoreDataEntries`、モデル生成ではない)のため`entry.title`をそのまま使う。
+ * それ以外(`gemini_search_candidate`/`google_grounding`)は、既知hostnameならその
+ * 表示名、未知hostnameならhostname文字列そのものを使い、モデル自己申告の
+ * `entry.title`には依存しない。
+ */
+export function deriveDisplaySourceName(entry: SourceRegistryEntry): string {
+  if (entry.discovery_provenance === "known_store_data") return entry.title;
+  const host = hostnameOf(entry.resolved_url ?? entry.grounding_redirect_url);
+  if (host === null) return entry.title;
+  return KNOWN_HOSTNAME_DISPLAY_NAMES[host] ?? host;
+}
+
+/**
+ * UI上でsource URLをクリック可能なリンクにしてよいか判定する
+ * (fix/ai-research-source-identity-integrity、FIX8)。
+ *
+ * 識別確認(`identity_status`)が済んでいない`gemini_search_candidate`/
+ * `google_grounding`のURLは、実機smokeで確認された通り全く無関係な別店舗のページを
+ * 指している可能性がある。ユーザーが誤って無関係な外部ページへ誘導されないよう、
+ * 識別確認済み(target_match/competitor_match/contextual)または`known_store_data`
+ * (アプリ自身が保持するURL)の場合のみクリック可能にする。
+ */
+export function isSourceLinkClickable(entry: SourceRegistryEntry): boolean {
+  if (entry.discovery_provenance === "known_store_data") return true;
+  const status = entry.identity_status;
+  return status === "target_match" || status === "competitor_match" || status === "contextual";
+}
+
+/**
  * Tier B判定に使ってよい「信頼済みsource_type」を導出する。自己申告の
  * `entry.source_type`をそのまま信用せず、以下のいずれかの場合のみ返す:
  * (1) `discovery_provenance === "known_store_data"`(app側が決定、信頼済み)。
@@ -494,6 +622,61 @@ const PRIMARY_SOURCE_REQUIRED_KEYS: ReadonlySet<string> = new Set([
   "concept",
 ]);
 const PRIMARY_SOURCE_TYPES: ReadonlySet<SourceType> = new Set(["official_site", "official_sns"]);
+
+/**
+ * 競合店舗そのものを調査対象とする項目(fix/ai-research-source-identity-integrity)。
+ * これらの項目は対象店舗ではなく競合店舗のページが根拠になってよいため、
+ * `identity_status==="competitor_match"`を要求する(target_matchは要求しない)。
+ */
+const COMPETITOR_ITEM_KEYS: ReadonlySet<string> = new Set([
+  "competitor_stores",
+  "competitor_benchmark",
+  "competitor_paid_ads",
+]);
+
+/**
+ * 対象店舗固有のページではなく、商圏・市場等の文脈情報を根拠として許容してよい項目
+ * (fix/ai-research-source-identity-integrity)。`target_match`に加え`contextual`
+ * (エリア特集記事等)も根拠として認める。巨大なmatrixを避けるため、明確に
+ * 「対象店舗個別のページである必要が薄い」項目のみへ限定する。
+ */
+const CONTEXTUAL_ITEM_KEYS: ReadonlySet<string> = new Set(["trade_area", "market_demand"]);
+
+/**
+ * `item.key`のカテゴリに応じて、confirmedの根拠として要求する`identity_status`の
+ * 集合を返す(fix/ai-research-source-identity-integrity、実機smokeで発見したCONFIRMED
+ * BUGの修正)。デフォルトは「対象店舗固有情報」として`target_match`のみを要求する
+ * (今回事故になったHotPepperの誤URLはこの既定ルールで`unrelated`/`uncertain`となり
+ * 除外される想定)。
+ */
+function getRequiredIdentityStatuses(key: string): ReadonlySet<IdentityStatus> {
+  if (COMPETITOR_ITEM_KEYS.has(key)) return new Set(["competitor_match"]);
+  if (CONTEXTUAL_ITEM_KEYS.has(key)) return new Set(["target_match", "contextual"]);
+  return new Set(["target_match"]);
+}
+
+/**
+ * Source Registryエントリが`item.key`のconfirmed根拠として使ってよい identity か判定する。
+ * `not_checked`(未検証・既存runとの後方互換)・`unrelated`・`uncertain`は
+ * どのカテゴリでも根拠として認めない(false positiveよりfalse negativeを優先)。
+ */
+function isIdentityAcceptableForItem(entry: SourceRegistryEntry, itemKey: string): boolean {
+  const identityStatus = entry.identity_status ?? "not_checked";
+  return getRequiredIdentityStatuses(itemKey).has(identityStatus);
+}
+
+/**
+ * Tier B(SearchFact)による今回の実機smoke事故を踏まえた方針(fix/ai-research-source-identity-integrity):
+ * 第三者(known_store_data以外)のSearchFact-onlyエビデンスは、target項目のconfirmedの
+ * 根拠に**使わない**。`hotpepper.jp`のような信頼済みhostnameであっても、実際に指している
+ * ページが対象店舗かどうかはURL Context本文取得+`source_verifications`による識別確認
+ * (`identity_status`)を経なければ判定できないため(今回のHotPepper誤URL事故の直接原因)。
+ * `known_store_data`(`stores.site_url`/`instagram_url`)はアプリ自身が対象店舗のURLとして
+ * 保持するデータであり、Geminiの発見・自己申告を経由しないため、この制約の対象外とする。
+ */
+function isTierBEligible(entry: SourceRegistryEntry): boolean {
+  return entry.discovery_provenance === "known_store_data";
+}
 
 /**
  * Tier B(SearchFact)判定で「同一keyに複数の異なるSearchFact値」を対立する事実では
@@ -611,12 +794,15 @@ export function validateResearchItemStatus(
   const isPlacesVerified = context.placesVerifiedKeys?.has(item.key) ?? false;
 
   // path 2: URL Context本文取得成功のsourceのみ根拠にできる。ただし以下は除外する
-  // (feat/ai-research-pre-smoke-hardening):
+  // (feat/ai-research-pre-smoke-hardening、fix/ai-research-source-identity-integrity):
   // - MAJOR8: competitor(競合店舗)由来のsourceは自店項目のconfirmed根拠にしない
   //   (「明らかに不適合」な最小防御。完全な意味照合は今回のスコープ外の残存リスク)。
   // - MAJOR5: owner_profile/owner_career/owner_philosophy/conceptは、本人発信の
   //   一次情報(official_site/official_sns)以外の本文取得成功では根拠にしない
   //   (第三者グルメサイト・記事の取得成功だけでは「本人発信」を保証できないため)。
+  // - 実機smoke事故: `url_context_status==="success"`(=ページ取得成功)だけでは
+  //   「対象店舗のページだった」ことを一切保証しない。`identity_status`
+  //   (`isIdentityAcceptableForItem`)による識別確認を必須にする。
   const requiresPrimarySource = PRIMARY_SOURCE_REQUIRED_KEYS.has(item.key);
   const verifiedIds = new Set(
     context.sourceRegistry
@@ -624,6 +810,7 @@ export function validateResearchItemStatus(
         if (entry.url_context_status !== "success") return false;
         if (entry.source_type === "competitor") return false;
         if (requiresPrimarySource && !PRIMARY_SOURCE_TYPES.has(entry.source_type)) return false;
+        if (!isIdentityAcceptableForItem(entry, item.key)) return false;
         return true;
       })
       .map((entry) => entry.id),
@@ -642,6 +829,12 @@ export function validateResearchItemStatus(
   // 「無条件に真実」ではない(追加修正C)。同一keyについて信頼済みSearchFactの値が
   // 複数かつ異なる場合は、どちらが正しいか機械的に判断できないためconfirmedにしない
   // (false positiveよりfalse negativeを優先)。
+  //
+  // fix/ai-research-source-identity-integrity: 加えて`isTierBEligible`
+  // (`known_store_data`のみ)を必須にする。第三者(hostname trustのみ)のSearchFact-only
+  // エビデンスは、URL Context本文取得すら経ていないため`source_verifications`による
+  // 識別確認の機会が無く、trusted hostnameであっても実際に対象店舗のページを指している
+  // 保証が無い(今回のHotPepper誤URL事故の教訓)。
   const allowedSourceTypes = SOURCE_TRUST_MATRIX[item.key];
   const trustedFactsForKey =
     allowedSourceTypes === undefined
@@ -651,6 +844,7 @@ export function validateResearchItemStatus(
           if (!item.source_ids.includes(fact.sourceId)) return false;
           const entry = context.sourceRegistry.find((e) => e.id === fact.sourceId);
           if (entry === undefined) return false;
+          if (!isTierBEligible(entry)) return false;
           const trustedType = deriveTrustedSourceType(entry);
           return trustedType !== undefined && allowedSourceTypes.includes(trustedType);
         });
@@ -896,7 +1090,8 @@ export function applyDeterministicValidation(
   const conflictValidated = validateConflictShape(sourceIdsSanitized);
   const statusValidated = validateResearchItemStatus(conflictValidated, context);
   const invariantEnforced = enforceStatusValueInvariant(statusValidated);
-  return pruneUnverifiedSourceIds(invariantEnforced, context);
+  const sourceIdsPruned = pruneUnverifiedSourceIds(invariantEnforced, context);
+  return flagEvidenceSourceIdMismatch(sourceIdsPruned);
 }
 
 /**
@@ -916,13 +1111,26 @@ export function pruneUnverifiedSourceIds(
   item: ResearchItem,
   context: ResearchValidationContext,
 ): ResearchItem {
+  // fix/ai-research-source-identity-integrity: url_context成功済みでも識別確認
+  // (`identity_status`)が対象keyのカテゴリに適合しないsourceは、判定に寄与していない
+  // ことと同様に表示からも刈り込む(誤ったURLが「確認済み」リンクとしてUIに残る
+  // 実機smoke事故の再発防止、`validateResearchItemStatus`のpath 2と同じ基準を使う)。
   const verifiedIds = new Set(
     context.sourceRegistry
-      .filter((entry) => entry.url_context_status === "success")
+      .filter(
+        (entry) =>
+          entry.url_context_status === "success" && isIdentityAcceptableForItem(entry, item.key),
+      )
       .map((entry) => entry.id),
   );
   const searchFactIdsForKey = new Set(
-    (context.searchFacts ?? []).filter((fact) => fact.key === item.key).map((fact) => fact.sourceId),
+    (context.searchFacts ?? [])
+      .filter((fact) => fact.key === item.key)
+      .map((fact) => fact.sourceId)
+      .filter((sourceId) => {
+        const entry = context.sourceRegistry.find((e) => e.id === sourceId);
+        return entry !== undefined && isTierBEligible(entry);
+      }),
   );
   const isKept = (id: string): boolean => verifiedIds.has(id) || searchFactIdsForKey.has(id);
 
@@ -950,6 +1158,38 @@ export function pruneUnverifiedSourceIds(
     ...item,
     source_ids: filteredSourceIds,
     candidates: candidatesChanged ? filteredCandidates : item.candidates,
+  };
+}
+
+/**
+ * `S01`/`S05`等のsource ID表記が`item.evidence`本文に直接埋め込まれ、かつその
+ * IDが`item.source_ids`(prune後)に含まれていない場合、warningを付与する
+ * (fix/ai-research-source-identity-integrity、FIX11)。
+ *
+ * 実機smokeで、evidence本文が「S05ぐるなびによると」等具体的なsource IDを含む一方、
+ * source_ids配列が別の(または刈り込まれた)ID集合になっており、UIのsource badgeと
+ * evidence本文の説明が食い違う不整合が確認された。evidence本文の自由文字列を
+ * 機械的に安全に書き換えることはできない(文脈を壊すリスクがある)ため、ここでは
+ * 検出してwarningを付与するに留める。source_idsをcanonical provenanceとして扱う
+ * (Stage2 promptにも evidence本文へsource IDを書かせない指示を追加済み)。
+ *
+ * 純関数。入力を変更せず、新しい `ResearchItem` を返す。
+ */
+const EVIDENCE_SOURCE_ID_PATTERN = /\bS\d{2,3}\b/g;
+
+export function flagEvidenceSourceIdMismatch(item: ResearchItem): ResearchItem {
+  if (!item.evidence) return item;
+  const mentioned = item.evidence.match(EVIDENCE_SOURCE_ID_PATTERN);
+  if (!mentioned) return item;
+  const sourceIdSet = new Set(item.source_ids);
+  const hasStaleReference = mentioned.some((id) => !sourceIdSet.has(id));
+  if (!hasStaleReference) return item;
+  return {
+    ...item,
+    warning: appendWarning(
+      item.warning,
+      "evidence内の出典表記がsource_idsと一致しない可能性があります。",
+    ),
   };
 }
 

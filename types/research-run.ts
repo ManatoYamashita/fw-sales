@@ -16,7 +16,10 @@ export {
   RESOLVE_STATUSES,
   URL_CONTEXT_STATUSES,
   DISCOVERY_PROVENANCES,
+  IDENTITY_STATUSES,
+  SOURCE_VERIFICATION_RELATIONS,
   SourceRegistryEntrySchema,
+  SourceVerificationSchema,
   ResearchItemCandidateSchema,
   ResearchItemSchema,
   ResearchItemsSchema,
@@ -29,6 +32,9 @@ export {
   validateResearchItemStatus,
   applyDeterministicValidation,
   validateResearchItems,
+  deriveTrustedSourceType,
+  deriveDisplaySourceName,
+  isSourceLinkClickable,
 } from "@/lib/ai/research-result-schema";
 
 export type {
@@ -37,6 +43,9 @@ export type {
   ResolveStatus,
   UrlContextStatus,
   DiscoveryProvenance,
+  IdentityStatus,
+  SourceVerificationRelation,
+  SourceVerification,
   SourceRegistryEntry,
   ResearchItemCandidate,
   ResearchItem,

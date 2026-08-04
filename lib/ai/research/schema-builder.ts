@@ -17,9 +17,13 @@ import {
   stripUnsupportedKeys,
   withPropertyOrdering,
 } from "@/lib/ai/_shared/json-schema-utils";
-import { ResearchPolicySchema, RESEARCH_STATUSES } from "@/lib/ai/research-result-schema";
+import {
+  ResearchPolicySchema,
+  RESEARCH_STATUSES,
+  SOURCE_VERIFICATION_RELATIONS,
+} from "@/lib/ai/research-result-schema";
 
-const TOP_LEVEL_PROPERTY_ORDERING = ["store_identification", "items"] as const;
+const TOP_LEVEL_PROPERTY_ORDERING = ["store_identification", "source_verifications", "items"] as const;
 const ITEM_PROPERTY_ORDERING = [
   "key",
   "research_policy",
@@ -30,6 +34,15 @@ const ITEM_PROPERTY_ORDERING = [
   "confidence",
   "warning",
   "candidates",
+] as const;
+const SOURCE_VERIFICATION_PROPERTY_ORDERING = [
+  "source_id",
+  "relation",
+  "observed_title",
+  "observed_name",
+  "observed_address",
+  "observed_phone",
+  "note",
 ] as const;
 
 /**
@@ -68,6 +81,24 @@ function buildDynamicResearchItemSchema(
   });
 }
 
+/**
+ * per-source identity verification(fix/ai-research-source-identity-integrity)。
+ * `source_id`をSource Registryのid一覧へ動的制限する(捏造・未知IDの拒否、既存の
+ * `source_ids.items.enum`と同じ一次防御)。`registryIds`が空の場合の安全な
+ * フォールバックも既存の`enumOrString`をそのまま再利用する。
+ */
+function buildSourceVerificationSchema(registryIds: readonly string[]) {
+  return z.object({
+    source_id: enumOrString(registryIds),
+    relation: z.enum(SOURCE_VERIFICATION_RELATIONS),
+    observed_title: z.string().nullable(),
+    observed_name: z.string().nullable(),
+    observed_address: z.string().nullable(),
+    observed_phone: z.string().nullable(),
+    note: z.string(),
+  });
+}
+
 function buildDynamicStage2ResponseSchema(
   allowedKeys: readonly string[],
   registryIds: readonly string[],
@@ -78,6 +109,11 @@ function buildDynamicStage2ResponseSchema(
       matched_address: z.string(),
       identification_note: z.string(),
     }),
+    // fix/ai-research-source-identity-integrity: Source Registryの各source_idについて
+    // 「実際に取得したページが対象店舗/競合/文脈情報/無関係のいずれか」をモデル自身に
+    // 申告させる。既存Stage2 Structured Outputへ追加するため、追加のGemini呼出は
+    // 発生しない(Gemini呼出はrunあたりStage1 1回・Stage2 1回のまま)。
+    source_verifications: z.array(buildSourceVerificationSchema(registryIds)),
     items: z.array(buildDynamicResearchItemSchema(allowedKeys, registryIds)),
   });
 }
@@ -103,27 +139,42 @@ export function buildStage2JsonSchema(params: Stage2SchemaBuildParams): Record<s
 }
 
 /**
- * `items.items`(配列要素=1件分のResearchItemスキーマ)にも `propertyOrdering` を
- * 埋め込む。`withPropertyOrdering` はトップレベル専用のため、ここでネスト path を
- * 直接書き換える。
+ * `items.items`(配列要素=1件分のResearchItemスキーマ)・`source_verifications.items`
+ * (配列要素=1件分のSourceVerificationスキーマ)にも `propertyOrdering` を埋め込む。
+ * `withPropertyOrdering` はトップレベル専用のため、ここでネスト path を直接書き換える。
  */
 function withItemPropertyOrdering(schema: Record<string, unknown>): Record<string, unknown> {
   const properties = schema.properties as Record<string, unknown> | undefined;
   const itemsField = properties?.items as Record<string, unknown> | undefined;
   const itemSchema = itemsField?.items as Record<string, unknown> | undefined;
-  if (!itemSchema) return schema;
+  const verificationsField = properties?.source_verifications as Record<string, unknown> | undefined;
+  const verificationSchema = verificationsField?.items as Record<string, unknown> | undefined;
+
+  if (!itemSchema && !verificationSchema) return schema;
 
   return {
     ...schema,
     properties: {
       ...properties,
-      items: {
-        ...itemsField,
-        items: {
-          ...itemSchema,
-          propertyOrdering: [...ITEM_PROPERTY_ORDERING],
-        },
-      },
+      ...(itemSchema
+        ? {
+            items: {
+              ...itemsField,
+              items: { ...itemSchema, propertyOrdering: [...ITEM_PROPERTY_ORDERING] },
+            },
+          }
+        : {}),
+      ...(verificationSchema
+        ? {
+            source_verifications: {
+              ...verificationsField,
+              items: {
+                ...verificationSchema,
+                propertyOrdering: [...SOURCE_VERIFICATION_PROPERTY_ORDERING],
+              },
+            },
+          }
+        : {}),
     },
   };
 }

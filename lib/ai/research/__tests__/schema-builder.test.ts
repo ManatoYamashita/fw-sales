@@ -57,10 +57,29 @@ describe("buildStage2JsonSchema", () => {
 
   it("propertyOrderingがトップレベルと項目レベルに設定される", () => {
     const schema = buildStage2JsonSchema({ allowedKeys: ["x"], registryIds: ["S01"] });
-    expect(schema.propertyOrdering).toEqual(["store_identification", "items"]);
+    expect(schema.propertyOrdering).toEqual(["store_identification", "source_verifications", "items"]);
     const itemSchema = getItemSchema(schema);
     expect(itemSchema.propertyOrdering).toContain("key");
     expect(itemSchema.propertyOrdering).toContain("source_ids");
+  });
+
+  it("source_verifications.items.propertyOrderingが設定される(fix/ai-research-source-identity-integrity)", () => {
+    const schema = buildStage2JsonSchema({ allowedKeys: ["x"], registryIds: ["S01"] });
+    const properties = schema.properties as JsonSchemaNode;
+    const verificationsField = properties.source_verifications as JsonSchemaNode;
+    const verificationItemSchema = verificationsField.items as JsonSchemaNode;
+    expect(verificationItemSchema.propertyOrdering).toContain("source_id");
+    expect(verificationItemSchema.propertyOrdering).toContain("relation");
+  });
+
+  it("source_verifications[].source_id.enumがregistryIdsに制限される(fix/ai-research-source-identity-integrity)", () => {
+    const schema = buildStage2JsonSchema({ allowedKeys: ["x"], registryIds: ["S01", "S02"] });
+    const properties = schema.properties as JsonSchemaNode;
+    const verificationsField = properties.source_verifications as JsonSchemaNode;
+    const verificationItemSchema = verificationsField.items as JsonSchemaNode;
+    const verificationProperties = verificationItemSchema.properties as JsonSchemaNode;
+    const sourceIdField = verificationProperties.source_id as JsonSchemaNode;
+    expect(sourceIdField.enum).toEqual(["S01", "S02"]);
   });
 
   it("Gemini非対応キー($schema等)を含まない", () => {
@@ -86,6 +105,17 @@ describe("buildStage2ResponseZodSchema", () => {
     const schema = buildStage2ResponseZodSchema(["business_hours_holidays"], ["S01"]);
     const result = schema.safeParse({
       store_identification: { matched_name: "x", matched_address: "y", identification_note: "z" },
+      source_verifications: [
+        {
+          source_id: "S01",
+          relation: "target_store",
+          observed_title: "t",
+          observed_name: "n",
+          observed_address: "a",
+          observed_phone: "p",
+          note: "note",
+        },
+      ],
       items: [
         {
           key: "business_hours_holidays",
@@ -104,6 +134,7 @@ describe("buildStage2ResponseZodSchema", () => {
     const schema = buildStage2ResponseZodSchema(["business_hours_holidays"], ["S01"]);
     const result = schema.safeParse({
       store_identification: { matched_name: "x", matched_address: "y", identification_note: "z" },
+      source_verifications: [],
       items: [
         {
           key: "business_hours_holidays",
@@ -122,6 +153,7 @@ describe("buildStage2ResponseZodSchema", () => {
     const schema = buildStage2ResponseZodSchema(["business_hours_holidays"], ["S01"]);
     const result = schema.safeParse({
       store_identification: { matched_name: "x", matched_address: "y", identification_note: "z" },
+      source_verifications: [],
       items: [
         {
           key: "revenue", // allowedKeysに含まれない
@@ -132,6 +164,46 @@ describe("buildStage2ResponseZodSchema", () => {
           source_ids: [],
         },
       ],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("registryIdsに含まれないsource_verifications[].source_idを拒否する(fix/ai-research-source-identity-integrity)", () => {
+    const schema = buildStage2ResponseZodSchema(["business_hours_holidays"], ["S01"]);
+    const result = schema.safeParse({
+      store_identification: { matched_name: "x", matched_address: "y", identification_note: "z" },
+      source_verifications: [
+        {
+          source_id: "S99",
+          relation: "target_store",
+          observed_title: null,
+          observed_name: null,
+          observed_address: null,
+          observed_phone: null,
+          note: "",
+        },
+      ],
+      items: [],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("未知のsource_verifications[].relationを拒否する(fix/ai-research-source-identity-integrity)", () => {
+    const schema = buildStage2ResponseZodSchema(["business_hours_holidays"], ["S01"]);
+    const result = schema.safeParse({
+      store_identification: { matched_name: "x", matched_address: "y", identification_note: "z" },
+      source_verifications: [
+        {
+          source_id: "S01",
+          relation: "official_partner", // 未知のrelation
+          observed_title: null,
+          observed_name: null,
+          observed_address: null,
+          observed_phone: null,
+          note: "",
+        },
+      ],
+      items: [],
     });
     expect(result.success).toBe(false);
   });

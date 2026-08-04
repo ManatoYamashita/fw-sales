@@ -21,6 +21,9 @@ import {
   validateFinalResearchResultIntegrity,
   sortResearchItemsToCanonicalOrder,
   deriveTrustedSourceType,
+  deriveDisplaySourceName,
+  isSourceLinkClickable,
+  flagEvidenceSourceIdMismatch,
   type ResearchItem,
   type ResearchItemCandidate,
   type SourceRegistryEntry,
@@ -41,6 +44,11 @@ function makeSource(
     source_type: "official_site",
     discovery_provenance: "google_grounding",
     url_context_status: "not_attempted",
+    // fix/ai-research-source-identity-integrity: 既存テストの大半は
+    // 「url_context成功=対象店舗のページ」という(修正前は正しかった)前提で書かれて
+    // いるため、デフォルトをtarget_matchにして既存の意図を保つ。identity_status
+    // ゲート自体を検証するテストは明示的にoverrideする。
+    identity_status: "target_match",
     ...overrides,
   };
 }
@@ -539,7 +547,13 @@ describe("validateResearchItemStatus (confirmed の deterministic validation)", 
       expect(result.value).toBe("17:00-24:00");
     });
 
-    it("hostname classifierで既知ポータルと判定できるsource(例: tabelog.com)ならdiscovery_provenanceがgemini_search_candidateでもTier B対象になる(MAJOR6)", () => {
+    it("hostname classifierで既知ポータルと判定できるsource(例: tabelog.com)でも、discovery_provenanceがgemini_search_candidate(第三者・known_store_data以外)ならTier Bでconfirmedにしない(fix/ai-research-source-identity-integrity、FIX6で方針変更)", () => {
+      // 実機smoke事故の教訓: hotpepper.jp等の信頼済みhostnameであっても、実際に
+      // 指しているページが対象店舗のものである保証はURL Context本文取得+
+      // source_verificationsによる識別確認を経なければ得られない。SearchFactのみ
+      // (URL Context本文取得を経ていない)第三者sourceは、hostname trustがあっても
+      // target項目のconfirmedの根拠として使わない方針へ変更した(旧MAJOR6のTier B
+      // 許容は撤回、known_store_dataのみ引き続き許容)。
       const item = makeItem({ key: "seat_count", research_policy: "FACT", source_ids: ["S01"] });
       const registry = [
         makeSource({
@@ -554,7 +568,7 @@ describe("validateResearchItemStatus (confirmed の deterministic validation)", 
         sourceRegistry: registry,
         searchFacts: [{ sourceId: "S01", key: "seat_count", value: "40席" }],
       });
-      expect(result.status).toBe("confirmed");
+      expect(result.status).toBe("not_found");
     });
 
     it("既知hostnameでもknown_store_dataでもない自己申告sourceはTier B対象にならない(MAJOR6・追加修正B: google_groundingでもモデル自己申告typeのみでは信用しない)", () => {
@@ -831,6 +845,111 @@ describe("validateResearchItemStatus (confirmed の deterministic validation)", 
         placesVerifiedKeys: new Set(["review_avg"]),
       });
       expect(result.status).toBe("not_found");
+    });
+  });
+
+  describe("identity_status gate (fix/ai-research-source-identity-integrity、実機smoke事故の修正)", () => {
+    it("CASE A(実機smoke事故の再現): url_context成功済みでもidentity_status=unrelated(誤ったHotPepper URL)ならconfirmedを維持しない", () => {
+      const item = makeItem({ key: "business_hours_holidays", source_ids: ["S04"] });
+      const registry = [
+        makeSource({
+          id: "S04",
+          title: "東北メシ 炉端ジュン(柏/居酒屋)＜ネット予約可＞ | ホットペッパーグルメ",
+          grounding_redirect_url: "https://www.hotpepper.jp/strJ003828751/",
+          source_type: "gourmet_site",
+          url_context_status: "success",
+          identity_status: "unrelated",
+        }),
+      ];
+      const result = validateResearchItemStatus(item, { sourceRegistry: registry });
+      expect(result.status).toBe("not_found");
+    });
+
+    it("CASE B: url_context成功済み + identity_status=target_match(正しいHotPepper URL)ならconfirmedを維持する", () => {
+      const item = makeItem({ key: "business_hours_holidays", source_ids: ["S04"] });
+      const registry = [
+        makeSource({
+          id: "S04",
+          grounding_redirect_url: "https://www.hotpepper.jp/strJ003807133/",
+          source_type: "gourmet_site",
+          url_context_status: "success",
+          identity_status: "target_match",
+        }),
+      ];
+      const result = validateResearchItemStatus(item, { sourceRegistry: registry });
+      expect(result.status).toBe("confirmed");
+    });
+
+    it("url_context成功済みでもidentity_status=uncertainならconfirmedを維持しない", () => {
+      const item = makeItem({ source_ids: ["S01"] });
+      const registry = [makeSource({ url_context_status: "success", identity_status: "uncertain" })];
+      const result = validateResearchItemStatus(item, { sourceRegistry: registry });
+      expect(result.status).toBe("not_found");
+    });
+
+    it("url_context成功済みでもidentity_statusが未設定(not_checked、既存runとの後方互換)ならconfirmedを維持しない", () => {
+      const item = makeItem({ source_ids: ["S01"] });
+      const entry = makeSource({ url_context_status: "success" });
+      delete entry.identity_status;
+      const result = validateResearchItemStatus(item, { sourceRegistry: [entry] });
+      expect(result.status).toBe("not_found");
+    });
+
+    it("competitor調査項目(competitor_stores等)はidentity_status=target_matchではなくcompetitor_matchを要求する", () => {
+      const item = makeItem({
+        key: "competitor_stores",
+        research_policy: "ANALYSIS",
+        source_ids: ["S01"],
+      });
+      const targetMatchOnly = makeSource({ url_context_status: "success", identity_status: "target_match" });
+      const targetMatchResult = validateResearchItemStatus(item, { sourceRegistry: [targetMatchOnly] });
+      expect(targetMatchResult.status).not.toBe("confirmed"); // target_matchだけでは競合項目のconfirmed根拠にならない
+
+      const competitorMatch = makeSource({ url_context_status: "success", identity_status: "competitor_match" });
+      const competitorResult = validateResearchItemStatus(item, { sourceRegistry: [competitorMatch] });
+      expect(competitorResult.status).toBe("confirmed");
+    });
+
+    it("商圏・市場等の文脈許容項目(trade_area等)はtarget_match/contextualいずれも根拠として認める", () => {
+      const item = makeItem({ key: "trade_area", research_policy: "ANALYSIS", source_ids: ["S01"] });
+
+      const contextual = makeSource({ url_context_status: "success", identity_status: "contextual" });
+      expect(validateResearchItemStatus(item, { sourceRegistry: [contextual] }).status).toBe("confirmed");
+
+      const targetMatch = makeSource({ url_context_status: "success", identity_status: "target_match" });
+      expect(validateResearchItemStatus(item, { sourceRegistry: [targetMatch] }).status).toBe("confirmed");
+
+      const competitorMatch = makeSource({ url_context_status: "success", identity_status: "competitor_match" });
+      expect(validateResearchItemStatus(item, { sourceRegistry: [competitorMatch] }).status).not.toBe("confirmed");
+    });
+
+    it("第三者(known_store_data以外)のSearchFact-onlyはtarget FACTのconfirmedに使わない(FIX6、known_store_dataのみ引き続き許容)", () => {
+      const item = makeItem({ key: "seat_count", research_policy: "FACT", source_ids: ["S01"] });
+
+      const thirdParty = makeSource({
+        id: "S01",
+        grounding_redirect_url: "https://tabelog.com/x/y/z/",
+        source_type: "gourmet_site",
+        discovery_provenance: "gemini_search_candidate",
+        url_context_status: "not_attempted",
+      });
+      const thirdPartyResult = validateResearchItemStatus(item, {
+        sourceRegistry: [thirdParty],
+        searchFacts: [{ sourceId: "S01", key: "seat_count", value: "40席" }],
+      });
+      expect(thirdPartyResult.status).toBe("not_found");
+
+      const knownStoreData = makeSource({
+        id: "S01",
+        source_type: "gourmet_site",
+        discovery_provenance: "known_store_data",
+        url_context_status: "not_attempted",
+      });
+      const knownStoreDataResult = validateResearchItemStatus(item, {
+        sourceRegistry: [knownStoreData],
+        searchFacts: [{ sourceId: "S01", key: "seat_count", value: "40席" }],
+      });
+      expect(knownStoreDataResult.status).toBe("confirmed");
     });
   });
 });
@@ -1133,6 +1252,76 @@ describe("deriveTrustedSourceType (feat/ai-research-pre-smoke-hardening、MAJOR6
       source_type: "gourmet_site",
     });
     expect(deriveTrustedSourceType(entry)).toBeUndefined();
+  });
+});
+
+describe("deriveDisplaySourceName (fix/ai-research-source-identity-integrity、FIX9)", () => {
+  it("known_store_dataはentry.title(アプリ自身が付けた固定文言)をそのまま使う", () => {
+    const entry = makeSource({
+      discovery_provenance: "known_store_data",
+      title: "公式サイト(登録情報)",
+      grounding_redirect_url: "https://example-store.example.com/",
+    });
+    expect(deriveDisplaySourceName(entry)).toBe("公式サイト(登録情報)");
+  });
+
+  it("既知hostname(hotpepper.jp)なら固定の表示名を返し、モデル自己申告titleは使わない(実機smoke事故の再発防止)", () => {
+    const entry = makeSource({
+      discovery_provenance: "gemini_search_candidate",
+      title: "東北メシ 炉端ジュン(柏/居酒屋)＜ネット予約可＞ | ホットペッパーグルメ", // 実際には別店舗のtitleだった
+      grounding_redirect_url: "https://www.hotpepper.jp/strJ003828751/",
+    });
+    expect(deriveDisplaySourceName(entry)).toBe("ホットペッパーグルメ");
+  });
+
+  it("未知hostnameならhostname文字列そのものを返す(モデル自己申告titleは使わない)", () => {
+    const entry = makeSource({
+      discovery_provenance: "gemini_search_candidate",
+      title: "何らかのブログ記事",
+      grounding_redirect_url: "https://unknown-blog.example.com/post/1",
+    });
+    expect(deriveDisplaySourceName(entry)).toBe("unknown-blog.example.com");
+  });
+});
+
+describe("isSourceLinkClickable (fix/ai-research-source-identity-integrity、FIX8)", () => {
+  it("known_store_dataは常にクリック可能", () => {
+    const entry = makeSource({ discovery_provenance: "known_store_data" });
+    expect(isSourceLinkClickable(entry)).toBe(true);
+  });
+
+  it("identity_status=target_match/competitor_match/contextualはクリック可能", () => {
+    for (const status of ["target_match", "competitor_match", "contextual"] as const) {
+      const entry = makeSource({ discovery_provenance: "gemini_search_candidate", identity_status: status });
+      expect(isSourceLinkClickable(entry)).toBe(true);
+    }
+  });
+
+  it("identity_status=unrelated/uncertain/未設定(not_checked)はクリック不可(実機smoke事故: 誤ったURLへユーザーを誘導しない)", () => {
+    for (const status of ["unrelated", "uncertain", undefined] as const) {
+      const entry = makeSource({ discovery_provenance: "gemini_search_candidate", identity_status: status });
+      expect(isSourceLinkClickable(entry)).toBe(false);
+    }
+  });
+});
+
+describe("flagEvidenceSourceIdMismatch (fix/ai-research-source-identity-integrity、FIX11)", () => {
+  it("evidence本文に含まれるsource ID表記がsource_idsに存在しなければwarningを付与する", () => {
+    const item = makeItem({ evidence: "S05ぐるなびによると4,000円です", source_ids: ["S01"] });
+    const result = flagEvidenceSourceIdMismatch(item);
+    expect(result.warning).toContain("evidence内の出典表記");
+  });
+
+  it("evidence本文のsource ID表記がsource_idsに含まれていればwarningを付与しない", () => {
+    const item = makeItem({ evidence: "S01ぐるなびによると4,000円です", source_ids: ["S01"] });
+    const result = flagEvidenceSourceIdMismatch(item);
+    expect(result.warning).toBeUndefined();
+  });
+
+  it("evidence本文にsource ID表記が無ければ何もしない(通常ケース)", () => {
+    const item = makeItem({ evidence: "公式サイトに明記", source_ids: ["S01"] });
+    const result = flagEvidenceSourceIdMismatch(item);
+    expect(result).toBe(item);
   });
 });
 

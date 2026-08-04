@@ -6,6 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { SourceRegistryEntry } from "@/types/research-run";
 
 vi.mock("server-only", () => ({}));
 
@@ -28,6 +29,7 @@ const {
   buildDeterministicPlacesItems,
   deriveDeterministicPlacesConfirmedKeys,
   applyUrlContextStatus,
+  applySourceIdentityVerification,
   appendConfirmedMediaContext,
   upgradeMediaCoverageFromRegistry,
   finalizeResearchItems,
@@ -136,7 +138,8 @@ describe("runStage2 (統合、FACT+FACT_OR_HEARING+ANALYSISを1回で扱う)", (
   it("正常なJSON応答をパース・検証してitemsを返す", async () => {
     mockRunStructuredUrlContext.mockResolvedValue({
       rawText: JSON.stringify({
-        store_identification: { matched_name: "x", matched_address: "y", identification_note: "z" },
+        store_identification: { matched_name: "", matched_address: "", identification_note: "z" },
+        source_verifications: [],
         items: [
           {
             key: "business_hours_holidays",
@@ -164,7 +167,8 @@ describe("runStage2 (統合、FACT+FACT_OR_HEARING+ANALYSISを1回で扱う)", (
   it("1回のAPI呼出でFACT/FACT_OR_HEARING/ANALYSIS全キーを許可する", async () => {
     mockRunStructuredUrlContext.mockResolvedValue({
       rawText: JSON.stringify({
-        store_identification: { matched_name: "x", matched_address: "y", identification_note: "z" },
+        store_identification: { matched_name: "", matched_address: "", identification_note: "z" },
+        source_verifications: [],
         items: fullItemsForAllowedKeys(),
       }),
       urlContextMetadata: null,
@@ -191,7 +195,8 @@ describe("runStage2 (統合、FACT+FACT_OR_HEARING+ANALYSISを1回で扱う)", (
   it("スキーマ不一致(不正なsource_id等)もStage2InvalidOutputErrorを投げる", async () => {
     mockRunStructuredUrlContext.mockResolvedValue({
       rawText: JSON.stringify({
-        store_identification: { matched_name: "x", matched_address: "y", identification_note: "z" },
+        store_identification: { matched_name: "", matched_address: "", identification_note: "z" },
+        source_verifications: [],
         items: [
           {
             key: "business_hours_holidays",
@@ -218,7 +223,8 @@ describe("runStage2 (統合、FACT+FACT_OR_HEARING+ANALYSISを1回で扱う)", (
   it("keyが不足している(coverage不一致)場合もStage2InvalidOutputErrorを投げる(BLOCKER1)", async () => {
     mockRunStructuredUrlContext.mockResolvedValue({
       rawText: JSON.stringify({
-        store_identification: { matched_name: "x", matched_address: "y", identification_note: "z" },
+        store_identification: { matched_name: "", matched_address: "", identification_note: "z" },
+        source_verifications: [],
         items: [], // business_hours_holidaysが欠落
       }),
       urlContextMetadata: null,
@@ -244,7 +250,8 @@ describe("runStage2 (統合、FACT+FACT_OR_HEARING+ANALYSISを1回で扱う)", (
     };
     mockRunStructuredUrlContext.mockResolvedValue({
       rawText: JSON.stringify({
-        store_identification: { matched_name: "x", matched_address: "y", identification_note: "z" },
+        store_identification: { matched_name: "", matched_address: "", identification_note: "z" },
+        source_verifications: [],
         items: [dup, dup],
       }),
       urlContextMetadata: null,
@@ -262,7 +269,8 @@ describe("runStage2 (統合、FACT+FACT_OR_HEARING+ANALYSISを1回で扱う)", (
   it("未知のkeyが混入している(allowedKeysに無い)場合もStage2InvalidOutputErrorを投げる(BLOCKER1)", async () => {
     mockRunStructuredUrlContext.mockResolvedValue({
       rawText: JSON.stringify({
-        store_identification: { matched_name: "x", matched_address: "y", identification_note: "z" },
+        store_identification: { matched_name: "", matched_address: "", identification_note: "z" },
+        source_verifications: [],
         items: [
           {
             key: "business_hours_holidays",
@@ -302,7 +310,8 @@ describe("runStage2 (統合、FACT+FACT_OR_HEARING+ANALYSISを1回で扱う)", (
   it("searchNotesをStage2プロンプトへ渡す(feat/ai-research-source-diversity)", async () => {
     mockRunStructuredUrlContext.mockResolvedValue({
       rawText: JSON.stringify({
-        store_identification: { matched_name: "x", matched_address: "y", identification_note: "z" },
+        store_identification: { matched_name: "", matched_address: "", identification_note: "z" },
+        source_verifications: [],
         items: fullItemsForAllowedKeys(),
       }),
       urlContextMetadata: null,
@@ -339,7 +348,8 @@ describe("runStage2 (統合、FACT+FACT_OR_HEARING+ANALYSISを1回で扱う)", (
   it("sourceRegistryが空でもAPI呼出自体は行う(Source Registry空時の案内はprompts.tsが担当)", async () => {
     mockRunStructuredUrlContext.mockResolvedValue({
       rawText: JSON.stringify({
-        store_identification: { matched_name: "x", matched_address: "y", identification_note: "z" },
+        store_identification: { matched_name: "", matched_address: "", identification_note: "z" },
+        source_verifications: [],
         items: fullItemsForAllowedKeys(),
       }),
       urlContextMetadata: null,
@@ -441,12 +451,118 @@ describe("deriveDeterministicPlacesConfirmedKeys (feat/ai-research-final-audit-h
   });
 });
 
+describe("runStage2 store_identification coarse guard (fix/ai-research-source-identity-integrity、FIX12)", () => {
+  const REGISTRY = [
+    {
+      id: "S01",
+      title: "x",
+      grounding_redirect_url: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/x",
+      resolved_url: null,
+      resolve_status: "skipped" as const,
+      source_type: "official_site" as const,
+      discovery_provenance: "google_grounding" as const,
+      url_context_status: "not_attempted" as const,
+    },
+  ];
+  const ALL_EXCEPT_HOURS = new Set(
+    selectAiResearchItems(RESEARCH_POLICY_ITEMS)
+      .map((i) => i.key)
+      .filter((k) => k !== "business_hours_holidays"),
+  );
+
+  it("matched_name/matched_addressの両方が対象店舗と明確に不一致ならStage2InvalidOutputErrorを投げる(run全体が別店舗を調査した疑いが強い場合の粗いsafety net)", async () => {
+    mockRunStructuredUrlContext.mockResolvedValue({
+      rawText: JSON.stringify({
+        store_identification: {
+          matched_name: "カフェ&民泊 三喜遊",
+          matched_address: "香川県三豊市仁尾町仁尾丙795",
+          identification_note: "",
+        },
+        source_verifications: [],
+        items: fullItemsForAllowedKeys(ALL_EXCEPT_HOURS),
+      }),
+      urlContextMetadata: null,
+      usageMetadata: null,
+    });
+
+    await expect(
+      runStage2({ store: STORE, sourceRegistry: REGISTRY, excludeKeys: ALL_EXCEPT_HOURS }, AbortSignal.timeout(1000)),
+    ).rejects.toBeInstanceOf(Stage2InvalidOutputError);
+  });
+
+  it("matched_nameのみ不一致(matched_addressが空)なら発火しない(片方だけの不一致でrunを無駄に失敗させない)", async () => {
+    mockRunStructuredUrlContext.mockResolvedValue({
+      rawText: JSON.stringify({
+        store_identification: { matched_name: "カフェ&民泊 三喜遊", matched_address: "", identification_note: "" },
+        source_verifications: [],
+        items: fullItemsForAllowedKeys(ALL_EXCEPT_HOURS),
+      }),
+      urlContextMetadata: null,
+      usageMetadata: null,
+    });
+
+    await expect(
+      runStage2({ store: STORE, sourceRegistry: REGISTRY, excludeKeys: ALL_EXCEPT_HOURS }, AbortSignal.timeout(1000)),
+    ).resolves.toBeDefined();
+  });
+
+  it("matched_name/matched_addressが対象店舗と一致すれば発火しない(正常系)", async () => {
+    mockRunStructuredUrlContext.mockResolvedValue({
+      rawText: JSON.stringify({
+        store_identification: {
+          matched_name: STORE.name,
+          matched_address: STORE.address,
+          identification_note: "",
+        },
+        source_verifications: [],
+        items: fullItemsForAllowedKeys(ALL_EXCEPT_HOURS),
+      }),
+      urlContextMetadata: null,
+      usageMetadata: null,
+    });
+
+    await expect(
+      runStage2({ store: STORE, sourceRegistry: REGISTRY, excludeKeys: ALL_EXCEPT_HOURS }, AbortSignal.timeout(1000)),
+    ).resolves.toBeDefined();
+  });
+
+  it("source_verificationsがそのままStage2Outcomeへ返る", async () => {
+    mockRunStructuredUrlContext.mockResolvedValue({
+      rawText: JSON.stringify({
+        store_identification: { matched_name: "", matched_address: "", identification_note: "" },
+        source_verifications: [
+          {
+            source_id: "S01",
+            relation: "target_store",
+            observed_title: "t",
+            observed_name: "n",
+            observed_address: "a",
+            observed_phone: "p",
+            note: "note",
+          },
+        ],
+        items: fullItemsForAllowedKeys(ALL_EXCEPT_HOURS),
+      }),
+      urlContextMetadata: null,
+      usageMetadata: null,
+    });
+
+    const result = await runStage2(
+      { store: STORE, sourceRegistry: REGISTRY, excludeKeys: ALL_EXCEPT_HOURS },
+      AbortSignal.timeout(1000),
+    );
+    expect(result.sourceVerifications).toHaveLength(1);
+    expect(result.sourceVerifications[0]!.source_id).toBe("S01");
+  });
+});
+
 describe("runStage2 excludeKeys (feat/ai-research-quality-refinement)", () => {
   it("excludeKeysで指定したkeyはGeminiへの項目一覧・プロンプトから除外する", async () => {
     const excludeKeys = new Set(["review_avg", "review_count"]);
     mockRunStructuredUrlContext.mockResolvedValue({
       rawText: JSON.stringify({
-        store_identification: { matched_name: "x", matched_address: "y", identification_note: "z" },
+        store_identification: { matched_name: "", matched_address: "", identification_note: "z" },
+        source_verifications: [],
         items: fullItemsForAllowedKeys(excludeKeys),
       }),
       urlContextMetadata: null,
@@ -511,6 +627,148 @@ describe("applyUrlContextStatus", () => {
   });
 });
 
+describe("applySourceIdentityVerification (fix/ai-research-source-identity-integrity)", () => {
+  const targetStore = { name: "東北メシ 炉端ジュン", address: "千葉県柏市旭町1-1-12", phone: "04-7199-7985", genre: "居酒屋" };
+  const baseEntry = {
+    id: "S04",
+    title: "東北メシ 炉端ジュン(柏/居酒屋)＜ネット予約可＞ | ホットペッパーグルメ",
+    grounding_redirect_url: "https://www.hotpepper.jp/strJ003828751/",
+    resolved_url: null,
+    resolve_status: "skipped" as const,
+    source_type: "gourmet_site" as const,
+    discovery_provenance: "gemini_search_candidate" as const,
+    url_context_status: "success" as const,
+  };
+
+  it("CASE A(実機smoke事故の再現): relation=target_storeと自己申告されても、observed_name/addressが全く別店舗ならidentity_status=uncertainになりtarget_matchにしない", () => {
+    const result = applySourceIdentityVerification(
+      [baseEntry],
+      [
+        {
+          source_id: "S04",
+          relation: "target_store",
+          observed_title: "カフェ&民泊 三喜遊",
+          observed_name: "カフェ&民泊 三喜遊",
+          observed_address: "香川県三豊市仁尾町仁尾丙795",
+          observed_phone: null,
+          note: "実際には全く別店舗のページだった",
+        },
+      ],
+      targetStore,
+    );
+    expect(result[0]!.identity_status).toBe("uncertain");
+    expect(result[0]!.identity_note).toContain("別店舗");
+  });
+
+  it("CASE B: relation=target_storeかつobserved_name/addressが対象店舗と一致すればtarget_matchになる", () => {
+    const result = applySourceIdentityVerification(
+      [{ ...baseEntry, grounding_redirect_url: "https://www.hotpepper.jp/strJ003807133/" }],
+      [
+        {
+          source_id: "S04",
+          relation: "target_store",
+          observed_title: "東北メシ 炉端ジュン",
+          observed_name: "炉端ジュン",
+          observed_address: "千葉県柏市旭町1-1-12",
+          observed_phone: null,
+          note: "正しい店舗ページ",
+        },
+      ],
+      targetStore,
+    );
+    expect(result[0]!.identity_status).toBe("target_match");
+  });
+
+  it("wrong title + correct URL: titleが対象店舗と無関係でも、observed_name/addressが一致すればtarget_matchになる(titleを信用しない設計の裏返し)", () => {
+    const result = applySourceIdentityVerification(
+      [{ ...baseEntry, title: "全く関係ないtitle文字列" }],
+      [
+        {
+          source_id: "S04",
+          relation: "target_store",
+          observed_title: null,
+          observed_name: "炉端ジュン",
+          observed_address: "千葉県柏市旭町1-1-12",
+          observed_phone: null,
+          note: "本文からは正しく確認できた",
+        },
+      ],
+      targetStore,
+    );
+    expect(result[0]!.identity_status).toBe("target_match");
+  });
+
+  it("relation=competitorは自己申告のままcompetitor_matchにする(正解データが無いためコード側検証はしない、FIX3)", () => {
+    const result = applySourceIdentityVerification(
+      [baseEntry],
+      [
+        {
+          source_id: "S04",
+          relation: "competitor",
+          observed_title: "競合店の紹介記事",
+          observed_name: "競合店A",
+          observed_address: null,
+          observed_phone: null,
+          note: "競合調査目的で発見",
+        },
+      ],
+      targetStore,
+    );
+    expect(result[0]!.identity_status).toBe("competitor_match");
+  });
+
+  it("relation=contextualはcontextualに、relation=unrelatedはunrelatedに、relation=uncertainはuncertainにそのまま反映する", () => {
+    const cases: Array<["contextual" | "unrelated" | "uncertain", string]> = [
+      ["contextual", "contextual"],
+      ["unrelated", "unrelated"],
+      ["uncertain", "uncertain"],
+    ];
+    for (const [relation, expected] of cases) {
+      const result = applySourceIdentityVerification(
+        [baseEntry],
+        [
+          {
+            source_id: "S04",
+            relation,
+            observed_title: null,
+            observed_name: null,
+            observed_address: null,
+            observed_phone: null,
+            note: "",
+          },
+        ],
+        targetStore,
+      );
+      expect(result[0]!.identity_status).toBe(expected);
+    }
+  });
+
+  it("source_verificationsに言及の無いentryはidentity_status未設定(not_checked)のまま", () => {
+    const result = applySourceIdentityVerification([baseEntry], [], targetStore);
+    expect(result[0]!.identity_status).toBeUndefined();
+  });
+
+  it("identity_noteは長すぎる場合切り詰める", () => {
+    const longNote = "あ".repeat(300);
+    const result = applySourceIdentityVerification(
+      [baseEntry],
+      [
+        {
+          source_id: "S04",
+          relation: "unrelated",
+          observed_title: null,
+          observed_name: null,
+          observed_address: null,
+          observed_phone: null,
+          note: longNote,
+        },
+      ],
+      targetStore,
+    );
+    expect(result[0]!.identity_note!.length).toBeLessThan(longNote.length);
+  });
+});
+
 describe("finalizeResearchItems", () => {
   it("AI項目(統合)/HEARING項目を統合しdeterministic validationを適用する", () => {
     const aiItems = [
@@ -533,6 +791,7 @@ describe("finalizeResearchItems", () => {
         source_type: "other" as const,
         discovery_provenance: "google_grounding" as const,
         url_context_status: "success" as const,
+        identity_status: "target_match" as const,
       },
     ];
 
@@ -547,6 +806,41 @@ describe("finalizeResearchItems", () => {
     expect(result).toHaveLength(13);
     const businessHours = result.find((i) => i.key === "business_hours_holidays");
     expect(businessHours?.status).toBe("confirmed");
+  });
+
+  it("identity_statusがtarget_matchでなければurl_context成功済みでもconfirmedを維持しない(fix/ai-research-source-identity-integrity)", () => {
+    const aiItems = [
+      {
+        key: "business_hours_holidays",
+        research_policy: "FACT" as const,
+        status: "confirmed" as const,
+        value: "v",
+        evidence: "e",
+        source_ids: ["S01"],
+      },
+    ];
+    const registry = [
+      {
+        id: "S01",
+        title: "x",
+        grounding_redirect_url: "https://example.com/a",
+        resolved_url: null,
+        resolve_status: "skipped" as const,
+        source_type: "other" as const,
+        discovery_provenance: "google_grounding" as const,
+        url_context_status: "success" as const,
+        identity_status: "unrelated" as const,
+      },
+    ];
+
+    const result = finalizeResearchItems({
+      aiItems,
+      nonAiItems: [],
+      sourceRegistry: registry,
+    });
+
+    const businessHours = result.find((i) => i.key === "business_hours_holidays");
+    expect(businessHours?.status).toBe("not_found");
   });
 
   it("url_context_status成功が無いconfirmed項目は既存ルールに従い降格する(gemini_search_candidateも同様)", () => {
@@ -597,27 +891,37 @@ describe("appendConfirmedMediaContext (feat/ai-research-final-quality、Observed
   const registryWithSuccess = [
     {
       id: "S01",
-      title: "ホットペッパー",
-      grounding_redirect_url: "https://example.com/a",
+      title: "自己申告のtitle(信用しない、FIX9)",
+      grounding_redirect_url: "https://www.hotpepper.jp/strJ003807133/",
       resolved_url: null,
       resolve_status: "skipped" as const,
       source_type: "gourmet_site" as const,
       discovery_provenance: "gemini_search_candidate" as const,
       url_context_status: "success" as const,
+      identity_status: "target_match" as const,
     },
   ];
 
-  it("own_net_exposure/exposure_gapのevidenceへ、実際に成功したsourceの一覧を追記する", () => {
+  it("own_net_exposure/exposure_gapのevidenceへ、実際に成功したsourceの一覧を追記する(表示名はhostnameからdeterministicに導出、entry.titleは使わない)", () => {
     const items = [makeItem("own_net_exposure"), makeItem("exposure_gap")];
     const result = appendConfirmedMediaContext(items, registryWithSuccess);
-    expect(result[0]!.evidence).toContain("ホットペッパー");
-    expect(result[1]!.evidence).toContain("ホットペッパー");
+    expect(result[0]!.evidence).toContain("ホットペッパーグルメ");
+    expect(result[1]!.evidence).toContain("ホットペッパーグルメ");
+    expect(result[0]!.evidence).not.toContain("自己申告のtitle");
   });
 
   it("valueの先頭にdeterministicなFACT部分(確認できた掲載媒体)を付加する(feat/ai-research-final-trust-boundary、value/verified sourceのズレ修正)", () => {
     const items = [makeItem("own_net_exposure", "e")];
     const result = appendConfirmedMediaContext(items, registryWithSuccess);
-    expect(result[0]!.value).toBe("確認できた掲載媒体: ホットペッパー。 v");
+    expect(result[0]!.value).toBe("確認できた掲載媒体: ホットペッパーグルメ。 v");
+  });
+
+  it("url_context成功でもidentity_statusがtarget_matchでなければ「確認できた媒体」に混入しない(fix/ai-research-source-identity-integrity、FIX10)", () => {
+    const wrongStoreSource = { ...registryWithSuccess[0]!, identity_status: "unrelated" as const };
+    const items = [makeItem("own_net_exposure", "元のevidence")];
+    const result = appendConfirmedMediaContext(items, [wrongStoreSource]);
+    expect(result[0]!.evidence).toBe("元のevidence");
+    expect(result[0]!.value).toBe("v");
   });
 
   it("対象外keyのevidence/valueは変更しない", () => {
@@ -657,32 +961,35 @@ describe("appendConfirmedMediaContext (feat/ai-research-final-quality、Observed
   });
 });
 
-describe("upgradeMediaCoverageFromRegistry (feat/ai-research-final-quality)", () => {
-  const gourmetSuccess = {
+describe("upgradeMediaCoverageFromRegistry (feat/ai-research-final-quality、fix/ai-research-source-identity-integrity でFIX10として再設計)", () => {
+  const mediaItems = () => [
+    {
+      key: "media_coverage",
+      research_policy: "FACT" as const,
+      status: "not_found" as const,
+      value: null,
+      evidence: "見つからなかった",
+      source_ids: [],
+    },
+  ];
+
+  const tabelogTargetMatch = {
     id: "S01",
-    title: "ホットペッパーグルメ",
-    grounding_redirect_url: "https://example.com/a",
+    title: "自己申告のtitle(信用しない)",
+    grounding_redirect_url: "https://tabelog.com/kanagawa/A1234/A123456/12345678/",
     resolved_url: null,
     resolve_status: "skipped" as const,
     source_type: "gourmet_site" as const,
     discovery_provenance: "gemini_search_candidate" as const,
     url_context_status: "success" as const,
+    identity_status: "target_match" as const,
   };
 
-  it("media_coverageがnot_foundでも、成功済みの第三者媒体があればconfirmedへ補正する", () => {
-    const items = [
-      {
-        key: "media_coverage",
-        research_policy: "FACT" as const,
-        status: "not_found" as const,
-        value: null,
-        evidence: "見つからなかった",
-        source_ids: [],
-      },
-    ];
-    const result = upgradeMediaCoverageFromRegistry(items, [gourmetSuccess]);
+  it("url_context成功 + identity_status=target_matchの第三者媒体があればconfirmedへ補正し、valueはhostnameからdeterministicに導出する(entry.titleは使わない、FIX9)", () => {
+    const result = upgradeMediaCoverageFromRegistry(mediaItems(), [tabelogTargetMatch]);
     expect(result[0]!.status).toBe("confirmed");
-    expect(result[0]!.value).toContain("ホットペッパーグルメ");
+    expect(result[0]!.value).toBe("食べログ");
+    expect(result[0]!.value).not.toContain("自己申告のtitle");
     expect(result[0]!.source_ids).toEqual(["S01"]);
     expect(result[0]!.evidence_basis).toBe("url_context");
   });
@@ -698,203 +1005,91 @@ describe("upgradeMediaCoverageFromRegistry (feat/ai-research-final-quality)", ()
         source_ids: ["S99"], // 未検証の捏造id
       },
     ];
-    const result = upgradeMediaCoverageFromRegistry(items, [gourmetSuccess]);
-    expect(result[0]!.value).toBe("ホットペッパーグルメ");
+    const result = upgradeMediaCoverageFromRegistry(items, [tabelogTargetMatch]);
+    expect(result[0]!.value).toBe("食べログ");
     expect(result[0]!.source_ids).toEqual(["S01"]);
   });
 
-  it("key一致のSearchFactのみ(url_context成功なし)でもvalueを構築し、evidence_basisはsearch_noteになる", () => {
-    // SearchFactのみの経路(Tier B相当)はderiveTrustedSourceTypeによる既知hostname
-    // 判定が必須なため、既知ポータル(jalan.net)のURLを使う(fix/ai-research-final-audit-hardening、
-    // 以前はexample.com(未知hostname)でも自己申告typeを信用してしまうバグがあった)。
-    const errorSource = {
-      ...gourmetSuccess,
+  it("複数のtarget_match媒体があれば集約する", () => {
+    const jalanTargetMatch = {
+      ...tabelogTargetMatch,
       id: "S02",
-      url_context_status: "error" as const,
-      title: "じゃらんnet",
+      source_type: "reservation_site" as const,
       grounding_redirect_url: "https://www.jalan.net/kankou/spt_guide000000.html",
     };
-    const items = [
-      {
-        key: "media_coverage",
-        research_policy: "FACT" as const,
-        status: "not_found" as const,
-        value: null,
-        evidence: "見つからなかった",
-        source_ids: [],
-      },
-    ];
-    const result = upgradeMediaCoverageFromRegistry(items, [errorSource], [
-      { sourceId: "S02", key: "media_coverage", value: "じゃらんnetに掲載" },
-    ]);
+    const result = upgradeMediaCoverageFromRegistry(mediaItems(), [tabelogTargetMatch, jalanTargetMatch]);
     expect(result[0]!.status).toBe("confirmed");
-    expect(result[0]!.value).toBe("じゃらんnet");
-    expect(result[0]!.evidence_basis).toBe("search_note");
+    expect(result[0]!.value).toBe("食べログ、じゃらんnet");
+    expect(result[0]!.source_ids.sort()).toEqual(["S01", "S02"]);
   });
 
-  it("url_context成功とSearchFact一致の両方がある場合、evidence_basisはmixedになる", () => {
-    const searchFactOnly = {
-      ...gourmetSuccess,
-      id: "S02",
-      url_context_status: "error" as const,
-      title: "じゃらんnet",
-      grounding_redirect_url: "https://www.jalan.net/kankou/spt_guide000000.html",
-    };
-    const items = [
-      {
-        key: "media_coverage",
-        research_policy: "FACT" as const,
-        status: "not_found" as const,
-        value: null,
-        evidence: "見つからなかった",
-        source_ids: [],
-      },
-    ];
-    const result = upgradeMediaCoverageFromRegistry(items, [gourmetSuccess, searchFactOnly], [
-      { sourceId: "S02", key: "media_coverage", value: "じゃらんnetに掲載" },
-    ]);
-    expect(result[0]!.evidence_basis).toBe("mixed");
-    expect(result[0]!.value).toContain("ホットペッパーグルメ");
-    expect(result[0]!.value).toContain("じゃらんnet");
-  });
-
-  it("成功済みの対象媒体が無ければ何もしない", () => {
-    const items = [
-      {
-        key: "media_coverage",
-        research_policy: "FACT" as const,
-        status: "not_found" as const,
-        value: null,
-        evidence: "見つからなかった",
-        source_ids: [],
-      },
-    ];
-    const result = upgradeMediaCoverageFromRegistry(items, []);
-    expect(result[0]!.status).toBe("not_found");
-  });
-
-  it("official_siteのみが成功していてもmedia_coverageの対象媒体とはみなさない(自店発信のため)", () => {
-    const officialOnly = { ...gourmetSuccess, source_type: "official_site" as const };
-    const items = [
-      {
-        key: "media_coverage",
-        research_policy: "FACT" as const,
-        status: "not_found" as const,
-        value: null,
-        evidence: "見つからなかった",
-        source_ids: [],
-      },
-    ];
-    const result = upgradeMediaCoverageFromRegistry(items, [officialOnly]);
-    expect(result[0]!.status).toBe("not_found");
-  });
-
-  it("url_context成功が無い場合、SearchFactのみでは自己申告source_typeを信用しない(fix/ai-research-final-audit-hardening、CONFIRMED BUG修正: 未知hostnameのspoof防止)", () => {
-    // grounding_redirect_urlのhostnameが既知ポータル(tabelog.com等)でもknown_store_dataでもない
-    // 「example.com」の場合、Stage1モデルが自己申告したsource_type:"gourmet_site"を
-    // SearchFactのみの経路(url_context未成功)で信用してはならない(Tier B trust matrixと
-    // 同じ境界をderiveTrustedSourceTypeで強制する)。
-    const untrustedHostSearchFactOnly = {
-      ...gourmetSuccess,
-      id: "S02",
-      url_context_status: "error" as const,
-      grounding_redirect_url: "https://example.com/untrusted",
-      title: "自己申告グルメサイト",
-    };
-    const items = [
-      {
-        key: "media_coverage",
-        research_policy: "FACT" as const,
-        status: "not_found" as const,
-        value: null,
-        evidence: "見つからなかった",
-        source_ids: [],
-      },
-    ];
-    const result = upgradeMediaCoverageFromRegistry(items, [untrustedHostSearchFactOnly], [
-      { sourceId: "S02", key: "media_coverage", value: "掲載あり" },
-    ]);
-    expect(result[0]!.status).toBe("not_found");
-  });
-
-  it("known_store_data(信頼済み)のSearchFactのみのsourceは自己申告source_typeでも信用する", () => {
-    const knownStoreDataSource = {
-      ...gourmetSuccess,
-      id: "S02",
-      url_context_status: "error" as const,
-      discovery_provenance: "known_store_data" as const,
-      grounding_redirect_url: "https://example.com/official-instagram",
-      title: "公式Instagram経由の媒体情報",
-    };
-    const items = [
-      {
-        key: "media_coverage",
-        research_policy: "FACT" as const,
-        status: "not_found" as const,
-        value: null,
-        evidence: "見つからなかった",
-        source_ids: [],
-      },
-    ];
-    const result = upgradeMediaCoverageFromRegistry(items, [knownStoreDataSource], [
-      { sourceId: "S02", key: "media_coverage", value: "掲載あり" },
-    ]);
-    expect(result[0]!.status).toBe("confirmed");
-  });
-
-  it("url_context成功が0件でも、既知hostnameの複数媒体をSearchFactのみで集約confirmedできる(finalizeResearchItemsを経由した回帰テスト、fix/ai-research-final-audit-hardening、CONFIRMED BUG修正)", () => {
-    // 監査で発見した実バグ: upgradeMediaCoverageFromRegistryがconfirmedへ補正しても、
-    // 後続のfinalizeResearchItems(applyDeterministicValidation)がTier Bの
-    // 「同一keyのSearchFact値が全て一致すること」制約を無条件に適用していたため、
-    // 2件以上の異なる媒体(各々valueテキストが異なるのは通常のGemini出力で必発)が
-    // あると、集約結果ごとnot_foundへ格下げされ消えていた。
-    const tabelog = {
-      id: "S01",
-      title: "食べログ",
-      grounding_redirect_url: "https://tabelog.com/kanagawa/A1234/A123456/12345678/",
+  it("実機smoke事故の再現: url_context成功かつ信頼済みhostnameでも、identity_statusがunrelated(=別店舗のページ)なら媒体として列挙しない(CONFIRMED BUG修正の核心)", () => {
+    // 東北メシ 炉端ジュンの調査で、実際には「カフェ&民泊 三喜遊」という完全な別店舗を
+    // 指すHotPepper URLが、url_context取得に成功しモデルのtitleも「炉端ジュン」で
+    // あったにもかかわらず「確認済み媒体」として扱われた実機事故のケース。
+    const wrongStoreHotPepper = {
+      id: "S04",
+      title: "東北メシ 炉端ジュン(柏/居酒屋)＜ネット予約可＞ | ホットペッパーグルメ",
+      grounding_redirect_url: "https://www.hotpepper.jp/strJ003828751/",
       resolved_url: null,
       resolve_status: "skipped" as const,
       source_type: "gourmet_site" as const,
       discovery_provenance: "gemini_search_candidate" as const,
-      url_context_status: "error" as const,
+      url_context_status: "success" as const,
+      identity_status: "unrelated" as const,
     };
-    const jalan = {
-      id: "S02",
-      title: "じゃらんnet",
-      grounding_redirect_url: "https://www.jalan.net/kankou/spt_guide000000.html",
-      resolved_url: null,
-      resolve_status: "skipped" as const,
-      source_type: "reservation_site" as const,
-      discovery_provenance: "gemini_search_candidate" as const,
-      url_context_status: "error" as const,
-    };
-    const searchFacts = [
-      { sourceId: "S01", key: "media_coverage", value: "食べログに掲載あり" },
-      { sourceId: "S02", key: "media_coverage", value: "じゃらんnetの店舗ページあり" },
-    ];
-    const aiItems = [
-      {
-        key: "media_coverage",
-        research_policy: "FACT" as const,
-        status: "not_found" as const,
-        value: null,
-        evidence: "見つからなかった",
-        source_ids: [],
-      },
-    ];
+    const result = upgradeMediaCoverageFromRegistry(mediaItems(), [wrongStoreHotPepper]);
+    expect(result[0]!.status).toBe("not_found");
+  });
 
-    const upgraded = upgradeMediaCoverageFromRegistry(aiItems, [tabelog, jalan], searchFacts);
+  it("url_context成功だがidentity_status=uncertain(観測不足等)なら媒体として列挙しない", () => {
+    const uncertainSource = { ...tabelogTargetMatch, identity_status: "uncertain" as const };
+    const result = upgradeMediaCoverageFromRegistry(mediaItems(), [uncertainSource]);
+    expect(result[0]!.status).toBe("not_found");
+  });
+
+  it("url_context成功だがidentity_statusが未設定(not_checked、既存runとの後方互換)なら媒体として列挙しない", () => {
+    const notCheckedSource: SourceRegistryEntry = { ...tabelogTargetMatch };
+    delete notCheckedSource.identity_status;
+    const result = upgradeMediaCoverageFromRegistry(mediaItems(), [notCheckedSource]);
+    expect(result[0]!.status).toBe("not_found");
+  });
+
+  it("identity_status=target_matchでもurl_context成功でなければ媒体として列挙しない(SearchFact-onlyの経路は廃止、FIX6)", () => {
+    const notFetched = { ...tabelogTargetMatch, url_context_status: "error" as const };
+    const result = upgradeMediaCoverageFromRegistry(mediaItems(), [notFetched]);
+    expect(result[0]!.status).toBe("not_found");
+  });
+
+  it("成功済みの対象媒体が無ければ何もしない", () => {
+    const result = upgradeMediaCoverageFromRegistry(mediaItems(), []);
+    expect(result[0]!.status).toBe("not_found");
+  });
+
+  it("official_siteのみが成功していてもmedia_coverageの対象媒体とはみなさない(自店発信のため)", () => {
+    const officialOnly = { ...tabelogTargetMatch, source_type: "official_site" as const };
+    const result = upgradeMediaCoverageFromRegistry(mediaItems(), [officialOnly]);
+    expect(result[0]!.status).toBe("not_found");
+  });
+
+  it("url_context成功 + identity_status=target_matchの媒体は、finalizeResearchItemsを経由してもconfirmedのまま維持される(統合回帰テスト)", () => {
+    const jalanTargetMatch = {
+      ...tabelogTargetMatch,
+      id: "S02",
+      source_type: "reservation_site" as const,
+      grounding_redirect_url: "https://www.jalan.net/kankou/spt_guide000000.html",
+    };
+    const registry = [tabelogTargetMatch, jalanTargetMatch];
+    const upgraded = upgradeMediaCoverageFromRegistry(mediaItems(), registry);
     const finalItems = finalizeResearchItems({
       aiItems: upgraded,
       nonAiItems: [],
-      sourceRegistry: [tabelog, jalan],
-      searchFacts,
+      sourceRegistry: registry,
     });
 
     const mediaCoverageItem = finalItems.find((i) => i.key === "media_coverage")!;
     expect(mediaCoverageItem.status).toBe("confirmed");
-    expect(mediaCoverageItem.value).toContain("食べログ");
-    expect(mediaCoverageItem.value).toContain("じゃらんnet");
+    expect(mediaCoverageItem.value).toBe("食べログ、じゃらんnet");
     expect(mediaCoverageItem.source_ids.sort()).toEqual(["S01", "S02"]);
   });
 });
