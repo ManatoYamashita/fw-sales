@@ -19,6 +19,23 @@
  * `safeFetchHtml`側の`setTimeout`(絶対デッドライン基準、活動によってリセットされない)
  * から呼び出すことで、DNS解決・接続・ヘッダ受信・redirect追跡・body読込の**全て**を
  * 単一の絶対デッドライン内に強制収める。
+ *
+ * ## Security invariant: 過去hopのnetwork connectionを残さない(PR #199 review HIGH findingの修正)
+ *
+ * 各hopは、次のいずれかの経路で確定した瞬間に、そのhopが保持するnetwork resource
+ * (`req`/`res`のsocket)を必ず手放す:
+ *
+ * - **final response**(redirectではない最終応答): body完了(`end`)/`error`/
+ *   `timeout`のいずれかでsocketを終了する。
+ * - **redirect response**: Locationを取得した時点で、bodyの完了を待たず
+ *   ただちに旧socketを終了する(`res.resume()`によるbodyの受動的drainでは、
+ *   悪意あるサーバーがidle timeout未満の間隔で小刻みにbodyを送り続けた場合に
+ *   socketがバックグラウンドで残り続けてしまうため、これは行わない)。
+ * - **cancelled response**: 絶対デッドライン等で既にhopが確定済みの後に
+ *   headersが届いた場合、drainせず即座に破棄する。
+ *
+ * したがって`safeFetchHtml`が返った時点で、過去のいずれのhopのnetwork connectionも
+ * バックグラウンドに残らない。
  */
 
 import "server-only";
@@ -200,18 +217,39 @@ function requestOneHop(url: URL, lookup: LookupFunction, opts: HopOptions): HopH
     },
     (incoming: IncomingMessage) => {
       if (settled) {
-        // 絶対デッドラインによりcancel済みの後にheadersが届いた場合、bodyを
-        // drainして破棄するのみ(以降の処理は一切行わない)。
-        incoming.resume();
+        // 絶対デッドライン等で既にcancel済みの場合、drainする理由はなく即座に破棄する
+        // (commit後review HIGH findingの修正: resume()で受動的にdrainし続けると、
+        // network resourceがバックグラウンドに残り続ける)。destroy()が非同期に
+        // 'error' を発生させてもプロセスをクラッシュさせないよう、破棄前に
+        // no-opのerrorハンドラを付けておく(settled済みのため結果には無関係)。
+        incoming.on("error", () => {});
+        incoming.destroy();
         return;
       }
       res = incoming;
-      const status = res.statusCode ?? 0;
 
+      // redirect/final/破棄後いずれの経路でも、unhandled 'error' event による
+      // プロセスクラッシュを防ぐため最初に登録する(以前はfinal経路でのみ
+      // 登録しており、redirect経路のresには一切errorハンドラが無かった)。
+      res.on("error", (err: Error) => {
+        if (settled) return;
+        destroyAll();
+        settleReject(new HopError("network_error", err.message));
+      });
+
+      const status = res.statusCode ?? 0;
       const location = res.headers.location;
       if (REDIRECT_STATUSES.has(status) && typeof location === "string" && location.length > 0) {
-        res.resume(); // bodyは読まず破棄
+        // security invariant: 各hopはresolve/reject確定と同時にnetwork resourceを
+        // 手放す。redirect先へ進む場合も、旧hopのbodyがidle timeout未満の間隔で
+        // 小刻みに送られ続けるような悪意あるサーバーに対し、bodyの完了を待たず
+        // settle直後にsocket自体を終了する(commit後review HIGH findingの修正)。
+        // settleResolveを先に実行してsettled=trueにしてから破棄することで、
+        // destroy()に伴い後から発生しうるdata/error/closeイベントは全て
+        // 上記の`if (settled) return`ガードで無視され、二重settleや
+        // redirect結果のnetwork_errorへの化けを防ぐ。
         settleResolve({ kind: "redirect", location });
+        destroyAll();
         return;
       }
 
@@ -262,11 +300,6 @@ function requestOneHop(url: URL, lookup: LookupFunction, opts: HopOptions): HopH
           body: Buffer.concat(chunks).toString("utf-8"),
           contentType,
         });
-      });
-      res.on("error", (err: Error) => {
-        if (settled) return;
-        destroyAll();
-        settleReject(new HopError("network_error", err.message));
       });
     },
   );

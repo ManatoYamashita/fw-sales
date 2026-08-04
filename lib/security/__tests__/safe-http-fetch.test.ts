@@ -126,6 +126,71 @@ describe("safeFetchHtml: ALLOW", () => {
     });
   });
 
+  it("redirect検出後、bodyのendを待たずに旧hopのreq/resを即座にdestroyしてから次hopへ進む(PR #199 review HIGH findingの修正)", async () => {
+    mockDnsResolvesTo("93.184.216.34");
+    const redirectRes = createMockRes(302, { location: "https://example.com/new" });
+    const redirectReq = mockRequestOnce(https, redirectRes, () => {
+      // 意図的にendイベントを発火させない。redirect元のbodyが完了しなくても
+      // 次hopへ進めること(=body完了を待たずに即座に旧hopを終了すること)を確認する。
+    });
+
+    mockDnsResolvesTo("93.184.216.34");
+    mockRequestOnce(
+      https,
+      createMockRes(200, { "content-type": "text/html" }),
+      driveNormalBody(["final content"]),
+    );
+
+    const result = await safeFetchHtml("https://example.com/old");
+
+    expect(redirectRes.destroy).toHaveBeenCalled();
+    expect(redirectReq.destroy).toHaveBeenCalled();
+    expect(result).toEqual({
+      ok: true,
+      status: 200,
+      finalUrl: "https://example.com/new",
+      body: "final content",
+      contentType: "text/html",
+    });
+  });
+
+  it("redirect元がdestroy後にdata/error/closeイベントを出しても二重settle/network_errorにならない", async () => {
+    mockDnsResolvesTo("93.184.216.34");
+    const redirectRes = createMockRes(302, { location: "https://example.com/new" });
+    mockRequestOnce(https, redirectRes, () => {
+      // drive内では何もしない。destroy後に遅れてイベントが発火するケースは
+      // 下で明示的にemitして再現する。
+    });
+
+    mockDnsResolvesTo("93.184.216.34");
+    mockRequestOnce(
+      https,
+      createMockRes(200, { "content-type": "text/html" }),
+      driveNormalBody(["final content"]),
+    );
+
+    const resultPromise = safeFetchHtml("https://example.com/old");
+
+    // redirect検出(settleResolve + destroyAll)が完了するのを待ってから、
+    // destroy後に遅れて届いた想定のイベントを発火させる。DNS mock解決・
+    // queueMicrotaskの入れ子など不定回のmicrotaskを挟むため、Promise.resolve()の
+    // 固定回数連鎖ではなく、マクロタスク境界(setTimeout)まで進めて
+    // 未処理のmicrotaskを全て確実に消化させる。
+    await new Promise((r) => setTimeout(r, 0));
+    redirectRes.emit("data", Buffer.from("late-chunk-after-destroy"));
+    redirectRes.emit("error", new Error("ECONNRESET after destroy"));
+    redirectRes.emit("close");
+
+    const result = await resultPromise;
+    expect(result).toEqual({
+      ok: true,
+      status: 200,
+      finalUrl: "https://example.com/new",
+      body: "final content",
+      contentType: "text/html",
+    });
+  });
+
   it("相対URLのredirectを追跡する", async () => {
     mockDnsResolvesTo("93.184.216.34");
     mockRequestOnce(https, createMockRes(301, { location: "/moved-here" }), () => {});
