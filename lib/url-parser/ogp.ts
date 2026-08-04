@@ -2,54 +2,68 @@ import "server-only";
 import * as cheerio from "cheerio";
 import { guessGenre } from "./genre";
 import type { OgpResult } from "./types";
+import { safeFetchHtml, type SafeFetchFailureReason } from "@/lib/security/safe-http-fetch";
 
 const FETCH_TIMEOUT_MS = 8000;
-const USER_AGENT =
-  "Mozilla/5.0 (compatible; FirstWebReserchAI/1.0; +https://firstweb.example.com)";
+/** 1リクエストで読み込む本文の最大バイト数(fix/url-import-ssrf-hardening)。 */
+const MAX_OGP_BODY_BYTES = 2_000_000;
+
+/**
+ * `safeFetchHtml`の失敗理由を、内部情報(解決先IP・DNSエラー詳細等)を含まない
+ * 日本語メッセージへマッピングする(fix/url-import-ssrf-hardening、要件6)。
+ */
+const SANITIZED_ERROR_MESSAGES: Record<SafeFetchFailureReason, string> = {
+  invalid_url: "URLの形式が正しくありません",
+  disallowed_scheme: "対応していないURL形式です",
+  credentials_in_url: "認証情報を含むURLは使用できません",
+  dns_lookup_failed: "指定されたURLへ接続できませんでした",
+  dns_no_records: "指定されたURLへ接続できませんでした",
+  dns_timeout: "接続がタイムアウトしました",
+  disallowed_ip_range: "安全上アクセスできないURLです",
+  too_many_redirects: "リダイレクトが多すぎるため取得できませんでした",
+  invalid_redirect_location: "リダイレクト先のURLが不正です",
+  timeout: "タイムアウトしました",
+  body_too_large: "取得したページのサイズが大きすぎます",
+  disallowed_content_type: "対応していない形式のページです",
+  http_error: "ページの取得に失敗しました",
+  network_error: "ページの取得に失敗しました",
+};
+
+function toSanitizedOgpError(reason: SafeFetchFailureReason): string {
+  return SANITIZED_ERROR_MESSAGES[reason] ?? "ページの取得に失敗しました";
+}
 
 /**
  * 食べログ等から OGP / JSON-LD / 構造化データを直接取得する Server-only 関数。
  * cheerio を用いた DOM パースで CSS セレクタ + JSON-LD `Restaurant` schema を読む。
+ *
+ * fetch自体は `lib/security/safe-http-fetch.ts` の `safeFetchHtml` に委譲する
+ * (fix/url-import-ssrf-hardening、既存のSSRF脆弱性を修正)。本関数のシグネチャ・
+ * `OgpResult` の形状は変更しない。
  */
 export async function fetchOgp(url: string): Promise<OgpResult> {
   if (!url) return { ok: false, error: "URL が未指定です" };
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  const result = await safeFetchHtml(url, {
+    hopTimeoutMs: 5000,
+    totalTimeoutMs: FETCH_TIMEOUT_MS,
+    maxBodyBytes: MAX_OGP_BODY_BYTES,
+  });
 
-  try {
-    const response = await fetch(url, {
-      signal: controller.signal,
-      headers: {
-        "User-Agent": USER_AGENT,
-        Accept: "text/html,application/xhtml+xml",
-        "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
-      },
-      redirect: "follow",
-      cache: "no-store",
-    });
-    if (!response.ok) {
-      return { ok: false, error: `HTTP ${response.status}` };
-    }
-    const finalUrl = response.url || url;
-    const html = await response.text();
-    const result = extractFromHtml(html, finalUrl);
-    // 短縮 URL のリダイレクト後 URL を後段の再パースで利用するため保持
-    if (finalUrl && finalUrl !== url) {
-      result.final_url = finalUrl;
-    }
-    return result;
-  } catch (e) {
-    if (e instanceof DOMException && e.name === "AbortError") {
-      return { ok: false, error: "タイムアウトしました" };
-    }
-    return {
-      ok: false,
-      error: e instanceof Error ? e.message : "fetch error",
-    };
-  } finally {
-    clearTimeout(timer);
+  if (!result.ok) {
+    return { ok: false, error: toSanitizedOgpError(result.reason) };
   }
+  if (result.status < 200 || result.status >= 300) {
+    return { ok: false, error: `HTTP ${result.status}` };
+  }
+
+  const finalUrl = result.finalUrl || url;
+  const extracted = extractFromHtml(result.body, finalUrl);
+  // 短縮 URL のリダイレクト後 URL を後段の再パースで利用するため保持
+  if (finalUrl && finalUrl !== url) {
+    extracted.final_url = finalUrl;
+  }
+  return extracted;
 }
 
 /**
