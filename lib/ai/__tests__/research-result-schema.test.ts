@@ -1282,6 +1282,86 @@ describe("deriveDisplaySourceName (fix/ai-research-source-identity-integrity、F
     });
     expect(deriveDisplaySourceName(entry)).toBe("unknown-blog.example.com");
   });
+
+  it("既知hostname(gnavi.co.jp)なら固定の表示名を返す", () => {
+    const entry = makeSource({
+      discovery_provenance: "gemini_search_candidate",
+      title: "楽天ぐるなびの店舗ページ",
+      grounding_redirect_url: "https://r.gnavi.co.jp/a740702/",
+    });
+    expect(deriveDisplaySourceName(entry)).toBe("楽天ぐるなび");
+  });
+
+  describe("grounding redirect transport host(実機Preview検証、2026-08-07で発見)", () => {
+    // makeSource()のデフォルトgrounding_redirect_urlはvertexaisearch.cloud.google.comの
+    // redirect URL(実際のStage1出力の大半がこの形式)。既存3テストは全てこのデフォルトを
+    // 上書きしていたため、このバグはテストで検出されていなかった。
+    it("target_matchで確認済み・titleが有効ならtitleへfallbackし、transport hostnameを返さない", () => {
+      const entry = makeSource({
+        title: "東北メシ 炉端ジュン(柏/居酒屋)＜ネット予約可＞ | ホットペッパーグルメ",
+        identity_status: "target_match",
+        // grounding_redirect_urlはmakeSource()のデフォルト(vertexaisearch redirect)のまま。
+      });
+      const result = deriveDisplaySourceName(entry);
+      expect(result).toBe("東北メシ 炉端ジュン(柏/居酒屋)＜ネット予約可＞ | ホットペッパーグルメ");
+      expect(result).not.toContain("vertexaisearch.cloud.google.com");
+    });
+
+    it("competitor_matchで確認済みならtitleへfallbackする", () => {
+      const entry = makeSource({
+        title: "競合店の公式ページ",
+        identity_status: "competitor_match",
+      });
+      expect(deriveDisplaySourceName(entry)).toBe("競合店の公式ページ");
+    });
+
+    it("contextualで確認済みならtitleへfallbackする", () => {
+      const entry = makeSource({
+        title: "エリア特集記事",
+        identity_status: "contextual",
+      });
+      expect(deriveDisplaySourceName(entry)).toBe("エリア特集記事");
+    });
+
+    it.each(["uncertain", "unrelated", "not_checked"] as const)(
+      "identity_status=%sの未確認sourceはtitleを無条件採用せず、transport hostnameも返さない",
+      (identityStatus) => {
+        const entry = makeSource({
+          title: "東北メシ 炉端ジュン(柏/居酒屋)＜ネット予約可＞ | ホットペッパーグルメ",
+          identity_status: identityStatus,
+        });
+        const result = deriveDisplaySourceName(entry);
+        expect(result).not.toBe("vertexaisearch.cloud.google.com");
+        expect(result).not.toContain("東北メシ");
+      },
+    );
+
+    it("identity_status未設定(既存runとの後方互換)でもtitleを無条件採用しない", () => {
+      const entry = makeSource({
+        title: "東北メシ 炉端ジュン(柏/居酒屋)＜ネット予約可＞ | ホットペッパーグルメ",
+        identity_status: undefined,
+      });
+      const result = deriveDisplaySourceName(entry);
+      expect(result).not.toBe("vertexaisearch.cloud.google.com");
+      expect(result).not.toContain("東北メシ");
+    });
+
+    it("target_matchだがtitleが空文字の場合もtransport hostnameを返さない", () => {
+      const entry = makeSource({ title: "", identity_status: "target_match" });
+      const result = deriveDisplaySourceName(entry);
+      expect(result).not.toBe("vertexaisearch.cloud.google.com");
+    });
+
+    it("resolved_urlがtransport hostでも同様にtitleへfallbackする(target_match時)", () => {
+      const entry = makeSource({
+        title: "本文中で確認できたページタイトル",
+        identity_status: "target_match",
+        resolved_url: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/xyz",
+        grounding_redirect_url: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/xyz",
+      });
+      expect(deriveDisplaySourceName(entry)).toBe("本文中で確認できたページタイトル");
+    });
+  });
 });
 
 describe("isSourceLinkClickable (fix/ai-research-source-identity-integrity、FIX8)", () => {

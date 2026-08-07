@@ -556,17 +556,64 @@ const KNOWN_HOSTNAME_DISPLAY_NAMES: Readonly<Record<string, string>> = {
 };
 
 /**
+ * Google Search grounding のredirect URLが使うtransport host(実機Preview検証、
+ * 2026-08-07で発見)。`https://vertexaisearch.cloud.google.com/grounding-api-redirect/...`
+ * は実際に掲載されている媒体のURLではなく、Googleがgrounding結果を中継するための
+ * 転送先に過ぎない。`lib/ai/research/source-url-resolver.ts`の`ALLOWED_START_HOSTS`と
+ * 同じ値だが、そちらは`node:net`に依存するserver-onlyモジュール(SSRF対策用)であり、
+ * 本ファイルはclient component(`research-source-badge.tsx`)からもimportされるため
+ * 直接参照せずローカルに再定義する。
+ *
+ * `fix/ai-research-poc-like-retrieval`でStage1.5(grounding redirect URLの解決)が
+ * クリティカルパスから撤去されて以降、`gemini_search_candidate`由来のエントリは
+ * `resolved_url`が恒常的にnullのままとなり、`deriveDisplaySourceName`が
+ * `grounding_redirect_url`のhostnameであるこの値をそのまま媒体名として返してしまう
+ * 実バグを引き起こしていた(`media_coverage`/`own_net_exposure`/`exposure_gap`の
+ * `ResearchItem.value`に"vertexaisearch.cloud.google.com"が混入)。
+ */
+const TRANSPORT_ONLY_HOSTNAMES: ReadonlySet<string> = new Set([
+  "vertexaisearch.cloud.google.com",
+]);
+
+/**
+ * 実媒体名を安全に特定できない場合の汎用プレースホルダ。特定の媒体名を推測・捏造しない
+ * (`vertexaisearch.cloud.google.com`のようなtransport hostをそのまま出さない代わりに
+ * "Google"等の別の誤った固有名詞へ置き換えることもしない)。
+ */
+const UNKNOWN_SOURCE_DISPLAY_NAME = "情報源(詳細不明)";
+
+/**
  * UI表示用のsource名を導出する。`known_store_data`はアプリ自身が付けた固定文言
  * (`buildKnownStoreDataEntries`、モデル生成ではない)のため`entry.title`をそのまま使う。
  * それ以外(`gemini_search_candidate`/`google_grounding`)は、既知hostnameならその
- * 表示名、未知hostnameならhostname文字列そのものを使い、モデル自己申告の
- * `entry.title`には依存しない。
+ * 表示名、未知の実hostnameならhostname文字列そのものを使う。
+ *
+ * hostnameがtransport-only(`vertexaisearch.cloud.google.com`)またはURLとして
+ * パースできない場合、実媒体名をhostnameから機械的に特定できない。この場合に限り、
+ * Stage2の`source_verifications`とStoreIdentityの突合で確認済み(`identity_status`が
+ * `target_match`/`competitor_match`/`contextual`のいずれか)であることを条件に
+ * モデル自己申告の`entry.title`へfallbackする。これはFIX9が回避しようとした事故
+ * (別店舗URLに自店名titleが付いていた)を、hostname非表示という粗い手段ではなく
+ * `identity_status`という後発の、より正確なtrust boundaryで直接防ぐ形になる
+ * (false positiveよりfalse negativeを優先する既存方針と整合)。
+ * 未確認(`uncertain`/`unrelated`/`not_checked`/未設定)の場合は、特定の媒体名を
+ * 推測せず`UNKNOWN_SOURCE_DISPLAY_NAME`を返す。
  */
 export function deriveDisplaySourceName(entry: SourceRegistryEntry): string {
   if (entry.discovery_provenance === "known_store_data") return entry.title;
+
   const host = hostnameOf(entry.resolved_url ?? entry.grounding_redirect_url);
-  if (host === null) return entry.title;
-  return KNOWN_HOSTNAME_DISPLAY_NAMES[host] ?? host;
+  if (host !== null && !TRANSPORT_ONLY_HOSTNAMES.has(host)) {
+    return KNOWN_HOSTNAME_DISPLAY_NAMES[host] ?? host;
+  }
+
+  const isVerified =
+    entry.identity_status === "target_match" ||
+    entry.identity_status === "competitor_match" ||
+    entry.identity_status === "contextual";
+  if (isVerified && entry.title.trim() !== "") return entry.title;
+
+  return UNKNOWN_SOURCE_DISPLAY_NAME;
 }
 
 /**

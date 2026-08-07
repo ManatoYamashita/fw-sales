@@ -918,6 +918,28 @@ describe("appendConfirmedMediaContext (feat/ai-research-final-quality、Observed
     expect(result[0]!.value).toBe("確認できた掲載媒体: ホットペッパーグルメ。 v");
   });
 
+  it("実機Preview検証(2026-08-07)の再現: grounding redirectのtransport hostしか持たないsourceでも、own_net_exposure/exposure_gapへtransport hostnameを混入させない", () => {
+    const transportOnlySource = {
+      id: "S01",
+      title: "【公式】東北メシ炉端ジュン | 伝統的な原始焼きをたのしむ",
+      grounding_redirect_url:
+        "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEQ3wveVOvo8uZ2UuajpEUwAxFbtdHrQqZk",
+      resolved_url: null,
+      resolve_status: "skipped" as const,
+      source_type: "official_site" as const,
+      discovery_provenance: "gemini_search_candidate" as const,
+      url_context_status: "success" as const,
+      identity_status: "target_match" as const,
+    };
+    // official_siteはMEDIA_COVERAGE_SOURCE_TYPESに含まれないため、gourmet_siteへ変更して検証する。
+    const source = { ...transportOnlySource, source_type: "gourmet_site" as const };
+    const items = [makeItem("own_net_exposure"), makeItem("exposure_gap")];
+    const result = appendConfirmedMediaContext(items, [source]);
+    expect(result[0]!.value).not.toContain("vertexaisearch.cloud.google.com");
+    expect(result[1]!.value).not.toContain("vertexaisearch.cloud.google.com");
+    expect(result[0]!.value).toContain("東北メシ炉端ジュン");
+  });
+
   it("url_context成功でもidentity_statusがtarget_matchでなければ「確認できた媒体」に混入しない(fix/ai-research-source-identity-integrity、FIX10)", () => {
     const wrongStoreSource = { ...registryWithSuccess[0]!, identity_status: "unrelated" as const };
     const items = [makeItem("own_net_exposure", "元のevidence")];
@@ -1023,6 +1045,28 @@ describe("upgradeMediaCoverageFromRegistry (feat/ai-research-final-quality、fix
     expect(result[0]!.status).toBe("confirmed");
     expect(result[0]!.value).toBe("食べログ、じゃらんnet");
     expect(result[0]!.source_ids.sort()).toEqual(["S01", "S02"]);
+  });
+
+  it("実機Preview検証(2026-08-07)の再現: grounding redirectのtransport hostしか持たないsourceでも、target_matchならtitleへfallackしtransport hostnameをvalueへ混入させない", () => {
+    // 炉端ジュン成功run(research_run_msitguoh_iw4n9v)で実際に発生した形。
+    // Stage1.5撤去によりresolved_urlは常にnullで、grounding_redirect_urlは
+    // vertexaisearch.cloud.google.comのredirect URLしか持たない。
+    const transportOnlySource = {
+      id: "S04",
+      title: "東北メシ 炉端ジュン(柏/居酒屋)＜ネット予約可＞ | ホットペッパーグルメ",
+      grounding_redirect_url:
+        "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHyIW3XC4lzLZF6T5vL0pxlqA8kgkMRfzu_IA7g",
+      resolved_url: null,
+      resolve_status: "skipped" as const,
+      source_type: "gourmet_site" as const,
+      discovery_provenance: "gemini_search_candidate" as const,
+      url_context_status: "success" as const,
+      identity_status: "target_match" as const,
+    };
+    const result = upgradeMediaCoverageFromRegistry(mediaItems(), [transportOnlySource]);
+    expect(result[0]!.status).toBe("confirmed");
+    expect(result[0]!.value).toBe("東北メシ 炉端ジュン(柏/居酒屋)＜ネット予約可＞ | ホットペッパーグルメ");
+    expect(result[0]!.value).not.toContain("vertexaisearch.cloud.google.com");
   });
 
   it("実機smoke事故の再現: url_context成功かつ信頼済みhostnameでも、identity_statusがunrelated(=別店舗のページ)なら媒体として列挙しない(CONFIRMED BUG修正の核心)", () => {
