@@ -86,8 +86,20 @@ export interface Stage2Outcome {
 }
 
 /**
- * Stage2の応答がJSON parse・schema検証・件数/key集合の一致(coverage)のいずれかで
- * 失敗したことを表すsanitizedなエラー(feat/ai-research-pre-smoke-hardening、BLOCKER1)。
+ * `Stage2InvalidOutputError`の失敗カテゴリ。`workflows/store-research.ts`の
+ * `classifyForWorkflowRetry`が`error_kind`(`stage2_invalid_output:${kind}`)へ
+ * そのまま反映する。DB(`store_research_runs.error_kind`)を見るだけで4分類が
+ * 判別できるようにするための機械可読トークンであり、生のGemini応答やユーザー入力
+ * とは無関係の固定値のみを取る(実機Preview検証、2026-08-07で発生した
+ * `fatal:stage2_invalid_output`が具体的にどの検証で落ちたか、DBからは判別
+ * できなかった事象への対応)。
+ */
+export type Stage2InvalidOutputKind = "json_parse" | "schema" | "coverage" | "identity";
+
+/**
+ * Stage2の応答がJSON parse・schema検証・件数/key集合の一致(coverage)・店舗同定の
+ * いずれかで失敗したことを表すsanitizedなエラー(feat/ai-research-pre-smoke-hardening、
+ * BLOCKER1)。
  *
  * 旧実装は失敗時に`items: []` + `parseWarning`を返し例外を投げなかったため、
  * Stage2が丸ごと失敗してもWorkflowはsucceededとして保存できてしまっていた
@@ -98,9 +110,12 @@ export interface Stage2Outcome {
  * (ユーザーが再調査を選べればよい、という既存方針を維持)。
  */
 export class Stage2InvalidOutputError extends Error {
-  constructor(message: string) {
+  readonly kind: Stage2InvalidOutputKind;
+
+  constructor(message: string, kind: Stage2InvalidOutputKind) {
     super(message);
     this.name = "Stage2InvalidOutputError";
+    this.kind = kind;
   }
 }
 
@@ -162,19 +177,19 @@ export async function runStage2(
   try {
     parsedJson = JSON.parse(result.rawText);
   } catch {
-    throw new Stage2InvalidOutputError("Stage2の応答をJSONとして解釈できませんでした。");
+    throw new Stage2InvalidOutputError("Stage2の応答をJSONとして解釈できませんでした。", "json_parse");
   }
 
   const zodSchema = buildStage2ResponseZodSchema(allowedKeys, registryIds);
   const parsed = zodSchema.safeParse(parsedJson);
   if (!parsed.success) {
-    throw new Stage2InvalidOutputError("Stage2の応答がスキーマに準拠しませんでした。");
+    throw new Stage2InvalidOutputError("Stage2の応答がスキーマに準拠しませんでした。", "schema");
   }
 
   const resultItems = parsed.data.items as ResearchItem[];
   const coverageError = validateStage2Coverage(resultItems, allowedKeys);
   if (coverageError !== null) {
-    throw new Stage2InvalidOutputError(`Stage2の応答が不完全でした: ${coverageError}`);
+    throw new Stage2InvalidOutputError(`Stage2の応答が不完全でした: ${coverageError}`, "coverage");
   }
 
   // FIX12(fix/ai-research-source-identity-integrity): run全体のstore_identificationが
@@ -192,6 +207,7 @@ export async function runStage2(
   if (nameLooksUnrelated && addressLooksUnrelated) {
     throw new Stage2InvalidOutputError(
       "店舗同定に失敗しました(store_identification_mismatch)",
+      "identity",
     );
   }
 

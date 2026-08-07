@@ -74,6 +74,15 @@ describe("errorMessage (research-failed-card)", () => {
     ).toBe("AI 調査結果の検証に失敗しました。再度お試しください。");
   });
 
+  it.each(["json_parse", "schema", "coverage", "identity"])(
+    "fatal:stage2_invalid_output:%s(runtime hardening、2026-08-07で追加した4分類)も同じ専用メッセージになる(UI文言は変更不要)",
+    (kind) => {
+      expect(
+        errorMessage({ error_kind: `fatal:stage2_invalid_output:${kind}`, error_message: "raw" }),
+      ).toBe("AI 調査結果の検証に失敗しました。再度お試しください。");
+    },
+  );
+
   it("未知のerror_kind(unknown/fatal単体/null等)は生のerror_messageを表示せず汎用メッセージにフォールバックする", () => {
     expect(errorMessage({ error_kind: "fatal", error_message: "生のDBエラー内容" })).toBe(
       "AI 調査に失敗しました。再度お試しください。",

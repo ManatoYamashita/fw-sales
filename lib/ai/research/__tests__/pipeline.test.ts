@@ -33,7 +33,6 @@ const {
   appendConfirmedMediaContext,
   upgradeMediaCoverageFromRegistry,
   finalizeResearchItems,
-  Stage2InvalidOutputError,
 } = await import("../pipeline");
 const { selectAiResearchItems } = await import("../prompts");
 const { RESEARCH_POLICY_ITEMS } = await import("@/lib/domain/research-policy");
@@ -189,7 +188,7 @@ describe("runStage2 (統合、FACT+FACT_OR_HEARING+ANALYSISを1回で扱う)", (
 
     await expect(
       runStage2({ store: STORE, sourceRegistry: REGISTRY }, AbortSignal.timeout(1000)),
-    ).rejects.toBeInstanceOf(Stage2InvalidOutputError);
+    ).rejects.toMatchObject({ name: "Stage2InvalidOutputError", kind: "json_parse" });
   });
 
   it("スキーマ不一致(不正なsource_id等)もStage2InvalidOutputErrorを投げる", async () => {
@@ -217,7 +216,7 @@ describe("runStage2 (統合、FACT+FACT_OR_HEARING+ANALYSISを1回で扱う)", (
         { store: STORE, sourceRegistry: REGISTRY, excludeKeys: ALL_EXCEPT_HOURS },
         AbortSignal.timeout(1000),
       ),
-    ).rejects.toBeInstanceOf(Stage2InvalidOutputError);
+    ).rejects.toMatchObject({ name: "Stage2InvalidOutputError", kind: "schema" });
   });
 
   it("keyが不足している(coverage不一致)場合もStage2InvalidOutputErrorを投げる(BLOCKER1)", async () => {
@@ -236,7 +235,7 @@ describe("runStage2 (統合、FACT+FACT_OR_HEARING+ANALYSISを1回で扱う)", (
         { store: STORE, sourceRegistry: REGISTRY, excludeKeys: ALL_EXCEPT_HOURS },
         AbortSignal.timeout(1000),
       ),
-    ).rejects.toBeInstanceOf(Stage2InvalidOutputError);
+    ).rejects.toMatchObject({ name: "Stage2InvalidOutputError", kind: "coverage" });
   });
 
   it("同一keyが重複している場合もStage2InvalidOutputErrorを投げる(BLOCKER1)", async () => {
@@ -263,7 +262,7 @@ describe("runStage2 (統合、FACT+FACT_OR_HEARING+ANALYSISを1回で扱う)", (
         { store: STORE, sourceRegistry: REGISTRY, excludeKeys: ALL_EXCEPT_HOURS },
         AbortSignal.timeout(1000),
       ),
-    ).rejects.toBeInstanceOf(Stage2InvalidOutputError);
+    ).rejects.toMatchObject({ name: "Stage2InvalidOutputError", kind: "coverage" });
   });
 
   it("未知のkeyが混入している(allowedKeysに無い)場合もStage2InvalidOutputErrorを投げる(BLOCKER1)", async () => {
@@ -304,7 +303,10 @@ describe("runStage2 (統合、FACT+FACT_OR_HEARING+ANALYSISを1回で扱う)", (
         },
         AbortSignal.timeout(1000),
       ),
-    ).rejects.toBeInstanceOf(Stage2InvalidOutputError);
+      // allowedKeysに無いkeyは`buildStage2ResponseZodSchema`のenum制約により
+      // coverage検証より前のsafeParseで弾かれるため、kindは"coverage"ではなく"schema"になる
+      // (実装を仮定せずvitest実行で確認した実際の挙動)。
+    ).rejects.toMatchObject({ name: "Stage2InvalidOutputError", kind: "schema" });
   });
 
   it("searchNotesをStage2プロンプトへ渡す(feat/ai-research-source-diversity)", async () => {
@@ -487,7 +489,7 @@ describe("runStage2 store_identification coarse guard (fix/ai-research-source-id
 
     await expect(
       runStage2({ store: STORE, sourceRegistry: REGISTRY, excludeKeys: ALL_EXCEPT_HOURS }, AbortSignal.timeout(1000)),
-    ).rejects.toBeInstanceOf(Stage2InvalidOutputError);
+    ).rejects.toMatchObject({ name: "Stage2InvalidOutputError", kind: "identity" });
   });
 
   it("matched_nameのみ不一致(matched_addressが空)なら発火しない(片方だけの不一致でrunを無駄に失敗させない)", async () => {

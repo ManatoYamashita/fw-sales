@@ -92,30 +92,51 @@ const STAGE_TIMEOUT_MS = 240_000;
  * PR #187 で修正済み: `api_error` のみ `api_error:<status>` の形で HTTP status を保持する。
  * ここに載せてよいのは正規化済みの kind と HTTP status のみで、SDK の生メッセージ・
  * request ID・API key は一切含めない。この観測性・503 retry の修正は本PRでも維持する。
+ *
+ * runtime hardening(実機Preview検証、2026-08-07): `stage2_invalid_output` は
+ * `Stage2InvalidOutputKind`(`json_parse`/`schema`/`coverage`/`identity`)を
+ * `stage2_invalid_output:<kind>` の形で追加できるよう拡張した。旧来の裸の
+ * `stage2_invalid_output`(kind不明時のフォールバック)も後方互換のため許容する。
  */
 const SANITIZED_KIND_PATTERN =
-  /\((auth_error|missing_api_key|rate_limit|timeout|network_error|max_tokens|api_error:\d{3}|stage2_invalid_output|final_result_invalid|unknown)\)/;
+  /\((auth_error|missing_api_key|rate_limit|timeout|network_error|max_tokens|api_error:\d{3}|stage2_invalid_output(?::(?:json_parse|schema|coverage|identity))?|final_result_invalid|unknown)\)/;
 
 /**
  * `AiClientError` を Workflow の retry 意味論(`FatalError` / `RetryableError`)へ変換する。
  * 純関数としてexportし、単体テストで直接検証する。PR #187 の修正内容を維持している
  * (絶対に壊さない): 503 (service unavailable) は 429 / timeout / network_error と同じ
  * 「最大1 retry」対象。`api_error` の他ステータス(400/404/500 等)は安全側に倒しretryしない。
+ *
+ * retryAfter(実機Preview検証、2026-08-07): 全種一律5sだったものを、種別ごとの典型的な
+ * 回復特性に合わせて調整した。maxRetries=1(2 attempts)自体は変更しない(3回以上への
+ * 安易な引き上げはしない方針)。429(rate_limit)はレスポンス自体が即座に返るため待機を
+ * 伸ばしてもtotal所要時間への影響が小さく30s、503は「過負荷は通常数分で解消する」という
+ * Gemini公式ガイドを踏まえ20s、timeout/network_errorは一過性の接続断が主因のため10s
+ * (いずれも`RESEARCH_RUN_EXPIRES_MARGIN_MINUTES`の既定10分マージンを圧迫しない範囲)。
  */
 export function classifyForWorkflowRetry(err: unknown): Error {
   if (err instanceof Stage2InvalidOutputError) {
-    // Stage2の応答がJSON parse/schema/coverageのいずれかで失敗した場合(BLOCKER1)。
+    // Stage2の応答がJSON parse/schema/coverage/identityのいずれかで失敗した場合(BLOCKER1)。
     // 自動的なGemini再callは追加しない(ユーザーが再調査を選べればよい)ため retry 0。
-    return new FatalError(`Stage2の応答検証に失敗しました(stage2_invalid_output)`);
+    // kindをsanitized tokenへ埋め込むことで、error_kindだけで4分類を判別できるようにする。
+    return new FatalError(`Stage2の応答検証に失敗しました(stage2_invalid_output:${err.kind})`);
   }
   if (isAiClientError(err)) {
     switch (err.kind) {
       case "rate_limit":
+        return new RetryableError(
+          `Gemini呼出が一時的に失敗しました(rate_limit)。1回だけ再試行します。`,
+          { retryAfter: "30s" },
+        );
       case "timeout":
+        return new RetryableError(
+          `Gemini呼出が一時的に失敗しました(timeout)。1回だけ再試行します。`,
+          { retryAfter: "10s" },
+        );
       case "network_error":
         return new RetryableError(
-          `Gemini呼出が一時的に失敗しました(${err.kind})。1回だけ再試行します。`,
-          { retryAfter: "5s" },
+          `Gemini呼出が一時的に失敗しました(network_error)。1回だけ再試行します。`,
+          { retryAfter: "10s" },
         );
       case "missing_api_key":
       case "auth_error":
@@ -124,7 +145,7 @@ export function classifyForWorkflowRetry(err: unknown): Error {
         if (err.status === 503) {
           return new RetryableError(
             `Gemini呼出が一時的に失敗しました(api_error:503)。1回だけ再試行します。`,
-            { retryAfter: "5s" },
+            { retryAfter: "20s" },
           );
         }
         return new FatalError(`Gemini呼出が失敗しました(api_error:${err.status})`);
@@ -141,13 +162,20 @@ export function classifyForWorkflowRetry(err: unknown): Error {
 /**
  * エラーオブジェクトから `store_research_runs.error_kind` へ書き込む短い文字列を導出する。
  * PR #187 の修正内容を維持している(絶対に壊さない)。
+ *
+ * `instanceof` ではなく `FatalError.is()`/`RetryableError.is()` を使う(実機Preview検証、
+ * 2026-08-07): `workflow` SDK公式ドキュメントが「cross-realm(workflow VM境界・retry時の
+ * 別実行コンテキスト)では `instanceof` が失敗しうるため `.is()` を使うこと」と明記している
+ * (`node_modules/workflow/docs/api-reference/workflow/fatal-error.mdx`)。`.is()` は
+ * `name`プロパティ一致(`FatalError`は加えて`fatal:true`のduck typingも)で判定するため、
+ * step再実行時にシリアライズ/デシリアライズを経てもクラス識別が保たれる。
  */
 export function deriveErrorKind(err: unknown): string {
-  if (err instanceof FatalError) {
+  if (FatalError.is(err)) {
     const match = err.message.match(SANITIZED_KIND_PATTERN);
     return match?.[1] !== undefined ? `fatal:${match[1]}` : "fatal";
   }
-  if (err instanceof RetryableError) {
+  if (RetryableError.is(err)) {
     const match = err.message.match(SANITIZED_KIND_PATTERN);
     return match?.[1] !== undefined ? `retryable_exhausted:${match[1]}` : "retryable_exhausted";
   }

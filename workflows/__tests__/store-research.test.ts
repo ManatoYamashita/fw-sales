@@ -32,7 +32,15 @@ vi.mock("@/lib/ai/research/pipeline", () => ({
   finalizeResearchItems: vi.fn(),
   // feat/ai-research-pre-smoke-hardening (BLOCKER1): classifyForWorkflowRetryが
   // `instanceof Stage2InvalidOutputError`で判定するため、モック側にも実体が必要。
-  Stage2InvalidOutputError: class Stage2InvalidOutputError extends Error {},
+  // runtime hardening (2026-08-07): 実クラスと同じく`kind`を保持する(4分類の
+  // sanitized token化をテストするため)。
+  Stage2InvalidOutputError: class Stage2InvalidOutputError extends Error {
+    kind: string;
+    constructor(message: string, kind: string) {
+      super(message);
+      this.kind = kind;
+    }
+  },
 }));
 vi.mock("@/lib/ai/research/source-registry", () => ({
   buildKnownStoreDataEntries: vi.fn(),
@@ -123,12 +131,55 @@ describe("classifyForWorkflowRetry (retry方針の分類、Plan v3.2 §17)", () 
 
   it("Stage2InvalidOutputErrorはFatalError(retry 0、自動Gemini再callは追加しない)になる(feat/ai-research-pre-smoke-hardening、BLOCKER1)", async () => {
     const { Stage2InvalidOutputError } = await import("@/lib/ai/research/pipeline");
-    const err = new Stage2InvalidOutputError("Stage2の応答をJSONとして解釈できませんでした。");
+    const err = new Stage2InvalidOutputError("Stage2の応答をJSONとして解釈できませんでした。", "json_parse");
     const result = classifyForWorkflowRetry(err);
     expect(result).toBeInstanceOf(FatalError);
     expect(result.message).toContain("stage2_invalid_output");
     // 生のGemini応答本文をmessageに含めないこと。
     expect(result.message).not.toContain("JSONとして解釈できませんでした");
+  });
+
+  describe("Stage2InvalidOutputErrorの4分類がsanitized kindへ反映される(実機Preview検証、2026-08-07: fatal:stage2_invalid_outputのみではDBから原因が判別できなかった事象への対応)", () => {
+    it.each<["json_parse" | "schema" | "coverage" | "identity", string]>([
+      ["json_parse", "Stage2の応答をJSONとして解釈できませんでした。"],
+      ["schema", "Stage2の応答がスキーマに準拠しませんでした。"],
+      ["coverage", "Stage2の応答が不完全でした: 重複したkeyが含まれていました"],
+      ["identity", "店舗同定に失敗しました(store_identification_mismatch)"],
+    ])("kind=%sは stage2_invalid_output:%s へ、生の元messageを含めずに変換される", async (kind, rawMessage) => {
+      const { Stage2InvalidOutputError } = await import("@/lib/ai/research/pipeline");
+      const err = new Stage2InvalidOutputError(rawMessage, kind);
+      const result = classifyForWorkflowRetry(err);
+      expect(result).toBeInstanceOf(FatalError);
+      // 定型文 + kind 以外の外部由来テキストが混入していないことを完全一致で検証する。
+      expect(result.message).toBe(`Stage2の応答検証に失敗しました(stage2_invalid_output:${kind})`);
+    });
+  });
+
+  describe("retryAfterの種別ごとの差分(実機Preview検証、2026-08-07: 一律5sから調整)", () => {
+    function approxSecondsFromNow(date: Date): number {
+      return Math.round((date.getTime() - Date.now()) / 1000);
+    }
+
+    it("rate_limitはretryAfter 30s", () => {
+      const result = classifyForWorkflowRetry({ kind: "rate_limit" } as AiClientError);
+      expect(result).toBeInstanceOf(RetryableError);
+      expect(approxSecondsFromNow((result as InstanceType<typeof RetryableError>).retryAfter)).toBe(30);
+    });
+
+    it("timeoutはretryAfter 10s", () => {
+      const result = classifyForWorkflowRetry({ kind: "timeout" } as AiClientError);
+      expect(approxSecondsFromNow((result as InstanceType<typeof RetryableError>).retryAfter)).toBe(10);
+    });
+
+    it("network_errorはretryAfter 10s", () => {
+      const result = classifyForWorkflowRetry({ kind: "network_error" } as AiClientError);
+      expect(approxSecondsFromNow((result as InstanceType<typeof RetryableError>).retryAfter)).toBe(10);
+    });
+
+    it("api_error(503)はretryAfter 20s", () => {
+      const result = classifyForWorkflowRetry({ kind: "api_error", status: 503 } as AiClientError);
+      expect(approxSecondsFromNow((result as InstanceType<typeof RetryableError>).retryAfter)).toBe(20);
+    });
   });
 });
 
@@ -190,6 +241,61 @@ describe("deriveErrorKind (error_kind導出)", () => {
     it("FatalError化したauth_errorは'fatal:auth_error'になる", () => {
       const classified = classifyForWorkflowRetry({ kind: "auth_error" } as AiClientError);
       expect(deriveErrorKind(classified)).toBe("fatal:auth_error");
+    });
+  });
+
+  describe("Stage2InvalidOutputErrorの4分類がderiveErrorKindでも往復する", () => {
+    it.each<"json_parse" | "schema" | "coverage" | "identity">([
+      "json_parse",
+      "schema",
+      "coverage",
+      "identity",
+    ])("kind=%sは classifyForWorkflowRetry → deriveErrorKind で 'fatal:stage2_invalid_output:%s' になる", async (kind) => {
+      const { Stage2InvalidOutputError } = await import("@/lib/ai/research/pipeline");
+      const err = new Stage2InvalidOutputError("元のsanitized reason", kind);
+      const classified = classifyForWorkflowRetry(err);
+      expect(deriveErrorKind(classified)).toBe(`fatal:stage2_invalid_output:${kind}`);
+    });
+
+    it("kind不明な旧形式(裸のstage2_invalid_output)も後方互換でfatal:stage2_invalid_outputになる", () => {
+      expect(deriveErrorKind(new FatalError("Stage2の応答検証に失敗しました(stage2_invalid_output)"))).toBe(
+        "fatal:stage2_invalid_output",
+      );
+    });
+  });
+
+  describe("Workflow error hydration境界での分類(SDK推奨の.is()移行、実機Preview検証、2026-08-07)", () => {
+    // workflow公式ドキュメント(node_modules/workflow/docs/api-reference/workflow/fatal-error.mdx)が
+    // 明記する通り、cross-realm(step再実行時の別実行コンテキスト)では`instanceof`は
+    // prototype chainの不一致で失敗しうる。`FatalError.is()`/`RetryableError.is()`は
+    // `name`プロパティ一致(`FatalError`はさらに`fatal:true`のduck typingも)で判定するため、
+    // 別クラスとしてhydrateされた場合でも正しく分類できることを確認する。
+    class RehydratedError extends Error {}
+
+    it("instanceofでは検出できないhydrated FatalError相当でも.is()経由でfatal分類される", () => {
+      const hydrated = Object.assign(
+        new RehydratedError("Stage2の応答検証に失敗しました(stage2_invalid_output:coverage)"),
+        { name: "FatalError", fatal: true },
+      );
+      expect(hydrated instanceof FatalError).toBe(false);
+      expect(deriveErrorKind(hydrated)).toBe("fatal:stage2_invalid_output:coverage");
+    });
+
+    it("instanceofでは検出できないhydrated RetryableError相当でも.is()経由でretryable_exhausted分類される", () => {
+      const hydrated = Object.assign(
+        new RehydratedError("Gemini呼出が一時的に失敗しました(api_error:503)。1回だけ再試行します。"),
+        { name: "RetryableError" },
+      );
+      expect(hydrated instanceof RetryableError).toBe(false);
+      expect(deriveErrorKind(hydrated)).toBe("retryable_exhausted:api_error:503");
+    });
+
+    it("fatal:trueだけを持つ非FatalErrorクラスもFatalErrorとしてduck typing判定される(SerializationError等のSDK内部挙動と同じ契約)", () => {
+      const hydrated = Object.assign(new RehydratedError("Gemini呼出が認証エラーで失敗しました(auth_error)"), {
+        fatal: true,
+      });
+      expect(hydrated instanceof FatalError).toBe(false);
+      expect(deriveErrorKind(hydrated)).toBe("fatal:auth_error");
     });
   });
 });
