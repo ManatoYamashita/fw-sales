@@ -73,6 +73,8 @@ import {
   GEMINI_STAGE_TIMEOUT_MS,
   GEMINI_STAGE_MAX_RETRIES,
   GEMINI_RETRY_AFTER_MS,
+  STAGE0_MAX_RETRIES,
+  DB_STEP_MAX_RETRIES,
 } from "@/lib/ai/research/run-timing";
 import { derivePlacesVerifiedKeys } from "@/lib/ai/research/places-verified";
 import { mergeBasicInfo } from "@/lib/domain/basic-info-merge";
@@ -229,7 +231,7 @@ async function loadStoreStep(storeId: string): Promise<LoadedStore> {
     knownStoreDataUrls: buildKnownStoreDataUrls(store),
   };
 }
-loadStoreStep.maxRetries = 1;
+loadStoreStep.maxRetries = DB_STEP_MAX_RETRIES;
 
 async function markStageStep(
   runId: string,
@@ -238,7 +240,7 @@ async function markStageStep(
   "use step";
   await repos.researchRun.update(runId, { stage });
 }
-markStageStep.maxRetries = 1;
+markStageStep.maxRetries = DB_STEP_MAX_RETRIES;
 
 /**
  * Stage0: Google Places 軽量再同期(best-effort)。`google_place_id` が有れば Place Details を、
@@ -253,7 +255,7 @@ async function stage0PlacesStep(
   "use step";
   return runStage0PlacesResync({ googlePlaceId, store, now: nowIso() });
 }
-stage0PlacesStep.maxRetries = 0;
+stage0PlacesStep.maxRetries = STAGE0_MAX_RETRIES;
 
 async function stage1Step(store: StoreIdentity) {
   "use step";
@@ -272,7 +274,7 @@ async function persistSourceRegistryStep(
   "use step";
   await repos.researchRun.update(runId, { source_registry: sourceRegistry });
 }
-persistSourceRegistryStep.maxRetries = 1;
+persistSourceRegistryStep.maxRetries = DB_STEP_MAX_RETRIES;
 
 /**
  * Stage2: AI対象項目(FACT + FACT_OR_HEARING + ANALYSIS)を1回のGemini呼出で生成する
@@ -315,7 +317,7 @@ async function persistSucceededStep(runId: string, params: FinalizeStepParams): 
     finished_at: nowIso(),
   });
 }
-persistSucceededStep.maxRetries = 1;
+persistSucceededStep.maxRetries = DB_STEP_MAX_RETRIES;
 
 async function markFailedStep(runId: string, err: unknown): Promise<void> {
   "use step";
@@ -327,7 +329,7 @@ async function markFailedStep(runId: string, err: unknown): Promise<void> {
     finished_at: nowIso(),
   });
 }
-markFailedStep.maxRetries = 1;
+markFailedStep.maxRetries = DB_STEP_MAX_RETRIES;
 
 /* ------------------------------------------------------------------ */
 /*  Workflow                                                            */

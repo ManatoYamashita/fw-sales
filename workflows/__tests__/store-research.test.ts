@@ -19,6 +19,11 @@ import {
   GEMINI_STAGE_TIMEOUT_MS,
   MAX_GEMINI_RETRY_AFTER_MS,
   MIN_SAFE_EXPIRES_MARGIN_MINUTES,
+  PLATFORM_STEP_TIMEOUT_MS,
+  STAGE0_MAX_RETRIES,
+  DB_STEP_COUNT,
+  DB_STEP_MAX_RETRIES,
+  DB_STEP_BUDGET_MS,
   computeMinimumSafeExpiryMs,
   getSafeExpiryBudgetBreakdownMs,
 } from "@/lib/ai/research/run-timing";
@@ -252,6 +257,22 @@ describe("stuck run 判定の安全下限(fix: PR #180 review Finding 3)", () =>
       GEMINI_STAGE_TIMEOUT_MS * (GEMINI_STAGE_MAX_RETRIES + 1) +
       MAX_GEMINI_RETRY_AFTER_MS * GEMINI_STAGE_MAX_RETRIES;
     expect(getSafeExpiryBudgetBreakdownMs().gemini).toBe(perStage * GEMINI_STAGE_COUNT);
+  });
+
+  // Workflow側のstep `.maxRetries` は共有定数(STAGE0_MAX_RETRIES / DB_STEP_MAX_RETRIES)を
+  // 参照している。step関数自体はexportしていないため呼び出し回数の実行時検証はできないが、
+  // budget側がその定数から導出されていることは固定できる。片方だけ値を変えれば
+  // これらのテストが落ちる(= budgetとretry構成のdriftを検知できる)。
+  it("Stage0部分のbudgetはSTAGE0_MAX_RETRIESと整合する", () => {
+    expect(getSafeExpiryBudgetBreakdownMs().stage0).toBe(
+      PLATFORM_STEP_TIMEOUT_MS * (STAGE0_MAX_RETRIES + 1),
+    );
+  });
+
+  it("DB step部分のbudgetはDB_STEP_MAX_RETRIESと整合する", () => {
+    expect(getSafeExpiryBudgetBreakdownMs().dbSteps).toBe(
+      DB_STEP_COUNT * (DB_STEP_MAX_RETRIES + 1) * DB_STEP_BUDGET_MS,
+    );
   });
 
   it("computeMinimumSafeExpiryMsは内訳の合計と一致する", () => {
