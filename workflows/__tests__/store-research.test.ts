@@ -9,9 +9,20 @@
  * `deriveErrorKind`)のみを検証する。
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { FatalError, RetryableError } from "workflow";
 import type { AiClientError } from "@/lib/ai/client";
+import {
+  GEMINI_RETRY_AFTER_MS,
+  GEMINI_STAGE_COUNT,
+  GEMINI_STAGE_MAX_RETRIES,
+  GEMINI_STAGE_TIMEOUT_MS,
+  MAX_GEMINI_RETRY_AFTER_MS,
+  MIN_SAFE_EXPIRES_MARGIN_MINUTES,
+  computeMinimumSafeExpiryMs,
+  getSafeExpiryBudgetBreakdownMs,
+} from "@/lib/ai/research/run-timing";
+import { getResearchRunExpiresMarginMinutes } from "@/lib/env";
 
 // store-research.ts は "use step" 関数内で repos / pipeline / source-registry /
 // places-stage0 / places-verified / basic-info-merge を参照するため、モジュールの
@@ -180,6 +191,74 @@ describe("classifyForWorkflowRetry (retry方針の分類、Plan v3.2 §17)", () 
       const result = classifyForWorkflowRetry({ kind: "api_error", status: 503 } as AiClientError);
       expect(approxSecondsFromNow((result as InstanceType<typeof RetryableError>).retryAfter)).toBe(20);
     });
+
+    // fix: PR #180 review Finding 3。Workflow側でretryAfterを再ハードコードすると
+    // expires margin の安全下限計算と drift し、Finding 3 が再発する。
+    it("retryAfterはrun-timing.tsのGEMINI_RETRY_AFTER_MSを参照している(drift検知)", () => {
+      const cases = [
+        [{ kind: "rate_limit" }, GEMINI_RETRY_AFTER_MS.rate_limit],
+        [{ kind: "timeout" }, GEMINI_RETRY_AFTER_MS.timeout],
+        [{ kind: "network_error" }, GEMINI_RETRY_AFTER_MS.network_error],
+        [{ kind: "api_error", status: 503 }, GEMINI_RETRY_AFTER_MS.service_unavailable],
+      ] as const;
+      for (const [err, expectedMs] of cases) {
+        const result = classifyForWorkflowRetry(err as AiClientError);
+        expect(approxSecondsFromNow((result as InstanceType<typeof RetryableError>).retryAfter)).toBe(
+          expectedMs / 1000,
+        );
+      }
+    });
+  });
+});
+
+describe("stuck run 判定の安全下限(fix: PR #180 review Finding 3)", () => {
+  const KEY = "RESEARCH_RUN_EXPIRES_MARGIN_MINUTES";
+  let saved: string | undefined;
+
+  beforeEach(() => {
+    saved = process.env[KEY];
+    delete process.env[KEY];
+  });
+
+  afterEach(() => {
+    if (saved === undefined) delete process.env[KEY];
+    else process.env[KEY] = saved;
+  });
+
+  it("既定のexpires marginは、正常runが要しうる保守的budgetを下回らない", () => {
+    expect(getResearchRunExpiresMarginMinutes() * 60_000).toBeGreaterThanOrEqual(
+      computeMinimumSafeExpiryMs(),
+    );
+  });
+
+  it("env で安全下限未満(旧既定の10分)を設定しても実効値は下限へclampされる", () => {
+    // 本番に旧値が残っているケース。コード側defaultの変更だけでは不具合が残るため
+    // clamp が必要(実効値は max(env override, safe minimum))。
+    process.env[KEY] = "10";
+    expect(getResearchRunExpiresMarginMinutes()).toBe(MIN_SAFE_EXPIRES_MARGIN_MINUTES);
+    expect(getResearchRunExpiresMarginMinutes() * 60_000).toBeGreaterThanOrEqual(
+      computeMinimumSafeExpiryMs(),
+    );
+  });
+
+  it("env で安全下限より長い値を設定した場合はその値を尊重する(延長方向のoverrideは有効)", () => {
+    const longer = MIN_SAFE_EXPIRES_MARGIN_MINUTES + 15;
+    process.env[KEY] = String(longer);
+    expect(getResearchRunExpiresMarginMinutes()).toBe(longer);
+  });
+
+  it("Gemini部分のbudgetはStage1/Stage2のtimeout・retry構成と一致する", () => {
+    const perStage =
+      GEMINI_STAGE_TIMEOUT_MS * (GEMINI_STAGE_MAX_RETRIES + 1) +
+      MAX_GEMINI_RETRY_AFTER_MS * GEMINI_STAGE_MAX_RETRIES;
+    expect(getSafeExpiryBudgetBreakdownMs().gemini).toBe(perStage * GEMINI_STAGE_COUNT);
+  });
+
+  it("computeMinimumSafeExpiryMsは内訳の合計と一致する", () => {
+    const b = getSafeExpiryBudgetBreakdownMs();
+    expect(b.gemini + b.stage0 + b.dbSteps + b.scheduling + b.safetyMargin).toBe(
+      computeMinimumSafeExpiryMs(),
+    );
   });
 });
 

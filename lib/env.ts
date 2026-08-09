@@ -8,10 +8,15 @@
  * 制約:
  * - エラーメッセージにはキー名のみを含め、値そのものはログに出さない (機密保護)。
  * - `import "server-only"` を付けない: scripts/seed.ts など Node 単体スクリプト
- *   からも import される想定のため。純粋ヘルパ関数として副作用を持たない。
+ *   からも import される想定のため。
+ * - 例外として `getResearchRunExpiresMarginMinutes` のみ、設定値が安全下限を
+ *   下回るときに `console.warn` を出す (運用側が設定ミスに気づけるようにするため)。
+ *   それ以外のヘルパは純粋関数で副作用を持たない。
  *
  * 関連: design.md §「`lib/env.ts` (assertEnv)」, requirements.md §6.1, §6.3
  */
+
+import { MIN_SAFE_EXPIRES_MARGIN_MINUTES } from "@/lib/ai/research/run-timing";
 
 /**
  * 必須環境変数を取得する。値が未設定または空文字なら例外を throw する。
@@ -121,15 +126,41 @@ export function getResearchMaxOutputTokens(): number {
  * AI 店舗調査 run (`store_research_runs`) の `expires_at` マージン(分)。
  *
  * `started_at` からこの分数後を stuck run 検出の参考値とする(AI 店舗調査再設計
- * Plan v3.2 §17)。PoC実測(約3分23秒)に対する暫定値であり、実運用のばらつきを
- * 見て調整する前提のため、コード直書きの magic number ではなく env で上書き
- * 可能にする。未設定時のデフォルトは 10 分。
+ * Plan v3.2 §17)。
+ *
+ * ## 安全下限による clamp(fix: PR #180 review Finding 3)
+ *
+ * 旧実装は既定 10 分固定だったが、Stage1/Stage2 はそれぞれ最大 240 秒 × 2 attempt +
+ * retry 待機を要しうるため、Gemini 部分だけで最大 17 分に達する。10 分では
+ * **正常に処理中の run が `isRunStuck` で stuck 扱いされ failed へ倒され、
+ * 同一店舗の二重 run を招く**。
+ *
+ * そこで既定値・下限ともに `MIN_SAFE_EXPIRES_MARGIN_MINUTES`
+ * (`lib/ai/research/run-timing.ts` が Workflow の timeout / retry 構成から導出)を使う。
+ * 実効値は概念的に `max(env override, safe minimum)`:
+ *
+ * - この env は **安全側へ延長するための override** であり、短縮する用途では扱わない
+ *   (run lifecycle の不変条件「expires は正常実行に必要な時間より短くならない」を守る)。
+ * - 本番に旧値(例 `10`)が設定済みでも、コード側 default の変更だけでは不具合が
+ *   残ってしまうため、下限未満は clamp する。
  *
  * 旧 `DEEP_RESEARCH_*` 系(このファイル下部)とは無関係の新設定。撤去済み
  * Deep Research パイプラインの再利用ではない。
  */
 export function getResearchRunExpiresMarginMinutes(): number {
-  return readPositiveInt("RESEARCH_RUN_EXPIRES_MARGIN_MINUTES", 10);
+  const configured = readPositiveInt(
+    "RESEARCH_RUN_EXPIRES_MARGIN_MINUTES",
+    MIN_SAFE_EXPIRES_MARGIN_MINUTES,
+  );
+  if (configured < MIN_SAFE_EXPIRES_MARGIN_MINUTES) {
+    // 値のみを記録する(secret は含まない)。運用側が設定ミスに気づけるようにする。
+    console.warn("[research.expiresMargin] configured value below safe minimum; clamped", {
+      configured,
+      safeMinimum: MIN_SAFE_EXPIRES_MARGIN_MINUTES,
+    });
+    return MIN_SAFE_EXPIRES_MARGIN_MINUTES;
+  }
+  return configured;
 }
 
 /**

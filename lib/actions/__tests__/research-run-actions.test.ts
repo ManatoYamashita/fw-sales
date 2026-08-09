@@ -17,6 +17,7 @@ const {
   mockStoreUpdate,
   mockGetLatestForStore,
   mockResearchRunGet,
+  mockGetForUpdate,
   mockCreate,
   mockUpdate,
   mockRevalidateTag,
@@ -28,6 +29,10 @@ const {
   mockStoreUpdate: vi.fn(),
   mockGetLatestForStore: vi.fn(),
   mockResearchRunGet: vi.fn(),
+  // fix: PR #180 review Finding 5。`getForUpdate`(SELECT ... FOR UPDATE)と通常`get`は
+  // **別のmock**にする。同一mockを共有していると、実装が誤って行ロック無しの`get`を
+  // 使うようになってもテストが検知できなかった。
+  mockGetForUpdate: vi.fn(),
   mockCreate: vi.fn(),
   mockUpdate: vi.fn(),
   mockRevalidateTag: vi.fn(),
@@ -53,13 +58,15 @@ vi.mock("@/lib/repositories", () => ({
   },
 }));
 
-// テストではtxへ同じmock関数をそのまま渡し、既存のmockXxx.mockResolvedValue(...)設定が
-// トランザクション内呼出(tx.researchRun.getForUpdate等)にもそのまま効くようにする。
+// review系Actionは `repos.transaction(async (tx) => ...)` 経由でtxのメソッドを呼ぶ。
+// `getForUpdate` と `get` は別mockにしてあるため、行ロックが設計上必須の処理で
+// 実装が誤って `get` を使った場合、`getForUpdate` が undefined を返して
+// テストが失敗する(= 実装ミスを検知できる)。
 mockTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) =>
   fn({
     store: { get: mockStoreGet, update: mockStoreUpdate },
     researchRun: {
-      getForUpdate: mockResearchRunGet,
+      getForUpdate: mockGetForUpdate,
       get: mockResearchRunGet,
       create: mockCreate,
       update: mockUpdate,
@@ -136,12 +143,21 @@ function makeBasicInfo(): BasicInfo {
   return {};
 }
 
+/**
+ * postgres-js の `PostgresError` 互換オブジェクト(`lib/db/postgres-error.ts` が
+ * `name === "PostgresError"` + `code` で検出する形)。
+ */
+function makePgError(code: string, extra: Record<string, unknown> = {}) {
+  return { name: "PostgresError", message: `pg ${code}`, code, ...extra };
+}
+
 beforeEach(() => {
   mockStart.mockReset();
   mockStoreGet.mockReset();
   mockStoreUpdate.mockReset();
   mockGetLatestForStore.mockReset();
   mockResearchRunGet.mockReset();
+  mockGetForUpdate.mockReset();
   mockCreate.mockReset();
   mockUpdate.mockReset();
   mockRevalidateTag.mockReset();
@@ -237,14 +253,98 @@ describe("startResearchRunAction", () => {
     expect(mockRevalidateTag).toHaveBeenCalled();
   });
 
-  it("DB作成が部分ユニークインデックス違反で失敗した場合、二重起動エラーとして扱う(レース対策)", async () => {
-    mockCreate.mockRejectedValue(new Error("duplicate key value violates unique constraint"));
+  it("DB作成が部分ユニークインデックス違反(SQLSTATE 23505)で失敗した場合、二重起動エラーとして扱う(レース対策)", async () => {
+    mockCreate.mockRejectedValue(
+      makePgError("23505", {
+        constraint_name: "store_research_runs_running_store_idx",
+        table_name: "store_research_runs",
+      }),
+    );
 
     const result = await startResearchRunAction(nextStoreId());
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain("既に調査中");
     expect(mockStart).not.toHaveBeenCalled();
+  });
+
+  // fix: PR #180 review Finding 4。旧実装は裸の `catch {}` で全失敗を二重起動扱いし、
+  // ログも残さなかったため、接続断・権限エラー等が「既に調査中」という誤った案内のまま
+  // 検知不能になっていた。
+  describe("create()のエラー分類(SQLSTATEを判別する)", () => {
+    it("23505以外のDBエラーは二重起動扱いにせず、汎用文言を返す", async () => {
+      mockCreate.mockRejectedValue(makePgError("08006", { message: "connection failure" }));
+
+      const result = await startResearchRunAction(nextStoreId());
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error).not.toContain("既に調査中");
+        expect(result.error).toContain("調査の開始に失敗");
+      }
+      expect(mockStart).not.toHaveBeenCalled();
+    });
+
+    it("23505以外のDBエラーはSQLSTATE等を構造化ログへ残す(運用で原因を追えるように)", async () => {
+      const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+      mockCreate.mockRejectedValue(
+        makePgError("42501", { table_name: "store_research_runs", constraint_name: "some_constraint" }),
+      );
+
+      await startResearchRunAction(nextStoreId());
+
+      expect(spy).toHaveBeenCalledWith(
+        expect.stringContaining("[research.startRun]"),
+        expect.objectContaining({ code: "42501", table: "store_research_runs" }),
+      );
+      spy.mockRestore();
+    });
+
+    it("DBエラーのraw messageやdetailをUIへ露出しない", async () => {
+      const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+      mockCreate.mockRejectedValue(
+        makePgError("42501", {
+          message: "permission denied for table store_research_runs",
+          detail: "internal schema detail that must not leak",
+        }),
+      );
+
+      const result = await startResearchRunAction(nextStoreId());
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error).not.toContain("permission denied");
+        expect(result.error).not.toContain("internal schema detail");
+      }
+      spy.mockRestore();
+    });
+
+    it("PostgresErrorとして解釈できないエラーも二重起動扱いにしない", async () => {
+      const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+      mockCreate.mockRejectedValue(new Error("unexpected non-pg failure"));
+
+      const result = await startResearchRunAction(nextStoreId());
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).not.toContain("既に調査中");
+      spy.mockRestore();
+    });
+
+    it("PostgresErrorとして解釈できないエラーでもerror識別子をログに残す(全項目undefinedにしない)", async () => {
+      const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+      mockCreate.mockRejectedValue(new TypeError("fetch failed"));
+
+      await startResearchRunAction(nextStoreId());
+
+      expect(spy).toHaveBeenCalledWith(
+        expect.stringContaining("[research.startRun]"),
+        expect.objectContaining({ unrecognized_error_name: "TypeError" }),
+      );
+      // 生メッセージはログにも含めない(DB由来の値が混入しうるため)。
+      const logged = JSON.stringify(spy.mock.calls[0]?.[1]);
+      expect(logged).not.toContain("fetch failed");
+      spy.mockRestore();
+    });
   });
 
   it("Workflow起動が失敗したらrunをfailedへ遷移させる", async () => {
@@ -296,10 +396,65 @@ describe("getResearchRunStatusAction", () => {
   });
 });
 
+/**
+ * 行ロック(`SELECT ... FOR UPDATE`)が設計上必須のreview系書込みAction
+ * (feat/research-review-write-integrity MAJOR10)について、実際に `getForUpdate` が
+ * 呼ばれ、ロック無しの `get` が使われていないことを検証する
+ * (fix: PR #180 review Finding 5)。
+ */
+describe("review系Actionの行ロック(getForUpdate)呼び出し", () => {
+  it("recordReviewDecisionActionはgetForUpdateでrun行をロックする", async () => {
+    const run = makeRun();
+    mockGetForUpdate.mockResolvedValue(run);
+
+    await recordReviewDecisionAction({
+      runId: run.id,
+      storeId: run.store_id,
+      itemKey: "business_hours_holidays",
+      decision: "adopted",
+    });
+
+    expect(mockGetForUpdate).toHaveBeenCalledWith(run.id);
+    expect(mockResearchRunGet).not.toHaveBeenCalled();
+  });
+
+  it("bulkAdoptConfirmedActionはgetForUpdateでrun行をロックする", async () => {
+    const run = makeRun();
+    mockGetForUpdate.mockResolvedValue(run);
+
+    await bulkAdoptConfirmedAction({ runId: run.id, storeId: run.store_id });
+
+    expect(mockGetForUpdate).toHaveBeenCalledWith(run.id);
+    expect(mockResearchRunGet).not.toHaveBeenCalled();
+  });
+
+  it("completeReviewActionはgetForUpdateでrun行をロックする", async () => {
+    const run = makeRun({ review_decisions: { business_hours_holidays: { decision: "skipped", decided_at: "2026-08-01T00:00:00.000Z" } } });
+    mockGetForUpdate.mockResolvedValue(run);
+
+    await completeReviewAction({ runId: run.id, storeId: run.store_id, skipRemaining: false });
+
+    expect(mockGetForUpdate).toHaveBeenCalledWith(run.id);
+    expect(mockResearchRunGet).not.toHaveBeenCalled();
+  });
+
+  it("トランザクション内でgetしか呼ばない実装だったら失敗する(テストの検知能力の確認)", async () => {
+    // `getForUpdate` と `get` が同一mockだった旧テストでは、この差を区別できなかった。
+    // 通常の `get` にだけrunを設定した状態では、行ロック経由の読み出しは何も得られない。
+    const run = makeRun();
+    mockResearchRunGet.mockResolvedValue(run);
+    mockGetForUpdate.mockResolvedValue(null);
+
+    const result = await bulkAdoptConfirmedAction({ runId: run.id, storeId: run.store_id });
+
+    expect(result.ok).toBe(false);
+  });
+});
+
 describe("recordReviewDecisionAction", () => {
   it("採用(adopted)時にbasic_infoへmanualソースで即時反映する", async () => {
     const run = makeRun();
-    mockResearchRunGet.mockResolvedValue(run);
+    mockGetForUpdate.mockResolvedValue(run);
 
     const result = await recordReviewDecisionAction({
       runId: run.id,
@@ -333,7 +488,7 @@ describe("recordReviewDecisionAction", () => {
 
   it("却下(rejected)時はbasic_infoを変更しない", async () => {
     const run = makeRun();
-    mockResearchRunGet.mockResolvedValue(run);
+    mockGetForUpdate.mockResolvedValue(run);
 
     const result = await recordReviewDecisionAction({
       runId: run.id,
@@ -358,7 +513,7 @@ describe("recordReviewDecisionAction", () => {
     const run = makeRun({
       result: [makeItem({ key: "revenue", status: "hearing_required", value: null, source_ids: [] })],
     });
-    mockResearchRunGet.mockResolvedValue(run);
+    mockGetForUpdate.mockResolvedValue(run);
 
     const result = await recordReviewDecisionAction({
       runId: run.id,
@@ -383,7 +538,7 @@ describe("recordReviewDecisionAction", () => {
         }),
       ],
     });
-    mockResearchRunGet.mockResolvedValue(run);
+    mockGetForUpdate.mockResolvedValue(run);
 
     const result = await recordReviewDecisionAction({
       runId: run.id,
@@ -409,7 +564,7 @@ describe("recordReviewDecisionAction", () => {
         }),
       ],
     });
-    mockResearchRunGet.mockResolvedValue(run);
+    mockGetForUpdate.mockResolvedValue(run);
 
     const result = await recordReviewDecisionAction({
       runId: run.id,
@@ -425,7 +580,7 @@ describe("recordReviewDecisionAction", () => {
 
   it("レビュー完了済みのrunは拒否する", async () => {
     const run = makeRun({ review_completed_at: "2026-08-01T01:00:00.000Z" });
-    mockResearchRunGet.mockResolvedValue(run);
+    mockGetForUpdate.mockResolvedValue(run);
 
     const result = await recordReviewDecisionAction({
       runId: run.id,
@@ -443,7 +598,7 @@ describe("recordReviewDecisionAction", () => {
         business_hours_holidays: { decision: "adopted", decided_at: "2026-08-01T00:30:00.000Z" },
       },
     });
-    mockResearchRunGet.mockResolvedValue(run);
+    mockGetForUpdate.mockResolvedValue(run);
 
     const result = await recordReviewDecisionAction({
       runId: run.id,
@@ -460,7 +615,7 @@ describe("recordReviewDecisionAction", () => {
 
   it("editedValueが空文字ならcanonicalへ保存せず拒否する(MAJOR11)", async () => {
     const run = makeRun();
-    mockResearchRunGet.mockResolvedValue(run);
+    mockGetForUpdate.mockResolvedValue(run);
 
     const result = await recordReviewDecisionAction({
       runId: run.id,
@@ -476,7 +631,7 @@ describe("recordReviewDecisionAction", () => {
 
   it("editedValueが空白のみでも拒否する(MAJOR11)", async () => {
     const run = makeRun();
-    mockResearchRunGet.mockResolvedValue(run);
+    mockGetForUpdate.mockResolvedValue(run);
 
     const result = await recordReviewDecisionAction({
       runId: run.id,
@@ -492,7 +647,7 @@ describe("recordReviewDecisionAction", () => {
 
   it("editedValueの前後の空白はtrimして保存する", async () => {
     const run = makeRun();
-    mockResearchRunGet.mockResolvedValue(run);
+    mockGetForUpdate.mockResolvedValue(run);
 
     const result = await recordReviewDecisionAction({
       runId: run.id,
@@ -515,7 +670,7 @@ describe("recordReviewDecisionAction", () => {
 
   it("decisionが不正な値(未知のenum)ならruntimeで拒否する(追加修正E)", async () => {
     const run = makeRun();
-    mockResearchRunGet.mockResolvedValue(run);
+    mockGetForUpdate.mockResolvedValue(run);
 
     const result = await recordReviewDecisionAction({
       runId: run.id,
@@ -531,7 +686,7 @@ describe("recordReviewDecisionAction", () => {
 
   it("runId/storeId/itemKeyが文字列以外ならruntimeで拒否する(追加修正E)", async () => {
     const run = makeRun();
-    mockResearchRunGet.mockResolvedValue(run);
+    mockGetForUpdate.mockResolvedValue(run);
 
     const result = await recordReviewDecisionAction({
       // @ts-expect-error 不正型をruntime検証するためのテスト
@@ -542,12 +697,12 @@ describe("recordReviewDecisionAction", () => {
     });
 
     expect(result.ok).toBe(false);
-    expect(mockResearchRunGet).not.toHaveBeenCalled();
+    expect(mockGetForUpdate).not.toHaveBeenCalled();
   });
 
   it("runId/storeId/itemKeyが空文字(型は正しいが空)ならruntimeで拒否する(fix/ai-research-final-audit-hardening、欠落していたテストケース)", async () => {
     const run = makeRun();
-    mockResearchRunGet.mockResolvedValue(run);
+    mockGetForUpdate.mockResolvedValue(run);
 
     const blankRunId = await recordReviewDecisionAction({
       runId: "",
@@ -573,7 +728,7 @@ describe("recordReviewDecisionAction", () => {
     });
     expect(blankItemKey.ok).toBe(false);
 
-    expect(mockResearchRunGet).not.toHaveBeenCalled();
+    expect(mockGetForUpdate).not.toHaveBeenCalled();
   });
 
   it("selectedCandidateIdが空文字ならruntimeで明示的に拒否する(fix/ai-research-final-audit-hardening、以前は候補一覧に存在しないことによる偶然の拒否のみだった)", async () => {
@@ -588,7 +743,7 @@ describe("recordReviewDecisionAction", () => {
         }),
       ],
     });
-    mockResearchRunGet.mockResolvedValue(run);
+    mockGetForUpdate.mockResolvedValue(run);
 
     const result = await recordReviewDecisionAction({
       runId: run.id,
@@ -612,7 +767,7 @@ describe("bulkAdoptConfirmedAction", () => {
         makeItem({ key: "average_spend_day_night", status: "inferred", value: "3000円" }),
       ],
     });
-    mockResearchRunGet.mockResolvedValue(run);
+    mockGetForUpdate.mockResolvedValue(run);
 
     const result = await bulkAdoptConfirmedAction({ runId: run.id, storeId: run.store_id });
 
@@ -630,7 +785,7 @@ describe("bulkAdoptConfirmedAction", () => {
     const run = makeRun({
       result: [makeItem({ status: "inferred" })],
     });
-    mockResearchRunGet.mockResolvedValue(run);
+    mockGetForUpdate.mockResolvedValue(run);
 
     const result = await bulkAdoptConfirmedAction({ runId: run.id, storeId: run.store_id });
 
@@ -643,7 +798,7 @@ describe("bulkAdoptConfirmedAction", () => {
 describe("completeReviewAction", () => {
   it("未対応項目が残っている場合、skipRemaining=falseなら拒否する", async () => {
     const run = makeRun({ result: [makeItem()] });
-    mockResearchRunGet.mockResolvedValue(run);
+    mockGetForUpdate.mockResolvedValue(run);
 
     const result = await completeReviewAction({
       runId: run.id,
@@ -657,7 +812,7 @@ describe("completeReviewAction", () => {
 
   it("skipRemaining=trueなら残りをskippedにして完了する", async () => {
     const run = makeRun({ result: [makeItem()] });
-    mockResearchRunGet.mockResolvedValue(run);
+    mockGetForUpdate.mockResolvedValue(run);
 
     const result = await completeReviewAction({
       runId: run.id,
@@ -682,7 +837,7 @@ describe("completeReviewAction", () => {
       result: [makeItem()],
       review_decisions: { business_hours_holidays: { decision: "adopted", decided_at: "x" } },
     });
-    mockResearchRunGet.mockResolvedValue(run);
+    mockGetForUpdate.mockResolvedValue(run);
     mockStoreGet.mockResolvedValue({ id: run.store_id, stage: "未調査", basic_info: {} });
 
     const result = await completeReviewAction({
@@ -700,7 +855,7 @@ describe("completeReviewAction", () => {
       result: [makeItem()],
       review_decisions: { business_hours_holidays: { decision: "adopted", decided_at: "x" } },
     });
-    mockResearchRunGet.mockResolvedValue(run);
+    mockGetForUpdate.mockResolvedValue(run);
     mockStoreGet.mockResolvedValue({ id: run.store_id, stage: "架電済み", basic_info: {} });
 
     const result = await completeReviewAction({
@@ -715,7 +870,7 @@ describe("completeReviewAction", () => {
 
   it("レビュー完了済みのrunは再度完了できない", async () => {
     const run = makeRun({ review_completed_at: "2026-08-01T01:00:00.000Z" });
-    mockResearchRunGet.mockResolvedValue(run);
+    mockGetForUpdate.mockResolvedValue(run);
 
     const result = await completeReviewAction({
       runId: run.id,

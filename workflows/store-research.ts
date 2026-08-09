@@ -69,6 +69,11 @@ import {
   mergeKnownStoreDataIntoRegistry,
 } from "@/lib/ai/research/source-registry";
 import { runStage0PlacesResync, type Stage0PlacesResult } from "@/lib/ai/research/places-stage0";
+import {
+  GEMINI_STAGE_TIMEOUT_MS,
+  GEMINI_STAGE_MAX_RETRIES,
+  GEMINI_RETRY_AFTER_MS,
+} from "@/lib/ai/research/run-timing";
 import { derivePlacesVerifiedKeys } from "@/lib/ai/research/places-verified";
 import { mergeBasicInfo } from "@/lib/domain/basic-info-merge";
 import { isAiClientError } from "@/lib/ai/client";
@@ -82,8 +87,13 @@ import type { SearchNote } from "@/lib/ai/research/source-registry";
 import type { BasicInfo } from "@/types/basic-info";
 import { nowIso } from "@/lib/utils/date";
 
-/** 1 stage あたりのGemini呼出timeout。Hobbyの個別Function上限(300秒)に収まる値。 */
-const STAGE_TIMEOUT_MS = 240_000;
+/**
+ * timeout / retry 構成は `lib/ai/research/run-timing.ts` を唯一のSource of Truthとする
+ * (fix: PR #180 review Finding 3)。ここで独自にハードコードすると、
+ * `getResearchRunExpiresMarginMinutes()` の安全下限計算との drift が発生し、
+ * 正常runがstuck誤判定される不具合が再発する。
+ */
+const STAGE_TIMEOUT_MS = GEMINI_STAGE_TIMEOUT_MS;
 
 /**
  * `classifyForWorkflowRetry` が `FatalError`/`RetryableError` のメッセージへ埋め込む
@@ -111,8 +121,13 @@ const SANITIZED_KIND_PATTERN =
  * 回復特性に合わせて調整した。maxRetries=1(2 attempts)自体は変更しない(3回以上への
  * 安易な引き上げはしない方針)。429(rate_limit)はレスポンス自体が即座に返るため待機を
  * 伸ばしてもtotal所要時間への影響が小さく30s、503は「過負荷は通常数分で解消する」という
- * Gemini公式ガイドを踏まえ20s、timeout/network_errorは一過性の接続断が主因のため10s
- * (いずれも`RESEARCH_RUN_EXPIRES_MARGIN_MINUTES`の既定10分マージンを圧迫しない範囲)。
+ * Gemini公式ガイドを踏まえ20s、timeout/network_errorは一過性の接続断が主因のため10s。
+ *
+ * これらの実値は`lib/ai/research/run-timing.ts`の`GEMINI_RETRY_AFTER_MS`が保持する
+ * (fix: PR #180 review Finding 3)。同モジュールが`MAX_GEMINI_RETRY_AFTER_MS`を導出し、
+ * `getResearchRunExpiresMarginMinutes()`の安全下限計算へ反映するため、ここで値を
+ * 変更しても expires margin が自動的に追従する(旧実装のようにretryAfterを伸ばした結果
+ * 既定マージンを超過する、という drift が起きない)。
  */
 export function classifyForWorkflowRetry(err: unknown): Error {
   if (err instanceof Stage2InvalidOutputError) {
@@ -126,17 +141,17 @@ export function classifyForWorkflowRetry(err: unknown): Error {
       case "rate_limit":
         return new RetryableError(
           `Gemini呼出が一時的に失敗しました(rate_limit)。1回だけ再試行します。`,
-          { retryAfter: "30s" },
+          { retryAfter: GEMINI_RETRY_AFTER_MS.rate_limit },
         );
       case "timeout":
         return new RetryableError(
           `Gemini呼出が一時的に失敗しました(timeout)。1回だけ再試行します。`,
-          { retryAfter: "10s" },
+          { retryAfter: GEMINI_RETRY_AFTER_MS.timeout },
         );
       case "network_error":
         return new RetryableError(
           `Gemini呼出が一時的に失敗しました(network_error)。1回だけ再試行します。`,
-          { retryAfter: "10s" },
+          { retryAfter: GEMINI_RETRY_AFTER_MS.network_error },
         );
       case "missing_api_key":
       case "auth_error":
@@ -145,7 +160,7 @@ export function classifyForWorkflowRetry(err: unknown): Error {
         if (err.status === 503) {
           return new RetryableError(
             `Gemini呼出が一時的に失敗しました(api_error:503)。1回だけ再試行します。`,
-            { retryAfter: "20s" },
+            { retryAfter: GEMINI_RETRY_AFTER_MS.service_unavailable },
           );
         }
         return new FatalError(`Gemini呼出が失敗しました(api_error:${err.status})`);
@@ -248,7 +263,7 @@ async function stage1Step(store: StoreIdentity) {
     throw classifyForWorkflowRetry(err);
   }
 }
-stage1Step.maxRetries = 1;
+stage1Step.maxRetries = GEMINI_STAGE_MAX_RETRIES;
 
 async function persistSourceRegistryStep(
   runId: string,
@@ -279,7 +294,7 @@ async function stage2Step(
     throw classifyForWorkflowRetry(err);
   }
 }
-stage2Step.maxRetries = 1;
+stage2Step.maxRetries = GEMINI_STAGE_MAX_RETRIES;
 
 interface FinalizeStepParams {
   items: ResearchItem[];

@@ -19,6 +19,7 @@ import { start } from "workflow/api";
 import { revalidateTag } from "next/cache";
 import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
+import { parsePostgresError } from "@/lib/db/postgres-error";
 import { getCurrentSession } from "@/lib/supabase/server";
 import { checkRateLimit } from "@/lib/ai/rate-limiter";
 import { nowIso } from "@/lib/utils/date";
@@ -89,9 +90,37 @@ export async function startResearchRunAction(
       requested_by_user_id: session.userId,
     });
     runId = run.id;
-  } catch {
-    // DB 部分ユニークインデックス違反(レースコンディションで二重起動された場合の最終防御)。
-    return failure("この店舗は既に調査中です。完了までお待ちください。");
+  } catch (err) {
+    // SQLSTATE を判別する(fix: PR #180 review Finding 4)。旧実装は全ての失敗を
+    // 二重起動として固定文言で返しログも残さなかったため、接続断・権限エラー等が
+    // 誤った案内のまま検知不能になっていた。
+    const parsed = parsePostgresError(err);
+    if (parsed?.code === "23505") {
+      // 部分ユニークインデックス違反(`store_research_runs_running_store_idx`)。
+      // レースコンディションで二重起動された場合の最終防御。
+      return failure("この店舗は既に調査中です。完了までお待ちください。");
+    }
+    // それ以外は原因不明の失敗として扱う。診断情報(SQLSTATE/constraint/table)は
+    // Vercel logs にのみ残し、UI へは内部スキーマ情報を含まない汎用文言だけを返す
+    // (`lib/actions/store-actions.ts` の既存 convention と同じ二系統設計)。
+    //
+    // `parsePostgresError` が null を返す形状(network/fetch系、想定外のwrapper等)でも
+    // 「ログはあるが中身が全て undefined」にならないよう、error の識別子だけは残す。
+    // 生メッセージは含めない(DB由来の値が混入しうるため)。
+    console.error("[research.startRun] create failed", {
+      storeId,
+      code: parsed?.code,
+      constraint: parsed?.constraint,
+      table: parsed?.table,
+      ...(parsed === null
+        ? {
+            unrecognized_error_name: err instanceof Error ? err.name : typeof err,
+            unrecognized_error_constructor: (err as { constructor?: { name?: string } } | null)
+              ?.constructor?.name,
+          }
+        : {}),
+    });
+    return failure("調査の開始に失敗しました。しばらくしてから再度お試しください。");
   }
 
   try {

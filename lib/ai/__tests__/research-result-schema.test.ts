@@ -760,9 +760,18 @@ describe("validateResearchItemStatus (confirmed の deterministic validation)", 
       expect(result.status).not.toBe("confirmed");
     });
 
-    it("owner_profileはofficial_siteの本文取得成功ならconfirmedを維持する", () => {
+    it("owner_profileはknown_store_dataのofficial_siteの本文取得成功ならconfirmedを維持する", () => {
+      // 信頼できる一次情報の唯一の経路。`buildKnownStoreDataUrls`が`stores.site_url`へ
+      // app側で`official_site`を付与するため、`deriveTrustedSourceType`が信頼済みtypeを返す。
       const item = makeItem({ key: "owner_profile", research_policy: "FACT_OR_HEARING", source_ids: ["S01"] });
-      const registry = [makeSource({ id: "S01", source_type: "official_site", url_context_status: "success" })];
+      const registry = [
+        makeSource({
+          id: "S01",
+          source_type: "official_site",
+          discovery_provenance: "known_store_data",
+          url_context_status: "success",
+        }),
+      ];
       const result = validateResearchItemStatus(item, { sourceRegistry: registry });
       expect(result.status).toBe("confirmed");
     });
@@ -774,6 +783,84 @@ describe("validateResearchItemStatus (confirmed の deterministic validation)", 
         const result = validateResearchItemStatus(item, { sourceRegistry: registry });
         expect(result.status).not.toBe("confirmed");
       }
+    });
+
+    describe("一次情報判定はモデル自己申告のsource_typeを信用しない(PR #180 review Finding 1)", () => {
+      // `gemini_search_candidate`/`google_grounding`の`source_type`はStage1モデルが
+      // `[SOURCE]`ブロックで自己申告した値。これを直接見ると、モデルが任意のURLに
+      // `type: official_site`と付けるだけで「本人発信の一次情報」を偽装でき、
+      // `deriveTrustedSourceType`が設けたtrust boundaryを迂回できてしまう。
+      it("自己申告official_site(gemini_search_candidate)はurl_context成功+target_matchでも維持しない", () => {
+        for (const key of ["owner_profile", "owner_career", "owner_philosophy", "concept"]) {
+          const item = makeItem({ key, research_policy: "FACT_OR_HEARING", source_ids: ["S01"] });
+          const registry = [
+            makeSource({
+              id: "S01",
+              source_type: "official_site",
+              discovery_provenance: "gemini_search_candidate",
+              url_context_status: "success",
+              identity_status: "target_match",
+            }),
+          ];
+          const result = validateResearchItemStatus(item, { sourceRegistry: registry });
+          expect(result.status).not.toBe("confirmed");
+        }
+      });
+
+      it("自己申告official_sns(google_grounding)も同様に維持しない", () => {
+        const item = makeItem({ key: "owner_philosophy", research_policy: "FACT_OR_HEARING", source_ids: ["S01"] });
+        const registry = [
+          makeSource({
+            id: "S01",
+            source_type: "official_sns",
+            discovery_provenance: "google_grounding",
+            url_context_status: "success",
+            identity_status: "target_match",
+          }),
+        ];
+        expect(validateResearchItemStatus(item, { sourceRegistry: registry }).status).not.toBe("confirmed");
+      });
+
+      it("known_store_dataのofficial_snsは維持する(正当な一次情報経路を壊さない)", () => {
+        const item = makeItem({ key: "concept", research_policy: "FACT_OR_HEARING", source_ids: ["S01"] });
+        const registry = [
+          makeSource({
+            id: "S01",
+            source_type: "official_sns",
+            discovery_provenance: "known_store_data",
+            url_context_status: "success",
+          }),
+        ];
+        expect(validateResearchItemStatus(item, { sourceRegistry: registry }).status).toBe("confirmed");
+      });
+
+      it("既知hostname(tabelog)は決定的に判定できてもgourmet_siteなので一次情報にはならない", () => {
+        const item = makeItem({ key: "owner_career", research_policy: "FACT_OR_HEARING", source_ids: ["S01"] });
+        const registry = [
+          makeSource({
+            id: "S01",
+            source_type: "official_site",
+            grounding_redirect_url: "https://tabelog.com/chiba/A1203/A120302/12000000/",
+            discovery_provenance: "gemini_search_candidate",
+            url_context_status: "success",
+          }),
+        ];
+        expect(validateResearchItemStatus(item, { sourceRegistry: registry }).status).not.toBe("confirmed");
+      });
+
+      it("一次情報必須でない項目は自己申告source_typeのままconfirmedを維持できる(通常URL Context経路の回帰防止)", () => {
+        const item = makeItem({ key: "business_hours_holidays", source_ids: ["S01"] });
+        const registry = [
+          makeSource({
+            id: "S01",
+            source_type: "gourmet_site",
+            discovery_provenance: "gemini_search_candidate",
+            url_context_status: "success",
+            identity_status: "target_match",
+          }),
+        ];
+        expect(validateResearchItemStatus(item, { sourceRegistry: registry }).status).toBe("confirmed");
+      });
     });
   });
 

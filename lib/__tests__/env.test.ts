@@ -6,10 +6,26 @@
  *   上書きは **切り戻し経路そのもの**なので、失われないようテストで固定する。
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { getGeminiModel, getResearchMaxOutputTokens } from "../env";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  getGeminiModel,
+  getResearchMaxOutputTokens,
+  getResearchRunExpiresMarginMinutes,
+} from "../env";
+import { MIN_SAFE_EXPIRES_MARGIN_MINUTES } from "@/lib/ai/research/run-timing";
 
-const KEYS = ["GEMINI_MODEL", "RESEARCH_MAX_OUTPUT_TOKENS"] as const;
+const KEYS = [
+  "GEMINI_MODEL",
+  "RESEARCH_MAX_OUTPUT_TOKENS",
+  "RESEARCH_RUN_EXPIRES_MARGIN_MINUTES",
+] as const;
+
+/**
+ * `readPositiveInt` が既定へフォールバックすべき不正値
+ * (fix: PR #180 review Finding 6)。仕様上 `Number.parseInt` を使うため、
+ * 「数値として解釈できない」「0以下」がフォールバック条件。
+ */
+const INVALID_POSITIVE_INT_VALUES = ["", "   ", "0", "-1", "-100", "abc", "NaN", "null"] as const;
 
 let saved: Record<string, string | undefined>;
 
@@ -59,5 +75,67 @@ describe("getResearchMaxOutputTokens (fix/ai-research-stage2-max-tokens)", () =>
   it("RESEARCH_MAX_OUTPUT_TOKENS設定時はその値を返す", () => {
     process.env.RESEARCH_MAX_OUTPUT_TOKENS = "24576";
     expect(getResearchMaxOutputTokens()).toBe(24576);
+  });
+
+  it.each(INVALID_POSITIVE_INT_VALUES)(
+    "不正値 %o は既定16384へフォールバックする(readPositiveInt仕様)",
+    (raw) => {
+      process.env.RESEARCH_MAX_OUTPUT_TOKENS = raw;
+      expect(getResearchMaxOutputTokens()).toBe(16384);
+    },
+  );
+
+  it("前後の空白付きの正の整数はtrimして解釈する(readEnv仕様)", () => {
+    process.env.RESEARCH_MAX_OUTPUT_TOKENS = "  8192  ";
+    expect(getResearchMaxOutputTokens()).toBe(8192);
+  });
+});
+
+/**
+ * fix: PR #180 review Finding 3 / Finding 6。
+ * 旧実装は既定10分固定で、`readPositiveInt` の不正値フォールバックを検証する
+ * テストが1件も無かった。加えて現在は安全下限への clamp が入る。
+ */
+describe("getResearchRunExpiresMarginMinutes", () => {
+  it("未設定なら安全下限(Workflowのtimeout/retry構成から導出)を返す", () => {
+    expect(getResearchRunExpiresMarginMinutes()).toBe(MIN_SAFE_EXPIRES_MARGIN_MINUTES);
+  });
+
+  it.each(INVALID_POSITIVE_INT_VALUES)(
+    "不正値 %o は既定(=安全下限)へフォールバックする",
+    (raw) => {
+      process.env.RESEARCH_RUN_EXPIRES_MARGIN_MINUTES = raw;
+      expect(getResearchRunExpiresMarginMinutes()).toBe(MIN_SAFE_EXPIRES_MARGIN_MINUTES);
+    },
+  );
+
+  it("安全下限より長い値はそのまま尊重する(延長方向のoverrideは有効)", () => {
+    const longer = MIN_SAFE_EXPIRES_MARGIN_MINUTES + 30;
+    process.env.RESEARCH_RUN_EXPIRES_MARGIN_MINUTES = String(longer);
+    expect(getResearchRunExpiresMarginMinutes()).toBe(longer);
+  });
+
+  it("安全下限未満の正の整数は下限へclampされ、警告ログを残す", () => {
+    const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    process.env.RESEARCH_RUN_EXPIRES_MARGIN_MINUTES = String(MIN_SAFE_EXPIRES_MARGIN_MINUTES - 1);
+
+    expect(getResearchRunExpiresMarginMinutes()).toBe(MIN_SAFE_EXPIRES_MARGIN_MINUTES);
+    expect(spy).toHaveBeenCalledWith(
+      expect.stringContaining("[research.expiresMargin]"),
+      expect.objectContaining({
+        configured: MIN_SAFE_EXPIRES_MARGIN_MINUTES - 1,
+        safeMinimum: MIN_SAFE_EXPIRES_MARGIN_MINUTES,
+      }),
+    );
+    spy.mockRestore();
+  });
+
+  it("ちょうど安全下限の値はclampせずそのまま返す(警告も出さない)", () => {
+    const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    process.env.RESEARCH_RUN_EXPIRES_MARGIN_MINUTES = String(MIN_SAFE_EXPIRES_MARGIN_MINUTES);
+
+    expect(getResearchRunExpiresMarginMinutes()).toBe(MIN_SAFE_EXPIRES_MARGIN_MINUTES);
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
   });
 });

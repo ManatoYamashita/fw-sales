@@ -76,6 +76,56 @@ describe("isTargetStoreMatch (fix/ai-research-source-identity-integrity、FIX3)"
       ),
     ).toBe(true);
   });
+
+  describe("数字を含まない電話番号表記のfalse positive防止(PR #180 review Finding 2)", () => {
+    // `stores.phone` は `text().notNull()` でフォーマット検証が無く、営業リストのCSV取込等で
+    // 「不明」「未掲載」「-」のような数字を含まない値が実在しうる。`normalizePhone` は
+    // 数字以外を全て除去するため、これらは正規化後いずれも "" になる。正規化**前**の
+    // 非空チェックしか無いと `"" === ""` が成立し、名前さえ緩く一致すれば
+    // 全く無関係のページが `target_match` として採用されてしまう。
+    it("observed/target双方が数字なし文字列でも電話一致とみなさない", () => {
+      expect(
+        isTargetStoreMatch(
+          { name: "炉端ジュン", address: null, phone: "不明" },
+          { ...TARGET_STORE, phone: "未掲載" },
+        ),
+      ).toBe(false);
+    });
+
+    it("記号のみの電話番号表記同士も一致とみなさない", () => {
+      expect(
+        isTargetStoreMatch(
+          { name: "炉端ジュン", address: null, phone: "-" },
+          { ...TARGET_STORE, phone: "―" },
+        ),
+      ).toBe(false);
+    });
+
+    it("observed側だけが数字なしなら一致しない(target側は正規の番号)", () => {
+      expect(
+        isTargetStoreMatch({ name: "炉端ジュン", address: null, phone: "非公開" }, TARGET_STORE),
+      ).toBe(false);
+    });
+
+    it("target側だけが数字なしなら一致しない(observed側は正規の番号)", () => {
+      expect(
+        isTargetStoreMatch(
+          { name: "炉端ジュン", address: null, phone: "04-7199-7985" },
+          { ...TARGET_STORE, phone: "不明" },
+        ),
+      ).toBe(false);
+    });
+
+    it("正常な電話番号の表記ゆれ一致は維持する(修正で壊さないことの確認)", () => {
+      // 注: `normalizePhone` は `/[^\d]/g` で除去するため `\d` はASCII数字のみ。
+      // 全角数字の吸収は現状の仕様外であり、本修正のscopeでも変更しない。
+      for (const observedPhone of ["04-7199-7985", "(04) 7199 7985", "tel: 04.7199.7985"]) {
+        expect(
+          isTargetStoreMatch({ name: "炉端ジュン", address: null, phone: observedPhone }, TARGET_STORE),
+        ).toBe(true);
+      }
+    });
+  });
 });
 
 describe("isNameMatch / isAddressMatch / normalizePhone (re-export確認、fix/ai-research-source-identity-integrity)", () => {

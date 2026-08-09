@@ -52,17 +52,28 @@ export interface Stage0PlacesResult {
 /**
  * 店舗名一致 + (住所一致 or 電話一致) を満たす候補のみを抽出する
  * (`pickStrongPlaceMatch`/`diagnosePlacesMatch`共通のcore filter)。
+ *
+ * 電話の一致判定は`identity-match.ts:isTargetStoreMatch`と同じ不変条件に揃える
+ * (PR #180 review Finding 2 の hardening)。`normalizePhone`は数字以外を全て除去する
+ * ため、「不明」「未掲載」「-」のような数字を含まない文字列は正規化後いずれも ""
+ * になる。正規化**前**の非空チェックだけでは `"" === ""` が成立し、電話が実質未確認の
+ * 両者を「電話一致」と誤判定してしまう。
+ *
+ * 現在のGoogle Places入力(`p.phone`は`nationalPhoneNumber ?? ""`)ではこの経路は
+ * 顕在化しにくいが、将来の供給元変更・fallback追加で `"" === ""` が identity match に
+ * ならないよう、2つの呼び出し箇所で不変条件を統一しておく。
  */
 function findStrongMatches(
   candidates: readonly PlaceResult[],
   store: { name: string; address: string; phone: string },
 ): PlaceResult[] {
   const searchIdentityName = deriveSearchIdentityName(store.name);
+  const storePhone = normalizePhone(store.phone);
   return candidates.filter((p) => {
     if (!isNameMatch(p.name, searchIdentityName)) return false;
     const addressMatches = store.address.trim() !== "" && isAddressMatch(p.formattedAddress, store.address);
-    const phoneMatches =
-      store.phone.trim() !== "" && p.phone.trim() !== "" && normalizePhone(p.phone) === normalizePhone(store.phone);
+    const candidatePhone = normalizePhone(p.phone);
+    const phoneMatches = storePhone !== "" && candidatePhone !== "" && candidatePhone === storePhone;
     return addressMatches || phoneMatches;
   });
 }

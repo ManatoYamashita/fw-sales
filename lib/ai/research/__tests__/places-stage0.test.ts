@@ -138,6 +138,52 @@ describe("pickStrongPlaceMatch (feat/ai-research-quality-refinement)", () => {
     expect(result).not.toBeNull();
   });
 
+  describe("電話一致は正規化後の非空を必須とする(PR #180 review Finding 2 の hardening)", () => {
+    // `identity-match.ts:isTargetStoreMatch`と同じ不変条件。現在のGoogle Places入力では
+    // 顕在化しにくいが、供給元が変わっても `"" === ""` が identity match にならないよう固定する。
+    const NO_ADDRESS_MATCH = { name: "炉端ジュン", formattedAddress: "異なる住所表記" };
+
+    it("数字を含まない文字列同士は電話一致とみなさない", () => {
+      const result = pickStrongPlaceMatch(
+        [{ ...PLACE_RESULT, ...NO_ADDRESS_MATCH, phone: "不明" }],
+        { ...STORE, phone: "未掲載" },
+      );
+      expect(result).toBeNull();
+    });
+
+    it("記号だけの表記同士も電話一致とみなさない", () => {
+      const result = pickStrongPlaceMatch(
+        [{ ...PLACE_RESULT, ...NO_ADDRESS_MATCH, phone: "-" }],
+        { ...STORE, phone: "―" },
+      );
+      expect(result).toBeNull();
+    });
+
+    it("候補側だけが正規化後空なら電話一致とみなさない", () => {
+      const result = pickStrongPlaceMatch(
+        [{ ...PLACE_RESULT, ...NO_ADDRESS_MATCH, phone: "非公開" }],
+        STORE,
+      );
+      expect(result).toBeNull();
+    });
+
+    it("店舗側だけが正規化後空なら電話一致とみなさない", () => {
+      const result = pickStrongPlaceMatch([{ ...PLACE_RESULT, ...NO_ADDRESS_MATCH }], {
+        ...STORE,
+        phone: "不明",
+      });
+      expect(result).toBeNull();
+    });
+
+    it("正常な表記ゆれ(03-1234-5678 と 0312345678)は電話一致として採用する", () => {
+      const result = pickStrongPlaceMatch(
+        [{ ...PLACE_RESULT, ...NO_ADDRESS_MATCH, phone: "03-1234-5678" }],
+        { ...STORE, phone: "0312345678" },
+      );
+      expect(result).not.toBeNull();
+    });
+  });
+
   describe("日本住所の表記ゆれ吸収(feat/ai-research-searchfact-places-match、実APIで確認済みの実例)", () => {
     it("Google側の「日本、〒xxx-xxxx」prefix + 全角数字「丁目」表記と、fw-sales側の半角ハイフン表記が一致する", () => {
       // 実際のText Search 1回で確認した実データ形式(炉端ジュン)。

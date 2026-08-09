@@ -151,11 +151,17 @@ export function isTargetStoreMatch(
     observed.address.trim() !== "" &&
     target.address.trim() !== "" &&
     isAddressMatch(observed.address, target.address);
-  const phoneMatches =
-    !!observed.phone &&
-    observed.phone.trim() !== "" &&
-    target.phone.trim() !== "" &&
-    normalizePhone(observed.phone) === normalizePhone(target.phone);
+
+  // 正規化**後**の非空チェックが必須(fix: PR #180 review Finding 2)。
+  // `normalizePhone`は数字以外を全て除去するため、「不明」「未掲載」「-」のような
+  // 数字を含まない非空文字列は正規化後いずれも "" になる。正規化前の非空チェックだけでは
+  // `"" === ""` が成立し、電話番号が実質未確認の両者を「電話一致」と誤判定して、
+  // 名前が緩く一致するだけの無関係なページをtarget_matchとして採用してしまう。
+  // `stores.phone`は`text().notNull()`でフォーマット検証が無く、これらの値は実在しうる。
+  // `isAddressMatch`が正規化後に非空を確認しているのと同じ防御をphone側にも揃える。
+  const observedPhone = observed.phone !== null ? normalizePhone(observed.phone) : "";
+  const targetPhone = normalizePhone(target.phone);
+  const phoneMatches = observedPhone !== "" && targetPhone !== "" && observedPhone === targetPhone;
 
   return addressMatches || phoneMatches;
 }

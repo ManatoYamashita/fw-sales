@@ -642,8 +642,24 @@ export function isSourceLinkClickable(entry: SourceRegistryEntry): boolean {
  * 自己申告typeにのみ依存する場合)は`undefined`を返し、Tier B対象外とする
  * (feat/ai-research-pre-smoke-hardening、MAJOR6・追加修正B)。
  *
- * URL Context成功経路(path 2、`hasVerifiedSource`)はこの制約の対象外(本文取得
+ * URL Context成功経路(path 2、`hasVerifiedSource`)は原則この制約の対象外(本文取得
  * 成功という別の裏付けがあるため、source_typeの自己申告可否を問わない)。
+ *
+ * ただし例外として、`PRIMARY_SOURCE_REQUIRED_KEYS`の4項目(owner_profile/owner_career/
+ * owner_philosophy/concept)の一次情報判定にはpath 2でも本関数を通す
+ * (fix: PR #180 review Finding 1)。これらの項目で必要なのは「ページを取得できたこと」
+ * ではなく「**本人発信**であること」であり、後者はurl_context成功では裏付けられず
+ * `source_type`が信頼できるかどうかに直接依存するため。結果としてこの4項目は
+ * 実質`known_store_data`(`stores.site_url`/`instagram_url`)のみが根拠になりうる
+ * (`KNOWN_HOSTNAME_SOURCE_TYPES`にofficial系のhostnameは登録していないため)。
+ *
+ * なお本条件は`isIdentityAcceptableForItem`(`identity_status==="target_match"`必須)と
+ * **AND**で効く。`applySourceIdentityVerification`はStage2の`source_verifications`で
+ * 観測した名前 AND (住所 OR 電話) が一致した場合にのみtarget_matchを付けるため、
+ * 住所・電話を掲載しない公式サイト/SNSはこの4項目のconfirmed根拠になれない。
+ * 結果としてこの4項目は実運用でほぼ常にhearing_requiredへ降格しうるが、
+ * これは「本人発信を機械的に保証できないならAIに断定させない」という
+ * false positiveよりfalse negativeを優先する既存方針の意図した帰結である。
  */
 export function deriveTrustedSourceType(entry: SourceRegistryEntry): SourceType | undefined {
   if (entry.discovery_provenance === "known_store_data") return entry.source_type;
@@ -847,6 +863,9 @@ export function validateResearchItemStatus(
   // - MAJOR5: owner_profile/owner_career/owner_philosophy/conceptは、本人発信の
   //   一次情報(official_site/official_sns)以外の本文取得成功では根拠にしない
   //   (第三者グルメサイト・記事の取得成功だけでは「本人発信」を保証できないため)。
+  //   この一次情報判定は`deriveTrustedSourceType`を通す(fix: PR #180 review Finding 1)。
+  //   `entry.source_type`を直接見ると、モデルが任意のURLへ`type: official_site`と
+  //   自己申告するだけで「本人発信」を偽装でき、trust boundaryを迂回できてしまう。
   // - 実機smoke事故: `url_context_status==="success"`(=ページ取得成功)だけでは
   //   「対象店舗のページだった」ことを一切保証しない。`identity_status`
   //   (`isIdentityAcceptableForItem`)による識別確認を必須にする。
@@ -856,7 +875,10 @@ export function validateResearchItemStatus(
       .filter((entry) => {
         if (entry.url_context_status !== "success") return false;
         if (entry.source_type === "competitor") return false;
-        if (requiresPrimarySource && !PRIMARY_SOURCE_TYPES.has(entry.source_type)) return false;
+        if (requiresPrimarySource) {
+          const trustedType = deriveTrustedSourceType(entry);
+          if (trustedType === undefined || !PRIMARY_SOURCE_TYPES.has(trustedType)) return false;
+        }
         if (!isIdentityAcceptableForItem(entry, item.key)) return false;
         return true;
       })
