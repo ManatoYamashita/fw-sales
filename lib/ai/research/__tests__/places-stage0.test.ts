@@ -313,7 +313,9 @@ describe("runStage0PlacesResync", () => {
       });
 
       expect(mockGetPlaceById).toHaveBeenCalledTimes(1);
-      expect(mockGetPlaceById).toHaveBeenCalledWith("places/abc123");
+      // 第2引数の undefined は「timeoutMs 未指定 = fetch に signal を付けない」を意味する
+      // (runtime reliability hardening、F5 でオプション引数を追加)。
+      expect(mockGetPlaceById).toHaveBeenCalledWith("places/abc123", undefined);
       expect(mockSearchPlaces).not.toHaveBeenCalled();
       expect(result.placesBasicInfo.store_name?.value).toBe("炉端ジュン");
       expect(result.placesBasicInfo.store_name?.filled_by).toBe("places");
@@ -356,7 +358,8 @@ describe("runStage0PlacesResync", () => {
       const result = await runStage0PlacesResync({ googlePlaceId: null, store: STORE, now: NOW });
 
       expect(mockSearchPlaces).toHaveBeenCalledTimes(1);
-      expect(mockSearchPlaces).toHaveBeenCalledWith("炉端ジュン", STORE.address); // prefix除去後の名前で検索
+      // prefix除去後の名前で検索。第3引数の undefined は timeoutMs 未指定 (F5)。
+      expect(mockSearchPlaces).toHaveBeenCalledWith("炉端ジュン", STORE.address, undefined);
       expect(mockGetPlaceById).not.toHaveBeenCalled();
       expect(result.placesBasicInfo.store_name?.value).toBe("東北メシ 炉端ジュン");
       expect(result.warning).toBeNull();
@@ -423,5 +426,115 @@ describe("classifyPlacesError (feat/ai-research-final-quality)", () => {
   it("ステータス不明・分類不能なエラーはunknownになる", () => {
     expect(classifyPlacesError(new Error("something else"))).toBe("unknown");
     expect(classifyPlacesError("plain string")).toBe("unknown");
+  });
+
+  // runtime reliability hardening (F5): Stage0 に明示 timeout を導入したため、
+  // abort を api_error/unknown と混同せず専用種別へ落とす。
+  it("AbortSignal.timeout由来のTimeoutErrorはtimeoutになる", () => {
+    expect(classifyPlacesError(new DOMException("The operation was aborted.", "TimeoutError"))).toBe(
+      "timeout",
+    );
+  });
+
+  it("AbortErrorもtimeoutになる", () => {
+    expect(classifyPlacesError(new DOMException("This operation was aborted", "AbortError"))).toBe(
+      "timeout",
+    );
+  });
+});
+
+/**
+ * Stage0 の明示 timeout (runtime reliability hardening、F5)。
+ *
+ * `lib/places/google.ts` の `fetch` には元々 `AbortSignal` が無く、Stage0 の 1 attempt が
+ * platform 上限(300 秒)まで伸びうる状態だった。Stage0 は best-effort の補助処理なので、
+ * 早めに諦めて Stage1(Gemini)へ進む方がよい。**run 全体を failed にしてはいけない。**
+ */
+describe("Stage0の明示timeout (runtime reliability hardening、F5)", () => {
+  const TIMEOUT_MS = 15_000;
+
+  function timeoutError(): DOMException {
+    return new DOMException("The operation was aborted due to timeout", "TimeoutError");
+  }
+
+  it("Place Details経路でtimeoutMsをplacesクライアントへ渡す", async () => {
+    mockGetPlaceById.mockResolvedValue(PLACE_RESULT);
+
+    await runStage0PlacesResync({
+      googlePlaceId: "places/abc123",
+      store: STORE,
+      now: NOW,
+      timeoutMs: TIMEOUT_MS,
+    });
+
+    expect(mockGetPlaceById).toHaveBeenCalledWith("places/abc123", { timeoutMs: TIMEOUT_MS });
+  });
+
+  it("Text Search経路でもtimeoutMsを渡す", async () => {
+    mockSearchPlaces.mockResolvedValue([PLACE_RESULT]);
+
+    await runStage0PlacesResync({
+      googlePlaceId: null,
+      store: STORE,
+      now: NOW,
+      timeoutMs: TIMEOUT_MS,
+    });
+
+    expect(mockSearchPlaces).toHaveBeenCalledWith("炉端ジュン", STORE.address, {
+      timeoutMs: TIMEOUT_MS,
+    });
+  });
+
+  it("timeoutMs未指定なら従来どおりoptionsを渡さない(既存呼び出し元の挙動を変えない)", async () => {
+    mockGetPlaceById.mockResolvedValue(PLACE_RESULT);
+
+    await runStage0PlacesResync({ googlePlaceId: "places/abc123", store: STORE, now: NOW });
+
+    expect(mockGetPlaceById).toHaveBeenCalledWith("places/abc123", undefined);
+  });
+
+  it("Place Details timeout時はthrowせずwarningを返しWeb調査へ続行する", async () => {
+    mockGetPlaceById.mockRejectedValue(timeoutError());
+
+    const result = await runStage0PlacesResync({
+      googlePlaceId: "places/abc123",
+      store: STORE,
+      now: NOW,
+      timeoutMs: TIMEOUT_MS,
+    });
+
+    expect(result.placesBasicInfo).toEqual({});
+    expect(result.warning).toContain("timeout");
+    expect(result.warning).toContain("既存情報のみで調査を続行します");
+  });
+
+  it("Text Search timeout時もthrowせずwarningを返す", async () => {
+    mockSearchPlaces.mockRejectedValue(timeoutError());
+
+    const result = await runStage0PlacesResync({
+      googlePlaceId: null,
+      store: STORE,
+      now: NOW,
+      timeoutMs: TIMEOUT_MS,
+    });
+
+    expect(result.placesBasicInfo).toEqual({});
+    expect(result.warning).toContain("timeout");
+  });
+
+  it("timeout warningに店舗名・住所・電話などの入力値を含めない", async () => {
+    mockGetPlaceById.mockRejectedValue(timeoutError());
+
+    const result = await runStage0PlacesResync({
+      googlePlaceId: "places/abc123",
+      store: STORE,
+      now: NOW,
+      timeoutMs: TIMEOUT_MS,
+    });
+
+    expect(result.warning).not.toContain(STORE.name);
+    expect(result.warning).not.toContain(STORE.address);
+    expect(result.warning).not.toContain(STORE.phone);
+    expect(result.warning).not.toContain("places/abc123");
   });
 });

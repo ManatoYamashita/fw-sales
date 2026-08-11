@@ -134,7 +134,30 @@ function toPlaceResult(raw: RawPlace): PlaceResult | null {
   };
 }
 
-export interface SearchPlacesPageOptions {
+/**
+ * Places API 呼び出しの明示 timeout (runtime reliability hardening、F5)。
+ *
+ * 従来 `fetch` に `AbortSignal` が無く、Google Places が応答しない場合に呼び出し元が
+ * platform の Function 上限まで占有されうる状態だった。特に AI 店舗調査の Stage0 は
+ * **best-effort の補助処理**であり、応答が遅いときは早く諦めて Gemini 側の Stage1 へ
+ * 進む方がよい(`lib/ai/research/run-timing.ts:STAGE0_PLACES_TIMEOUT_MS`)。
+ *
+ * **未指定時は `signal` を渡さない**(既存呼び出し元の挙動を変えないため)。
+ */
+export interface PlacesRequestOptions {
+  /** 指定した場合のみ `AbortSignal.timeout(timeoutMs)` を fetch へ渡す。 */
+  timeoutMs?: number;
+}
+
+/**
+ * `options.timeoutMs` が指定されているときだけ `signal` を含む部分オブジェクトを返す。
+ * spread して `fetch` の init に混ぜる想定(未指定なら空 = 従来と同一のリクエスト)。
+ */
+function abortSignalInit(options?: PlacesRequestOptions): { signal?: AbortSignal } {
+  return options?.timeoutMs === undefined ? {} : { signal: AbortSignal.timeout(options.timeoutMs) };
+}
+
+export interface SearchPlacesPageOptions extends PlacesRequestOptions {
   /** 1ページあたりの最大件数 (1-20)。未指定時は20。 */
   pageSize?: number;
   /** 前ページのレスポンスで返された `nextPageToken`。未指定時は1ページ目を取得する。 */
@@ -200,6 +223,7 @@ export async function searchPlacesPage(
     },
     body: JSON.stringify(body),
     cache: "no-store",
+    ...abortSignalInit(options),
   });
 
   if (!response.ok) {
@@ -225,8 +249,9 @@ export async function searchPlacesPage(
 export async function searchPlaces(
   keyword: string,
   area: string,
+  options?: PlacesRequestOptions,
 ): Promise<PlaceResult[]> {
-  const { places } = await searchPlacesPage(keyword, area);
+  const { places } = await searchPlacesPage(keyword, area, options);
   return places;
 }
 
@@ -292,7 +317,11 @@ function buildPlaceDetailsUrl(placeId: string): string {
  * Place Details API (GET) を1回呼び出し、RawPlace を返す共通処理。
  * `getPlaceById` / `getPlaceDetails` で共有する (フィールドマスクのみ呼び出し側で変える)。
  */
-async function fetchRawPlaceDetails(placeId: string, fieldMask: string): Promise<RawPlace> {
+async function fetchRawPlaceDetails(
+  placeId: string,
+  fieldMask: string,
+  options?: PlacesRequestOptions,
+): Promise<RawPlace> {
   const apiKey = process.env.GOOGLE_PLACES_API_KEY;
   if (!apiKey) {
     throw new Error("GOOGLE_PLACES_API_KEY が設定されていません");
@@ -305,6 +334,7 @@ async function fetchRawPlaceDetails(placeId: string, fieldMask: string): Promise
       "X-Goog-FieldMask": fieldMask,
     },
     cache: "no-store",
+    ...abortSignalInit(options),
   });
 
   if (!response.ok) {
@@ -320,8 +350,11 @@ async function fetchRawPlaceDetails(placeId: string, fieldMask: string): Promise
  * addStoreFromPlaceAction がサーバー側でデータを再取得する際に使用する。
  * 必須フィールドが欠けている場合は null を返す。
  */
-export async function getPlaceById(placeId: string): Promise<PlaceResult | null> {
-  const raw = await fetchRawPlaceDetails(placeId, DETAILS_FIELD_MASK);
+export async function getPlaceById(
+  placeId: string,
+  options?: PlacesRequestOptions,
+): Promise<PlaceResult | null> {
+  const raw = await fetchRawPlaceDetails(placeId, DETAILS_FIELD_MASK, options);
   return toPlaceResult(raw);
 }
 

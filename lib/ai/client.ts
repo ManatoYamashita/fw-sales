@@ -286,6 +286,72 @@ function looksLikeInvalidApiKey(err: unknown): boolean {
 }
 
 /**
+ * Google API 標準の列挙値 (`error.status` / `google.rpc.ErrorInfo.reason`) を
+ * **JSON のキー位置に固定して**取り出す正規表現 (runtime reliability hardening、F4)。
+ *
+ * `[A-Z][A-Z0-9_]{2,63}` の shape guard により、抽出されうるのは UPPER_SNAKE_CASE の
+ * 列挙トークンのみになる:
+ * - API キー (`AIzaSy...`) は大小混在なので終端の `"` までマッチしない
+ * - request ID (UUID) はハイフン・小文字を含むのでマッチしない
+ * - `error.message` の自由文 (空白・日本語・記号を含む) はマッチしない
+ * - 64 文字を超える値はマッチしない
+ */
+const PROVIDER_STATUS_PATTERN = /"status"\s*:\s*"([A-Z][A-Z0-9_]{2,63})"/;
+const PROVIDER_REASON_PATTERN = /"reason"\s*:\s*"([A-Z][A-Z0-9_]{2,63})"/;
+
+/**
+ * 構造化ログ専用の sanitized な provider 診断情報。
+ * **`AiClientError` には載せない**(DB `error_message` / UI へ流出させないため)。
+ */
+export interface ProviderDiagnostics {
+  /** SDK が公開する HTTP ステータス (`ApiError.status`)。 */
+  http_status?: number;
+  /** Google API の `error.status` 列挙値 (例 `RESOURCE_EXHAUSTED`)。 */
+  provider_status?: string;
+  /** `google.rpc.ErrorInfo.reason` 列挙値 (例 `RATE_LIMIT_EXCEEDED`)。 */
+  provider_reason?: string;
+}
+
+/**
+ * SDK 生エラーから、**構造化ログへ出しても安全なスカラーだけ**を取り出す。
+ *
+ * ## なぜ必要か
+ *
+ * `@google/genai` 1.52.0 の `ApiError` は `{ message, status }` しか公開せず
+ * (`ApiErrorInfo` の型定義)、HTTP headers (`Retry-After` 等) は SDK 内部で破棄される。
+ * `error.details[]` / `error.status` は **`message` に `JSON.stringify` された文字列
+ * としてのみ**存在する。したがって構造化フィールドとしてのアクセスは不可能で、
+ * 文字列からの抽出しか採れない (既存 `looksLikeInvalidApiKey` と同じ制約)。
+ *
+ * 2026-08 の実障害では Gemini の billing / prepaid credit 枯渇が 429 として届き、
+ * `rate_limit` に分類されて 30 秒待って 1 retry した末に失敗していた。
+ * 一時的な rate limit と billing 枯渇を安全に区別できる signal が現時点では
+ * 確認できていないため、**分類は増やさず**、次回に切り分けられるよう provider 側の
+ * 列挙トークンだけをログへ残す。
+ *
+ * ## 制約 (必ず守ること)
+ *
+ * - 戻り値は shape guard を通した列挙トークンと HTTP status のみ。
+ * - この戻り値を `AiClientError` / DB / UI へ載せないこと。用途は構造化ログのみ。
+ * - 呼び出し側は `console.error(..., err)` のように**元 Error を渡さない**こと。
+ */
+export function extractProviderDiagnostics(err: unknown): ProviderDiagnostics {
+  const diagnostics: ProviderDiagnostics = {};
+
+  const status = readStructuredStatus(err);
+  if (status !== null) diagnostics.http_status = status;
+
+  if (err instanceof Error) {
+    const providerStatus = err.message.match(PROVIDER_STATUS_PATTERN)?.[1];
+    if (providerStatus !== undefined) diagnostics.provider_status = providerStatus;
+    const providerReason = err.message.match(PROVIDER_REASON_PATTERN)?.[1];
+    if (providerReason !== undefined) diagnostics.provider_reason = providerReason;
+  }
+
+  return diagnostics;
+}
+
+/**
  * SDK 生エラーを `AiClientError` に正規化する。
  *
  * 重要: 生エラーメッセージには API キー先頭文字や internal request ID が混入することがある。

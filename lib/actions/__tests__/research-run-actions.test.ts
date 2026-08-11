@@ -359,6 +359,48 @@ describe("startResearchRunAction", () => {
     );
   });
 
+  // 監査指摘 3 と同じ方針を Workflow 起動失敗経路にも適用する。`workflows/store-research.ts`
+  // の `markFailedStep` だけを sanitize しても、この経路が raw message を同じ列へ書いて
+  // いれば穴が残る。`error_message` は Client Component へ渡る `StoreResearchRun` に含まれる
+  // ため、RSC payload としてブラウザへも送られる。
+  it("Workflow起動失敗時にraw error messageをerror_messageへ保存しない", async () => {
+    mockStart.mockRejectedValue(
+      new Error('connect ECONNREFUSED 10.0.0.7:5432 token=abc123 requestId=8f3c1d2e'),
+    );
+
+    await startResearchRunAction(nextStoreId());
+
+    const updated = mockUpdate.mock.calls.at(-1)?.[1] as { error_message?: string };
+    expect(updated.error_message).toBe("調査の開始に失敗しました");
+    for (const secret of ["ECONNREFUSED", "10.0.0.7", "abc123", "8f3c1d2e"]) {
+      expect(updated.error_message).not.toContain(secret);
+    }
+  });
+
+  it("Workflow起動失敗はsanitized structured logへ記録する(DBから消えた分の観測性を補う)", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockStart.mockRejectedValue(
+      new Error('connect ECONNREFUSED 10.0.0.7:5432 token=abc123 requestId=8f3c1d2e'),
+    );
+
+    const storeId = nextStoreId();
+    await startResearchRunAction(storeId);
+
+    expect(spy).toHaveBeenCalledWith(
+      "[research.startRun] workflow start failed",
+      expect.objectContaining({ storeId, runId: "research_run_1", error_name: "Error" }),
+    );
+    // 元 Error オブジェクト・raw message はログにも渡さない。
+    const logged = JSON.stringify(spy.mock.calls.at(-1));
+    for (const secret of ["ECONNREFUSED", "10.0.0.7", "abc123", "8f3c1d2e"]) {
+      expect(logged).not.toContain(secret);
+    }
+    for (const arg of spy.mock.calls.at(-1)!) {
+      expect(arg).not.toBeInstanceOf(Error);
+    }
+    spy.mockRestore();
+  });
+
   it("レート制限に達している場合はエラーを返す", async () => {
     const storeId = nextStoreId();
     // per-store 上限(10分5回)に達するまで呼び出す

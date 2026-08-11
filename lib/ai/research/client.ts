@@ -17,7 +17,12 @@ import "server-only";
 
 import { GoogleGenAI, FinishReason } from "@google/genai";
 import { readEnv, getResearchGeminiModel, getResearchMaxOutputTokens } from "@/lib/env";
-import { normalizeSdkError, makeError, type AiClientError } from "@/lib/ai/client";
+import {
+  normalizeSdkError,
+  makeError,
+  extractProviderDiagnostics,
+  type AiClientError,
+} from "@/lib/ai/client";
 import type { GroundingMetadataLike } from "./source-registry";
 
 export interface UsageMetadataLike {
@@ -101,6 +106,42 @@ function extractUsageMetadata(um: unknown): UsageMetadataLike | null {
   };
 }
 
+/**
+ * Gemini 呼出失敗を **sanitized な structured log** として記録する
+ * (runtime reliability hardening、F3/F4)。
+ *
+ * 従来 `lib/ai/` と `workflows/` には `console.*` が 1 つも無く、Gemini がどの HTTP status /
+ * provider reason で落ちたかは Vercel logs に残らなかった。2026-08 の billing 障害では
+ * `store_research_runs.error_kind` を Supabase で直接見るしか診断手段がなく、しかもその値は
+ * `fatal:rate_limit` で「一時的な rate limit」と区別がつかなかった。
+ *
+ * ここが provider 側の生情報に触れられる最後の地点なので、`extractProviderDiagnostics`
+ * を通した列挙トークンだけをログへ出す。**`AiClientError` には載せない**
+ * (DB `error_message` / UI へ流出させないため)。
+ *
+ * 制約:
+ * - 元 Error オブジェクトを `console.error` へ渡さない(スタックや raw message が出る)。
+ * - raw `err.message` / レスポンス本文 / request ID / API key / headers は出さない。
+ * - `AiClientError` の `message` フィールド(`unknown` kind が持つ定型文)も出さない。
+ */
+function logGeminiCallFailure(stage: "stage1" | "stage2", err: unknown, kind: AiClientError["kind"]): void {
+  console.error("[research.gemini] call failed", {
+    stage,
+    kind,
+    ...extractProviderDiagnostics(err),
+  });
+}
+
+/**
+ * SDK 生エラーを正規化しつつ、失敗を sanitized にログへ残す。
+ * 正規化後の `AiClientError` の内容は従来と一切変わらない(分類ロジックは無変更)。
+ */
+function normalizeAndLog(stage: "stage1" | "stage2", err: unknown): AiClientError {
+  const normalized = normalizeSdkError(err);
+  logGeminiCallFailure(stage, err, normalized.kind);
+  return normalized;
+}
+
 export function createResearchGeminiClient(): ResearchGeminiClient {
   return {
     async runSourceDiscovery(prompt, signal) {
@@ -142,7 +183,7 @@ export function createResearchGeminiClient(): ResearchGeminiClient {
           searchQueryCount,
         };
       } catch (err) {
-        throw normalizeSdkError(err);
+        throw normalizeAndLog("stage1", err);
       }
     },
 
@@ -200,7 +241,7 @@ export function createResearchGeminiClient(): ResearchGeminiClient {
           usageMetadata: extractUsageMetadata(response.usageMetadata),
         };
       } catch (err) {
-        throw normalizeSdkError(err);
+        throw normalizeAndLog("stage2", err);
       }
     },
   };

@@ -116,6 +116,14 @@ export function diagnosePlacesMatch(
  * 生レスポンス本文)は一切含めない。判定できない場合は"unknown"。
  */
 export function classifyPlacesError(err: unknown): string {
+  // 明示timeout(`AbortSignal.timeout`)由来の中断を専用種別へ落とす
+  // (runtime reliability hardening、F5)。`AbortSignal.timeout` は `TimeoutError`、
+  // 外部からの明示abortは `AbortError` を投げる。いずれも「Placesが応答しなかった」
+  // として同じ扱いでよい(呼び出し側はどちらもbest-effort失敗として続行する)。
+  // `err.name` による構造化判定であり、メッセージ文言には依存しない。
+  if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) {
+    return "timeout";
+  }
   const message = err instanceof Error ? err.message : String(err);
   if (message.includes("GOOGLE_PLACES_API_KEY")) return "missing_api_key";
   const statusMatch = message.match(/エラー \((\d{3})\)/);
@@ -132,12 +140,20 @@ export async function runStage0PlacesResync(params: {
   googlePlaceId: string | null;
   store: { name: string; address: string; phone: string };
   now: string;
+  /**
+   * Places 呼び出しの明示 timeout(runtime reliability hardening、F5)。
+   * 未指定なら従来どおり timeout 無しで呼ぶ。Workflow からは
+   * `run-timing.ts:STAGE0_PLACES_TIMEOUT_MS` を渡す。
+   */
+  timeoutMs?: number;
 }): Promise<Stage0PlacesResult> {
-  const { googlePlaceId, store, now } = params;
+  const { googlePlaceId, store, now, timeoutMs } = params;
+  // 未指定時は `undefined` を渡す = `lib/places/google.ts` 側で `signal` を付けない。
+  const requestOptions = timeoutMs === undefined ? undefined : { timeoutMs };
 
   if (googlePlaceId !== null && googlePlaceId.trim() !== "") {
     try {
-      const place = await getPlaceById(googlePlaceId);
+      const place = await getPlaceById(googlePlaceId, requestOptions);
       if (place === null) {
         return {
           placesBasicInfo: {},
@@ -155,7 +171,7 @@ export async function runStage0PlacesResync(params: {
 
   try {
     const searchIdentityName = deriveSearchIdentityName(store.name);
-    const candidates = await searchPlaces(searchIdentityName, store.address);
+    const candidates = await searchPlaces(searchIdentityName, store.address, requestOptions);
     const matched = pickStrongPlaceMatch(candidates, store);
     if (!matched) {
       // 曖昧(0件 or 複数件)の場合は不採用。従来どおりWeb調査へfallbackする

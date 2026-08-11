@@ -71,6 +71,62 @@ export const PLATFORM_STEP_TIMEOUT_MS = 300_000;
 export const STAGE0_MAX_RETRIES = 0;
 
 /**
+ * Stage0 の Google Places 呼び出しに与える明示 timeout(runtime reliability hardening)。
+ *
+ * `lib/places/google.ts` の `fetch` には元々 `AbortSignal` が無く、Stage0 の 1 attempt が
+ * platform 上限(300 秒)まで伸びうる状態だった。Stage0 は**補助情報の best-effort 取得**
+ * であり、Places が長時間応答しないときは早く諦めて Stage1(Gemini)へ進む方が
+ * ユーザー体験・run 全体の所要時間ともに良い。
+ *
+ * **重要: これは latency 改善であって `expires_at` budget の削減ではない。**
+ * `getSafeExpiryBudgetBreakdownMs().stage0` は引き続き `PLATFORM_STEP_TIMEOUT_MS` で
+ * 見積もる。理由は 3 点:
+ * 1. `AbortSignal.timeout` が縛るのは fetch のみで、DNS 前段の遅延・レスポンス body の
+ *    読み出し・JSON parse・step の enqueue 遅延は縛らない。
+ * 2. `expires_at` は「workflow が `markFailedStep` すら実行できずに死んだ場合」の最終
+ *    防御であり、保守的すぎることのコストはほぼ無い。
+ * 3. 逆に短すぎると正常 run が stuck 誤判定され、同一店舗の二重 run を招く
+ *    (`MIN_SAFE_EXPIRES_MARGIN_MINUTES` = 30 分という安全下限の思想そのもの)。
+ */
+export const STAGE0_PLACES_TIMEOUT_MS = 15_000;
+
+/**
+ * `classifyForWorkflowRetry` が `RetryableError` として投げる sanitized kind token の集合。
+ *
+ * ## なぜこの定数が必要か(runtime reliability hardening、F1)
+ *
+ * Workflow SDK(`@workflow/core` 5.0.0-beta.38)は retry 上限に達した step の元エラーを
+ * **新しい `FatalError` でラップする**(`dist/runtime/step-executor.js:786-794`):
+ *
+ * ```js
+ * const errorMessage = `Step "${stepName}" failed after ${maxRetries} retry: ${元message}`;
+ * const wrappedError = new FatalError(errorMessage);
+ * wrappedError.cause = err;
+ * ```
+ *
+ * このため workflow の catch には `RetryableError` が届かず、`deriveErrorKind` の
+ * `RetryableError.is()` 分岐は本番で到達不能だった。結果として一時的障害も恒久的障害も
+ * `fatal:*` に潰れ、実障害では `error_kind = 'fatal:rate_limit'` が記録されている。
+ *
+ * `deriveErrorKind` はこの集合を使い、「`FatalError` の message に含まれる token が
+ * retryable 集合に属する ⟺ 我々が生成した `RetryableError` を SDK が retry exhaustion
+ * 後に wrap した」という**決定論的な導出**を行う。SDK 内部の英語メッセージ形式にも
+ * `err.cause` の serialize 挙動にも依存しない。
+ *
+ * この不変条件は `classifyForWorkflowRetry` の非 `AiClientError` fallback が
+ * **raw message を引き継がない**ことに依存する(引き継ぐと raw message に偶然
+ * `(rate_limit)` 等が含まれた場合に誤分類する)。両者は必ずセットで維持すること。
+ */
+export const RETRYABLE_SANITIZED_KINDS = [
+  "rate_limit",
+  "timeout",
+  "network_error",
+  "api_error:503",
+] as const;
+
+export type RetryableSanitizedKind = (typeof RETRYABLE_SANITIZED_KINDS)[number];
+
+/**
  * DB 書き込み/読み出しのみを行う step の数。
  * `loadStoreStep` / `markStageStep`×2 / `persistSourceRegistryStep` /
  * `persistSucceededStep` / `markFailedStep` の 6 つ。

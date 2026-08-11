@@ -21,6 +21,9 @@ import {
   MIN_SAFE_EXPIRES_MARGIN_MINUTES,
   PLATFORM_STEP_TIMEOUT_MS,
   STAGE0_MAX_RETRIES,
+  STAGE0_PLACES_TIMEOUT_MS,
+  RETRYABLE_SANITIZED_KINDS,
+  type RetryableSanitizedKind,
   DB_STEP_COUNT,
   DB_STEP_MAX_RETRIES,
   DB_STEP_BUDGET_MS,
@@ -73,7 +76,9 @@ vi.mock("@/lib/domain/basic-info-merge", () => ({
   mergeBasicInfo: vi.fn(),
 }));
 
-const { classifyForWorkflowRetry, deriveErrorKind } = await import("../store-research");
+const { classifyForWorkflowRetry, deriveErrorKind, buildFailureRecord } = await import(
+  "../store-research"
+);
 
 describe("classifyForWorkflowRetry (retry方針の分類、Plan v3.2 §17)", () => {
   it.each<AiClientError["kind"]>(["rate_limit", "timeout", "network_error"])(
@@ -113,6 +118,41 @@ describe("classifyForWorkflowRetry (retry方針の分類、Plan v3.2 §17)", () 
   it("非Errorのthrow値もFatalErrorへ変換される", () => {
     const result = classifyForWorkflowRetry("文字列でthrow");
     expect(result).toBeInstanceOf(FatalError);
+  });
+
+  describe("非AiClientError fallbackのsanitization(runtime reliability hardening、F1の前提条件)", () => {
+    // 旧実装は `new FatalError(err.message)` で raw message を FatalError へ引き継いでいた。
+    // この状態で「FatalError内のsanitized tokenがretryable集合ならretryable_exhausted」
+    // という判定(F1)を足すと、raw messageに偶然 `(rate_limit)` 等が含まれていた場合に
+    // retry exhaustionでないFatalErrorを誤分類しうる。fallbackを固定文言にすることで
+    // 「FatalError内にretryable tokenがある ⟺ SDKがretry exhaustion後にwrapした」
+    // という不変条件を成立させる。
+    it("raw messageをFatalErrorへ引き継がず、定型のsanitized文言のみになる", () => {
+      const result = classifyForWorkflowRetry(
+        new Error("connect ECONNREFUSED 10.0.0.7:5432 user=svc_prod token=abc123"),
+      );
+      expect(result.message).toBe("Gemini呼出が失敗しました(unknown)");
+      expect(result.message).not.toContain("ECONNREFUSED");
+      expect(result.message).not.toContain("svc_prod");
+      expect(result.message).not.toContain("abc123");
+    });
+
+    it("非Errorのthrow値も同じsanitized文言になる", () => {
+      expect(classifyForWorkflowRetry("文字列でthrow").message).toBe(
+        "Gemini呼出が失敗しました(unknown)",
+      );
+    });
+
+    it.each(["rate_limit", "timeout", "network_error", "api_error:503"])(
+      "raw messageに(%s)が含まれていてもretryable_exhaustedへ誤分類せずfatal:unknownになる",
+      (token) => {
+        const classified = classifyForWorkflowRetry(
+          new Error(`internal parser failed near marker (${token}) while decoding`),
+        );
+        expect(deriveErrorKind(classified)).toBe("fatal:unknown");
+        expect(classified.message).not.toContain(token);
+      },
+    );
   });
 
   it("api_error(503)はRetryableError(最大1 retry)になる(observability bug修正 smoke testで発見、Plan §17)", () => {
@@ -281,6 +321,124 @@ describe("stuck run 判定の安全下限(fix: PR #180 review Finding 3)", () =>
       computeMinimumSafeExpiryMs(),
     );
   });
+
+  // runtime reliability hardening: Stage0 に明示 timeout(STAGE0_PLACES_TIMEOUT_MS)を
+  // 導入したが、これは latency 改善であって budget 削減ではない。AbortSignal は fetch
+  // のみを縛り、DNS 前段の遅延・body 読み出し・JSON parse・step の enqueue 遅延は
+  // 縛らないため、expires budget は引き続き platform 上限で保守的に見積もる。
+  // 安全下限(30分)を下げると正常runのstuck誤判定→二重runのリスクが上がる。
+  it("Stage0 timeout導入後もStage0 budgetはplatform上限のままで、安全下限は30分を割らない", () => {
+    expect(getSafeExpiryBudgetBreakdownMs().stage0).toBe(
+      PLATFORM_STEP_TIMEOUT_MS * (STAGE0_MAX_RETRIES + 1),
+    );
+    expect(STAGE0_PLACES_TIMEOUT_MS).toBeLessThan(PLATFORM_STEP_TIMEOUT_MS);
+    expect(MIN_SAFE_EXPIRES_MARGIN_MINUTES).toBe(30);
+  });
+});
+
+/**
+ * 監査指摘 3: `markFailedStep` が `err.message` をそのまま
+ * `store_research_runs.error_message` へ保存していた。Gemini 経路は
+ * `classifyForWorkflowRetry` で sanitize されるが、DB step の失敗は
+ * SDK wrapper 経由で **Postgres/Neon の生メッセージ**が入りうる。
+ *
+ * さらに research detail page は `StoreResearchRun[]` を Client Component へ渡すため、
+ * UI で非表示でも `error_message` は RSC payload としてブラウザへ送られる。
+ * そこで永続化する文言自体を固定文言にする。
+ *
+ * 診断の Source of Truth は `error_kind`(sanitized token)と structured log が担う。
+ */
+describe("buildFailureRecord (永続化する失敗レコードのsanitization、監査指摘 3)", () => {
+  const FIXED_MESSAGE = "AI店舗調査に失敗しました";
+
+  it("どんなerrorでもerror_messageは固定文言になる", () => {
+    expect(buildFailureRecord(new Error("x")).error_message).toBe(FIXED_MESSAGE);
+    expect(buildFailureRecord("plain string").error_message).toBe(FIXED_MESSAGE);
+    expect(buildFailureRecord(null).error_message).toBe(FIXED_MESSAGE);
+  });
+
+  it("DB由来の生エラーメッセージを保存しない", () => {
+    const raw =
+      'Step "markStageStep" failed after 1 retry: connection to server at "ep-x.neon.tech" (10.0.0.7), port 5432 failed: FATAL: password authentication failed for user "svc_prod"';
+    const record = buildFailureRecord(new FatalError(raw));
+    expect(record.error_message).toBe(FIXED_MESSAGE);
+    for (const secret of ["neon.tech", "10.0.0.7", "svc_prod", "password authentication"]) {
+      expect(record.error_message).not.toContain(secret);
+    }
+  });
+
+  it("provider由来の生メッセージ・request ID・API keyを保存しない", () => {
+    const raw =
+      '{"error":{"code":429,"message":"quota exceeded","status":"RESOURCE_EXHAUSTED"}} key=AIzaSyFAKEKEY123 requestId=8f3c1d2e-aaaa';
+    const record = buildFailureRecord(new FatalError(raw));
+    expect(record.error_message).toBe(FIXED_MESSAGE);
+    for (const secret of ["AIzaSyFAKEKEY123", "8f3c1d2e", "quota exceeded", "RESOURCE_EXHAUSTED"]) {
+      expect(record.error_message).not.toContain(secret);
+    }
+  });
+
+  it("storeIdなど外部値を埋め込んだFatalErrorのmessageも保存しない(follow-up候補 A の実害を先に閉じる)", () => {
+    const record = buildFailureRecord(new FatalError("店舗が見つかりません: store-abc-123"));
+    expect(record.error_message).toBe(FIXED_MESSAGE);
+    expect(record.error_message).not.toContain("store-abc-123");
+  });
+
+  it("error_kindは従来どおりsanitized tokenを保持する(診断のSource of Truthは維持)", () => {
+    const retryable = classifyForWorkflowRetry({ kind: "rate_limit" } as AiClientError);
+    expect(
+      buildFailureRecord(new FatalError(`Step "stage1Step" failed after 1 retry: ${retryable.message}`))
+        .error_kind,
+    ).toBe("retryable_exhausted:rate_limit");
+    expect(
+      buildFailureRecord(classifyForWorkflowRetry({ kind: "auth_error" } as AiClientError)).error_kind,
+    ).toBe("fatal:auth_error");
+    expect(buildFailureRecord(new Error("x")).error_kind).toBe("unknown");
+  });
+});
+
+describe("RETRYABLE_SANITIZED_KINDS の drift ガード(runtime reliability hardening、F1)", () => {
+  // `deriveErrorKind` は「FatalError の message に含まれる token がこの集合に属するなら
+  // SDK による retry exhaustion wrap」と判定する。したがってこの定数が
+  // `classifyForWorkflowRetry` の RetryableError 分岐と 1 対 1 で対応していることが
+  // 不変条件になる。Record<RetryableSanitizedKind, ...> の網羅性により、token を
+  // 追加した場合は fixture 追加を型が強制する。
+  const FIXTURE_BY_TOKEN: Record<RetryableSanitizedKind, AiClientError> = {
+    rate_limit: { kind: "rate_limit" },
+    timeout: { kind: "timeout" },
+    network_error: { kind: "network_error" },
+    "api_error:503": { kind: "api_error", status: 503 },
+  };
+
+  it("各tokenは実際にRetryableErrorへ分類されるkindである", () => {
+    for (const token of RETRYABLE_SANITIZED_KINDS) {
+      const classified = classifyForWorkflowRetry(FIXTURE_BY_TOKEN[token]);
+      expect(classified, `${token} は RetryableError であるべき`).toBeInstanceOf(RetryableError);
+      expect(classified.message).toContain(`(${token})`);
+    }
+  });
+
+  it("RetryableErrorになるkindの数は GEMINI_RETRY_AFTER_MS のキー数と一致する", () => {
+    expect(RETRYABLE_SANITIZED_KINDS.length).toBe(Object.keys(GEMINI_RETRY_AFTER_MS).length);
+  });
+
+  it("retryしないkindのtokenは1つもこの集合に含まれない", () => {
+    const nonRetryable: AiClientError[] = [
+      { kind: "auth_error" },
+      { kind: "missing_api_key" },
+      { kind: "max_tokens" },
+      { kind: "api_error", status: 400 },
+      { kind: "api_error", status: 404 },
+      { kind: "api_error", status: 500 },
+      { kind: "unknown", message: "x" },
+    ];
+    for (const err of nonRetryable) {
+      const classified = classifyForWorkflowRetry(err);
+      expect(classified).toBeInstanceOf(FatalError);
+      for (const token of RETRYABLE_SANITIZED_KINDS) {
+        expect(classified.message).not.toContain(`(${token})`);
+      }
+    }
+  });
 });
 
 describe("deriveErrorKind (error_kind導出)", () => {
@@ -361,6 +519,123 @@ describe("deriveErrorKind (error_kind導出)", () => {
       expect(deriveErrorKind(new FatalError("Stage2の応答検証に失敗しました(stage2_invalid_output)"))).toBe(
         "fatal:stage2_invalid_output",
       );
+    });
+  });
+
+  describe("Workflow SDKのretry exhaustion wrapper(runtime reliability hardening、F1)", () => {
+    /**
+     * `@workflow/core` 5.0.0-beta.38 の step-executor は、retry 上限に達した step の
+     * 元エラーを**新しい `FatalError` でラップ**する(installed dist で確認:
+     * `node_modules/.pnpm/@workflow+core@5.0.0-beta.38_ws@8.20.0/node_modules/@workflow/core/
+     * dist/runtime/step-executor.js:786-794`)。
+     *
+     *   const errorMessage = `Step "${stepName}" failed after ${maxRetries} retry: ${元message}`;
+     *   const wrappedError = new FatalError(errorMessage);
+     *   wrappedError.cause = err;
+     *
+     * このため、我々が `RetryableError` として投げたものも workflow の catch には
+     * `FatalError` として届く。旧実装では `deriveErrorKind` の `RetryableError.is()`
+     * 分岐が本番で到達不能となり、一時的障害も恒久的障害も `fatal:*` に潰れていた
+     * (実障害の観測値 `error_kind = 'fatal:rate_limit'` がこの経路の証拠)。
+     */
+    function wrapAsRetryExhausted(inner: Error, stepName = "stage1Step"): Error {
+      return new FatalError(`Step "${stepName}" failed after 1 retry: ${inner.message}`);
+    }
+
+    it.each<[string, AiClientError]>([
+      ["rate_limit", { kind: "rate_limit" }],
+      ["timeout", { kind: "timeout" }],
+      ["network_error", { kind: "network_error" }],
+      ["api_error:503", { kind: "api_error", status: 503 }],
+    ])("SDKがwrapした%sはretryable_exhausted:<token>として復元される", (token, err) => {
+      const wrapped = wrapAsRetryExhausted(classifyForWorkflowRetry(err));
+      expect(FatalError.is(wrapped)).toBe(true);
+      expect(deriveErrorKind(wrapped)).toBe(`retryable_exhausted:${token}`);
+    });
+
+    it.each<[string, AiClientError]>([
+      ["auth_error", { kind: "auth_error" }],
+      ["missing_api_key", { kind: "missing_api_key" }],
+      ["max_tokens", { kind: "max_tokens" }],
+      ["api_error:404", { kind: "api_error", status: 404 }],
+      ["unknown", { kind: "unknown", message: "x" }],
+    ])("retryしない%sはwrapされてもfatal:<token>のままである", (token, err) => {
+      const wrapped = wrapAsRetryExhausted(classifyForWorkflowRetry(err), "stage2Step");
+      expect(deriveErrorKind(wrapped)).toBe(`fatal:${token}`);
+    });
+
+    it("final_result_invalidはretryable集合に含まれずfatalのままである", () => {
+      const wrapped = wrapAsRetryExhausted(
+        new FatalError("最終結果の整合性検証に失敗しました(final_result_invalid)"),
+      );
+      expect(deriveErrorKind(wrapped)).toBe("fatal:final_result_invalid");
+    });
+
+    /**
+     * 監査指摘 B: retryable token だけを message 全体から探すと、DB step 等の raw error が
+     * SDK に wrap された際に偶然同じ token を含むと誤分類しうる
+     * (`loadStoreStep` / `markStageStep` 等は `classifyForWorkflowRetry` を通さないため、
+     * Postgres/Neon の生メッセージがそのまま wrapper message に入る)。
+     *
+     * そこで retry exhaustion の判定は、**我々が生成する RetryableError の自前定型文**に
+     * anchor する。SDK の英語 wrapper prefix にも `err.cause` にも依存しない。
+     */
+    describe("自前テンプレートへのanchor(監査指摘 B)", () => {
+      it("FatalError内に単なる(timeout)があるだけではretry exhausted扱いしない", () => {
+        expect(deriveErrorKind(new FatalError("何らかの処理が (timeout) で終了しました"))).toBe(
+          "fatal:timeout",
+        );
+      });
+
+      it.each(["rate_limit", "timeout", "network_error", "api_error:503"])(
+        "DB step由来のraw messageがSDKにwrapされ(%s)を含んでもretry exhausted扱いしない",
+        (token) => {
+          // `markStageStep` 等は classifyForWorkflowRetry を通さないため、Postgres の
+          // 生メッセージがそのまま SDK wrapper message に入りうる形を模す。
+          const wrapped = new FatalError(
+            `Step "markStageStep" failed after 1 retry: canceling statement due to (${token}) at neon-proxy`,
+          );
+          expect(deriveErrorKind(wrapped)).toBe(`fatal:${token}`);
+        },
+      );
+
+      it("自前テンプレートを含む場合のみretryable_exhaustedになる", () => {
+        const ours = classifyForWorkflowRetry({ kind: "rate_limit" } as AiClientError);
+        // 定型文まるごとを含む(SDK wrap 相当)
+        expect(
+          deriveErrorKind(new FatalError(`Step "stage1Step" failed after 1 retry: ${ours.message}`)),
+        ).toBe("retryable_exhausted:rate_limit");
+        // token だけ(定型文なし)
+        expect(deriveErrorKind(new FatalError("(rate_limit)"))).toBe("fatal:rate_limit");
+      });
+
+      it.each<[string, () => Error]>([
+        ["fatal:auth_error", () => classifyForWorkflowRetry({ kind: "auth_error" } as AiClientError)],
+        ["fatal:max_tokens", () => classifyForWorkflowRetry({ kind: "max_tokens" } as AiClientError)],
+        [
+          "fatal:stage2_invalid_output:schema",
+          () => new FatalError("Stage2の応答検証に失敗しました(stage2_invalid_output:schema)"),
+        ],
+        [
+          "fatal:final_result_invalid",
+          () => new FatalError("最終結果の整合性検証に失敗しました(final_result_invalid)"),
+        ],
+      ])("anchor導入後も%sの分類は変わらない", (expected, make) => {
+        expect(deriveErrorKind(make())).toBe(expected);
+        // SDK に wrap されても同じ
+        expect(
+          deriveErrorKind(new FatalError(`Step "stage2Step" failed after 1 retry: ${make().message}`)),
+        ).toBe(expected);
+      });
+    });
+
+    it("hydrate後(plain object相当)のwrapped FatalErrorでも復元できる", () => {
+      const hydrated = Object.assign(
+        new Error('Step "stage1Step" failed after 1 retry: Gemini呼出が一時的に失敗しました(rate_limit)。1回だけ再試行します。'),
+        { name: "FatalError", fatal: true },
+      );
+      expect(hydrated instanceof FatalError).toBe(false);
+      expect(deriveErrorKind(hydrated)).toBe("retryable_exhausted:rate_limit");
     });
   });
 

@@ -126,10 +126,23 @@ export async function startResearchRunAction(
   try {
     await start(storeResearchWorkflow, [runId, storeId]);
   } catch (err) {
+    // DB へ raw message を残さなくなった分、運用診断は structured log 側で担保する
+    // (同ファイルの `[research.startRun] create failed` と同じ規約。err オブジェクト
+    // そのものは渡さず、種別を示す sanitized scalar のみ)。
+    console.error("[research.startRun] workflow start failed", {
+      storeId,
+      runId,
+      error_name: err instanceof Error ? err.name : typeof err,
+      error_constructor: (err as { constructor?: { name?: string } } | null)?.constructor?.name,
+    });
     await repos.researchRun.update(runId, {
       status: "failed",
       error_kind: "workflow_start_failed",
-      error_message: err instanceof Error ? err.message : "調査の開始に失敗しました",
+      // raw な起動エラーを DB へ保存しない(`workflows/store-research.ts:buildFailureRecord`
+      // と同じ方針)。`error_message` は `StoreResearchRun` の一部として Client Component
+      // へ渡り RSC payload に載るため、UI で非表示でもブラウザへは届く。診断の
+      // Source of Truth は `error_kind` と structured log 側が担う。
+      error_message: "調査の開始に失敗しました",
       finished_at: nowIso(),
     });
     return failure("調査の開始に失敗しました。しばらくしてから再度お試しください。");

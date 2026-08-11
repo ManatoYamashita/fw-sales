@@ -195,6 +195,114 @@ describe("runSourceDiscovery (Stage1)", () => {
   });
 });
 
+/**
+ * runtime reliability hardening (F3/F4)。
+ *
+ * 従来 `lib/ai/` と `workflows/` には `console.*` が 1 つも無く、Gemini 呼出が
+ * どの HTTP status / provider reason で落ちたかは Vercel logs に一切残らなかった
+ * (2026-08 の billing 障害では Supabase を直接開いて `store_research_runs` を
+ * 見るしか診断手段がなかった)。
+ *
+ * ログへ出してよいのは sanitized scalar のみ。元 Error オブジェクト・raw message・
+ * API key・request ID・レスポンス本文は渡さない。
+ */
+describe("Gemini呼出失敗のsanitized structured log", () => {
+  const RESOURCE_EXHAUSTED_BODY = JSON.stringify({
+    error: {
+      code: 429,
+      message: "Resource has been exhausted. key=AIzaSyFAKEKEY123 requestId=8f3c1d2e-aaaa",
+      status: "RESOURCE_EXHAUSTED",
+      details: [{ "@type": "type.googleapis.com/google.rpc.ErrorInfo", reason: "RATE_LIMIT_EXCEEDED" }],
+    },
+  });
+
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    errorSpy.mockRestore();
+  });
+
+  it("Stage1の失敗をstage/kind/http_status/provider_status/provider_reason付きで記録する", async () => {
+    mockGenerateContent.mockRejectedValue(
+      Object.assign(new Error(RESOURCE_EXHAUSTED_BODY), { status: 429 }),
+    );
+
+    await expect(
+      createResearchGeminiClient().runSourceDiscovery("p", AbortSignal.timeout(1000)),
+    ).rejects.toMatchObject({ kind: "rate_limit" });
+
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    const [message, fields] = errorSpy.mock.calls[0]!;
+    expect(message).toBe("[research.gemini] call failed");
+    expect(fields).toEqual({
+      stage: "stage1",
+      kind: "rate_limit",
+      http_status: 429,
+      provider_status: "RESOURCE_EXHAUSTED",
+      provider_reason: "RATE_LIMIT_EXCEEDED",
+    });
+  });
+
+  it("Stage2の失敗はstage=stage2として記録する", async () => {
+    mockGenerateContent.mockRejectedValue(
+      Object.assign(new Error("boom"), { status: 503 }),
+    );
+
+    await expect(
+      createResearchGeminiClient().runStructuredUrlContext(
+        { prompt: "p", jsonSchema: { type: "object" } },
+        AbortSignal.timeout(1000),
+      ),
+    ).rejects.toMatchObject({ kind: "api_error", status: 503 });
+
+    const [, fields] = errorSpy.mock.calls[0]!;
+    expect(fields).toMatchObject({ stage: "stage2", kind: "api_error", http_status: 503 });
+  });
+
+  it("元Errorオブジェクト・raw message・API key・request IDをログへ渡さない", async () => {
+    mockGenerateContent.mockRejectedValue(
+      Object.assign(new Error(RESOURCE_EXHAUSTED_BODY), { status: 429 }),
+    );
+
+    await createResearchGeminiClient()
+      .runSourceDiscovery("p", AbortSignal.timeout(1000))
+      .catch(() => {});
+
+    // 引数は「文言」と「sanitized fieldsオブジェクト」の2つだけ。Errorを渡さない。
+    expect(errorSpy.mock.calls[0]).toHaveLength(2);
+    const serialized = JSON.stringify(errorSpy.mock.calls[0]);
+    expect(serialized).not.toContain("AIzaSyFAKEKEY123");
+    expect(serialized).not.toContain("8f3c1d2e");
+    expect(serialized).not.toContain("Resource has been exhausted");
+    for (const arg of errorSpy.mock.calls[0]!) {
+      expect(arg).not.toBeInstanceOf(Error);
+    }
+  });
+
+  it("ログ追加後もthrowされるAiClientErrorのkindは変わらない", async () => {
+    mockGenerateContent.mockRejectedValue(
+      Object.assign(new Error("unauthorized"), { status: 401 }),
+    );
+
+    await expect(
+      createResearchGeminiClient().runSourceDiscovery("p", AbortSignal.timeout(1000)),
+    ).rejects.toMatchObject({ kind: "auth_error" });
+  });
+
+  it("APIキー未設定(API呼出前の失敗)ではログを出さない", async () => {
+    delete process.env.GEMINI_API_KEY;
+
+    await expect(
+      createResearchGeminiClient().runSourceDiscovery("p", AbortSignal.timeout(1000)),
+    ).rejects.toMatchObject({ kind: "missing_api_key" });
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+});
+
 describe("runStructuredUrlContext (Stage2)", () => {
   const JSON_SCHEMA = { type: "object", properties: {} };
 

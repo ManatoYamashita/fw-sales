@@ -33,7 +33,9 @@ vi.mock("@google/genai", () => {
   };
 });
 
-const { createGeminiClient, isAiClientError } = await import("../client");
+const { createGeminiClient, isAiClientError, extractProviderDiagnostics } = await import(
+  "../client"
+);
 
 const USER_PARTS: Part[] = [{ text: "## 店舗基本情報\n- 屋号: 導楽" }];
 const JSON_SCHEMA = { type: "object", properties: {} } as Record<string, unknown>;
@@ -385,6 +387,116 @@ describe("createGeminiClient — 構造化ステータスによる分類", () =>
       expect(serialized).not.toContain("abc-123");
       expect(serialized).not.toContain("API_KEY_INVALID");
     });
+  });
+});
+
+/**
+ * runtime reliability hardening (F4)。
+ *
+ * `@google/genai` 1.52.0 の `ApiError` は `{ message, status }` しか公開せず
+ * (`genai.d.ts:332-354`)、HTTP headers は SDK が破棄する。`error.details[]` /
+ * `error.status` は **`message` に `JSON.stringify` された文字列としてのみ**存在する
+ * (`dist/index.mjs:8205-8224`)。
+ *
+ * billing 枯渇と一時的 rate limit はどちらも 429 として届き、現時点では安全に区別できない
+ * (どの `reason` トークンが billing を示すかがコード・テスト・ドキュメントのいずれからも
+ * 確認できない)。そのため**分類は増やさず**、次回インシデントで切り分けられるよう
+ * provider 側の列挙トークンだけを sanitized に取り出してログへ出す。
+ */
+describe("extractProviderDiagnostics (sanitized provider診断、runtime reliability hardening)", () => {
+  /** SDK の ApiError 相当 (status を持つ Error)。 */
+  function apiError(status: number, message: string): Error & { status: number } {
+    return Object.assign(new Error(message), { status });
+  }
+
+  const RESOURCE_EXHAUSTED_BODY = JSON.stringify({
+    error: {
+      code: 429,
+      message: "Resource has been exhausted (e.g. check quota).",
+      status: "RESOURCE_EXHAUSTED",
+      details: [
+        {
+          "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+          reason: "RATE_LIMIT_EXCEEDED",
+          domain: "googleapis.com",
+        },
+      ],
+    },
+  });
+
+  it("Google標準のerror bodyからhttp_status/provider_status/provider_reasonを取り出す", () => {
+    expect(extractProviderDiagnostics(apiError(429, RESOURCE_EXHAUSTED_BODY))).toEqual({
+      http_status: 429,
+      provider_status: "RESOURCE_EXHAUSTED",
+      provider_reason: "RATE_LIMIT_EXCEEDED",
+    });
+  });
+
+  it("既存の400 fixture(API_KEY_INVALID)からも同じ形で取り出せる", () => {
+    const body = JSON.stringify({
+      error: {
+        code: 400,
+        message: "API key not valid. Please pass a valid API key.",
+        status: "INVALID_ARGUMENT",
+        details: [
+          {
+            "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+            reason: "API_KEY_INVALID",
+          },
+        ],
+      },
+    });
+    expect(extractProviderDiagnostics(apiError(400, body))).toEqual({
+      http_status: 400,
+      provider_status: "INVALID_ARGUMENT",
+      provider_reason: "API_KEY_INVALID",
+    });
+  });
+
+  it("API key / request ID / 自由文 message を抽出しない", () => {
+    const body = JSON.stringify({
+      error: {
+        code: 429,
+        message: "quota exceeded for key AIzaSyFAKEKEY123 (requestId 8f3c1d2e-aaaa-bbbb)",
+        status: "RESOURCE_EXHAUSTED",
+        details: [{ reason: "RATE_LIMIT_EXCEEDED", metadata: { key: "AIzaSyFAKEKEY123" } }],
+      },
+    });
+    const diagnostics = extractProviderDiagnostics(apiError(429, body));
+    const serialized = JSON.stringify(diagnostics);
+    expect(serialized).not.toContain("AIzaSyFAKEKEY123");
+    expect(serialized).not.toContain("8f3c1d2e");
+    expect(serialized).not.toContain("quota exceeded");
+    expect(diagnostics.provider_status).toBe("RESOURCE_EXHAUSTED");
+  });
+
+  it.each([
+    ['"status":"Resource_Exhausted"', "混在ケースは列挙トークンではない"],
+    ['"status":"resource exhausted"', "空白を含む値は列挙トークンではない"],
+    ['"status":"リソース枯渇"', "非ASCIIは抽出しない"],
+    ['"status":"AB"', "短すぎる値は抽出しない"],
+    [`"status":"${"A".repeat(80)}"`, "長すぎる値は抽出しない"],
+  ])("%s は provider_status として抽出しない (%s)", (fragment) => {
+    const diagnostics = extractProviderDiagnostics(apiError(429, `{"error":{${fragment}}}`));
+    expect(diagnostics.provider_status).toBeUndefined();
+  });
+
+  it("status/reason キーが無いbodyではhttp_statusのみ返す", () => {
+    expect(extractProviderDiagnostics(apiError(500, "opaque server error"))).toEqual({
+      http_status: 500,
+    });
+  });
+
+  it("非Error / null / 文字列でも throw せず空オブジェクトを返す", () => {
+    expect(extractProviderDiagnostics(null)).toEqual({});
+    expect(extractProviderDiagnostics("boom")).toEqual({});
+    expect(extractProviderDiagnostics(undefined)).toEqual({});
+    expect(extractProviderDiagnostics({ nope: true })).toEqual({});
+  });
+
+  it("statusを持たない通常のErrorでもmessage内のトークンは拾える", () => {
+    const err = new Error('{"error":{"status":"UNAVAILABLE"}}');
+    expect(extractProviderDiagnostics(err)).toEqual({ provider_status: "UNAVAILABLE" });
   });
 });
 

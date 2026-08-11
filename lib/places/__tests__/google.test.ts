@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  getPlaceById,
   getPlaceDetails,
   resolveSearchCenter,
+  searchPlaces,
   searchPlacesPage,
 } from "../google";
 
@@ -503,6 +505,82 @@ describe("getPlaceDetails", () => {
       userRatingsTotal: 120,
       websiteUri: "https://example.com",
       businessStatus: "OPERATIONAL",
+    });
+  });
+});
+
+/**
+ * 呼び出し側から指定できる明示 timeout (runtime reliability hardening、F5)。
+ *
+ * 従来 `fetch` に `AbortSignal` が一切無く、Places が応答しない場合に呼び出し元
+ * (特に AI 店舗調査の Stage0) が platform の Function 上限まで占有されうる状態だった。
+ *
+ * **後方互換が要件**: `timeoutMs` を渡さない既存呼び出し元 (`area-search-actions.ts` /
+ * `url-parser/places-fallback.ts`) の挙動は 1 ミリも変えない = `signal` を渡さない。
+ */
+describe("timeoutMs オプション", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.stubEnv("GOOGLE_PLACES_API_KEY", "test-api-key");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("getPlaceById: 未指定なら signal を渡さない(既存呼び出し元の挙動不変)", async () => {
+    fetchMock = vi.fn().mockResolvedValue(jsonResponse(DETAILS_PLACE));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getPlaceById("ChIJfood");
+
+    const [, init] = getFetchCall(fetchMock);
+    expect((init as { signal?: unknown }).signal).toBeUndefined();
+  });
+
+  it("getPlaceById: 指定すると AbortSignal を渡す", async () => {
+    fetchMock = vi.fn().mockResolvedValue(jsonResponse(DETAILS_PLACE));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getPlaceById("ChIJfood", { timeoutMs: 15_000 });
+
+    const [, init] = getFetchCall(fetchMock);
+    expect((init as { signal?: unknown }).signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("searchPlaces: 未指定なら signal を渡さない", async () => {
+    fetchMock = vi.fn().mockResolvedValue(jsonResponse({ places: [FOOD_PLACE] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await searchPlaces("居酒屋", "渋谷");
+
+    const [, init] = getFetchCall(fetchMock);
+    expect((init as { signal?: unknown }).signal).toBeUndefined();
+  });
+
+  it("searchPlaces: 指定すると AbortSignal を渡す", async () => {
+    fetchMock = vi.fn().mockResolvedValue(jsonResponse({ places: [FOOD_PLACE] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await searchPlaces("居酒屋", "渋谷", { timeoutMs: 15_000 });
+
+    const [, init] = getFetchCall(fetchMock);
+    expect((init as { signal?: unknown }).signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("timeout 経過で fetch が abort される", async () => {
+    // fetch 側は signal の abort をそのまま拒否として伝播する実装を模す。
+    fetchMock = vi.fn().mockImplementation((_url: string, init: { signal?: AbortSignal }) => {
+      return new Promise((_resolve, reject) => {
+        init.signal?.addEventListener("abort", () => reject(init.signal!.reason));
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getPlaceById("ChIJfood", { timeoutMs: 1 })).rejects.toMatchObject({
+      name: "TimeoutError",
     });
   });
 });

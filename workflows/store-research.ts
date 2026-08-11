@@ -74,6 +74,9 @@ import {
   GEMINI_STAGE_MAX_RETRIES,
   GEMINI_RETRY_AFTER_MS,
   STAGE0_MAX_RETRIES,
+  STAGE0_PLACES_TIMEOUT_MS,
+  RETRYABLE_SANITIZED_KINDS,
+  type RetryableSanitizedKind,
   DB_STEP_MAX_RETRIES,
 } from "@/lib/ai/research/run-timing";
 import { derivePlacesVerifiedKeys } from "@/lib/ai/research/places-verified";
@@ -114,6 +117,56 @@ const SANITIZED_KIND_PATTERN =
   /\((auth_error|missing_api_key|rate_limit|timeout|network_error|max_tokens|api_error:\d{3}|stage2_invalid_output(?::(?:json_parse|schema|coverage|identity))?|final_result_invalid|unknown)\)/;
 
 /**
+ * `classifyForWorkflowRetry` が `RetryableError` のメッセージに使う定型文プレフィックス。
+ * **生成(`retryableMessage`)と検出(`RETRY_EXHAUSTED_PATTERN`)の両方でこの定数を使う**ため、
+ * 片方だけを書き換えて drift させることができない。
+ */
+const RETRYABLE_MESSAGE_PREFIX = "Gemini呼出が一時的に失敗しました";
+
+function retryableMessage(token: RetryableSanitizedKind): string {
+  return `${RETRYABLE_MESSAGE_PREFIX}(${token})。1回だけ再試行します。`;
+}
+
+/**
+ * 「Workflow SDK が retry exhaustion 後に wrap した」ことを判定する正規表現。
+ *
+ * ## なぜ token 単体ではなく自前テンプレートに anchor するのか
+ *
+ * SDK は retry 上限に達した step の元エラーを新しい `FatalError` でラップし、その message は
+ * `Step "<name>" failed after N retry: <元message>` になる。ここで **DB step
+ * (`loadStoreStep` / `markStageStep` / `persist*Step` / `markFailedStep`) は
+ * `classifyForWorkflowRetry` を通さない**ため、Postgres/Neon の生メッセージがそのまま
+ * `<元message>` に入りうる。
+ *
+ * token だけを message 全体から探すと、生メッセージが偶然 `(timeout)` 等を含んだだけで
+ * 「Gemini の一過性エラーを retry したが力尽きた」と誤ラベルしてしまう。そこで
+ * **我々が生成した RetryableError の定型文ごと**一致した場合のみ retry exhaustion と判定する。
+ *
+ * この設計は SDK の英語 wrapper prefix にも `err.cause` の serialize 挙動にも依存しない
+ * (どちらも SDK 実装詳細であり、バージョン更新で変わりうるため)。
+ */
+const RETRY_EXHAUSTED_PATTERN = new RegExp(
+  `${RETRYABLE_MESSAGE_PREFIX}\\((${RETRYABLE_SANITIZED_KINDS.join("|")})\\)`,
+);
+
+/**
+ * 失敗時に `store_research_runs` へ永続化する sanitized なフィールド。
+ *
+ * `error_message` に **raw なエラー内容を一切保存しない**(監査指摘 3)。理由は 2 つ:
+ * 1. DB step の失敗では SDK wrapper 経由で Postgres/Neon の生メッセージ(接続先ホスト・
+ *    ロール名等を含みうる)が入る経路があった。
+ * 2. research detail page は `StoreResearchRun[]` を Client Component へ渡すため、
+ *    UI で非表示でも `error_message` は RSC payload としてブラウザへ送られる。
+ *
+ * 診断の Source of Truth は `error_kind`(sanitized token)と Vercel structured log が担う。
+ */
+const FAILED_RUN_MESSAGE = "AI店舗調査に失敗しました";
+
+export function buildFailureRecord(err: unknown): { error_kind: string; error_message: string } {
+  return { error_kind: deriveErrorKind(err), error_message: FAILED_RUN_MESSAGE };
+}
+
+/**
  * `AiClientError` を Workflow の retry 意味論(`FatalError` / `RetryableError`)へ変換する。
  * 純関数としてexportし、単体テストで直接検証する。PR #187 の修正内容を維持している
  * (絶対に壊さない): 503 (service unavailable) は 429 / timeout / network_error と同じ
@@ -141,29 +194,25 @@ export function classifyForWorkflowRetry(err: unknown): Error {
   if (isAiClientError(err)) {
     switch (err.kind) {
       case "rate_limit":
-        return new RetryableError(
-          `Gemini呼出が一時的に失敗しました(rate_limit)。1回だけ再試行します。`,
-          { retryAfter: GEMINI_RETRY_AFTER_MS.rate_limit },
-        );
+        return new RetryableError(retryableMessage("rate_limit"), {
+          retryAfter: GEMINI_RETRY_AFTER_MS.rate_limit,
+        });
       case "timeout":
-        return new RetryableError(
-          `Gemini呼出が一時的に失敗しました(timeout)。1回だけ再試行します。`,
-          { retryAfter: GEMINI_RETRY_AFTER_MS.timeout },
-        );
+        return new RetryableError(retryableMessage("timeout"), {
+          retryAfter: GEMINI_RETRY_AFTER_MS.timeout,
+        });
       case "network_error":
-        return new RetryableError(
-          `Gemini呼出が一時的に失敗しました(network_error)。1回だけ再試行します。`,
-          { retryAfter: GEMINI_RETRY_AFTER_MS.network_error },
-        );
+        return new RetryableError(retryableMessage("network_error"), {
+          retryAfter: GEMINI_RETRY_AFTER_MS.network_error,
+        });
       case "missing_api_key":
       case "auth_error":
         return new FatalError(`Gemini呼出が認証エラーで失敗しました(${err.kind})`);
       case "api_error": {
         if (err.status === 503) {
-          return new RetryableError(
-            `Gemini呼出が一時的に失敗しました(api_error:503)。1回だけ再試行します。`,
-            { retryAfter: GEMINI_RETRY_AFTER_MS.service_unavailable },
-          );
+          return new RetryableError(retryableMessage("api_error:503"), {
+            retryAfter: GEMINI_RETRY_AFTER_MS.service_unavailable,
+          });
         }
         return new FatalError(`Gemini呼出が失敗しました(api_error:${err.status})`);
       }
@@ -173,7 +222,19 @@ export function classifyForWorkflowRetry(err: unknown): Error {
         return new FatalError(`Gemini呼出が失敗しました(${err.kind})`);
     }
   }
-  return new FatalError(err instanceof Error ? err.message : "不明なエラーで失敗しました");
+  // 非 AiClientError(Gemini stage 内で起きた想定外の例外)。
+  //
+  // **raw `err.message` を引き継がない**(runtime reliability hardening)。旧実装は
+  // `new FatalError(err.message)` としていたため、(a) 外部由来テキストが `error_message`
+  // として DB へ入りうる、(b) `deriveErrorKind` が「FatalError 内の retryable token =
+  // SDK による retry exhaustion wrap」と判定する際に、raw message に偶然
+  // `(rate_limit)` 等が含まれていると誤分類する、という 2 つの問題があった。
+  //
+  // sanitized な固定文言にすることで、`classifyForWorkflowRetry` が生成する FatalError の
+  // message は全て既知の定型文だけになり、`RETRYABLE_SANITIZED_KINDS` を使った
+  // retry exhaustion 判定の不変条件が成立する(`run-timing.ts` の JSDoc 参照)。
+  // 診断に必要な情報は `lib/ai/research/client.ts` が sanitized structured log として出す。
+  return new FatalError("Gemini呼出が失敗しました(unknown)");
 }
 
 /**
@@ -189,6 +250,18 @@ export function classifyForWorkflowRetry(err: unknown): Error {
  */
 export function deriveErrorKind(err: unknown): string {
   if (FatalError.is(err)) {
+    // Workflow SDK は retry 上限に達した step の元エラーを**新しい FatalError でラップ**する
+    // (`@workflow/core` dist/runtime/step-executor.js:786-794)。そのため我々が投げた
+    // `RetryableError` も workflow の catch には `FatalError` として届き、旧実装では
+    // 「retryしたが力尽きた」情報が失われて全て `fatal:*` に潰れていた
+    // (実障害の観測値 `fatal:rate_limit` がこの経路の証拠)。
+    //
+    // 判定は `RETRY_EXHAUSTED_PATTERN`(自前定型文への anchor)で行う。token 単体で探すと、
+    // `classifyForWorkflowRetry` を通さない DB step の raw message が偶然 `(timeout)` 等を
+    // 含んだだけで誤ラベルされる(同 pattern の JSDoc 参照)。
+    const exhausted = err.message.match(RETRY_EXHAUSTED_PATTERN);
+    if (exhausted?.[1] !== undefined) return `retryable_exhausted:${exhausted[1]}`;
+
     const match = err.message.match(SANITIZED_KIND_PATTERN);
     return match?.[1] !== undefined ? `fatal:${match[1]}` : "fatal";
   }
@@ -253,7 +326,12 @@ async function stage0PlacesStep(
   store: StoreIdentity,
 ): Promise<Stage0PlacesResult> {
   "use step";
-  return runStage0PlacesResync({ googlePlaceId, store, now: nowIso() });
+  return runStage0PlacesResync({
+    googlePlaceId,
+    store,
+    now: nowIso(),
+    timeoutMs: STAGE0_PLACES_TIMEOUT_MS,
+  });
 }
 stage0PlacesStep.maxRetries = STAGE0_MAX_RETRIES;
 
@@ -321,11 +399,24 @@ persistSucceededStep.maxRetries = DB_STEP_MAX_RETRIES;
 
 async function markFailedStep(runId: string, err: unknown): Promise<void> {
   "use step";
-  const message = err instanceof Error ? err.message : "不明なエラーで失敗しました";
+  // `error_message` は固定文言のみ。raw なエラー内容は DB へ保存しない
+  // (`buildFailureRecord` の JSDoc 参照、監査指摘 3)。
+  const failure = buildFailureRecord(err);
+  // 失敗を Vercel Function logs にも残す(runtime reliability hardening、F3)。
+  // 従来 `workflows/` と `lib/ai/` には console 出力が1つも無く、run 失敗の診断には
+  // Supabase を直接開いて `store_research_runs` を見るしかなかった。
+  //
+  // 出してよいのは sanitized scalar のみ。err オブジェクト・raw message・API key・
+  // request ID・レスポンス本文は渡さない(Gemini 呼出単位のより詳細な診断は
+  // `lib/ai/research/client.ts` 側の log が担当する)。
+  console.error("[research.workflow] run failed", {
+    runId,
+    error_kind: failure.error_kind,
+    retry_exhausted: failure.error_kind.startsWith("retryable_exhausted"),
+  });
   await repos.researchRun.update(runId, {
     status: "failed",
-    error_kind: deriveErrorKind(err),
-    error_message: message,
+    ...failure,
     finished_at: nowIso(),
   });
 }
