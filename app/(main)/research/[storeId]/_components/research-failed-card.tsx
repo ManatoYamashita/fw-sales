@@ -11,11 +11,15 @@ import type { StoreResearchRun } from "@/types/research-run";
 /**
  * `run.error_kind` は `workflows/store-research.ts:deriveErrorKind` が
  * `"retryable_exhausted"` / `"fatal:auth_error"` のように prefix + sanitized kind の
- * 形で返すため、部分一致(`includes`)で判定する。`run.error_message`(生のDB/Workflow
- * エラーメッセージ)はUIへ**直接表示しない**(feat/ai-research-pre-smoke-hardening、
- * MAJOR12)。表示文言は`error_kind`のallowlist mappingのみで決定し、未知のkindは
- * 一律genericメッセージにする。`error_message`はログ・内部監査用にDBへ保持したまま
- * でよいが、UIの根拠には使わない。
+ * 形で返すため、部分一致(`includes`)で判定する。表示文言は`error_kind`のallowlist
+ * mappingのみで決定し、未知のkindは一律genericメッセージにする。
+ *
+ * 現行runの`error_message`は`workflows/store-research.ts:buildFailureRecord`および
+ * `lib/actions/research-run-actions.ts`で固定sanitized文言のみを保存する。ただし、この
+ * hardening以前に作成された過去runにはrawなDB/Workflowエラーメッセージが残っている
+ * 可能性がある。後方互換とdefense in depthのため、`error_message`は一般ユーザーにも
+ * adminにも**直接表示せず**、UI文言の根拠にも使わない
+ * (feat/ai-research-pre-smoke-hardening、MAJOR12)。
  */
 export function errorMessage(run: Pick<StoreResearchRun, "error_kind" | "error_message">): string {
   const kind = run.error_kind ?? "";
@@ -85,8 +89,10 @@ export function errorMessage(run: Pick<StoreResearchRun, "error_kind" | "error_m
  * 出たときに「何が起きたか」を画面から判断できない。障害のたびに Supabase を開かずに
  * 済むよう、admin にだけ sanitized な識別子を出す。
  *
- * **出してよいのは `error_kind` と `stage` だけ。** `error_message` は Workflow / DB 由来の
- * 生メッセージが入りうるため admin にも出さない(MAJOR12 の方針を維持)。
+ * **出してよいのは `error_kind` と `stage` だけ。** 現行runの`error_message`は固定
+ * sanitized文言だが、hardening以前の過去runにはrawなWorkflow/DBメッセージが残っている
+ * 可能性があるため、後方互換とdefense in depthとしてadminにも表示しない
+ * (MAJOR12 の方針を維持)。
  */
 export function adminDiagnostic(run: Pick<StoreResearchRun, "error_kind" | "stage">): string {
   return `診断コード: ${run.error_kind ?? "(なし)"} / stage: ${run.stage ?? "(なし)"}`;
