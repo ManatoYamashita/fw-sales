@@ -33,9 +33,12 @@ vi.mock("@google/genai", () => {
   };
 });
 
-const { createGeminiClient, isAiClientError, extractProviderDiagnostics } = await import(
-  "../client"
-);
+const {
+  createGeminiClient,
+  isAiClientError,
+  extractProviderDiagnostics,
+  hasUnpairedSurrogate,
+} = await import("../client");
 
 const USER_PARTS: Part[] = [{ text: "## 店舗基本情報\n- 屋号: 導楽" }];
 const JSON_SCHEMA = { type: "object", properties: {} } as Record<string, unknown>;
@@ -425,10 +428,13 @@ describe("extractProviderDiagnostics (sanitized provider診断、runtime reliabi
   });
 
   it("Google標準のerror bodyからhttp_status/provider_status/provider_reasonを取り出す", () => {
+    // `provider_detail_types` は PR #180 で追加した項目(`@type` の末尾トークンのみ)。
+    // このfixtureの details は `google.rpc.ErrorInfo` なので "ErrorInfo" が入る。
     expect(extractProviderDiagnostics(apiError(429, RESOURCE_EXHAUSTED_BODY))).toEqual({
       http_status: 429,
       provider_status: "RESOURCE_EXHAUSTED",
       provider_reason: "RATE_LIMIT_EXCEEDED",
+      provider_detail_types: ["ErrorInfo"],
     });
   });
 
@@ -450,6 +456,7 @@ describe("extractProviderDiagnostics (sanitized provider診断、runtime reliabi
       http_status: 400,
       provider_status: "INVALID_ARGUMENT",
       provider_reason: "API_KEY_INVALID",
+      provider_detail_types: ["ErrorInfo"],
     });
   });
 
@@ -497,6 +504,261 @@ describe("extractProviderDiagnostics (sanitized provider診断、runtime reliabi
   it("statusを持たない通常のErrorでもmessage内のトークンは拾える", () => {
     const err = new Error('{"error":{"status":"UNAVAILABLE"}}');
     expect(extractProviderDiagnostics(err)).toEqual({ provider_status: "UNAVAILABLE" });
+  });
+});
+
+/**
+ * `google.rpc.BadRequest` の field violation 抽出(PR #180、Stage2 400 observability)。
+ *
+ * ## 背景
+ *
+ * 実機 Preview で Stage2 が `http_status=400 / provider_status=INVALID_ARGUMENT` で
+ * 2回連続失敗した。現在のログはこの2値までしか出さないため、
+ * 「request config(schema)側の問題」なのか「動的 prompt(contents)側の問題」なのか、
+ * あるいは provider の一過性なのかを切り分ける情報が残っていなかった。
+ *
+ * `@google/genai` 1.52.0 は非2xx応答で **error body 全体を `JSON.stringify` して
+ * `ApiError.message` へ入れる**(`dist/index.mjs` の `!response.ok` 分岐)。
+ * したがって `error.details[].fieldViolations[].field`(= API のフィールドパス)は
+ * message 内に存在する。これは値ではなく**フィールド名**なので、
+ * 厳格な shape guard を通せば安全にログへ出せる。
+ *
+ * ## 絶対に出さないもの
+ *
+ * `fieldViolations[].description`(自由文。prompt 断片・店舗名を含みうる)、
+ * `error.message`、raw body、API key、request ID。
+ * shape guard を通らない値は**加工して残すのではなく完全に drop** する。
+ */
+describe("extractProviderDiagnostics — provider_field_violations / provider_detail_types", () => {
+  function apiError(status: number, message: string): Error & { status: number } {
+    return Object.assign(new Error(message), { status });
+  }
+
+  const badRequest = (fieldViolations: unknown[], extra: Record<string, unknown> = {}) =>
+    apiError(
+      400,
+      JSON.stringify({
+        error: {
+          code: 400,
+          message: "Request contains an invalid argument.",
+          status: "INVALID_ARGUMENT",
+          details: [
+            {
+              "@type": "type.googleapis.com/google.rpc.BadRequest",
+              fieldViolations,
+              ...extra,
+            },
+          ],
+        },
+      }),
+    );
+
+  it("1. BadRequest の fieldViolations[].field を抽出する", () => {
+    const result = extractProviderDiagnostics(
+      badRequest([{ field: "generation_config.response_json_schema" }]),
+    );
+    expect(result.provider_status).toBe("INVALID_ARGUMENT");
+    expect(result.provider_field_violations).toEqual([
+      "generation_config.response_json_schema",
+    ]);
+  });
+
+  it("2. contents[0].parts[0].text 形式の index 付き path も受理する", () => {
+    const result = extractProviderDiagnostics(
+      badRequest([{ field: "contents" }, { field: "contents[0].parts[0].text" }]),
+    );
+    expect(result.provider_field_violations).toEqual(["contents", "contents[0].parts[0].text"]);
+  });
+
+  it("3. 重複する field は除去する", () => {
+    const result = extractProviderDiagnostics(
+      badRequest([{ field: "contents" }, { field: "contents" }, { field: "tools[0].url_context" }]),
+    );
+    expect(result.provider_field_violations).toEqual(["contents", "tools[0].url_context"]);
+  });
+
+  it("4. 安全な field が6件以上あっても5件で打ち切る", () => {
+    const result = extractProviderDiagnostics(
+      badRequest([1, 2, 3, 4, 5, 6, 7].map((i) => ({ field: `contents[${i}].parts` }))),
+    );
+    expect(result.provider_field_violations).toHaveLength(5);
+    expect(result.provider_field_violations?.[0]).toBe("contents[1].parts");
+  });
+
+  it.each([
+    ["空白を含む", "invalid argument here"],
+    ["URLを含む", "https://tabelog.com/kanagawa/"],
+    ["quoteを含む", 'contents"0"'],
+    ["日本語を含む", "対象店舗 関内 なむら"],
+    ["slashを含む", "type.googleapis.com/google.rpc.BadRequest"],
+    ["colonを含む", "error:contents"],
+    ["自由文メッセージ", "Invalid JSON payload received. Unknown name."],
+    ["大文字を含む", "generationConfig.responseJsonSchema"],
+    ["空文字", ""],
+    ["長すぎる", `a${".b".repeat(120)}`],
+  ])("5-8. 安全でない field(%s)は完全に drop する", (_label, field) => {
+    const result = extractProviderDiagnostics(badRequest([{ field }]));
+    expect(result.provider_field_violations).toBeUndefined();
+    // 空文字は `toContain("")` が常に真になるため部分文字列チェックの対象外
+    // (drop されていることは上の assertion で担保済み)。
+    if (field !== "") {
+      expect(JSON.stringify(result)).not.toContain(field.slice(0, 20));
+    }
+  });
+
+  it("安全な field と安全でない field が混在する場合、安全なものだけを残す", () => {
+    const result = extractProviderDiagnostics(
+      badRequest([
+        { field: "対象店舗 関内 なむら" },
+        { field: "contents" },
+        { field: "https://example.com/x" },
+      ]),
+    );
+    expect(result.provider_field_violations).toEqual(["contents"]);
+  });
+
+  it("9. message が JSON として parse できなくても throw せず field violations を省略する", () => {
+    const result = extractProviderDiagnostics(apiError(400, "not json at all"));
+    expect(result).toEqual({ http_status: 400 });
+  });
+
+  it("9b. JSON だが期待 shape でない場合も安全に省略する", () => {
+    for (const body of [
+      "[]",
+      '"string"',
+      "null",
+      '{"error":null}',
+      '{"error":{"details":"nope"}}',
+      '{"error":{"details":[null,42,"x"]}}',
+      '{"error":{"details":[{"fieldViolations":"nope"}]}}',
+      '{"error":{"details":[{"fieldViolations":[{"field":123}]}]}}',
+    ]) {
+      const result = extractProviderDiagnostics(apiError(400, body));
+      expect(result.provider_field_violations).toBeUndefined();
+    }
+  });
+
+  it("10. 既存の provider_status / provider_reason 抽出は変わらない", () => {
+    const body = JSON.stringify({
+      error: {
+        code: 429,
+        message: "quota",
+        status: "RESOURCE_EXHAUSTED",
+        details: [
+          { "@type": "type.googleapis.com/google.rpc.ErrorInfo", reason: "RATE_LIMIT_EXCEEDED" },
+        ],
+      },
+    });
+    const result = extractProviderDiagnostics(apiError(429, body));
+    expect(result.http_status).toBe(429);
+    expect(result.provider_status).toBe("RESOURCE_EXHAUSTED");
+    expect(result.provider_reason).toBe("RATE_LIMIT_EXCEEDED");
+    expect(result.provider_field_violations).toBeUndefined();
+  });
+
+  it("11. fieldViolations[].description と error.message を戻り値へ含めない", () => {
+    const description = "prompt に 関内 なむら の 045-305-6536 が含まれます";
+    const err = apiError(
+      400,
+      JSON.stringify({
+        error: {
+          code: 400,
+          message: "Invalid JSON payload received. Unknown name \"xyz\".",
+          status: "INVALID_ARGUMENT",
+          details: [
+            {
+              "@type": "type.googleapis.com/google.rpc.BadRequest",
+              fieldViolations: [{ field: "contents", description }],
+            },
+          ],
+        },
+      }),
+    );
+    const serialized = JSON.stringify(extractProviderDiagnostics(err));
+    expect(serialized).not.toContain(description);
+    expect(serialized).not.toContain("Invalid JSON payload");
+    expect(serialized).not.toContain("045-305-6536");
+    expect(serialized).not.toContain("なむら");
+    expect(serialized).toContain("contents");
+  });
+
+  it("12. @type の末尾トークンのみを provider_detail_types として抽出する", () => {
+    const result = extractProviderDiagnostics(
+      badRequest([{ field: "contents" }]),
+    );
+    expect(result.provider_detail_types).toEqual(["BadRequest"]);
+    expect(JSON.stringify(result)).not.toContain("googleapis.com");
+  });
+
+  it("12b. 複数 detail type を dedupe し、安全でない @type は drop する", () => {
+    const err = apiError(
+      400,
+      JSON.stringify({
+        error: {
+          status: "INVALID_ARGUMENT",
+          details: [
+            { "@type": "type.googleapis.com/google.rpc.BadRequest" },
+            { "@type": "type.googleapis.com/google.rpc.BadRequest" },
+            { "@type": "type.googleapis.com/google.rpc.ErrorInfo" },
+            { "@type": "not a type name" },
+            { "@type": 42 },
+            {},
+          ],
+        },
+      }),
+    );
+    expect(extractProviderDiagnostics(err).provider_detail_types).toEqual([
+      "BadRequest",
+      "ErrorInfo",
+    ]);
+  });
+});
+
+/**
+ * Stage2 prompt の unpaired UTF-16 surrogate 検出(PR #180、Stage2 400 の候補B観測)。
+ *
+ * Stage2 prompt には Stage1 モデル生成テキスト(`[SOURCE] title:` / Search Note summary)が
+ * そのまま入る。lone surrogate が含まれると `JSON.stringify` で `\udXXX` として送出され、
+ * Google 側の JSON→proto transcode が invalid UTF-8 として `INVALID_ARGUMENT` を返しうる。
+ *
+ * **これは diagnostic 専用。** prompt の書き換え・sanitize・run の失敗化は一切行わない。
+ */
+describe("hasUnpairedSurrogate", () => {
+  it("13. 通常のASCIIは false", () => {
+    expect(hasUnpairedSurrogate("hello world 12345 https://example.com/a-b_c")).toBe(false);
+  });
+
+  it("14. 日本語は false", () => {
+    expect(hasUnpairedSurrogate("関内 なむら 神奈川県横浜市中区 045-305-6536")).toBe(false);
+  });
+
+  it("15. 正常な emoji(surrogate pair)は false", () => {
+    expect(hasUnpairedSurrogate("😀")).toBe(false);
+    expect(hasUnpairedSurrogate("店舗 😀 レビュー 🍣")).toBe(false);
+  });
+
+  it("16. lone high surrogate は true", () => {
+    expect(hasUnpairedSurrogate("\uD83D")).toBe(true);
+    expect(hasUnpairedSurrogate("title: 食べログ\uD800")).toBe(true);
+  });
+
+  it("17. lone low surrogate は true", () => {
+    expect(hasUnpairedSurrogate("\uDE00")).toBe(true);
+    expect(hasUnpairedSurrogate("abc\uDC00def")).toBe(true);
+  });
+
+  it("18. high surrogate の直後が low surrogate でなければ true", () => {
+    expect(hasUnpairedSurrogate("\uD83Dx")).toBe(true);
+    expect(hasUnpairedSurrogate("\uD83D\uD83Dx")).toBe(true);
+  });
+
+  it("19. 正常なペアの直後にテキストが続いても false", () => {
+    expect(hasUnpairedSurrogate("😀 と書かれていました")).toBe(false);
+  });
+
+  it("空文字は false / 巨大な正常文字列でも false", () => {
+    expect(hasUnpairedSurrogate("")).toBe(false);
+    expect(hasUnpairedSurrogate("あ".repeat(50_000))).toBe(false);
   });
 });
 

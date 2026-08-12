@@ -332,6 +332,140 @@ export interface ProviderDiagnostics {
   provider_status?: string;
   /** `google.rpc.ErrorInfo.reason` 列挙値 (例 `RATE_LIMIT_EXCEEDED`)。 */
   provider_reason?: string;
+  /**
+   * `google.rpc.BadRequest.fieldViolations[].field` のうち、**API のフィールドパス**
+   * として厳格に検証できたものだけ (PR #180、Stage2 400 observability)。
+   * 例: `generation_config.response_json_schema` / `contents[0].parts[0].text`。
+   *
+   * 400 INVALID_ARGUMENT が「request config(schema)側」か「動的 prompt(contents)側」か
+   * を切り分ける唯一の provider 由来 signal。値ではなく**フィールド名**なので安全。
+   * 同じ violation の `description` は自由文(prompt 断片・店舗名を含みうる)のため
+   * **絶対に載せない**。
+   */
+  provider_field_violations?: string[];
+  /**
+   * `error.details[]["@type"]` の**末尾トークンのみ** (例 `BadRequest` / `ErrorInfo`)。
+   * `type.googleapis.com/...` のような URL 形状は載せない。
+   */
+  provider_detail_types?: string[];
+}
+
+/**
+ * `fieldViolations[].field` として採用してよい **API フィールドパス**の形。
+ *
+ * Google の field path は protobuf のフィールド名(lower_snake_case)とインデックスの
+ * 組み合わせに限られる。この shape guard により、抽出されうるのは
+ * `contents` / `contents[0].parts[0].text` / `generation_config.response_json_schema`
+ * のような**構造上のパス**だけになる:
+ * - 空白・引用符・コロン・スラッシュを含む自由文はマッチしない
+ * - URL (`https://...`) はスラッシュとコロンでマッチしない
+ * - 日本語・大文字を含む値(店舗名・prompt 断片・camelCase の自由文)はマッチしない
+ *
+ * **マッチしない値は加工せず完全に drop する。**
+ */
+const PROVIDER_FIELD_PATH_PATTERN = /^[a-z0-9_]+(?:\.[a-z0-9_]+|\[\d+\])*$/;
+const MAX_PROVIDER_FIELD_PATH_LENGTH = 160;
+/** `@type` の末尾トークン (`google.rpc.BadRequest` → `BadRequest`) として採用してよい形。 */
+const PROVIDER_DETAIL_TYPE_PATTERN = /^[A-Za-z][A-Za-z0-9]{1,63}$/;
+/** ログが肥大化しないための件数上限(どちらも dedupe 後に適用)。 */
+const MAX_PROVIDER_DETAIL_ENTRIES = 5;
+
+/**
+ * `ApiError.message` を **strict に JSON.parse** し、`error.details[]` 配列だけを返す。
+ *
+ * `@google/genai` 1.52.0 は非2xx応答で error body 全体を `JSON.stringify` して
+ * `ApiError.message` に入れる(`dist/index.mjs` の `!response.ok` 分岐)。したがって
+ * 構造として辿れる。**自由文から広い正規表現で field path を探索する設計は採らない**
+ * (自由文の一部を誤って field path として拾い、prompt 断片を露出させうるため)。
+ *
+ * parse 失敗・期待 shape でない場合は空配列を返して safe degrade する(throw しない)。
+ */
+function readProviderErrorDetails(err: unknown): unknown[] {
+  if (!(err instanceof Error)) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(err.message);
+  } catch {
+    return [];
+  }
+  if (typeof parsed !== "object" || parsed === null) return [];
+  const error = (parsed as { error?: unknown }).error;
+  if (typeof error !== "object" || error === null) return [];
+  const details = (error as { details?: unknown }).details;
+  return Array.isArray(details) ? details : [];
+}
+
+/** dedupe + 件数上限を適用した配列を返す(空なら `undefined`)。 */
+function cappedUnique(values: readonly string[]): string[] | undefined {
+  const unique = [...new Set(values)].slice(0, MAX_PROVIDER_DETAIL_ENTRIES);
+  return unique.length > 0 ? unique : undefined;
+}
+
+function extractFieldViolations(details: readonly unknown[]): string[] | undefined {
+  const fields: string[] = [];
+  for (const detail of details) {
+    if (typeof detail !== "object" || detail === null) continue;
+    const violations = (detail as { fieldViolations?: unknown }).fieldViolations;
+    if (!Array.isArray(violations)) continue;
+    for (const violation of violations) {
+      if (typeof violation !== "object" || violation === null) continue;
+      // `description` は自由文なので読まない。`field` のみ。
+      const field = (violation as { field?: unknown }).field;
+      if (typeof field !== "string") continue;
+      if (field.length === 0 || field.length > MAX_PROVIDER_FIELD_PATH_LENGTH) continue;
+      if (!PROVIDER_FIELD_PATH_PATTERN.test(field)) continue;
+      fields.push(field);
+    }
+  }
+  return cappedUnique(fields);
+}
+
+function extractDetailTypes(details: readonly unknown[]): string[] | undefined {
+  const types: string[] = [];
+  for (const detail of details) {
+    if (typeof detail !== "object" || detail === null) continue;
+    const raw = (detail as Record<string, unknown>)["@type"];
+    if (typeof raw !== "string") continue;
+    // `type.googleapis.com/google.rpc.BadRequest` → `BadRequest`
+    const suffix = raw.split(/[./]/).pop();
+    if (suffix === undefined || !PROVIDER_DETAIL_TYPE_PATTERN.test(suffix)) continue;
+    types.push(suffix);
+  }
+  return cappedUnique(types);
+}
+
+/**
+ * 文字列に **unpaired UTF-16 surrogate** が含まれるかを判定する
+ * (PR #180、Stage2 400 INVALID_ARGUMENT の候補B観測)。
+ *
+ * ## なぜ必要か
+ *
+ * Stage2 prompt には Stage1 モデル生成テキスト(`[SOURCE] title:` や Search Note の
+ * summary)がそのまま埋め込まれる。lone surrogate が混入すると `JSON.stringify` は
+ * `\udXXX` エスケープとして送出し、Google 側の JSON→proto 変換が invalid UTF-8 として
+ * `INVALID_ARGUMENT` を返しうる。これを boolean 1つで観測できるようにする。
+ *
+ * ## 診断専用
+ *
+ * **この関数の結果で prompt を書き換えたり sanitize したり run を失敗させたりしない。**
+ * 判定するだけで、provider へは従来どおり同じ文字列を送る。
+ *
+ * 純関数。入力を変更しない。
+ */
+export function hasUnpairedSurrogate(text: string): boolean {
+  for (let i = 0; i < text.length; i += 1) {
+    const code = text.charCodeAt(i);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      // high surrogate: 直後が low surrogate でなければ unpaired。
+      const next = i + 1 < text.length ? text.charCodeAt(i + 1) : NaN;
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return true;
+      i += 1; // 正常なペアなので low 側を読み飛ばす
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      // high surrogate に続かない low surrogate は常に unpaired。
+      return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -368,6 +502,16 @@ export function extractProviderDiagnostics(err: unknown): ProviderDiagnostics {
     if (providerStatus !== undefined) diagnostics.provider_status = providerStatus;
     const providerReason = err.message.match(PROVIDER_REASON_PATTERN)?.[1];
     if (providerReason !== undefined) diagnostics.provider_reason = providerReason;
+  }
+
+  // PR #180: `error.details[]` を構造として辿り、厳格 shape guard を通った
+  // フィールドパス / detail type だけを追加する(通らなければ完全に drop)。
+  const details = readProviderErrorDetails(err);
+  if (details.length > 0) {
+    const fieldViolations = extractFieldViolations(details);
+    if (fieldViolations !== undefined) diagnostics.provider_field_violations = fieldViolations;
+    const detailTypes = extractDetailTypes(details);
+    if (detailTypes !== undefined) diagnostics.provider_detail_types = detailTypes;
   }
 
   return diagnostics;

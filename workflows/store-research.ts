@@ -184,14 +184,56 @@ export function buildFailureRecord(err: unknown): { error_kind: string; error_me
 export function extractFailureTokenUsage(
   err: unknown,
   stage1Usage: UsageMetadataLike | null,
+  stage1Diagnostics: Stage1Diagnostics | null = null,
 ): Record<string, unknown> | null {
   const usage: Record<string, unknown> = {};
   if (stage1Usage !== null) usage.stage1 = stage1Usage;
+  // PR #180: Stage1 が完了していれば diagnostics も残す。Stage1 完了前の失敗では
+  // `null` のまま渡され、0埋めした偽の diagnostics を捏造しない。
+  if (stage1Diagnostics !== null) usage.stage1_diagnostics = stage1Diagnostics;
   // `stage2` に入るのは `readMaxTokensFailureCause` の厳格な shape guard を
   // 通過した数値のみ(成功パスの `stage2_combined` と同じフィールド命名)。
   const stage2 = readMaxTokensFailureCause(err);
   if (stage2 !== null) usage.stage2 = stage2;
   return Object.keys(usage).length > 0 ? usage : null;
+}
+
+/**
+ * `token_usage.stage1_diagnostics` として永続化する sanitized な Stage1 診断
+ * (PR #180)。**count と boolean のみ。** raw text / URL / 検索クエリは含まない。
+ *
+ * 成功パス(`persistSucceededStep`)と失敗パス(`markFailedStep`)の**両方が
+ * この同じ object を使う**ため、片方だけフィールドが増減して drift することがない。
+ */
+export interface Stage1Diagnostics {
+  search_call_count: number;
+  search_query_count: number;
+  tabelog_search_attempted: boolean;
+  tabelog_source_emitted: boolean;
+  tabelog_source_block_mentions_domain: boolean;
+}
+
+/**
+ * Stage1 完了直後に、永続化する形の diagnostics を組み立てる。
+ *
+ * ここで `Stage1Outcome` の camelCase から保存用の snake_case へ写像するのは1箇所だけで、
+ * 成功/失敗の両パスがこの結果を共有する。**Stage1 が完了していない間は呼ばない**
+ * (呼ばれなければ `stage1_diagnostics` は保存されない)。
+ */
+export function buildStage1Diagnostics(stage1: {
+  searchCallCount: number;
+  searchQueryCount: number;
+  tabelogSearchAttempted: boolean;
+  tabelogSourceEmitted: boolean;
+  tabelogSourceBlockMentionsDomain: boolean;
+}): Stage1Diagnostics {
+  return {
+    search_call_count: stage1.searchCallCount,
+    search_query_count: stage1.searchQueryCount,
+    tabelog_search_attempted: stage1.tabelogSearchAttempted,
+    tabelog_source_emitted: stage1.tabelogSourceEmitted,
+    tabelog_source_block_mentions_domain: stage1.tabelogSourceBlockMentionsDomain,
+  };
 }
 
 /**
@@ -609,6 +651,7 @@ async function markFailedStep(
   runId: string,
   err: unknown,
   stage1Usage: UsageMetadataLike | null = null,
+  stage1Diagnostics: Stage1Diagnostics | null = null,
 ): Promise<void> {
   "use step";
   // `error_message` は固定文言のみ。raw なエラー内容は DB へ保存しない
@@ -627,7 +670,9 @@ async function markFailedStep(
     retry_exhausted: failure.error_kind.startsWith("retryable_exhausted"),
   });
   // Theme 5B: 失敗時も token 内訳を残す(取得できていない場合は patch に含めない)。
-  const tokenUsage = extractFailureTokenUsage(err, stage1Usage);
+  // PR #180: Stage1 完了済みなら diagnostics も同じ patch へ含める
+  // (従来は成功パスでしか保存されず、Stage2 失敗のたびに失われていた)。
+  const tokenUsage = extractFailureTokenUsage(err, stage1Usage, stage1Diagnostics);
   await repos.researchRun.update(runId, {
     status: "failed",
     ...failure,
@@ -663,6 +708,9 @@ export async function storeResearchWorkflow(
   // Stage2 が失敗しても Stage1 の usage を失わないよう、try の外側で保持する
   // (feat/ai-research-quality-ux-hardening、Theme 5B)。
   let stage1Usage: UsageMetadataLike | null = null;
+  // 同じ理由で Stage1 diagnostics も try の外側で保持する(PR #180)。
+  // Stage1 完了前は `null` のままで、その場合 `stage1_diagnostics` は保存されない。
+  let stage1Diagnostics: Stage1Diagnostics | null = null;
 
   try {
     const { store, basicInfo, googlePlaceId, knownStoreDataUrls } = await loadStoreStep(storeId);
@@ -713,6 +761,7 @@ export async function storeResearchWorkflow(
     // Stage1: Source Discovery(Google Search)。
     const stage1 = await stage1Step(store);
     stage1Usage = stage1.usageMetadata;
+    stage1Diagnostics = buildStage1Diagnostics(stage1);
 
     // known_store_data(既存DBの公開URL)をSource Registryへ優先seedする。
     const knownEntries = buildKnownStoreDataEntries(knownStoreDataUrls);
@@ -814,19 +863,10 @@ export async function storeResearchWorkflow(
         // jsonb (`store_research_runs.token_usage`) 配下のため、フィールド追加に
         // migration は不要。保存するのは件数と boolean のみで、検索クエリ文字列は
         // `client.ts:extractSearchDiagnostics` の中で破棄済み(ここには届かない)。
-        stage1_diagnostics: {
-          search_call_count: stage1.searchCallCount,
-          search_query_count: stage1.searchQueryCount,
-          // 食べログ検索の mandatory attempt を実際に行ったか(PR #180 BLOCKER 1)。
-          // false でも run は succeeded のまま継続する(observability のみ)。
-          tabelog_search_attempted: stage1.tabelogSearchAttempted,
-          // 検索実行後にどこで食べログが消えたかを次回 smoke で分離するための診断値。
-          // emitted=false / mentions_domain=true なら「SOURCE ブロック内に書いたが
-          // 既存 parser の要求形式を満たさなかった」、両方 false なら
-          // 「モデル出力に食べログ SOURCE 自体が無い」と読む。いずれも run は失敗させない。
-          tabelog_source_emitted: stage1.tabelogSourceEmitted,
-          tabelog_source_block_mentions_domain: stage1.tabelogSourceBlockMentionsDomain,
-        },
+        //
+        // 失敗パス(`markFailedStep`)と**同じ object** を使う(PR #180)。
+        // ここで inline 構築すると成功パスだけフィールドが増減して drift しうる。
+        stage1_diagnostics: stage1Diagnostics,
         stage2_combined: stage2Result.usageMetadata,
       },
       warnings,
@@ -836,7 +876,7 @@ export async function storeResearchWorkflow(
   } catch (err) {
     // running状態から抜け出せない状態を作らない(Plan §17の必須要件)。
     // Workflow自体もfailedとして記録されるようre-throwする(観測性の二重化)。
-    await markFailedStep(runId, err, stage1Usage);
+    await markFailedStep(runId, err, stage1Usage, stage1Diagnostics);
     throw err;
   }
 }

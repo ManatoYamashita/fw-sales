@@ -21,6 +21,7 @@ import {
   normalizeSdkError,
   makeError,
   extractProviderDiagnostics,
+  hasUnpairedSurrogate,
   type AiClientError,
 } from "@/lib/ai/client";
 import type { GroundingMetadataLike } from "./source-registry";
@@ -165,12 +166,36 @@ function extractUsageMetadata(um: unknown): UsageMetadataLike | null {
  * - raw `err.message` / レスポンス本文 / request ID / API key / headers は出さない。
  * - `AiClientError` の `message` フィールド(`unknown` kind が持つ定型文)も出さない。
  */
-function logGeminiCallFailure(stage: "stage1" | "stage2", err: unknown, kind: AiClientError["kind"]): void {
+function logGeminiCallFailure(
+  stage: "stage1" | "stage2",
+  err: unknown,
+  kind: AiClientError["kind"],
+  requestDiagnostics?: RequestDiagnostics,
+): void {
   console.error("[research.gemini] call failed", {
     stage,
     kind,
     ...extractProviderDiagnostics(err),
+    ...(requestDiagnostics ?? {}),
   });
+}
+
+/**
+ * 失敗ログにだけ添える **request 側の sanitized 診断**(PR #180、Stage2 400 observability)。
+ *
+ * `extractProviderDiagnostics` が provider 応答側を担うのに対し、こちらは
+ * 「我々が送ったリクエストの性質」を boolean で記録する。
+ * **boolean のみ。** raw prompt・文字位置・文字コード・周辺文字は一切出さない。
+ * `AiClientError` にも DB にも載せない(ログ専用)。
+ */
+interface RequestDiagnostics {
+  /**
+   * Stage2 prompt に unpaired UTF-16 surrogate が含まれていたか。
+   * 実機の Stage2 `400 INVALID_ARGUMENT` について、
+   * 「動的 prompt の Unicode 不正」仮説を次回 smoke で直接検証するための観測値。
+   * **この値で prompt を書き換えたり run を失敗させたりしない。**
+   */
+  prompt_has_unpaired_surrogate: boolean;
 }
 
 /**
@@ -202,9 +227,13 @@ function logMaxTokens(stage: "stage1" | "stage2", usage: UsageMetadataLike | nul
  * SDK 生エラーを正規化しつつ、失敗を sanitized にログへ残す。
  * 正規化後の `AiClientError` の内容は従来と一切変わらない(分類ロジックは無変更)。
  */
-function normalizeAndLog(stage: "stage1" | "stage2", err: unknown): AiClientError {
+function normalizeAndLog(
+  stage: "stage1" | "stage2",
+  err: unknown,
+  requestDiagnostics?: RequestDiagnostics,
+): AiClientError {
   const normalized = normalizeSdkError(err);
-  logGeminiCallFailure(stage, err, normalized.kind);
+  logGeminiCallFailure(stage, err, normalized.kind, requestDiagnostics);
   return normalized;
 }
 
@@ -313,7 +342,11 @@ export function createResearchGeminiClient(): ResearchGeminiClient {
           usageMetadata: extractUsageMetadata(response.usageMetadata),
         };
       } catch (err) {
-        throw normalizeAndLog("stage2", err);
+        // prompt は**一切変更せず**、失敗時にだけ性質を boolean で観測する(PR #180)。
+        // 成功パスでは評価すらしない(失敗時のみのコスト)。
+        throw normalizeAndLog("stage2", err, {
+          prompt_has_unpaired_surrogate: hasUnpairedSurrogate(prompt),
+        });
       }
     },
   };

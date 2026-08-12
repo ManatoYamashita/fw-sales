@@ -743,6 +743,83 @@ describe("extractFailureTokenUsage (Theme 5B)", () => {
     expect(extractFailureTokenUsage(new Error("db down"), null)).toBeNull();
   });
 
+  /**
+   * Stage1 diagnostics の失敗時 persistence(PR #180)。
+   *
+   * 実機で Stage2 が `api_error:400` で落ちた際、`token_usage` に `stage1` しか残らず、
+   * Stage1 完了時点で確定していた 5 つの diagnostics(検索回数・食べログ観測)が
+   * すべて失われていた。原因は `stage1_diagnostics` が `persistSucceededStep` の
+   * 呼び出し内でのみ inline 構築されていたこと。成功/失敗で同じ object を使う。
+   *
+   * 保存するのは count と boolean のみで、raw URL / query / text は含まない。
+   */
+  describe("stage1_diagnostics の失敗時 persistence", () => {
+    const DIAGNOSTICS = {
+      search_call_count: 3,
+      search_query_count: 12,
+      tabelog_search_attempted: true,
+      tabelog_source_emitted: false,
+      tabelog_source_block_mentions_domain: false,
+    };
+
+    it("23. Stage1完了後にStage2がapi_error:400で落ちてもstage1/stage1_diagnosticsを保存する", () => {
+      const stage1 = { ...USAGE };
+      const apiError = classifyForWorkflowRetry({
+        kind: "api_error",
+        status: 400,
+      } as AiClientError);
+      expect(extractFailureTokenUsage(apiError, stage1, DIAGNOSTICS)).toEqual({
+        stage1,
+        stage1_diagnostics: DIAGNOSTICS,
+      });
+    });
+
+    it("24. Stage2がmax_tokensの場合はstage1 / stage1_diagnostics / stage2をすべて残す", () => {
+      const stage1 = { ...USAGE, totalTokenCount: 999 };
+      expect(extractFailureTokenUsage(maxTokensError(USAGE), stage1, DIAGNOSTICS)).toEqual({
+        stage1,
+        stage1_diagnostics: DIAGNOSTICS,
+        stage2: USAGE,
+      });
+    });
+
+    it("25. Stage1完了前の失敗ではstage1_diagnosticsを作らない(0埋めの捏造をしない)", () => {
+      const apiError = classifyForWorkflowRetry({
+        kind: "api_error",
+        status: 400,
+      } as AiClientError);
+      expect(extractFailureTokenUsage(apiError, null, null)).toBeNull();
+      // Stage1 usage だけある(diagnostics 未確定)状態でも捏造しない。
+      const stage1 = { ...USAGE };
+      const result = extractFailureTokenUsage(apiError, stage1, null);
+      expect(result).toEqual({ stage1 });
+      expect(result).not.toHaveProperty("stage1_diagnostics");
+    });
+
+    it("27. 保存される diagnostics に raw URL / query / text が含まれない", () => {
+      const stage1 = { ...USAGE };
+      const serialized = JSON.stringify(
+        extractFailureTokenUsage(new Error("db down"), stage1, DIAGNOSTICS),
+      );
+      expect(serialized).not.toContain("tabelog.com");
+      expect(serialized).not.toContain("なむら");
+      expect(serialized).not.toContain("[SOURCE]");
+      expect(serialized).not.toContain("http");
+      for (const value of Object.values(DIAGNOSTICS)) {
+        expect(["number", "boolean"]).toContain(typeof value);
+      }
+    });
+
+    it("28. 第3引数を省略した既存呼び出しは従来どおり動作する(後方互換)", () => {
+      const stage1 = { ...USAGE };
+      expect(extractFailureTokenUsage(maxTokensError(USAGE), stage1)).toEqual({
+        stage1,
+        stage2: USAGE,
+      });
+      expect(extractFailureTokenUsage(new Error("db down"), null)).toBeNull();
+    });
+  });
+
   it("生のAiClientErrorを直接渡してもstage2を採用しない(guard必須、最終レビュー指摘)", () => {
     // `markFailedStep` に届くのは常に cause 付きの FatalError。guard を通らない
     // 入力から usage を拾う裏口を残さない。

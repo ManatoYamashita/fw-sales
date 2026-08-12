@@ -380,12 +380,15 @@ describe("Gemini呼出失敗のsanitized structured log", () => {
     expect(errorSpy).toHaveBeenCalledTimes(1);
     const [message, fields] = errorSpy.mock.calls[0]!;
     expect(message).toBe("[research.gemini] call failed");
+    // `provider_detail_types` は PR #180 で追加(`@type` の末尾トークンのみ)。
+    // Stage1 の失敗ログには request 側 diagnostic(prompt_has_unpaired_surrogate)を付けない。
     expect(fields).toEqual({
       stage: "stage1",
       kind: "rate_limit",
       http_status: 429,
       provider_status: "RESOURCE_EXHAUSTED",
       provider_reason: "RATE_LIMIT_EXCEEDED",
+      provider_detail_types: ["ErrorInfo"],
     });
   });
 
@@ -403,6 +406,93 @@ describe("Gemini呼出失敗のsanitized structured log", () => {
 
     const [, fields] = errorSpy.mock.calls[0]!;
     expect(fields).toMatchObject({ stage: "stage2", kind: "api_error", http_status: 503 });
+  });
+
+  /**
+   * Stage2 400 の候補B(動的 prompt に unpaired UTF-16 surrogate が混入)を
+   * 次回 Preview smoke で直接観測するための diagnostic(PR #180)。
+   *
+   * **boolean のみ。** raw prompt / 文字位置 / 文字コード / 周辺文字はログへ出さない。
+   * prompt 自体も一切書き換えず、provider へは従来どおり同じ文字列を送る。
+   */
+  describe("Stage2 prompt_has_unpaired_surrogate", () => {
+    const BAD_REQUEST_BODY = JSON.stringify({
+      error: {
+        code: 400,
+        message: "Request contains an invalid argument.",
+        status: "INVALID_ARGUMENT",
+        details: [
+          {
+            "@type": "type.googleapis.com/google.rpc.BadRequest",
+            fieldViolations: [{ field: "contents", description: "raw 断片 関内 なむら" }],
+          },
+        ],
+      },
+    });
+
+    const failStage2 = async (prompt: string) => {
+      mockGenerateContent.mockRejectedValue(
+        Object.assign(new Error(BAD_REQUEST_BODY), { status: 400 }),
+      );
+      await expect(
+        createResearchGeminiClient().runStructuredUrlContext(
+          { prompt, jsonSchema: { type: "object" } },
+          AbortSignal.timeout(1000),
+        ),
+      ).rejects.toMatchObject({ kind: "api_error", status: 400 });
+      return errorSpy.mock.calls[0]!;
+    };
+
+    it("20a. prompt に lone surrogate があれば true を記録する", async () => {
+      const [message, fields] = await failStage2("title: 食べログ\uD800 / 予約");
+      expect(message).toBe("[research.gemini] call failed");
+      expect(fields).toMatchObject({
+        stage: "stage2",
+        kind: "api_error",
+        http_status: 400,
+        provider_status: "INVALID_ARGUMENT",
+        provider_field_violations: ["contents"],
+        prompt_has_unpaired_surrogate: true,
+      });
+    });
+
+    it("20b. 正常な prompt では false を記録する", async () => {
+      const [, fields] = await failStage2("関内 なむら の調査 😀 https://retty.me/x/");
+      expect(fields).toMatchObject({ prompt_has_unpaired_surrogate: false });
+    });
+
+    it("21. raw prompt / fieldViolation description / raw message をログへ出さない", async () => {
+      const prompt = "対象店舗: 関内 なむら / 電話番号: 045-305-6536\uD800";
+      const [, fields] = await failStage2(prompt);
+      const serialized = JSON.stringify(fields);
+      expect(serialized).not.toContain("045-305-6536");
+      expect(serialized).not.toContain("なむら");
+      expect(serialized).not.toContain("raw 断片");
+      expect(serialized).not.toContain("Request contains an invalid argument");
+      expect(serialized).toContain("prompt_has_unpaired_surrogate");
+    });
+
+    it("22. diagnostic を計算しても provider へ渡す prompt 文字列は変わらない", async () => {
+      const prompt = "title: 食べログ\uD800 / 予約";
+      await failStage2(prompt);
+      const call = mockGenerateContent.mock.calls.at(-1)!;
+      const sentText = call[0].contents[0].parts[0].text;
+      expect(sentText).toBe(prompt);
+      expect(sentText.includes("\uD800")).toBe(true);
+      // sanitize / 置換文字への変換をしていないこと。
+      expect(sentText).not.toContain("�");
+    });
+
+    it("Stage1 の失敗ログには prompt_has_unpaired_surrogate を付けない", async () => {
+      mockGenerateContent.mockRejectedValue(
+        Object.assign(new Error(BAD_REQUEST_BODY), { status: 400 }),
+      );
+      await createResearchGeminiClient()
+        .runSourceDiscovery("p\uD800", AbortSignal.timeout(1000))
+        .catch(() => undefined);
+      const [, fields] = errorSpy.mock.calls[0]!;
+      expect(fields).not.toHaveProperty("prompt_has_unpaired_surrogate");
+    });
   });
 
   it("元Errorオブジェクト・raw message・API key・request IDをログへ渡さない", async () => {
