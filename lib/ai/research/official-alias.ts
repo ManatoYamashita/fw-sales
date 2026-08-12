@@ -48,7 +48,7 @@
 
 import "server-only";
 
-import { resolveGroundingRedirectUrl } from "./source-url-resolver";
+import { isAllowedStartHost, resolveGroundingRedirectUrl } from "./source-url-resolver";
 import { isStrictSameUrl, normalizeUrlForMatch } from "./url-normalize";
 import { reindexSourceRegistry } from "./source-registry";
 import type { SourceRegistryEntry } from "@/lib/ai/research-result-schema";
@@ -71,9 +71,44 @@ export interface ResolveOfficialAliasesParams {
 export interface ResolveOfficialAliasesResult {
   registry: SourceRegistryEntry[];
   /** 統合(破棄)した候補エントリ数。structured log 用。 */
-  mergedCount: number;
+  merged: number;
   /** resolve を試みた候補エントリ数。structured log 用。 */
-  attemptedCount: number;
+  attempted: number;
+  /** 起点ホストが許可外で resolve 対象にしなかった候補数。 */
+  skippedUnsupportedHost: number;
+  /**
+   * 統合に至らなかった理由ごとの件数(**sanitized token のみ**)。
+   *
+   * 実機では `attempted: 8 / merged: 0` しか残らず、timeout / DNS / IP 拒否の
+   * どれなのか切り分けられなかった。URL・redirect token・provider response 本文・
+   * 生エラーメッセージは**一切含めない**(allowlist 外は `request_error` に丸める)。
+   */
+  failures: Record<string, number>;
+}
+
+/**
+ * `resolveGroundingRedirectUrl` が返す **静的な** reason の allowlist。
+ * ここに無い文字列(ネットワークエラーの生メッセージ等。IP やホスト名を含みうる)は
+ * `request_error` へ丸めてからでないとログへ出さない。
+ */
+const KNOWN_RESOLVE_FAILURE_REASONS: ReadonlySet<string> = new Set([
+  "invalid_url",
+  "disallowed_start_host",
+  "non_https_scheme",
+  "credentials_in_url",
+  "dns_lookup_failed",
+  "dns_no_records",
+  "disallowed_ip_range",
+  "timeout",
+  "invalid_redirect_location",
+  "too_many_redirects",
+  "hop_timeout",
+]);
+
+function sanitizeResolveFailureReason(reason: unknown): string {
+  return typeof reason === "string" && KNOWN_RESOLVE_FAILURE_REASONS.has(reason)
+    ? reason
+    : "request_error";
 }
 
 /**
@@ -87,14 +122,19 @@ export async function resolveOfficialAliases(
   params: ResolveOfficialAliasesParams,
 ): Promise<ResolveOfficialAliasesResult> {
   const { registry, knownOfficialUrls, maxEntries = ALIAS_RESOLVE_MAX_ENTRIES } = params;
+  const empty = (skippedUnsupportedHost = 0): ResolveOfficialAliasesResult => ({
+    registry: [...registry],
+    merged: 0,
+    attempted: 0,
+    skippedUnsupportedHost,
+    failures: {},
+  });
 
   // known official URL が無い店舗では統合の余地が無い。無駄な HEAD を出さない。
   const normalizedKnown = knownOfficialUrls
     .map((url) => normalizeUrlForMatch(url))
     .filter((url): url is string => url !== null);
-  if (normalizedKnown.length === 0) {
-    return { registry: [...registry], mergedCount: 0, attemptedCount: 0 };
-  }
+  if (normalizedKnown.length === 0) return empty();
 
   // 統合先(known_store_data エントリ)が存在する URL だけを対象にする。
   const mergeTargets = new Set(
@@ -103,16 +143,24 @@ export async function resolveOfficialAliases(
       .map((entry) => normalizeUrlForMatch(entry.grounding_redirect_url))
       .filter((url): url is string => url !== null && normalizedKnown.includes(url)),
   );
-  if (mergeTargets.size === 0) {
-    return { registry: [...registry], mergedCount: 0, attemptedCount: 0 };
-  }
+  if (mergeTargets.size === 0) return empty();
 
-  const candidates = registry
-    .filter((entry) => entry.discovery_provenance === "gemini_search_candidate")
-    .slice(0, maxEntries);
-  if (candidates.length === 0) {
-    return { registry: [...registry], mergedCount: 0, attemptedCount: 0 };
-  }
+  // 起点ホストが許可外の候補は `resolveGroundingRedirectUrl` が
+  // ネットワークに出る前に `disallowed_start_host` で必ず失敗する。
+  // モデルの `[SOURCE]` は実サイトURL(食べログ等)を書いてくることもあるため、
+  // これらを attempt に含めると **maxEntries の枠を食い潰して本命の redirect が
+  // 試行されない**。resolve 対象から先に除外する(registry からは落とさない)。
+  const geminiCandidates = registry.filter(
+    (entry) => entry.discovery_provenance === "gemini_search_candidate",
+  );
+  const resolvable = geminiCandidates.filter((entry) => {
+    const host = hostnameOfCandidate(entry.grounding_redirect_url);
+    return host !== null && isAllowedStartHost(host);
+  });
+  const skippedUnsupportedHost = geminiCandidates.length - resolvable.length;
+
+  const candidates = resolvable.slice(0, maxEntries);
+  if (candidates.length === 0) return empty(skippedUnsupportedHost);
 
   const settled = await Promise.allSettled(
     candidates.map((entry) => resolveGroundingRedirectUrl(entry.grounding_redirect_url)),
@@ -120,14 +168,22 @@ export async function resolveOfficialAliases(
 
   /** grounding_redirect_url → 解決結果。 */
   const outcomeByUrl = new Map<string, { resolvedUrl: string | null; isAlias: boolean }>();
+  const failures: Record<string, number> = {};
+  const countFailure = (reason: string): void => {
+    failures[reason] = (failures[reason] ?? 0) + 1;
+  };
+
   candidates.forEach((entry, index) => {
     const settledResult = settled[index];
     if (settledResult === undefined || settledResult.status === "rejected") {
+      // 生の例外メッセージはログへ出さない(IP・ホスト名を含みうる)。
+      countFailure("rejected");
       outcomeByUrl.set(entry.grounding_redirect_url, { resolvedUrl: null, isAlias: false });
       return;
     }
     const outcome = settledResult.value;
     if (outcome.status !== "resolved") {
+      countFailure(sanitizeResolveFailureReason(outcome.reason));
       outcomeByUrl.set(entry.grounding_redirect_url, { resolvedUrl: null, isAlias: false });
       return;
     }
@@ -142,6 +198,8 @@ export async function resolveOfficialAliases(
         const normalized = normalizeUrlForMatch(knownUrl);
         return normalized !== null && mergeTargets.has(normalized);
       });
+    if (!isSuccessStatus) countFailure("non_2xx_final");
+    else if (!isAlias) countFailure("no_strict_match");
     outcomeByUrl.set(entry.grounding_redirect_url, { resolvedUrl: outcome.url, isAlias });
   });
 
@@ -170,7 +228,18 @@ export async function resolveOfficialAliases(
   return {
     // Stage2 プロンプトへ渡す前なので、id を詰め直してよい(モデルはまだ参照していない)。
     registry: mergedCount > 0 ? reindexSourceRegistry(next) : next,
-    mergedCount,
-    attemptedCount: candidates.length,
+    merged: mergedCount,
+    attempted: candidates.length,
+    skippedUnsupportedHost,
+    failures,
   };
+}
+
+/** URL の hostname を取り出す(解釈できなければ `null`)。 */
+function hostnameOfCandidate(rawUrl: string): string | null {
+  try {
+    return new URL(rawUrl).hostname;
+  } catch {
+    return null;
+  }
 }

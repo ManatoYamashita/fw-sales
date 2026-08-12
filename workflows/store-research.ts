@@ -546,10 +546,16 @@ async function resolveAndPersistSourceRegistryStep(
     registry: sourceRegistry,
     knownOfficialUrls,
   });
+  // 失敗理由の内訳まで残す(PR #180 final smoke hardening、Issue A)。
+  // 実機では `attempted: 8 / merged: 0` しか出ておらず、timeout / DNS / IP 拒否の
+  // どれなのかを切り分けられなかった。出すのは allowlist 済みの reason token と
+  // その件数だけで、URL・redirect token・生エラーメッセージは含めない。
   console.info("[research.alias] official alias resolve", {
     runId,
-    attempted: aliased.attemptedCount,
-    merged: aliased.mergedCount,
+    attempted: aliased.attempted,
+    merged: aliased.merged,
+    skipped_unsupported_host: aliased.skippedUnsupportedHost,
+    failures: aliased.failures,
   });
   await repos.researchRun.update(runId, { source_registry: aliased.registry });
   return aliased.registry;

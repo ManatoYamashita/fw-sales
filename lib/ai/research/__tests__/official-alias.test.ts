@@ -28,9 +28,12 @@ vi.mock("server-only", () => ({}));
 
 const { mockResolve } = vi.hoisted(() => ({ mockResolve: vi.fn() }));
 
-vi.mock("../source-url-resolver", () => ({
-  resolveGroundingRedirectUrl: mockResolve,
-}));
+// `isAllowedStartHost` は SSRF ガードそのものなので **実装を使う**(mock しない)。
+// resolve の I/O だけを差し替える。
+vi.mock("../source-url-resolver", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../source-url-resolver")>();
+  return { ...actual, resolveGroundingRedirectUrl: mockResolve };
+});
 
 const { resolveOfficialAliases } = await import("../official-alias");
 
@@ -77,7 +80,7 @@ describe("resolveOfficialAliases — 統合する条件", () => {
       knownOfficialUrls: [KNOWN_URL],
     });
 
-    expect(result.mergedCount).toBe(1);
+    expect(result.merged).toBe(1);
     expect(result.registry).toHaveLength(1);
     expect(result.registry[0]!.discovery_provenance).toBe("known_store_data");
     expect(result.registry[0]!.source_type).toBe("official_site");
@@ -117,7 +120,7 @@ describe("resolveOfficialAliases — 統合する条件", () => {
       registry: [knownEntry(), candidateEntry()],
       knownOfficialUrls: [KNOWN_URL],
     });
-    expect(result.mergedCount).toBe(1);
+    expect(result.merged).toBe(1);
   });
 });
 
@@ -129,7 +132,7 @@ describe("resolveOfficialAliases — 統合しない条件(安全側fallback)", 
     });
     expect(mockResolve).not.toHaveBeenCalled();
     expect(result.registry).toHaveLength(1);
-    expect(result.mergedCount).toBe(0);
+    expect(result.merged).toBe(0);
   });
 
   it("final HTTP statusが4xx/5xxなら統合しない(承認レビュー指摘2)", async () => {
@@ -138,7 +141,7 @@ describe("resolveOfficialAliases — 統合しない条件(安全側fallback)", 
       registry: [knownEntry(), candidateEntry()],
       knownOfficialUrls: [KNOWN_URL],
     });
-    expect(notFound.mergedCount).toBe(0);
+    expect(notFound.merged).toBe(0);
     expect(notFound.registry).toHaveLength(2);
 
     mockResolve.mockResolvedValue({ status: "resolved", url: KNOWN_URL, finalStatus: 503 });
@@ -146,7 +149,7 @@ describe("resolveOfficialAliases — 統合しない条件(安全側fallback)", 
       registry: [knownEntry(), candidateEntry()],
       knownOfficialUrls: [KNOWN_URL],
     });
-    expect(serverError.mergedCount).toBe(0);
+    expect(serverError.merged).toBe(0);
   });
 
   it("resolver failureなら統合せずregistryを変更しない", async () => {
@@ -155,7 +158,7 @@ describe("resolveOfficialAliases — 統合しない条件(安全側fallback)", 
       registry: [knownEntry(), candidateEntry()],
       knownOfficialUrls: [KNOWN_URL],
     });
-    expect(result.mergedCount).toBe(0);
+    expect(result.merged).toBe(0);
     expect(result.registry).toHaveLength(2);
   });
 
@@ -165,7 +168,7 @@ describe("resolveOfficialAliases — 統合しない条件(安全側fallback)", 
       registry: [knownEntry(), candidateEntry()],
       knownOfficialUrls: [KNOWN_URL],
     });
-    expect(result.mergedCount).toBe(0);
+    expect(result.merged).toBe(0);
     expect(result.registry).toHaveLength(2);
   });
 
@@ -179,7 +182,7 @@ describe("resolveOfficialAliases — 統合しない条件(安全側fallback)", 
       registry: [knownEntry(), candidateEntry()],
       knownOfficialUrls: [KNOWN_URL],
     });
-    expect(result.mergedCount).toBe(0);
+    expect(result.merged).toBe(0);
   });
 
   it("www.の有無だけの違いでは統合しない", async () => {
@@ -192,7 +195,7 @@ describe("resolveOfficialAliases — 統合しない条件(安全側fallback)", 
       registry: [knownEntry(), candidateEntry()],
       knownOfficialUrls: [KNOWN_URL],
     });
-    expect(result.mergedCount).toBe(0);
+    expect(result.merged).toBe(0);
   });
 
   it("known_store_dataエントリが存在しなければ統合しない(統合先が無い)", async () => {
@@ -201,7 +204,7 @@ describe("resolveOfficialAliases — 統合しない条件(安全側fallback)", 
       registry: [candidateEntry()],
       knownOfficialUrls: [KNOWN_URL],
     });
-    expect(result.mergedCount).toBe(0);
+    expect(result.merged).toBe(0);
     expect(result.registry).toHaveLength(1);
   });
 
@@ -313,5 +316,161 @@ describe("alias統合とSearchFactの関係(最終レビュー指摘3)", () => {
 
     const urls = result.registry.map((e) => e.grounding_redirect_url);
     expect(urls).toContain(REDIRECT);
+  });
+});
+
+/**
+ * 失敗理由の sanitized な集計(PR #180 final smoke hardening、Issue A observability)。
+ *
+ * 実機では `attempted: 8 / merged: 0` しか残らず、
+ * 「timeout なのか DNS なのか IP 拒否なのか」を切り分けられなかった。
+ * **理由ごとの件数だけ**を allowlist 済みトークンで返す。
+ * URL / redirect token / provider response 本文 / 生エラーメッセージは一切含めない。
+ */
+describe("resolveOfficialAliases — failure reason の集計 (Issue A observability)", () => {
+  it("resolver failure の reason を件数として返す", async () => {
+    mockResolve.mockResolvedValue({ status: "failed", reason: "timeout" });
+
+    const result = await resolveOfficialAliases({
+      registry: [knownEntry(), candidateEntry()],
+      knownOfficialUrls: [KNOWN_URL],
+    });
+
+    expect(result.failures).toEqual({ timeout: 1 });
+  });
+
+  it("allowlist外の生エラーメッセージは request_error に丸める(IP/URLを漏らさない)", async () => {
+    mockResolve.mockResolvedValue({
+      status: "failed",
+      reason: "connect ENETUNREACH 2404:6800:4004:80a::2004:443",
+    });
+
+    const result = await resolveOfficialAliases({
+      registry: [knownEntry(), candidateEntry()],
+      knownOfficialUrls: [KNOWN_URL],
+    });
+
+    expect(result.failures).toEqual({ request_error: 1 });
+    expect(JSON.stringify(result.failures)).not.toContain("2404");
+    expect(JSON.stringify(result.failures)).not.toContain("ENETUNREACH");
+  });
+
+  it("final statusが2xxでない場合は non_2xx_final として数える", async () => {
+    mockResolve.mockResolvedValue({ status: "resolved", url: KNOWN_URL, finalStatus: 404 });
+
+    const result = await resolveOfficialAliases({
+      registry: [knownEntry(), candidateEntry()],
+      knownOfficialUrls: [KNOWN_URL],
+    });
+
+    expect(result.failures).toEqual({ non_2xx_final: 1 });
+  });
+
+  it("解決できたがknown official URLと厳格一致しない場合は no_strict_match", async () => {
+    mockResolve.mockResolvedValue({
+      status: "resolved",
+      url: "https://tabelog.com/xyz/",
+      finalStatus: 200,
+    });
+
+    const result = await resolveOfficialAliases({
+      registry: [knownEntry(), candidateEntry()],
+      knownOfficialUrls: [KNOWN_URL],
+    });
+
+    expect(result.failures).toEqual({ no_strict_match: 1 });
+  });
+
+  it("resolverがrejectした場合は rejected として数える", async () => {
+    mockResolve.mockRejectedValue(new Error("boom"));
+
+    const result = await resolveOfficialAliases({
+      registry: [knownEntry(), candidateEntry()],
+      knownOfficialUrls: [KNOWN_URL],
+    });
+
+    expect(result.failures).toEqual({ rejected: 1 });
+    expect(JSON.stringify(result.failures)).not.toContain("boom");
+  });
+
+  it("統合できた場合はfailuresに何も積まない", async () => {
+    mockResolve.mockResolvedValue({ status: "resolved", url: KNOWN_URL, finalStatus: 200 });
+
+    const result = await resolveOfficialAliases({
+      registry: [knownEntry(), candidateEntry()],
+      knownOfficialUrls: [KNOWN_URL],
+    });
+
+    expect(result.merged).toBe(1);
+    expect(result.failures).toEqual({});
+  });
+
+  it("複数候補の理由を種別ごとに合算する", async () => {
+    mockResolve.mockImplementation((url: string) =>
+      Promise.resolve(
+        url.endsWith("a")
+          ? { status: "failed", reason: "timeout" }
+          : { status: "failed", reason: "dns_lookup_failed" },
+      ),
+    );
+
+    const result = await resolveOfficialAliases({
+      registry: [
+        knownEntry(),
+        candidateEntry({ id: "S02", grounding_redirect_url: `${REDIRECT}a` }),
+        candidateEntry({ id: "S03", grounding_redirect_url: `${REDIRECT}b` }),
+        candidateEntry({ id: "S04", grounding_redirect_url: `${REDIRECT}c` }),
+      ],
+      knownOfficialUrls: [KNOWN_URL],
+    });
+
+    expect(result.failures).toEqual({ timeout: 1, dns_lookup_failed: 2 });
+  });
+});
+
+/**
+ * resolve 対象の絞り込み(Issue A)。
+ *
+ * `resolveGroundingRedirectUrl` は起点ホストが `vertexaisearch.cloud.google.com` 以外なら
+ * ネットワークに出る前に `disallowed_start_host` で失敗する。モデルの `[SOURCE]` は
+ * 実サイトURL(食べログ等)を書いてくることもあるため、これらを attempt に含めると
+ * **maxEntries の枠を食い潰して本命の redirect が試行されない**。
+ */
+describe("resolveOfficialAliases — resolve 対象の絞り込み (Issue A)", () => {
+  it("起点ホストが許可外の候補はresolverへ渡さない", async () => {
+    mockResolve.mockResolvedValue({ status: "failed", reason: "timeout" });
+
+    const result = await resolveOfficialAliases({
+      registry: [
+        knownEntry(),
+        candidateEntry({ id: "S02", grounding_redirect_url: "https://tabelog.com/abc/" }),
+      ],
+      knownOfficialUrls: [KNOWN_URL],
+    });
+
+    expect(mockResolve).not.toHaveBeenCalled();
+    expect(result.attempted).toBe(0);
+    expect(result.skippedUnsupportedHost).toBe(1);
+    // 対象外の候補は registry からも落とさず、resolve_status も変えない
+    const candidate = result.registry.find((e) => e.id === "S02");
+    expect(candidate?.resolve_status).toBe("skipped");
+  });
+
+  it("許可外候補がmaxEntriesを食い潰さない(本命のredirectが必ず試行される)", async () => {
+    mockResolve.mockResolvedValue({ status: "resolved", url: KNOWN_URL, finalStatus: 200 });
+
+    const unsupported = Array.from({ length: 8 }, (_, i) =>
+      candidateEntry({ id: `S${i + 10}`, grounding_redirect_url: `https://tabelog.com/${i}/` }),
+    );
+
+    const result = await resolveOfficialAliases({
+      registry: [knownEntry(), ...unsupported, candidateEntry()],
+      knownOfficialUrls: [KNOWN_URL],
+      maxEntries: 8,
+    });
+
+    expect(mockResolve).toHaveBeenCalledTimes(1);
+    expect(mockResolve).toHaveBeenCalledWith(REDIRECT);
+    expect(result.merged).toBe(1);
   });
 });

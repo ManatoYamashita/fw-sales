@@ -191,20 +191,46 @@ async function validateHopSafety(url: URL): Promise<HopSafetyOk | HopSafetyNg> {
 
   // 検証済みの最初の実IPへ接続を固定する (dns rebinding対策)。
   const pinned = candidateAddresses[0]!;
-  const pinnedLookup: LookupFunction = (_hostname, options, callback) => {
+  return { ok: true, pinnedLookup: createPinnedLookup(pinned.address, pinned.family) };
+}
+
+/**
+ * 検証済みの単一 IP へ接続を固定する `lookup` を作る(DNS rebinding 対策)。
+ *
+ * ## `options.all` を必ず尊重すること(PR #180 final smoke hardening)
+ *
+ * Node 20 以降、`net` の `autoSelectFamily` が既定で **true** になった。この場合
+ * `net.Socket.connect` は custom `lookup` を **`{ all: true }`** 付きで呼び出し、
+ * コールバックへ **`LookupAddress[]`(配列)** が返ることを期待する。
+ *
+ * 旧実装は `options.all` を無視して常に `callback(null, address, family)` の
+ * スカラー形式で返していたため、Node が `addresses[0].address` を読んで `undefined` を得、
+ * **ネットワークに出る前に `ERR_INVALID_IP_ADDRESS` で必ず失敗**していた。
+ * 実機(炉端ジュン)で alias resolve が 8 件中 0 件成功だった直接原因がこれである。
+ *
+ * `source-url-resolver.test.ts` は `node:https` / `node:dns` を丸ごと mock するため
+ * この契約違反を検知できなかった。実 connect パスでの回帰テストは
+ * `source-url-resolver.pinned-lookup.test.ts` が担う。
+ *
+ * **テスト用に export している**(SSRF 対策の中核ロジックと同じ扱い)。
+ */
+export function createPinnedLookup(address: string, family: 4 | 6): LookupFunction {
+  return (_hostname, options, callback) => {
     if (typeof options === "function") {
-      // Node の LookupFunction オーバーロードのうち options 省略形は本実装では使わない。
-      (options as unknown as (err: NodeJS.ErrnoException | null, address: string, family: number) => void)(
-        null,
-        pinned.address,
-        pinned.family,
-      );
+      // options 省略形 `(hostname, callback)`。スカラー形式で返す。
+      (options as unknown as (
+        err: NodeJS.ErrnoException | null,
+        address: string,
+        family: number,
+      ) => void)(null, address, family);
       return;
     }
-    callback(null, pinned.address, pinned.family);
+    if (options?.all === true) {
+      callback(null, [{ address, family }]);
+      return;
+    }
+    callback(null, address, family);
   };
-
-  return { ok: true, pinnedLookup };
 }
 
 /**
