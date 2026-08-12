@@ -5,6 +5,7 @@ import {
   formatReviewProgressLabel,
   getReviewableItems,
   getUndecidedReviewableItems,
+  summarizeUndecided,
   isReviewableItem,
   isReviewFullyDecided,
   isRunStuck,
@@ -440,5 +441,79 @@ describe("classifyResearchQueue", () => {
   it("入力が空配列なら全バケット空", () => {
     const result = classifyResearchQueue([], new Set(["x"]));
     expect(result).toEqual({ needsReview: [], waiting: [], done: [] });
+  });
+});
+
+/**
+ * Primary CTA の内訳表示(feat/ai-research-quality-ux-hardening、Plan §12.1.1)。
+ *
+ * 「残りを採用して調査完了」で**何が採用されるか**をユーザーが押す前に見えるようにする。
+ * `conflict` は Primary の採用対象ではないため内訳に混ぜず、別枠で数える。
+ */
+describe("summarizeUndecided", () => {
+  const item = (key: string, status: ResearchItem["status"]): ResearchItem => ({
+    key,
+    research_policy: "FACT",
+    status,
+    value: "v",
+    evidence: "e",
+    source_ids: [],
+  });
+
+  it("未判断のconfirmed / inferred / conflict を status別に数える", () => {
+    const items = [
+      item("a", "confirmed"),
+      item("b", "confirmed"),
+      item("c", "inferred"),
+      item("d", "conflict"),
+      item("e", "not_found"),
+      item("f", "hearing_required"),
+    ];
+    expect(summarizeUndecided(items, {})).toEqual({
+      confirmed: 2,
+      inferred: 1,
+      conflict: 1,
+      adoptable: 3,
+      total: 4,
+    });
+  });
+
+  it("判断済みの項目は数えない", () => {
+    const items = [item("a", "confirmed"), item("b", "inferred")];
+    const decisions = { a: { decision: "adopted" as const, decided_at: "2026-08-12T00:00:00.000Z" } };
+    expect(summarizeUndecided(items, decisions)).toEqual({
+      confirmed: 0,
+      inferred: 1,
+      conflict: 0,
+      adoptable: 1,
+      total: 1,
+    });
+  });
+
+  it("adoptableにconflictを含めない(Primaryで自動採用しないため)", () => {
+    const items = [item("a", "conflict"), item("b", "conflict")];
+    const summary = summarizeUndecided(items, {});
+    expect(summary.adoptable).toBe(0);
+    expect(summary.conflict).toBe(2);
+    expect(summary.total).toBe(2);
+  });
+
+  it("reviewableでない項目(not_found等)は一切数えない", () => {
+    const items = [
+      item("a", "not_found"),
+      item("b", "hearing_required"),
+      item("c", "external_data_required"),
+    ];
+    expect(summarizeUndecided(items, {})).toEqual({
+      confirmed: 0,
+      inferred: 0,
+      conflict: 0,
+      adoptable: 0,
+      total: 0,
+    });
+  });
+
+  it("空配列でも安全に0を返す", () => {
+    expect(summarizeUndecided([], {}).total).toBe(0);
   });
 });

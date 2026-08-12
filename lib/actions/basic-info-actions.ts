@@ -23,6 +23,7 @@ import { revalidateTag } from "next/cache";
 import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
 import { BASIC_INFO_ITEM_BY_KEY } from "@/lib/domain/basic-info-items";
+import { mergeBasicInfo } from "@/lib/domain/basic-info-merge";
 import type { BasicInfo, BasicInfoField } from "@/types/basic-info";
 import { failure, success, type ActionResult } from "./_helpers";
 
@@ -67,17 +68,29 @@ export async function updateBasicInfoFieldAction(
   const incoming: Partial<BasicInfo> = { [key]: field };
 
   try {
-    const updated = await repos.store.mergeBasicInfo(
-      storeId,
-      incoming,
-      "manual",
-    );
+    // feat/ai-research-quality-ux-hardening(Plan 12.2.2): 行ロック付き read-merge-write。
+    //
+    // 旧実装は `repos.store.mergeBasicInfo`(トランザクション外・行ロック無しの
+    // read-merge-write)を直接呼んでいた。`stores` の更新は**全列 SET** のため、
+    // review 側の書込み(個別採用 / 一括採用 / 「残りを採用して調査完了」)と
+    // 並行実行されると後着が先着を丸ごと巻き戻す lost update が発生しうる。
+    // とくに「残りを採用して調査完了」は約30 key を一度に書くため被害が大きい。
+    //
+    // ロック順は `stores` のみ(review 系は run -> store)。
+    // `stores` -> `store_research_runs` の順で明示ロックを取る経路は存在しないため、
+    // 新しい deadlock クラスは発生しない。
+    await repos.transaction(async (tx) => {
+      const store = await tx.store.getForUpdate(storeId);
+      if (!store) throw new Error(`Store not found: ${storeId}`);
+      const merged = mergeBasicInfo(store.basic_info, incoming, "manual", new Date().toISOString());
+      await tx.store.update(storeId, { basic_info: merged });
+    });
     // store 詳細 / 一覧キャッシュを無効化
-    revalidateTag(CACHE_TAGS.store(updated.id), "max");
+    revalidateTag(CACHE_TAGS.store(storeId), "max");
     revalidateTag(CACHE_TAGS.stores, "max");
     return success(undefined, `「${def.label}」を更新しました`);
   } catch (err) {
-    // mergeBasicInfo が throw する未存在 id 等を failure に正規化
+    // 未存在 id 等を failure に正規化
     const message =
       err instanceof Error ? err.message : "基本情報の更新に失敗しました";
     return failure(message);

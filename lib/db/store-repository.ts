@@ -67,6 +67,45 @@ export function toDbRow(store: Store): StoreInsertRow {
   };
 }
 
+/**
+ * `StorePatch` を **指定された列だけを含む** UPDATE payload へ変換する
+ * (feat/ai-research-quality-ux-hardening、最終レビュー指摘1)。
+ *
+ * ## なぜ全列 SET をやめるのか
+ *
+ * 旧 `update` は「現在行を SELECT → patch をマージ → `toDbRow(next)` で**全 Store 列**を
+ * SET」という read-modify-write だった。この形は、行ロックを取らない writer が
+ * 1つでも残っていると lost update を防げない:
+ *
+ *   1. 別 writer(例: `updateStorePatchAction`)が古い Store 行を読む
+ *   2. review action が `basic_info` を更新して commit
+ *   3. 別 writer が **古い basic_info を含む全列 SET** を行い、2 の更新を消す
+ *
+ * `getForUpdate` による行ロックは「ロックを取る writer 同士」しか直列化できない。
+ * 書き込み範囲そのものを patch 列に絞れば、**無関係な列を触らない**ため
+ * この経路が構造的に消える(異なる列への並行更新は衝突しなくなる)。
+ *
+ * ## 変換規則
+ *
+ * - `Store` のフィールド名は DB 列名と 1:1(`toDbRow` が単純 spread なのはそのため)。
+ * - `undefined` は「変更しない」を意味し、payload から除外する。
+ * - `null` は「NULL を書く」を意味し、**除外しない**(nullable 列のクリアが失われない)。
+ * - `ai_analysis_result` のみ text 列へ JSON 文字列化する(`toDbRow` と同じ規則)。
+ *   `null` はそのまま `null`。
+ *
+ * `toDbRow`(create 用・全列)の semantics は一切変更していない。
+ */
+function toDbPatch(patch: StorePatch): Partial<StoreInsertRow> {
+  const row: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(patch)) {
+    // `undefined` = 未指定。`null` は有効な値なので除外しない。
+    if (value === undefined) continue;
+    row[key] =
+      key === "ai_analysis_result" && value !== null ? JSON.stringify(value) : value;
+  }
+  return row as Partial<StoreInsertRow>;
+}
+
 function asOperatorType(raw: string): OperatorType {
   return (OPERATOR_TYPES as readonly string[]).includes(raw)
     ? (raw as OperatorType)
@@ -196,6 +235,19 @@ export function makeStoreRepo(executor: DbClient | Tx): StoreRepository {
       return head ? fromDbRow(head) : null;
     },
 
+    async getForUpdate(id) {
+      // `SELECT ... FOR UPDATE`。トランザクション内でのみ意味を持つ
+      // (interface 側 JSDoc 参照)。`research-run-repository.ts:getForUpdate` と同形。
+      const rows = await executor
+        .select()
+        .from(stores)
+        .where(eq(stores.id, id))
+        .for("update")
+        .limit(1);
+      const head = rows[0];
+      return head ? fromDbRow(head) : null;
+    },
+
     async create(input: StoreInput) {
       const now = today();
       const row: Store = {
@@ -209,21 +261,18 @@ export function makeStoreRepo(executor: DbClient | Tx): StoreRepository {
     },
 
     async update(id, patch: StorePatch) {
-      const current = await executor
-        .select()
-        .from(stores)
+      // patch で指定された列 + `updated_at` **のみ** を SET する(`toDbPatch` の JSDoc 参照)。
+      // 事前 SELECT を廃し 1 文で完結させることで、read-modify-write 由来の
+      // lost update が原理的に発生しなくなる。戻り値は `RETURNING` で
+      // **実際に更新された行**から作るため、従来より正確になる
+      // (`prompt-template-repository.ts:88-101` と同じ形)。
+      const rows = await executor
+        .update(stores)
+        .set({ ...toDbPatch(patch), updated_at: today() })
         .where(eq(stores.id, id))
-        .limit(1);
-      const headRow = current[0];
-      if (!headRow) return null;
-      const head = fromDbRow(headRow);
-      const next: Store = {
-        ...head,
-        ...patch,
-        updated_at: today(),
-      };
-      await executor.update(stores).set(toDbRow(next)).where(eq(stores.id, id));
-      return next;
+        .returning();
+      const head = rows[0];
+      return head ? fromDbRow(head) : null;
     },
 
     async delete(id) {
@@ -287,13 +336,19 @@ export function makeStoreRepo(executor: DbClient | Tx): StoreRepository {
     },
 
     async mergeBasicInfo(id, incoming, source: FillSource) {
-      // 既存 `update` と同じ read-merge-write 原子性パターン:
-      // 現在値 read → mergeBasicInfo 純関数で 1 ソース分のマージ → write を
-      // 1 文脈で実行する(last-write-wins、design.md §Persistence)。
+      // read-merge-write を 1 文脈で実行する(design.md §Persistence)。
+      //
+      // feat/ai-research-quality-ux-hardening(最終レビュー指摘1):
+      // - 現在値の読み出しに **行ロック**(`SELECT ... FOR UPDATE`)を付ける。
+      //   トランザクション内(`repos.transaction` 経由)で呼ばれた場合、
+      //   他の `basic_info` writer と直列化される。
+      // - 書き込みは **`basic_info` 列だけ**に絞る(旧実装は `toDbRow(next)` で全列 SET
+      //   していたため、並行する `stage`/`memo` 更新等を巻き戻す余地があった)。
       const current = await executor
         .select()
         .from(stores)
         .where(eq(stores.id, id))
+        .for("update")
         .limit(1);
       const headRow = current[0];
       if (!headRow) {
@@ -313,13 +368,15 @@ export function makeStoreRepo(executor: DbClient | Tx): StoreRepository {
         fieldNow,
       );
 
-      const next: Store = {
-        ...head,
-        basic_info: mergedBasicInfo,
-        updated_at: today(),
-      };
-      await executor.update(stores).set(toDbRow(next)).where(eq(stores.id, id));
-      return next;
+      const rows = await executor
+        .update(stores)
+        .set({ basic_info: mergedBasicInfo, updated_at: today() })
+        .where(eq(stores.id, id))
+        .returning();
+      const updatedRow = rows[0];
+      // `RETURNING` が空になるのは、ロック取得後に別 tx が削除した場合のみ。
+      if (!updatedRow) throw new Error(`Store not found: ${id}`);
+      return fromDbRow(updatedRow);
     },
 
     async findAreaSearchCandidates({ googlePlaceIds, bounds }: {

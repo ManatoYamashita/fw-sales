@@ -280,7 +280,7 @@ export async function recordReviewDecisionAction(
     };
 
     if (parsedDecision.data.decision === "adopted") {
-      const store = await tx.store.get(storeId);
+      const store = await tx.store.getForUpdate(storeId);
       if (!store) return failure("店舗が見つかりません");
 
       let field;
@@ -308,6 +308,19 @@ export async function recordReviewDecisionAction(
  * 確認済み(confirmed)項目のうち未対応のものを一括採用する(PR4, Plan v3.2 §5.3
  * 「確認済みを全て採用」)。推定(inferred)項目は対象外(1件ずつの人間判断を強制、
  * Plan §5.3)。store/run の書込みをそれぞれ1回にまとめ、項目数分の往復を避ける。
+ *
+ * ## 現在 UI からは呼ばれていない(feat/ai-research-quality-ux-hardening)
+ *
+ * Primary CTA が `adoptRemainingAndCompleteReviewAction`(confirmed + inferred を
+ * 採用して完了まで行う)へ置き換わったため、production caller は 0 件。
+ * **本 hardening では意図的に削除していない**:
+ *
+ * - 削除は挙動改善ではなく cleanup であり、hardening の commit に混ぜると
+ *   レビュー範囲が広がる
+ * - 本 action のテストは `tx.store.getForUpdate` を使う行ロック契約も
+ *   カバーしており、消すとその回帰検知も一緒に失われる
+ *
+ * 撤去は別 cleanup PR で行うこと(その際は対応するテストも同時に整理する)。
  */
 export async function bulkAdoptConfirmedAction(input: {
   runId: string;
@@ -336,7 +349,7 @@ export async function bulkAdoptConfirmedAction(input: {
       return success({ reviewDecisions: run.review_decisions, adoptedCount: 0 }, "対象がありません");
     }
 
-    const store = await tx.store.get(storeId);
+    const store = await tx.store.getForUpdate(storeId);
     if (!store) return failure("店舗が見つかりません");
 
     const now = nowIso();
@@ -414,7 +427,7 @@ export async function completeReviewAction(
       review_completed_at: nowIso(),
     });
 
-    const store = await tx.store.get(storeId);
+    const store = await tx.store.getForUpdate(storeId);
     if (store && store.stage === "未調査") {
       await tx.store.update(storeId, { stage: "調査済み" });
     }
@@ -424,4 +437,119 @@ export async function completeReviewAction(
 
     return success(undefined, "レビューを完了しました");
   });
+}
+
+export interface AdoptRemainingInput {
+  runId: string;
+  storeId: string;
+}
+
+export interface AdoptRemainingResult {
+  /** マージ後の全 decisions。クライアントはこれで state を置き換える(再構築しない)。 */
+  reviewDecisions: ReviewDecisions;
+  /** tx 内で採用した now。クライアントで `nowIso()` を捏造させない。 */
+  reviewCompletedAt: string;
+  adoptedCount: number;
+}
+
+/**
+ * 「残りを採用して調査完了」(feat/ai-research-quality-ux-hardening、Plan §12.2)。
+ *
+ * ## なぜ必要か
+ *
+ * 実運用の操作モデルは「AIが具体的に調査した値は基本採用。明らかにおかしいものだけ
+ * 編集/却下。skipはほぼ使わない」だが、UIは逆に「全項目に個別判断を要求し、
+ * 残りは『スキップ』して完了」というモデルだった。しかも
+ * `bulkAdoptConfirmedAction` は `inferred` を意図的に除外していたため、
+ * 一括操作を使っても未判断が必ず残り、Primary CTA が画面から消えていた。
+ *
+ * ## semantics(承認済みの仕様変更を含む)
+ *
+ * - 未判断 `confirmed` → adopted(tier A)
+ * - 未判断 `inferred`  → adopted(tier B)
+ *   **これは `bulkAdoptConfirmedAction` の「推定項目は1件ずつの人間判断を強制」という
+ *   既存の設計判断を意図的に変更するもの**(ユーザー承認済み)。
+ * - 未判断 `conflict`  → **自動採用しない。** 1件でも残っていれば failure を返し、
+ *   トランザクションごとロールバックする(DBへ一切書き込まない)。
+ * - 既存の `adopted` / `rejected` / `skipped` → 変更しない(immutable decision)。
+ *
+ * ## 不変条件
+ *
+ * - run 行ロック(`researchRun.getForUpdate`)+ **store 行ロック**
+ *   (`store.getForUpdate`、Plan §12.2.2)。ロック順は run → store で既存 action と同一。
+ * - `stores` への書き込みは `basic_info` と `stage` をまとめて **1回**。
+ * - stage は `未調査` のときだけ `調査済み` へ昇格(`架電済み` を降格させない)。
+ * - `revalidateTag` は **transaction の外**(`handoff-actions.ts` の規約に揃える)。
+ */
+export async function adoptRemainingAndCompleteReviewAction(
+  input: AdoptRemainingInput,
+): Promise<ActionResult<AdoptRemainingResult>> {
+  const session = await getCurrentSession();
+  if (!session) return failure("ログインが必要です");
+
+  const { runId, storeId } = input;
+  if (typeof runId !== "string" || runId.trim() === "") return failure("パラメータが不正です");
+  if (typeof storeId !== "string" || storeId.trim() === "") return failure("パラメータが不正です");
+
+  const result = await repos.transaction(async (tx) => {
+    const run = await tx.researchRun.getForUpdate(runId);
+    if (!run || run.store_id !== storeId) return failure("調査結果が見つかりません");
+    if (run.status !== "succeeded") return failure("この調査はまだレビューできません");
+    if (run.review_completed_at !== null) return failure("このレビューは既に完了しています");
+
+    const items = run.result ?? [];
+    const undecided = getUndecidedReviewableItems(items, run.review_decisions);
+
+    // conflict は候補選択が必須。1件でも残っていれば書き込む前に中断する
+    // (`buildAdoptedBasicInfoField` は conflict で throw するため、
+    //  ここで弾かないと tx 全体が例外でロールバックされ、ユーザーには理由が伝わらない)。
+    const conflicts = undecided.filter((item) => item.status === "conflict");
+    if (conflicts.length > 0) {
+      return failure(`候補を選択する必要がある項目が${conflicts.length}件あります`);
+    }
+
+    const store = await tx.store.getForUpdate(storeId);
+    if (!store) return failure("店舗が見つかりません");
+
+    // now は1度だけ取得し、全 decision と review_completed_at で使い回す(決定性)。
+    const now = nowIso();
+    let basicInfo = store.basic_info;
+    const mergedDecisions: ReviewDecisions = { ...run.review_decisions };
+    for (const item of undecided) {
+      const field = buildAdoptedBasicInfoField(item, run.source_registry, now);
+      basicInfo = mergeBasicInfo(basicInfo, { [item.key]: field }, "manual", now);
+      mergedDecisions[item.key] = { decision: "adopted", decided_at: now };
+    }
+
+    // basic_info と stage を1回の update にまとめる(既存 completeReviewAction は
+    // stage を別 update で書いていた)。stage 降格禁止ガードは従来どおり allow-list。
+    const storePatch: { basic_info: typeof basicInfo; stage?: "調査済み" } = {
+      basic_info: basicInfo,
+    };
+    if (store.stage === "未調査") storePatch.stage = "調査済み";
+    await tx.store.update(storeId, storePatch);
+
+    await tx.researchRun.update(runId, {
+      review_decisions: mergedDecisions,
+      review_completed_at: now,
+    });
+
+    return success(
+      {
+        reviewDecisions: mergedDecisions,
+        reviewCompletedAt: now,
+        adoptedCount: undecided.length,
+      },
+      undecided.length > 0
+        ? `${undecided.length}件を採用してレビューを完了しました`
+        : "レビューを完了しました",
+    );
+  });
+
+  // revalidate は transaction 成功後にのみ行う(rollback 時に走らせない)。
+  if (result.ok) {
+    revalidateTag(CACHE_TAGS.store(storeId), "max");
+    revalidateTag(CACHE_TAGS.stores, "max");
+  }
+  return result;
 }

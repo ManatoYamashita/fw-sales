@@ -59,6 +59,47 @@ export function getUndecidedReviewableItems(
 }
 
 /**
+ * 未判断 reviewable item の status 別内訳
+ * (feat/ai-research-quality-ux-hardening、Plan §12.1.1)。
+ */
+export interface UndecidedSummary {
+  confirmed: number;
+  inferred: number;
+  conflict: number;
+  /**
+   * Primary CTA(「残りを採用して調査完了」)で自動採用される件数。
+   * **`conflict` は含まない**(候補選択なしで自動採用してはいけないため)。
+   */
+  adoptable: number;
+  /** 未判断 reviewable item の総数(`conflict` を含む)。 */
+  total: number;
+}
+
+/**
+ * 未判断 reviewable item を status 別に集計する。
+ *
+ * Primary CTA を押す前に「何が採用されるか」を画面に出すための純関数
+ * (「残り: 確認済み 11・推定 7」「[残り18件を採用して調査完了]」)。
+ * `conflict` は採用対象ではないため `adoptable` から除外し、別枠で数える。
+ */
+export function summarizeUndecided(
+  items: readonly ResearchItem[],
+  decisions: ReviewDecisions,
+): UndecidedSummary {
+  const undecided = getUndecidedReviewableItems(items, decisions);
+  const confirmed = undecided.filter((item) => item.status === "confirmed").length;
+  const inferred = undecided.filter((item) => item.status === "inferred").length;
+  const conflict = undecided.filter((item) => item.status === "conflict").length;
+  return {
+    confirmed,
+    inferred,
+    conflict,
+    adoptable: confirmed + inferred,
+    total: undecided.length,
+  };
+}
+
+/**
  * レビュー完了条件(Plan v3.2 §15): reviewable item 全件が
  * `adopted`/`rejected`/`skipped` のいずれかで記録されていること。
  */
