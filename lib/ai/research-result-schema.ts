@@ -211,9 +211,21 @@ export type ResearchItemCandidate = z.infer<typeof ResearchItemCandidateSchema>;
  * - `places`: `placesVerifiedKeys`(Google Places検証済み)経由でconfirmed。
  * - `url_context`: `url_context_status==="success"`のsourceのみでconfirmed。
  * - `search_note`: Tier B(`SearchFact`一致 + source trust matrix許可)のみでconfirmed。
+ * - `existing_canonical`: 今回のWeb/Places再確認はできていないが、canonical
+ *   `stores.basic_info` に保持している確定情報を fallback として提示している
+ *   (feat/ai-research-quality-ux-hardening、Plan §5 P5 / §7)。
+ *   **`schema-builder.ts` の Stage2 Structured Output schema へは公開しない。**
+ *   AIが返すitemの`evidence_basis`は構造的に必ず`undefined`であり、この非対称性が
+ *   canonical bypass の二重防御になっている(`validateResearchItemStatus` 参照)。
  * - `mixed`: 上記のうち複数の経路が同時に該当する場合。
  */
-export const EVIDENCE_BASES = ["places", "url_context", "search_note", "mixed"] as const;
+export const EVIDENCE_BASES = [
+  "places",
+  "url_context",
+  "search_note",
+  "existing_canonical",
+  "mixed",
+] as const;
 export type EvidenceBasis = (typeof EVIDENCE_BASES)[number];
 
 export const ResearchItemSchema = z.object({
@@ -787,6 +799,22 @@ export interface ResearchValidationContext {
    * (「URLが存在するだけではそのkeyの根拠にしない」という設計思想)。
    */
   searchFacts?: readonly SearchFact[];
+  /**
+   * canonical `stores.basic_info` を fallback の根拠として使ってよい `ResearchItem.key`
+   * の集合(feat/ai-research-quality-ux-hardening、Plan §7)。
+   *
+   * **この集合に key が含まれるだけでは bypass しない。**
+   * `item.evidence_basis === "existing_canonical"` との **AND** を必須とする。
+   * 理由: Stage2 Structured Output schema(`lib/ai/research/schema-builder.ts`)は
+   * `evidence_basis` フィールドをモデルへ公開していないため、AIが返すitemの
+   * `evidence_basis` は構造的に必ず `undefined` になる。したがってこのANDは
+   * 「コード側が deterministic に合成した item だけが bypass に乗る」ことを
+   * `excludeKeys` の設定とは**独立に**保証する(承認レビュー指摘1、二重防御)。
+   *
+   * 呼び出し側は「実際に合成した item の key」だけを渡すこと
+   * (`pipeline.ts:deriveCanonicalFallbackConfirmedKeys`)。
+   */
+  canonicalVerifiedKeys?: ReadonlySet<string>;
 }
 
 /**
@@ -856,6 +884,14 @@ export function validateResearchItemStatus(
 
   const isPlacesVerified = context.placesVerifiedKeys?.has(item.key) ?? false;
 
+  // path 1': canonical fallback(feat/ai-research-quality-ux-hardening、Plan §7.1.1)。
+  // **key一致だけでは通さない。** `evidence_basis === "existing_canonical"` との AND を
+  // 必須にすることで、Stage2 schema が `evidence_basis` を公開していない事実を利用し、
+  // 「AI生成itemがこのbypassに乗る」経路を構造的に閉じる(承認レビュー指摘1)。
+  const isCanonicalVerified =
+    (context.canonicalVerifiedKeys?.has(item.key) ?? false) &&
+    item.evidence_basis === "existing_canonical";
+
   // path 2: URL Context本文取得成功のsourceのみ根拠にできる。ただし以下は除外する
   // (feat/ai-research-pre-smoke-hardening、fix/ai-research-source-identity-integrity):
   // - MAJOR8: competitor(競合店舗)由来のsourceは自店項目のconfirmed根拠にしない
@@ -922,11 +958,12 @@ export function validateResearchItemStatus(
   const hasSearchFactMatch =
     trustedFactsForKey.length > 0 && (isAggregationKey || distinctFactValues.size === 1);
 
-  if (isPlacesVerified || hasVerifiedSource || hasSearchFactMatch) {
+  if (isPlacesVerified || isCanonicalVerified || hasVerifiedSource || hasSearchFactMatch) {
     type SingleBasis = Exclude<EvidenceBasis, "mixed">;
     const bases = (
       [
         isPlacesVerified ? "places" : null,
+        isCanonicalVerified ? "existing_canonical" : null,
         hasVerifiedSource ? "url_context" : null,
         hasSearchFactMatch ? "search_note" : null,
       ] as const

@@ -31,6 +31,13 @@ import {
   type SourceVerification,
 } from "@/lib/ai/research-result-schema";
 import { isAddressMatch, isNameMatch, isTargetStoreMatch } from "./identity-match";
+import {
+  CANONICAL_EVIDENCE_BASIS,
+  CANONICAL_FALLBACK_KEYS,
+  isCanonicalFallbackAllowed,
+} from "./evidence-precedence";
+import { deriveFreshPlacesVerifiedKeys } from "./places-verified";
+import { normalizeUrlForMatch } from "./url-normalize";
 import type { BasicInfo } from "@/types/basic-info";
 
 /* ------------------------------------------------------------------ */
@@ -262,33 +269,199 @@ export function buildNonAiItems(): ResearchItem[] {
 export const DETERMINISTIC_PLACES_KEYS = ["review_avg", "review_count"] as const;
 
 /**
- * Stage0でGoogle Placesが確認済みの`review_avg`/`review_count`から、AI呼出無しで
- * confirmedなResearchItemを直接合成する(feat/ai-research-quality-refinement)。
- * `placesVerifiedKeys`に含まれないkey、または値が空のkeyはスキップする
- * (`derivePlacesVerifiedKeys`が`filled_by==="places"`かつ非空の場合のみ含めるため、
- * manual保護は`effectiveBasicInfo`の生成側(`mergeBasicInfo`)が既に担保している)。
+ * **このrunのStage0がGoogle Placesから実際に取得した**`review_avg`/`review_count`から、
+ * AI呼出無しでconfirmedなResearchItemを直接合成する。
+ *
+ * ## fresh 起点へ変更した理由(feat/ai-research-quality-ux-hardening、Plan §6.1)
+ *
+ * 以前は `mergeBasicInfo` **通過後**の `effectiveBasicInfo` を入力にしていた。
+ * `mergeBasicInfo` の manual 保護(`lib/domain/basic-info-merge.ts:88`)は
+ * canonical DB を守るための正しい規則だが、DBへ書かないin-memory経路にも等しく効くため、
+ * 「Placesが今 4.4 と答えている」という事実が保護規則によって破棄されていた。
+ * さらに review での採用が `filled_by:"manual"` を書く
+ * (`lib/domain/research-review.ts:246`)ため、**正しく運用するほど品質が下がる**
+ * 自己増悪ループになっていた(実機事象: 炉端ジュンの review_avg / review_count)。
+ *
+ * 本関数は canonical をまったく参照しないため、canonical 側の manual 保護を
+ * **1ミリも変更せずに**この経路だけを切り離せる。
+ *
+ * @param freshPlacesBasicInfo    `runStage0PlacesResync` が返す `placesBasicInfo`(生の Stage0 結果)
+ * @param freshPlacesVerifiedKeys `deriveFreshPlacesVerifiedKeys` の結果
+ * @param canonicalBasicInfo      差異検出用(任意)。値の採用には使わず、warning にのみ使う
  */
 export function buildDeterministicPlacesItems(
-  effectiveBasicInfo: BasicInfo,
-  placesVerifiedKeys: ReadonlySet<string>,
+  freshPlacesBasicInfo: Partial<BasicInfo>,
+  freshPlacesVerifiedKeys: ReadonlySet<string>,
+  canonicalBasicInfo?: BasicInfo,
 ): ResearchItem[] {
   const items: ResearchItem[] = [];
   for (const key of DETERMINISTIC_PLACES_KEYS) {
-    if (!placesVerifiedKeys.has(key)) continue;
-    const field = effectiveBasicInfo[key];
+    if (!freshPlacesVerifiedKeys.has(key)) continue;
+    const field = freshPlacesBasicInfo[key];
     if (!field?.value) continue;
+
+    // fresh を採用したうえで、canonical と食い違う場合だけ人間の判断材料を添える
+    // (canonical は書き換えない。採用するかどうかは review の人間判断に委ねる)。
+    const canonicalValue = canonicalBasicInfo?.[key]?.value ?? null;
+    const diverged =
+      canonicalValue !== null &&
+      canonicalValue.trim() !== "" &&
+      canonicalValue.trim() !== field.value.trim();
+
     items.push({
       key,
       research_policy: getResearchPolicy(key)!,
       status: "confirmed",
       value: field.value,
-      evidence: "Google Placesで確認済みの情報です。",
+      evidence: "今回の調査時点のGoogle Placesで確認した値です。",
       source_ids: [],
       confidence: 100,
       evidence_basis: "places",
+      ...(diverged
+        ? {
+            warning: `登録済みの値(${canonicalValue})と今回のGoogle Places値(${field.value})が異なります。`,
+          }
+        : {}),
     });
   }
   return items;
+}
+
+/**
+ * canonical `stores.basic_info` を根拠に、fresh で取得できなかった項目を
+ * **「今回は再確認できていない既知情報」として**合成する
+ * (feat/ai-research-quality-ux-hardening、Plan §7)。
+ *
+ * ## 何を解決するか
+ *
+ * アプリが既に確定情報を持っているのに、再調査のたびに `not_found` へ退化していた
+ * (実機事象: 炉端ジュンの `official_site`。canonical に値があるのに Research result は
+ * 「確認できず」)。Research pipeline が `stores.basic_info` を読む経路が
+ * deterministic Places item 生成の1本しか無かったことが原因。
+ *
+ * ## fresh と偽装しないための担保
+ *
+ * - `evidence` に「今回のWeb再確認はできていません」と `updated_at`(YYYY-MM-DD)を必ず含める
+ * - `evidence_basis` は `existing_canonical`(UI の source badge で fresh と区別する)
+ * - `confidence` は `null`(AIの確信度を騙らない)
+ * - `source_ids` は `[]`(存在しない出典URLを帰属させない)
+ *
+ * ## 対象を狭く保つ
+ *
+ * `CANONICAL_FALLBACK_KEYS`(3項目)のみ。全項目へ広げると Research result が
+ * 「調査」ではなく「既存値のエコー」になる。`official_site` は
+ * **human-reviewed(`filled_by==="manual"`)のみ**を対象とし、
+ * `stores.site_url` が非空なだけでは confirmed にしない(承認レビュー指摘1)。
+ * `stores.site_url` は従来どおり Source Registry へ `known_store_data` として
+ * seed されるだけである。
+ *
+ * @param canonicalBasicInfo 店舗の canonical `basic_info`
+ * @param alreadyProvidedKeys fresh 経路で既に item を合成済みの key(重複合成を避ける)
+ */
+export function buildCanonicalFallbackItems(
+  canonicalBasicInfo: BasicInfo,
+  alreadyProvidedKeys: ReadonlySet<string>,
+): ResearchItem[] {
+  const items: ResearchItem[] = [];
+  for (const key of CANONICAL_FALLBACK_KEYS) {
+    if (alreadyProvidedKeys.has(key)) continue;
+    const field = canonicalBasicInfo[key];
+    if (!isCanonicalFallbackAllowed(key, field)) continue;
+    items.push({
+      key,
+      research_policy: getResearchPolicy(key)!,
+      status: "confirmed",
+      value: field!.value,
+      evidence: `登録済みの基本情報として保持されている値です(最終更新 ${toDateOnly(field!.updated_at)})。今回のWeb再確認はできていません。`,
+      source_ids: [],
+      confidence: null,
+      evidence_basis: CANONICAL_EVIDENCE_BASIS,
+    });
+  }
+  return items;
+}
+
+/**
+ * `buildCanonicalFallbackItems` が**実際に合成した** item の key 集合を返す。
+ * `finalizeResearchItems` の `canonicalVerifiedKeys` へはこの結果だけを渡すこと
+ * (`deriveDeterministicPlacesConfirmedKeys` と同じ「合成した分だけ渡す」規約)。
+ */
+export function deriveCanonicalFallbackConfirmedKeys(
+  canonicalItems: readonly ResearchItem[],
+): Set<string> {
+  return new Set(canonicalItems.map((item) => item.key));
+}
+
+/** ISO 8601 の `updated_at` を表示用の `YYYY-MM-DD` にする(不正値はそのまま返す)。 */
+function toDateOnly(isoLike: string): string {
+  return /^\d{4}-\d{2}-\d{2}/.test(isoLike) ? isoLike.slice(0, 10) : isoLike;
+}
+
+export interface DeterministicItemsInput {
+  /** `runStage0PlacesResync` が返した生の Stage0 結果(canonical とマージしないこと)。 */
+  freshPlacesBasicInfo: Partial<BasicInfo>;
+  /** 店舗の canonical `basic_info`。fallback と差異警告にのみ使う。 */
+  canonicalBasicInfo: BasicInfo;
+}
+
+export interface DeterministicItemsResult {
+  /** Stage2 の `aiItems` へ合流させる deterministic item。 */
+  items: ResearchItem[];
+  /** trust boundary(`placesVerifiedKeys`)へ渡してよい key(BLOCKER2 の絞り込み済み)。 */
+  placesConfirmedKeys: Set<string>;
+  /** trust boundary(`canonicalVerifiedKeys`)へ渡してよい key。 */
+  canonicalConfirmedKeys: Set<string>;
+  /** Stage2 の `excludeKeys` へ渡す key(= 合成した全 item の key)。 */
+  deterministicKeys: string[];
+}
+
+/**
+ * Stage0 の結果と canonical から deterministic item 一式を導出する
+ * (feat/ai-research-quality-ux-hardening、Plan §6 / §7、Q18)。
+ *
+ * ## なぜ純関数として切り出すのか
+ *
+ * 実機バグ(Q1)の発生地点は `workflows/store-research.ts` の
+ * 「`mergeBasicInfo` を通した結果から Places 検証済み key を導く」という
+ * **2行の相互作用**だった。Workflow 本体は統合テストで丸ごと mock されるため、
+ * この相互作用には単体テストが1本も存在せず、誰も検知できなかった。
+ * `deriveDeterministicPlacesConfirmedKeys` が同じ理由で純関数化された前例に倣い、
+ * データフロー全体をテスト可能な1つの純関数へ集約する。
+ *
+ * ## 責務分離(この関数が守る不変条件)
+ *
+ * - fresh evidence は **canonical をまったく参照せずに**導出する
+ *   (canonical の manual 保護が fresh を破棄しない)
+ * - canonical fallback は fresh で埋まらなかった key にのみ適用する
+ * - trust boundary へ渡す key 集合は「実際に合成した item」から導く
+ *   (key の推測で bypass を与えない)
+ *
+ * 純関数。入力を変更しない。
+ */
+export function buildDeterministicItems(
+  input: DeterministicItemsInput,
+): DeterministicItemsResult {
+  const { freshPlacesBasicInfo, canonicalBasicInfo } = input;
+
+  const freshPlacesVerifiedKeys = deriveFreshPlacesVerifiedKeys(freshPlacesBasicInfo);
+  const placesItems = buildDeterministicPlacesItems(
+    freshPlacesBasicInfo,
+    freshPlacesVerifiedKeys,
+    canonicalBasicInfo,
+  );
+  const placesConfirmedKeys = deriveDeterministicPlacesConfirmedKeys(freshPlacesVerifiedKeys);
+
+  const freshProvidedKeys = new Set(placesItems.map((item) => item.key));
+  const canonicalItems = buildCanonicalFallbackItems(canonicalBasicInfo, freshProvidedKeys);
+  const canonicalConfirmedKeys = deriveCanonicalFallbackConfirmedKeys(canonicalItems);
+
+  const items = [...placesItems, ...canonicalItems];
+  return {
+    items,
+    placesConfirmedKeys,
+    canonicalConfirmedKeys,
+    deterministicKeys: items.map((item) => item.key),
+  };
 }
 
 /**
@@ -329,21 +502,30 @@ export function applyUrlContextStatus(
   sourceRegistry: readonly SourceRegistryEntry[],
   urlContextMetadataList: readonly (UrlContextMetadataLike | null)[],
 ): SourceRegistryEntry[] {
+  // 突合キーは `normalizeUrlForMatch` を通す(Q6、Plan §8.2 B1)。
+  // 従来は文字列完全一致のみだったため、末尾スラッシュ・scheme/host の case・fragment の
+  // 差だけで url_context 成功を取りこぼしていた。`www.` 除去や origin-only match は
+  // 行わない(trust判定にも使う正規化のため false negative を優先、§8.2.1)。
   const statusByUrl = new Map<string, "success" | "error">();
   for (const ucm of urlContextMetadataList) {
     if (!ucm) continue;
     for (const entry of ucm.urlMetadata) {
       if (!entry.retrievedUrl) continue;
+      const key = normalizeUrlForMatch(entry.retrievedUrl);
+      // 解釈できないURLは突合対象にしない(誤って別エントリへ紐付けない)。
+      if (key === null) continue;
       const isSuccess = entry.status === "URL_RETRIEVAL_STATUS_SUCCESS";
       // 一度でも成功していれば成功を優先する。
-      const existing = statusByUrl.get(entry.retrievedUrl);
+      const existing = statusByUrl.get(key);
       if (existing === "success") continue;
-      statusByUrl.set(entry.retrievedUrl, isSuccess ? "success" : "error");
+      statusByUrl.set(key, isSuccess ? "success" : "error");
     }
   }
 
   return sourceRegistry.map((entry) => {
-    const status = statusByUrl.get(entry.grounding_redirect_url);
+    const key = normalizeUrlForMatch(entry.grounding_redirect_url);
+    if (key === null) return entry;
+    const status = statusByUrl.get(key);
     if (!status || status === entry.url_context_status) return entry;
     return { ...entry, url_context_status: status };
   });
@@ -559,6 +741,12 @@ export interface FinalizeParams {
   placesVerifiedKeys?: ReadonlySet<string>;
   /** Tier B判定に使うSearchFact(feat/ai-research-quality-refinement)。 */
   searchFacts?: readonly SearchFact[];
+  /**
+   * canonical fallback item を合成した key(feat/ai-research-quality-ux-hardening)。
+   * `deriveCanonicalFallbackConfirmedKeys` の結果だけを渡すこと。
+   * trust boundary 側では `evidence_basis==="existing_canonical"` との AND で判定される。
+   */
+  canonicalVerifiedKeys?: ReadonlySet<string>;
 }
 
 /**
@@ -566,10 +754,22 @@ export interface FinalizeParams {
  * (`applyDeterministicValidation`, PR1)を適用した最終結果を返す。
  */
 export function finalizeResearchItems(params: FinalizeParams): ResearchItem[] {
-  const { aiItems, nonAiItems, sourceRegistry, placesVerifiedKeys, searchFacts } = params;
+  const {
+    aiItems,
+    nonAiItems,
+    sourceRegistry,
+    placesVerifiedKeys,
+    searchFacts,
+    canonicalVerifiedKeys,
+  } = params;
   const merged = [...aiItems, ...nonAiItems];
   return merged.map((item) =>
-    applyDeterministicValidation(item, { sourceRegistry, placesVerifiedKeys, searchFacts }),
+    applyDeterministicValidation(item, {
+      sourceRegistry,
+      placesVerifiedKeys,
+      searchFacts,
+      canonicalVerifiedKeys,
+    }),
   );
 }
 

@@ -89,3 +89,37 @@ describe("RESEARCH_POLICY_ITEMS", () => {
     expect(getResearchPolicy("not_a_real_key")).toBeUndefined();
   });
 });
+
+/**
+ * policy 別件数の drift ガード
+ * (feat/ai-research-quality-ux-hardening、Plan §11.3 / Q12)。
+ *
+ * `lib/env.ts` と `lib/ai/research/client.ts` のコメントが「42項目」のままドリフトしていた
+ * (`population_day_night` の ANALYSIS → EXTERNAL_DATA_REQUIRED 移動が未反映)。
+ * Stage2 の出力トークン見積もりは項目数に線形なので、この数字がずれると
+ * MAX_TOKENS 対策の判断自体が狂う。実数を固定して再発を防ぐ。
+ */
+describe("research_policy 別の項目数(drift ガード)", () => {
+  const countBy = (policy: string) =>
+    RESEARCH_POLICY_ITEMS.filter((item) => item.research_policy === policy).length;
+
+  it("FACT=20 / FACT_OR_HEARING=4 / ANALYSIS=17 / HEARING_ONLY=10 / EXTERNAL_DATA_REQUIRED=2", () => {
+    expect(countBy("FACT")).toBe(20);
+    expect(countBy("FACT_OR_HEARING")).toBe(4);
+    expect(countBy("ANALYSIS")).toBe(17);
+    expect(countBy("HEARING_ONLY")).toBe(10);
+    expect(countBy("EXTERNAL_DATA_REQUIRED")).toBe(2);
+  });
+
+  it("Stage2 が扱う項目数は 41(FACT + FACT_OR_HEARING + ANALYSIS)", () => {
+    expect(countBy("FACT") + countBy("FACT_OR_HEARING") + countBy("ANALYSIS")).toBe(41);
+  });
+
+  it("AI呼出なしで機械生成する項目数は 12(HEARING_ONLY + EXTERNAL_DATA_REQUIRED)", () => {
+    expect(countBy("HEARING_ONLY") + countBy("EXTERNAL_DATA_REQUIRED")).toBe(12);
+  });
+
+  it("合計は 53", () => {
+    expect(RESEARCH_POLICY_ITEMS.length).toBe(53);
+  });
+});

@@ -50,7 +50,23 @@ const PER_HOP_TIMEOUT_MS = 3000;
 const TOTAL_TIMEOUT_MS = 5000;
 
 export type ResolveOutcome =
-  | { status: "resolved"; url: string }
+  | {
+      status: "resolved";
+      url: string;
+      /**
+       * 最終ホップの HTTP status(feat/ai-research-quality-ux-hardening、承認レビュー指摘2)。
+       *
+       * 本 resolver は元々**表示・監査用**として設計されており、最終ページが 4xx/5xx でも
+       * 「URLの実体を特定できた」として `resolved` を返す。この挙動は表示用途では正しいが、
+       * **primary-source trust の根拠へ昇格させるには不十分**である
+       * (存在しないページへの redirect でも `resolved` になってしまう)。
+       *
+       * trust-critical な呼び出し側(`resolveOfficialAliases`)は
+       * `finalStatus` が 2xx であることを追加で要求する。既存の表示用途は
+       * 本フィールドを無視すればよく、後方互換は保たれる。
+       */
+      finalStatus: number;
+    }
   | { status: "failed"; reason: string };
 
 /**
@@ -107,7 +123,8 @@ export async function resolveGroundingRedirectUrl(
 
     // final: 2xx/4xx/5xx いずれもリクエスト自体は成功として、その時点のURLを解決結果とする。
     // (最終的に到達したページが404等でも、URLの実体を特定できたことに変わりはない)
-    return { status: "resolved", url: current.toString() };
+    // trust 判定に使う呼び出し側は `finalStatus` の 2xx を追加で要求すること。
+    return { status: "resolved", url: current.toString(), finalStatus: result.status };
   }
 
   return { status: "failed", reason: "too_many_redirects" };
@@ -252,7 +269,9 @@ function isDisallowedIPv6(address: string): boolean {
   return false;
 }
 
-type HopResult = { kind: "redirect"; location: string } | { kind: "final" };
+type HopResult =
+  | { kind: "redirect"; location: string }
+  | { kind: "final"; status: number };
 
 function requestOneHop(
   url: URL,
@@ -285,7 +304,7 @@ function requestOneHop(
             return;
           }
         }
-        resolve({ kind: "final" });
+        resolve({ kind: "final", status });
       },
     );
 

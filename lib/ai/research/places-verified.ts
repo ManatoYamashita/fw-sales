@@ -40,9 +40,47 @@ export const PLACES_VERIFIABLE_KEYS = [
  * (Places検証ではなく人間の手動確認であり、意味論が異なるため)。
  */
 export function derivePlacesVerifiedKeys(basicInfo: BasicInfo): Set<string> {
+  return collectPlacesVerifiedKeys(basicInfo);
+}
+
+/**
+ * **Stage0がこのrunで実際に取得した** Places 結果だけから検証済みkeyを導出する
+ * (feat/ai-research-quality-ux-hardening、Plan §6.1)。
+ *
+ * `derivePlacesVerifiedKeys` との違いは入力が canonical か fresh かの一点だが、
+ * この一点が実機バグ(Q1)の発生地点だった:
+ *
+ * - `derivePlacesVerifiedKeys(effectiveBasicInfo)` は `mergeBasicInfo` **通過後**の
+ *   canonical を見る。`mergeBasicInfo` の manual 保護
+ *   (`lib/domain/basic-info-merge.ts:88`、canonical DB を守るための**正しい**規則)は
+ *   DBへ書かないin-memory経路にも等しく効くため、「Placesが今 4.4 と答えている」
+ *   という事実が保護規則によって破棄される。
+ * - 結果として `filled_by==="manual"` になった項目は、**Placesが何を答えても
+ *   Places検証済みとして扱われる手段が存在しない**状態になっていた。
+ *   さらに review での「採用」が `filled_by:"manual"` を書く
+ *   (`lib/domain/research-review.ts:246`)ため、**正しく運用するほど品質が下がる**
+ *   自己増悪ループになっていた。
+ *
+ * 本関数は canonical をまったく参照しないため、canonical の `filled_by` が何であっても
+ * fresh evidence が失われない。canonical 側の manual 保護は**一切変更しない**。
+ *
+ * @param placesBasicInfo `runStage0PlacesResync` が返す `placesBasicInfo`
+ *                        (`placeResultToBasicInfo` が `filled_by:"places"` を刻んだ部分更新)
+ */
+export function deriveFreshPlacesVerifiedKeys(
+  placesBasicInfo: Partial<BasicInfo>,
+): Set<string> {
+  return collectPlacesVerifiedKeys(placesBasicInfo);
+}
+
+/**
+ * `PLACES_VERIFIABLE_KEYS` のうち `filled_by==="places"` かつ値が非空のkeyを集める。
+ * canonical / fresh の両方から呼ばれる共通実装(判定条件を1箇所に保つ)。
+ */
+function collectPlacesVerifiedKeys(source: Partial<BasicInfo>): Set<string> {
   const verified = new Set<string>();
   for (const key of PLACES_VERIFIABLE_KEYS) {
-    const field = basicInfo[key];
+    const field = source[key];
     if (field?.filled_by === "places" && field.value !== null && field.value.trim() !== "") {
       verified.add(key);
     }

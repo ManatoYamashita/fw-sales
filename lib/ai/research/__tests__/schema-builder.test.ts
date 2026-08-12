@@ -208,3 +208,62 @@ describe("buildStage2ResponseZodSchema", () => {
     expect(result.success).toBe(false);
   });
 });
+
+/**
+ * `evidence_basis` 非公開の不変条件
+ * (feat/ai-research-quality-ux-hardening、Plan §7.1.1 / 承認レビュー指摘1)。
+ *
+ * canonical fallback bypass は
+ * 「key ∈ canonicalVerifiedKeys AND evidence_basis === "existing_canonical"」を
+ * 発火条件にしている。この AND が防御として機能するのは、
+ * **Stage2 Structured Output schema が `evidence_basis` をモデルへ公開していない**
+ * ため AI 生成 item の `evidence_basis` が構造的に必ず `undefined` になる、という
+ * 一点に依存する。将来 schema に `evidence_basis` を足すとこの防御が無効化されるため、
+ * ここで明示的に固定する。
+ */
+describe("evidence_basis を Stage2 schema へ公開しない (canonical bypass の二重防御)", () => {
+  it("items要素のpropertiesに evidence_basis が存在しない", () => {
+    const schema = buildStage2JsonSchema({
+      allowedKeys: ["official_site", "review_avg"],
+      registryIds: ["S01"],
+    });
+    const itemProperties = getItemSchema(schema).properties as JsonSchemaNode;
+    expect(Object.keys(itemProperties)).not.toContain("evidence_basis");
+  });
+
+  it("JSON Schema 全文に evidence_basis という文字列が現れない", () => {
+    const schema = buildStage2JsonSchema({
+      allowedKeys: ["official_site"],
+      registryIds: ["S01"],
+    });
+    expect(JSON.stringify(schema)).not.toContain("evidence_basis");
+  });
+
+  it("Zod側も evidence_basis を受け付けない(モデルが勝手に返しても取り込まれない)", () => {
+    const zodSchema = buildStage2ResponseZodSchema(["official_site"], ["S01"]);
+    const parsed = zodSchema.safeParse({
+      store_identification: {
+        matched_name: "炉端ジュン",
+        matched_address: "東京都渋谷区1-2-3",
+        identification_note: "",
+      },
+      source_verifications: [],
+      items: [
+        {
+          key: "official_site",
+          research_policy: "FACT",
+          status: "confirmed",
+          value: "あり (https://example.test/)",
+          evidence: "公式サイトに明記",
+          source_ids: ["S01"],
+          evidence_basis: "existing_canonical",
+        },
+      ],
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      const item = parsed.data.items[0] as Record<string, unknown>;
+      expect(item.evidence_basis).toBeUndefined();
+    }
+  });
+});

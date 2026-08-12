@@ -133,6 +133,31 @@ function logGeminiCallFailure(stage: "stage1" | "stage2", err: unknown, kind: Ai
 }
 
 /**
+ * MAX_TOKENS 到達時の token 内訳を **sanitized な structured log** として記録する
+ * (feat/ai-research-quality-ux-hardening、Theme 5B)。
+ *
+ * 実機の MAX_TOKENS run では `token_usage = null` で、
+ * 「thinking が伸びたのか candidates が伸びたのか」を事後に切り分けられなかった。
+ * 出力枠(`maxOutputTokens`)を消費するのは `thoughtsTokenCount + candidatesTokenCount`
+ * だけであり(`toolUsePromptTokenCount` / `promptTokenCount` は入力側)、
+ * この内訳が無いと対策(上限引き上げ / 出力圧縮 / 分割)のどれが必要か判断できない。
+ *
+ * **数値と設定値のみ。** raw response 本文・candidate text・prompt 本文・URL は出さない
+ * (`logGeminiCallFailure` と同じ規約)。
+ */
+function logMaxTokens(stage: "stage1" | "stage2", usage: UsageMetadataLike | null): void {
+  console.error("[research.gemini] max_tokens", {
+    stage,
+    configured_max_output_tokens: getResearchMaxOutputTokens(),
+    prompt_token_count: usage?.promptTokenCount ?? null,
+    thoughts_token_count: usage?.thoughtsTokenCount ?? null,
+    candidates_token_count: usage?.candidatesTokenCount ?? null,
+    tool_use_prompt_token_count: usage?.toolUsePromptTokenCount ?? null,
+    total_token_count: usage?.totalTokenCount ?? null,
+  });
+}
+
+/**
  * SDK 生エラーを正規化しつつ、失敗を sanitized にログへ残す。
  * 正規化後の `AiClientError` の内容は従来と一切変わらない(分類ロジックは無変更)。
  */
@@ -211,12 +236,18 @@ export function createResearchGeminiClient(): ResearchGeminiClient {
 
         // 長さ上限による打ち切りを、空応答/JSON parse失敗より先に専用分類へ落とす。
         // Gemini 3系はthinkingが既定で有効で、thinking tokenも出力枠(maxOutputTokens)を
-        // 消費するため、42項目Combinedの出力途中でJSON が閉じられないまま打ち切られうる
+        // 消費するため、41項目Combinedの出力途中でJSON が閉じられないまま打ち切られうる
         // (実機smoke testで thoughtsTokenCount+candidatesTokenCount が上限に到達し、
         // 後続のJSON.parseが構文エラーになる事象を確認済み)。ここで検出しないと
         // 「JSON parse failure」と「出力token上限」が区別できなくなる。
         if (candidate?.finishReason === FinishReason.MAX_TOKENS) {
-          throw makeError({ kind: "max_tokens" });
+          // feat/ai-research-quality-ux-hardening(Theme 5B): この時点では
+          // `response.usageMetadata` がスコープ内にあり、thinking と candidates の
+          // どちらが枠を食い潰したかを**数値だけ**取り出せる。従来はここで読まずに
+          // throw していたため `token_usage = null` になり、対策の効果測定ができなかった。
+          const usage = extractUsageMetadata(response.usageMetadata);
+          logMaxTokens("stage2", usage);
+          throw makeError({ kind: "max_tokens", usage: usage ?? undefined });
         }
 
         const rawText = response.text;

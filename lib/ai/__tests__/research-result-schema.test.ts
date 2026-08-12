@@ -1549,3 +1549,97 @@ describe("sortResearchItemsToCanonicalOrder (feat/ai-research-pre-smoke-hardenin
     expect(sorted[1]!.key).toBe("unknown_key");
   });
 });
+
+/**
+ * canonical fallback bypass の trust boundary
+ * (feat/ai-research-quality-ux-hardening、Plan §7.1.1 / 承認レビュー指摘1)。
+ *
+ * bypass の発火条件を「key ∈ canonicalVerifiedKeys」だけにすると、将来
+ * `excludeKeys` に regression が起きて AI 生成 item が同じ key で混入した場合に
+ * bypass を乗っ取られる。Stage2 Structured Output schema は `evidence_basis` を
+ * モデルへ公開していない(`schema-builder.ts` の 9 フィールドに含まれない)ため、
+ * `evidence_basis === "existing_canonical"` との **AND** を必須にすることで
+ * 「コードが合成した item だけが bypass に乗る」ことを構造的に保証する。
+ */
+describe("canonicalVerifiedKeys bypass (承認レビュー指摘1)", () => {
+  it("key一致 + evidence_basis=existing_canonical の両方が揃えば confirmed を維持する", () => {
+    const item = makeItem({
+      key: "official_site",
+      research_policy: "FACT",
+      status: "confirmed",
+      value: "あり (https://robata-jun.com/)",
+      source_ids: [],
+      evidence_basis: "existing_canonical",
+    });
+    const result = validateResearchItemStatus(item, {
+      sourceRegistry: [],
+      canonicalVerifiedKeys: new Set(["official_site"]),
+    });
+    expect(result.status).toBe("confirmed");
+    expect(result.value).toBe("あり (https://robata-jun.com/)");
+    expect(result.evidence_basis).toBe("existing_canonical");
+  });
+
+  it("key一致でも evidence_basis が無い item は bypass できない(AI生成itemの混入防御)", () => {
+    // Stage2 schema は evidence_basis を持たないため、AI が返す item は必ず undefined。
+    const aiItem = makeItem({
+      key: "official_site",
+      research_policy: "FACT",
+      status: "confirmed",
+      value: "あり (https://例のサイト.example/)",
+      source_ids: [],
+      evidence_basis: undefined,
+    });
+    const result = validateResearchItemStatus(aiItem, {
+      sourceRegistry: [],
+      canonicalVerifiedKeys: new Set(["official_site"]),
+    });
+    expect(result.status).toBe("not_found");
+    expect(result.value).toBeNull();
+  });
+
+  it("evidence_basis を自己申告しても key が canonicalVerifiedKeys に無ければ bypass できない", () => {
+    const item = makeItem({
+      key: "concept",
+      research_policy: "FACT_OR_HEARING",
+      status: "confirmed",
+      source_ids: [],
+      evidence_basis: "existing_canonical",
+    });
+    const result = validateResearchItemStatus(item, {
+      sourceRegistry: [],
+      canonicalVerifiedKeys: new Set(["official_site"]),
+    });
+    expect(result.status).toBe("hearing_required");
+    expect(result.value).toBeNull();
+  });
+
+  it("canonicalVerifiedKeys 未指定なら従来どおり降格する", () => {
+    const item = makeItem({
+      key: "review_avg",
+      research_policy: "FACT",
+      status: "confirmed",
+      source_ids: [],
+      evidence_basis: "existing_canonical",
+    });
+    const result = validateResearchItemStatus(item, { sourceRegistry: [] });
+    expect(result.status).toBe("not_found");
+  });
+
+  it("HEARING_ONLY / EXTERNAL_DATA_REQUIRED は canonical bypass よりも前段で無条件降格する", () => {
+    const item = makeItem({
+      key: "population_day_night",
+      research_policy: "EXTERNAL_DATA_REQUIRED",
+      status: "confirmed",
+      value: "昼間 12000人",
+      source_ids: [],
+      evidence_basis: "existing_canonical",
+    });
+    const result = validateResearchItemStatus(item, {
+      sourceRegistry: [],
+      canonicalVerifiedKeys: new Set(["population_day_night"]),
+    });
+    expect(result.status).toBe("external_data_required");
+    expect(result.value).toBeNull();
+  });
+});

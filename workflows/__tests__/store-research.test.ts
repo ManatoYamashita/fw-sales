@@ -43,7 +43,7 @@ vi.mock("@/lib/ai/research/pipeline", () => ({
   runStage1: vi.fn(),
   runStage2: vi.fn(),
   buildNonAiItems: vi.fn(),
-  buildDeterministicPlacesItems: vi.fn(),
+  buildDeterministicItems: vi.fn(),
   DETERMINISTIC_PLACES_KEYS: ["review_avg", "review_count"],
   applyUrlContextStatus: vi.fn(),
   upgradeMediaCoverageFromRegistry: vi.fn(),
@@ -69,14 +69,16 @@ vi.mock("@/lib/ai/research/source-registry", () => ({
 vi.mock("@/lib/ai/research/places-stage0", () => ({
   runStage0PlacesResync: vi.fn(),
 }));
-vi.mock("@/lib/ai/research/places-verified", () => ({
-  derivePlacesVerifiedKeys: vi.fn(),
-}));
-vi.mock("@/lib/domain/basic-info-merge", () => ({
-  mergeBasicInfo: vi.fn(),
+vi.mock("@/lib/ai/research/official-alias", () => ({
+  resolveOfficialAliases: vi.fn(),
 }));
 
-const { classifyForWorkflowRetry, deriveErrorKind, buildFailureRecord } = await import(
+const {
+  classifyForWorkflowRetry,
+  deriveErrorKind,
+  buildFailureRecord,
+  extractFailureTokenUsage,
+} = await import(
   "../store-research"
 );
 
@@ -671,6 +673,355 @@ describe("deriveErrorKind (error_kind導出)", () => {
       });
       expect(hydrated instanceof FatalError).toBe(false);
       expect(deriveErrorKind(hydrated)).toBe("fatal:auth_error");
+    });
+  });
+});
+
+/**
+ * MAX_TOKENS 時の token_usage 永続化
+ * (feat/ai-research-quality-ux-hardening、Plan §11.2 / Theme 5B)。
+ *
+ * `store_research_runs.token_usage` は jsonb なので **migration 不要**。
+ * `StoreResearchRunPatch` には既に `token_usage` が含まれている。
+ *
+ * ## 入力は「`classifyForWorkflowRetry` が付けた cause」だけ(最終レビュー指摘)
+ *
+ * `markFailedStep` が受け取るのは step 境界を越えてきた `FatalError` であり、
+ * 生の `AiClientError` ではない。したがって `extractFailureTokenUsage` は
+ * **`err.cause` の厳格な shape guard を通った payload のみ**を受け付ける。
+ * 生 `AiClientError` を直接渡す経路は意図的に廃止した(guard を通らない入力を
+ * 受け入れる口を残さないため)。
+ */
+describe("extractFailureTokenUsage (Theme 5B)", () => {
+  const USAGE = {
+    promptTokenCount: 5344,
+    candidatesTokenCount: 6177,
+    toolUsePromptTokenCount: 83456,
+    thoughtsTokenCount: 18500,
+    totalTokenCount: 113477,
+  };
+
+  /** 本番と同じ経路(`classifyForWorkflowRetry` が cause を付ける)で入力を作る。 */
+  function maxTokensError(usage?: Record<string, unknown>): Error {
+    return classifyForWorkflowRetry({ kind: "max_tokens", usage } as AiClientError);
+  }
+
+  it("max_tokensエラーのusageをStage2分として取り出す", () => {
+    expect(extractFailureTokenUsage(maxTokensError(USAGE), null)).toEqual({ stage2: USAGE });
+  });
+
+  it("Stage1のusageも同時に保存する(Stage2失敗でStage1分まで消えないようにする)", () => {
+    const stage1 = { ...USAGE, totalTokenCount: 999 };
+    expect(extractFailureTokenUsage(maxTokensError(USAGE), stage1)).toEqual({
+      stage1,
+      stage2: USAGE,
+    });
+  });
+
+  it("usageが無いmax_tokensではstage2を含めない", () => {
+    expect(extractFailureTokenUsage(maxTokensError(undefined), null)).toBeNull();
+  });
+
+  it("max_tokens以外のエラーではStage1分だけを保存する", () => {
+    const stage1 = { ...USAGE };
+    const authError = classifyForWorkflowRetry({ kind: "auth_error" } as AiClientError);
+    expect(extractFailureTokenUsage(authError, stage1)).toEqual({ stage1 });
+    expect(extractFailureTokenUsage(authError, null)).toBeNull();
+  });
+
+  it("AiClientError以外(DB step失敗等)でもStage1分があれば保存する", () => {
+    const stage1 = { ...USAGE };
+    expect(extractFailureTokenUsage(new Error("db down"), stage1)).toEqual({ stage1 });
+    expect(extractFailureTokenUsage(new Error("db down"), null)).toBeNull();
+  });
+
+  it("生のAiClientErrorを直接渡してもstage2を採用しない(guard必須、最終レビュー指摘)", () => {
+    // `markFailedStep` に届くのは常に cause 付きの FatalError。guard を通らない
+    // 入力から usage を拾う裏口を残さない。
+    expect(
+      extractFailureTokenUsage({ kind: "max_tokens", usage: USAGE } as AiClientError, null),
+    ).toBeNull();
+  });
+
+  it("保存する値は数値のみ(raw message等を含めない)", () => {
+    const result = extractFailureTokenUsage(maxTokensError(USAGE), null);
+    for (const v of Object.values(result!.stage2 as Record<string, unknown>)) {
+      expect(typeof v === "number" || v === null).toBe(true);
+    }
+  });
+});
+
+describe("MAX_TOKENS usage の end-to-end 伝播 (Theme 5B / 最終レビュー指摘)", () => {
+  const STAGE2_USAGE = {
+    promptTokenCount: 5344,
+    candidatesTokenCount: 6177,
+    toolUsePromptTokenCount: 83456,
+    thoughtsTokenCount: 18500,
+    totalTokenCount: 113477,
+  };
+  const STAGE1_USAGE = {
+    promptTokenCount: 1200,
+    candidatesTokenCount: 800,
+    toolUsePromptTokenCount: 0,
+    thoughtsTokenCount: 400,
+    totalTokenCount: 2400,
+  };
+
+  /**
+   * Workflow step 境界の serialization を **再帰的に**再現する。
+   *
+   * - native Error(`FatalError` 含む)→ `{ (name,) message, stack, cause }` だけを
+   *   引き継いだ新インスタンスへ。**独自プロパティは捨てる。**
+   * - plain object / 配列 → own enumerable プロパティを再帰的にコピー(devalue 相当)
+   * - primitive → そのまま
+   *
+   * これにより「cause が Error subclass だと独自プロパティが消える」という
+   * 実 serializer の性質がテスト上でも再現される。
+   */
+  function simulateStepBoundary(value: unknown): unknown {
+    if (value instanceof Error) {
+      const revived =
+        value.name === "FatalError" ? new FatalError(value.message) : new Error(value.message);
+      revived.name = value.name;
+      revived.stack = value.stack;
+      if ("cause" in value) {
+        revived.cause = simulateStepBoundary((value as { cause?: unknown }).cause);
+      }
+      return revived;
+    }
+    if (Array.isArray(value)) return value.map(simulateStepBoundary);
+    if (typeof value === "object" && value !== null) {
+      const out: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(value)) out[k] = simulateStepBoundary(v);
+      return out;
+    }
+    return value;
+  }
+
+  function crossBoundary(err: Error): Error {
+    return simulateStepBoundary(err) as Error;
+  }
+
+  it("simulateStepBoundary 自体の妥当性: Error subclass の独自プロパティは失われる", () => {
+    // このメタテストが緑でないと、以降のテストは実 serializer を再現できていない。
+    class LegacyAiError extends Error {
+      usage = STAGE2_USAGE;
+      constructor() {
+        super("legacy");
+        this.name = "LegacyAiError";
+      }
+    }
+    const before = new LegacyAiError();
+    expect(before.usage).toEqual(STAGE2_USAGE);
+
+    const after = simulateStepBoundary(before) as { usage?: unknown };
+    expect(after).toBeInstanceOf(Error);
+    expect(after.usage).toBeUndefined();
+  });
+
+  it("旧方式(cause = Error subclass の AiClientError 相当)ではusageが消える", () => {
+    // 「AiClientError を Error subclass にする」将来のリファクタで壊れることの再現。
+    class ErrorLikeAiClientError extends Error {
+      kind = "max_tokens";
+      usage = STAGE2_USAGE;
+      constructor() {
+        super("");
+        this.name = "ErrorLikeAiClientError";
+      }
+    }
+    const fatal = new FatalError("Gemini呼出が失敗しました(max_tokens)");
+    fatal.cause = new ErrorLikeAiClientError();
+
+    const crossed = crossBoundary(fatal);
+
+    expect((crossed.cause as { usage?: unknown }).usage).toBeUndefined();
+    // 旧方式のまま plain-object 前提の guard を通しても拾えない = stage2 が欠ける
+    expect(extractFailureTokenUsage(crossed, STAGE1_USAGE)).toEqual({ stage1: STAGE1_USAGE });
+  });
+
+  it("新方式(cause = sanitized plain object)はserialization往復後もusageが残る", () => {
+    const aiError = { kind: "max_tokens", usage: STAGE2_USAGE } as AiClientError;
+    const classified = classifyForWorkflowRetry(aiError);
+
+    // cause は plain object であって Error ではない
+    const cause = (classified as { cause?: unknown }).cause as Record<string, unknown>;
+    expect(cause).not.toBeInstanceOf(Error);
+    expect(cause.kind).toBe("max_tokens_usage");
+
+    const crossed = crossBoundary(classified);
+    expect(extractFailureTokenUsage(crossed, null)).toEqual({ stage2: STAGE2_USAGE });
+  });
+
+  it("end-to-end: MAX_TOKENS → classify → step境界 → error_kind と stage1/stage2 が揃う", () => {
+    const aiError = { kind: "max_tokens", usage: STAGE2_USAGE } as AiClientError;
+
+    const classified = classifyForWorkflowRetry(aiError);
+    expect(FatalError.is(classified)).toBe(true);
+
+    const crossed = crossBoundary(classified);
+
+    const failure = buildFailureRecord(crossed);
+    const tokenUsage = extractFailureTokenUsage(crossed, STAGE1_USAGE);
+
+    expect(failure.error_kind).toBe("fatal:max_tokens");
+    expect(failure.error_message).toBe("AI店舗調査に失敗しました");
+    expect(tokenUsage).not.toBeNull();
+    expect(tokenUsage!.stage1).toEqual(STAGE1_USAGE);
+    expect(tokenUsage!.stage2).toEqual(STAGE2_USAGE);
+  });
+
+  it("causeが失われても error_kind は fatal:max_tokens のまま(safe degrade)", () => {
+    const fatal = new FatalError("Gemini呼出が失敗しました(max_tokens)");
+    const crossed = crossBoundary(fatal);
+
+    expect(deriveErrorKind(crossed)).toBe("fatal:max_tokens");
+    expect(extractFailureTokenUsage(crossed, STAGE1_USAGE)).toEqual({ stage1: STAGE1_USAGE });
+  });
+
+  it("usage が無い max_tokens では cause を付けず、stage1 だけを保存する", () => {
+    const aiError = { kind: "max_tokens" } as AiClientError;
+    const classified = classifyForWorkflowRetry(aiError);
+
+    expect((classified as { cause?: unknown }).cause).toBeUndefined();
+    expect(extractFailureTokenUsage(crossBoundary(classified), STAGE1_USAGE)).toEqual({
+      stage1: STAGE1_USAGE,
+    });
+  });
+});
+
+describe("MAX_TOKENS cause の shape guard (最終レビュー指摘)", () => {
+  const STAGE1_USAGE = {
+    promptTokenCount: 1,
+    candidatesTokenCount: 2,
+    toolUsePromptTokenCount: 3,
+    thoughtsTokenCount: 4,
+    totalTokenCount: 5,
+  };
+
+  function withCauseValue(cause: unknown): Error {
+    const fatal = new FatalError("Gemini呼出が失敗しました(max_tokens)");
+    fatal.cause = cause;
+    return fatal;
+  }
+
+  it("allowlist外のキーを含む usage は payload 全体を拒否する", () => {
+    const err = withCauseValue({
+      kind: "max_tokens_usage",
+      usage: { candidate: "secret", promptTokenCount: 10 },
+    });
+    expect(extractFailureTokenUsage(err, null)).toBeNull();
+  });
+
+  it("数値でない値(文字列)を含む usage は拒否する", () => {
+    const err = withCauseValue({
+      kind: "max_tokens_usage",
+      usage: { promptTokenCount: "AIzaSyFAKEKEY" },
+    });
+    expect(extractFailureTokenUsage(err, null)).toBeNull();
+  });
+
+  it("NaN / Infinity は拒否する", () => {
+    expect(
+      extractFailureTokenUsage(
+        withCauseValue({ kind: "max_tokens_usage", usage: { promptTokenCount: Number.NaN } }),
+        null,
+      ),
+    ).toBeNull();
+    expect(
+      extractFailureTokenUsage(
+        withCauseValue({
+          kind: "max_tokens_usage",
+          usage: { promptTokenCount: Number.POSITIVE_INFINITY },
+        }),
+        null,
+      ),
+    ).toBeNull();
+  });
+
+  it("kind が違う plain object は採用しない", () => {
+    const err = withCauseValue({ kind: "something_else", usage: { promptTokenCount: 10 } });
+    expect(extractFailureTokenUsage(err, null)).toBeNull();
+  });
+
+  it("raw string / Error / provider 風オブジェクトは usage として採用しない", () => {
+    expect(extractFailureTokenUsage(withCauseValue("promptTokenCount=10"), null)).toBeNull();
+    expect(extractFailureTokenUsage(withCauseValue(new Error("boom")), null)).toBeNull();
+    expect(
+      extractFailureTokenUsage(
+        withCauseValue({
+          status: 429,
+          message: '{"error":{"code":429,"status":"RESOURCE_EXHAUSTED"}}',
+        }),
+        null,
+      ),
+    ).toBeNull();
+  });
+
+  it("配列 / null / usage 空オブジェクト は拒否する", () => {
+    expect(extractFailureTokenUsage(withCauseValue([1, 2, 3]), null)).toBeNull();
+    expect(extractFailureTokenUsage(withCauseValue(null), null)).toBeNull();
+    expect(
+      extractFailureTokenUsage(withCauseValue({ kind: "max_tokens_usage", usage: {} }), null),
+    ).toBeNull();
+    expect(
+      extractFailureTokenUsage(withCauseValue({ kind: "max_tokens_usage", usage: [] }), null),
+    ).toBeNull();
+  });
+
+  it("null 値の token count は有効な値として受け付ける(取得できなかったフィールド)", () => {
+    const err = withCauseValue({
+      kind: "max_tokens_usage",
+      usage: { promptTokenCount: 10, thoughtsTokenCount: null },
+    });
+    expect(extractFailureTokenUsage(err, null)).toEqual({
+      stage2: { promptTokenCount: 10, thoughtsTokenCount: null },
+    });
+  });
+
+  it("MAX_TOKENS以外(auth_error / rate_limit)には stage2 usage を付与しない", () => {
+    for (const kind of ["auth_error", "rate_limit", "network_error"] as const) {
+      const classified = classifyForWorkflowRetry({ kind } as AiClientError);
+      expect((classified as { cause?: unknown }).cause).toBeUndefined();
+      expect(extractFailureTokenUsage(classified, STAGE1_USAGE)).toEqual({
+        stage1: STAGE1_USAGE,
+      });
+    }
+  });
+
+  it("保存される stage2 は数値と null のみ(raw が混ざらない)", () => {
+    const aiError = {
+      kind: "max_tokens",
+      usage: {
+        promptTokenCount: 5344,
+        candidatesTokenCount: 6177,
+        toolUsePromptTokenCount: 83456,
+        thoughtsTokenCount: 18500,
+        totalTokenCount: 113477,
+      },
+    } as AiClientError;
+    const tokenUsage = extractFailureTokenUsage(classifyForWorkflowRetry(aiError), null);
+    const serialized = JSON.stringify(tokenUsage);
+    expect(serialized).not.toContain("Gemini");
+    expect(serialized).not.toContain("http");
+    for (const v of Object.values(tokenUsage!.stage2 as Record<string, unknown>)) {
+      expect(typeof v === "number" || v === null).toBe(true);
+    }
+  });
+
+  it("AiClientError の usage に余計なキーがあっても cause には載せない", () => {
+    const aiError = {
+      kind: "max_tokens",
+      usage: {
+        promptTokenCount: 10,
+        // 型上はありえないが、将来フィールドが増えた場合に素通ししないことを固定する。
+        rawResponse: "SECRET",
+      },
+    } as unknown as AiClientError;
+    const classified = classifyForWorkflowRetry(aiError);
+
+    expect(JSON.stringify((classified as { cause?: unknown }).cause)).not.toContain("SECRET");
+    expect(extractFailureTokenUsage(classified, null)).toEqual({
+      stage2: { promptTokenCount: 10 },
     });
   });
 });

@@ -214,6 +214,22 @@ export function isValidCandidateUrl(raw: string): boolean {
 
 type DraftEntry = Omit<SourceRegistryEntry, "id">;
 
+/**
+ * Source Registry の `id` を先頭から `S01`, `S02`, ... で採番し直す。
+ *
+ * `official-alias.ts` がエントリを統合(削除)した後に呼ぶため export している。
+ * **Stage2 プロンプトへ渡す前**にのみ再採番してよい(Stage2 後に採番し直すと
+ * モデルが返した `source_ids` の参照先がずれる)。
+ */
+export function reindexSourceRegistry(
+  entries: readonly SourceRegistryEntry[],
+): SourceRegistryEntry[] {
+  return entries.map((entry, index) => ({
+    ...entry,
+    id: `S${String(index + 1).padStart(2, "0")}`,
+  }));
+}
+
 function assignSequentialIds(drafts: readonly DraftEntry[]): SourceRegistryEntry[] {
   return drafts.map((draft, index) => ({
     ...draft,

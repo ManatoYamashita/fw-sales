@@ -54,8 +54,7 @@ import {
   runStage1,
   runStage2,
   buildNonAiItems,
-  buildDeterministicPlacesItems,
-  deriveDeterministicPlacesConfirmedKeys,
+  buildDeterministicItems,
   applyUrlContextStatus,
   applySourceIdentityVerification,
   upgradeMediaCoverageFromRegistry,
@@ -69,6 +68,7 @@ import {
   mergeKnownStoreDataIntoRegistry,
 } from "@/lib/ai/research/source-registry";
 import { runStage0PlacesResync, type Stage0PlacesResult } from "@/lib/ai/research/places-stage0";
+import { resolveOfficialAliases } from "@/lib/ai/research/official-alias";
 import {
   GEMINI_STAGE_TIMEOUT_MS,
   GEMINI_STAGE_MAX_RETRIES,
@@ -79,8 +79,6 @@ import {
   type RetryableSanitizedKind,
   DB_STEP_MAX_RETRIES,
 } from "@/lib/ai/research/run-timing";
-import { derivePlacesVerifiedKeys } from "@/lib/ai/research/places-verified";
-import { mergeBasicInfo } from "@/lib/domain/basic-info-merge";
 import { isAiClientError } from "@/lib/ai/client";
 import type { StoreIdentity } from "@/lib/ai/research/prompts";
 import type { SourceRegistryEntry, ResearchItem, SearchFact } from "@/lib/ai/research-result-schema";
@@ -89,6 +87,7 @@ import {
   validateFinalResearchResultIntegrity,
 } from "@/lib/ai/research-result-schema";
 import type { SearchNote } from "@/lib/ai/research/source-registry";
+import type { UsageMetadataLike } from "@/lib/ai/research/client";
 import type { BasicInfo } from "@/types/basic-info";
 import { nowIso } from "@/lib/utils/date";
 
@@ -167,6 +166,146 @@ export function buildFailureRecord(err: unknown): { error_kind: string; error_me
 }
 
 /**
+ * 失敗時に保存する `token_usage`(feat/ai-research-quality-ux-hardening、Theme 5B)。
+ *
+ * 実機の MAX_TOKENS run では `token_usage = null` だった。原因は 2 つ:
+ * 1. `client.ts` が `usageMetadata` を読まずに throw していた(修正済み)
+ * 2. `markFailedStep` の patch に `token_usage` が含まれていなかった(本関数で対応)
+ *
+ * 副次被害として、Stage2 が落ちると **Stage1 の usage まで丸ごと消えていた**
+ * (`token_usage` を書くのは `persistSucceededStep` の1箇所だけだったため)。
+ * ここで Stage1 分も一緒に保存する。
+ *
+ * **数値のみ。** raw message / response body は絶対に含めない。
+ * `store_research_runs.token_usage` は jsonb なので **migration 不要**。
+ *
+ * @returns 保存すべき内容が無ければ `null`(patch に含めず既存値を維持する)
+ */
+export function extractFailureTokenUsage(
+  err: unknown,
+  stage1Usage: UsageMetadataLike | null,
+): Record<string, unknown> | null {
+  const usage: Record<string, unknown> = {};
+  if (stage1Usage !== null) usage.stage1 = stage1Usage;
+  // `stage2` に入るのは `readMaxTokensFailureCause` の厳格な shape guard を
+  // 通過した数値のみ(成功パスの `stage2_combined` と同じフィールド命名)。
+  const stage2 = readMaxTokensFailureCause(err);
+  if (stage2 !== null) usage.stage2 = stage2;
+  return Object.keys(usage).length > 0 ? usage : null;
+}
+
+/**
+ * `Error` へ `cause` を後付けする(`FatalError` の constructor が options を
+ * 受け取らないため)。SDK の serialization は `cause` を `BaseErrorPayload` に
+ * 含めるので、step 境界を越えて残る唯一の追加チャネルになる。
+ */
+function withCause<E extends Error>(error: E, cause: unknown): E {
+  error.cause = cause;
+  return error;
+}
+
+/**
+ * MAX_TOKENS 時に `FatalError.cause` へ載せる sanitized payload の判別子。
+ * plain object の構造だけで識別し、class identity / prototype には依存しない。
+ */
+const MAX_TOKENS_CAUSE_KIND = "max_tokens_usage";
+
+/**
+ * cause に載せてよい token 数フィールドの allowlist。
+ * `UsageMetadataLike`(`lib/ai/research/client.ts`)と同じ命名にそろえ、
+ * DB の `token_usage.stage1` / 成功パスの `stage2_combined` と比較可能にする。
+ */
+const MAX_TOKENS_USAGE_FIELDS = [
+  "promptTokenCount",
+  "candidatesTokenCount",
+  "toolUsePromptTokenCount",
+  "thoughtsTokenCount",
+  "totalTokenCount",
+] as const;
+
+type MaxTokensUsageField = (typeof MAX_TOKENS_USAGE_FIELDS)[number];
+type SanitizedTokenUsage = Partial<Record<MaxTokensUsageField, number | null>>;
+
+/**
+ * `FatalError.cause` へ載せる **完全に sanitized な plain object**
+ * (feat/ai-research-quality-ux-hardening、最終レビュー指摘)。
+ *
+ * 数値(と null)だけを持つ。raw response / provider message / prompt / URL /
+ * headers / request ID は一切含まない。`AiClientError` そのものは載せない。
+ */
+export interface MaxTokensFailureCause {
+  kind: typeof MAX_TOKENS_CAUSE_KIND;
+  usage: SanitizedTokenUsage;
+}
+
+/** 値が「数値(有限)または null」であること。`NaN`/`Infinity`/文字列は拒否。 */
+function isUsageValue(value: unknown): value is number | null {
+  return value === null || (typeof value === "number" && Number.isFinite(value));
+}
+
+/**
+ * `AiClientError.usage` から cause 用の sanitized payload を組み立てる。
+ * allowlist 外のキーは**落とし**、数値でない値を持つキーも落とす。
+ * 1つも載せる値が無ければ `null`(cause を付けない)。
+ */
+function buildMaxTokensFailureCause(usage: unknown): MaxTokensFailureCause | null {
+  if (typeof usage !== "object" || usage === null) return null;
+  const source = usage as Record<string, unknown>;
+  const sanitized: SanitizedTokenUsage = {};
+  for (const field of MAX_TOKENS_USAGE_FIELDS) {
+    const value = source[field];
+    if (isUsageValue(value)) sanitized[field] = value;
+  }
+  return Object.keys(sanitized).length > 0
+    ? { kind: MAX_TOKENS_CAUSE_KIND, usage: sanitized }
+    : null;
+}
+
+/**
+ * `err.cause` が MAX_TOKENS の sanitized payload かを**厳格に**判定して取り出す。
+ *
+ * Workflow の catch が受け取るのは `stage2Step` が投げた **`FatalError`** であり、
+ * 元の `AiClientError` ではない(`classifyForWorkflowRetry` が変換する)。
+ * SDK の serialization は `FatalError` / generic `Error` のいずれも
+ * `{ (name,) message, stack, cause }` しか保持しないため、`cause` が唯一の伝播経路。
+ *
+ * 受け入れ条件(すべて構造のみ。**prototype / class identity は見ない**):
+ * - plain object(配列でない)
+ * - `kind === "max_tokens_usage"`
+ * - `usage` が plain object(配列でない)
+ * - `usage` の **全ての own key が allowlist に含まれ**、値が数値(有限)か null
+ *
+ * 1つでも外れたら **payload 全体を拒否**する(部分採用しない)。
+ * 拒否時は `token_usage` から `stage2` を省略するだけで、
+ * `error_kind` の正しさには影響しない(safe degrade)。
+ *
+ * 探索は `err.cause` の **1段のみ**。深く辿ると SDK の retry-exhaustion wrapper 等を
+ * 巻き込み、意図しない値を拾う余地が増えるため。
+ */
+function readMaxTokensFailureCause(err: unknown): SanitizedTokenUsage | null {
+  const cause = (err as { cause?: unknown } | null | undefined)?.cause;
+  if (typeof cause !== "object" || cause === null || Array.isArray(cause)) return null;
+
+  const record = cause as Record<string, unknown>;
+  if (record.kind !== MAX_TOKENS_CAUSE_KIND) return null;
+
+  const usage = record.usage;
+  if (typeof usage !== "object" || usage === null || Array.isArray(usage)) return null;
+
+  const allowed = new Set<string>(MAX_TOKENS_USAGE_FIELDS);
+  const entries = Object.entries(usage as Record<string, unknown>);
+  if (entries.length === 0) return null;
+
+  const sanitized: SanitizedTokenUsage = {};
+  for (const [key, value] of entries) {
+    // 未知キー・非数値が1つでもあれば payload 全体を拒否する(部分採用しない)。
+    if (!allowed.has(key) || !isUsageValue(value)) return null;
+    sanitized[key as MaxTokensUsageField] = value;
+  }
+  return sanitized;
+}
+
+/**
  * `AiClientError` を Workflow の retry 意味論(`FatalError` / `RetryableError`)へ変換する。
  * 純関数としてexportし、単体テストで直接検証する。PR #187 の修正内容を維持している
  * (絶対に壊さない): 503 (service unavailable) は 429 / timeout / network_error と同じ
@@ -216,7 +355,41 @@ export function classifyForWorkflowRetry(err: unknown): Error {
         }
         return new FatalError(`Gemini呼出が失敗しました(api_error:${err.status})`);
       }
-      case "max_tokens":
+      case "max_tokens": {
+        // Theme 5B: token 内訳を `cause` に載せて Workflow の catch まで運ぶ。
+        //
+        // **`FatalError` の独自プロパティは step 境界を越えられない。** SDK の
+        // serialization reducer(`@workflow/core` dist の
+        // `serialization/reducers/common.js`)は `FatalError` を
+        // `makeErrorSubclassReducer('FatalError')` で扱い、保持されるのは
+        // `BaseErrorPayload = { message, stack, cause? }` **のみ**。
+        // したがって `new FatalError(msg)` に `usage` を生やしても失われる。
+        // `cause` は同 payload に含まれるため、ここだけを伝播経路に使う。
+        //
+        // **`cause` には `AiClientError` そのものを入れない**(最終レビュー指摘):
+        // 同 reducer 群の generic `Error` reducer(`:239-250`)も
+        // `{ name, message, stack, cause }` しか保存しないため、`cause` が
+        // native Error だった場合は独自プロパティが再帰的に失われる。
+        // 現状の `AiClientError` は plain object なのでたまたま生き残るが、
+        // それは「`AiClientError` が Error subclass ではない」という**偶然**に
+        // 依存した設計であり、将来 Error 化されると usage が無言で消える。
+        //
+        // そこで **専用の sanitized plain object** を cause に載せる。
+        // 中身は数値(と null)だけで、raw response / provider message / prompt /
+        // URL / headers / request ID は一切含まない。
+        //
+        // `deriveErrorKind` は従来どおり **message のみ**を見るため、分類ロジックは
+        // `cause` に一切依存しない(cause が失われても error_kind は
+        // `fatal:max_tokens` のままで、usage が欠けるだけの safe degrade)。
+        //
+        // `FatalError` の constructor は `message` しか受け取らない
+        // (`@workflow/errors` dist で確認済み。`super(message)` のみ)ため、
+        // `cause` は **生成後に代入する**。SDK 自身の retry-exhaustion wrapper も
+        // 同じ方法を採っている(`step-executor.js` の `wrappedError.cause = err`)。
+        const fatal = new FatalError(`Gemini呼出が失敗しました(${err.kind})`);
+        const cause = buildMaxTokensFailureCause(err.usage);
+        return cause === null ? fatal : withCause(fatal, cause);
+      }
       case "unknown":
       default:
         return new FatalError(`Gemini呼出が失敗しました(${err.kind})`);
@@ -345,14 +518,43 @@ async function stage1Step(store: StoreIdentity) {
 }
 stage1Step.maxRetries = GEMINI_STAGE_MAX_RETRIES;
 
-async function persistSourceRegistryStep(
+/**
+ * known official URL の alias 解決 + Source Registry の永続化。
+ *
+ * ## なぜ alias 解決を専用 step にせず、この step に同居させるのか
+ *
+ * 新しい step を足すと `run-timing.ts` の safe expiry budget
+ * (`SCHEDULING_BUDGET_PER_ATTEMPT_MS` + step timeout)が増え、
+ * `MIN_SAFE_EXPIRES_MARGIN_MINUTES` が 30 → 31 分へ動く。この 30 分は
+ * 既存の不変条件(`workflows/__tests__/store-research.test.ts` が `toBe(30)` で固定)
+ * であり、品質改善のために動かす必然性が無い。
+ *
+ * alias 解決は Stage1 と Stage2 の間、まさにこの step の位置で必要になる処理であり、
+ * HEAD リクエストのみ・並列実行・全体 8s 上限のため
+ * `DB_STEP_BUDGET_MS = 15_000` の見積内に収まる。
+ * → `GEMINI_STAGE_COUNT` / `DB_STEP_COUNT` / budget 定数はいずれも変更しない。
+ *
+ * best-effort。resolver が全滅しても registry はそのまま Stage2 へ進む。
+ */
+async function resolveAndPersistSourceRegistryStep(
   runId: string,
   sourceRegistry: SourceRegistryEntry[],
-): Promise<void> {
+  knownOfficialUrls: string[],
+): Promise<SourceRegistryEntry[]> {
   "use step";
-  await repos.researchRun.update(runId, { source_registry: sourceRegistry });
+  const aliased = await resolveOfficialAliases({
+    registry: sourceRegistry,
+    knownOfficialUrls,
+  });
+  console.info("[research.alias] official alias resolve", {
+    runId,
+    attempted: aliased.attemptedCount,
+    merged: aliased.mergedCount,
+  });
+  await repos.researchRun.update(runId, { source_registry: aliased.registry });
+  return aliased.registry;
 }
-persistSourceRegistryStep.maxRetries = DB_STEP_MAX_RETRIES;
+resolveAndPersistSourceRegistryStep.maxRetries = DB_STEP_MAX_RETRIES;
 
 /**
  * Stage2: AI対象項目(FACT + FACT_OR_HEARING + ANALYSIS)を1回のGemini呼出で生成する
@@ -397,7 +599,11 @@ async function persistSucceededStep(runId: string, params: FinalizeStepParams): 
 }
 persistSucceededStep.maxRetries = DB_STEP_MAX_RETRIES;
 
-async function markFailedStep(runId: string, err: unknown): Promise<void> {
+async function markFailedStep(
+  runId: string,
+  err: unknown,
+  stage1Usage: UsageMetadataLike | null = null,
+): Promise<void> {
   "use step";
   // `error_message` は固定文言のみ。raw なエラー内容は DB へ保存しない
   // (`buildFailureRecord` の JSDoc 参照、監査指摘 3)。
@@ -414,9 +620,12 @@ async function markFailedStep(runId: string, err: unknown): Promise<void> {
     error_kind: failure.error_kind,
     retry_exhausted: failure.error_kind.startsWith("retryable_exhausted"),
   });
+  // Theme 5B: 失敗時も token 内訳を残す(取得できていない場合は patch に含めない)。
+  const tokenUsage = extractFailureTokenUsage(err, stage1Usage);
   await repos.researchRun.update(runId, {
     status: "failed",
     ...failure,
+    ...(tokenUsage === null ? {} : { token_usage: tokenUsage }),
     finished_at: nowIso(),
   });
 }
@@ -445,6 +654,10 @@ export async function storeResearchWorkflow(
 ): Promise<StoreResearchWorkflowResult> {
   "use workflow";
 
+  // Stage2 が失敗しても Stage1 の usage を失わないよう、try の外側で保持する
+  // (feat/ai-research-quality-ux-hardening、Theme 5B)。
+  let stage1Usage: UsageMetadataLike | null = null;
+
   try {
     const { store, basicInfo, googlePlaceId, knownStoreDataUrls } = await loadStoreStep(storeId);
 
@@ -454,37 +667,65 @@ export async function storeResearchWorkflow(
     // google_place_idが無い場合はText Search fallback(strong matchのみ採用)を試みる
     // (feat/ai-research-quality-refinement)。
     const stage0 = await stage0PlacesStep(googlePlaceId, store);
-    const effectiveBasicInfo = mergeBasicInfo(basicInfo, stage0.placesBasicInfo, "places", nowIso());
-    // derivePlacesVerifiedKeysは最大6key(store_name/address/cuisine_genre/phone/
-    // review_avg/review_count)を返すが、実際にPlaces値から直接生成しているのは
-    // review_avg/review_countの2keyのみ(buildDeterministicPlacesItems参照)。
-    // 6key全てを`finalizeResearchItems`のplacesVerifiedKeysへそのまま渡すと、
-    // AIが生成したstore_name/address/cuisine_genre/phoneのvalueが、値の中身を
-    // 見ずにkey一致だけでconfirmed維持されてしまう(BLOCKER2)。deterministic item
-    // 生成には引き続き広いplacesVerifiedKeySetを使い、trust boundary(finalizeResearchItems)
-    // へはDETERMINISTIC_PLACES_KEYSのみに絞った集合を渡す。
-    const placesVerifiedKeySet = derivePlacesVerifiedKeys(effectiveBasicInfo);
-    const placesConfirmedBypassKeys = deriveDeterministicPlacesConfirmedKeys(placesVerifiedKeySet);
 
-    // Google Placesがdeterministicに確定済みのkey(review_avg/review_count)は、
-    // Gemini対象から除外しdeterministic itemとして直接合成する(feat/ai-research-quality-refinement)。
-    const deterministicPlacesItems = buildDeterministicPlacesItems(effectiveBasicInfo, placesVerifiedKeySet);
-    const deterministicKeys = deterministicPlacesItems.map((item) => item.key);
+    // Stage0の結末をsanitizedにログへ残す(feat/ai-research-quality-ux-hardening、Plan §6.3)。
+    // 従来は失敗時のwarningしか残らず、google_place_idが無い店舗でText Searchが
+    // strong matchしたのかを後から観測できなかった。値は載せない(種別のみ)。
+    console.info("[research.stage0] resync", { runId, ...stage0.diagnostic });
+
+    // --- fresh evidence 経路(canonicalから独立、Plan §6.1)-------------------
+    //
+    // 以前はここで `mergeBasicInfo(basicInfo, stage0.placesBasicInfo, "places", ...)` を
+    // 通した **マージ後** の basic_info から Places 検証済みkeyを導いていた。
+    // `mergeBasicInfo` の manual 保護(`lib/domain/basic-info-merge.ts:88`)は
+    // canonical DB を守るための正しい規則だが、DBへ書かないin-memory経路にも等しく
+    // 効くため、「Placesが今まさに答えている値」が保護規則によって破棄されていた。
+    // さらに review での採用が `filled_by:"manual"` を書くため、**正しく運用するほど
+    // 次回の調査品質が下がる**自己増悪ループになっていた(実機事象: 炉端ジュン)。
+    //
+    // 現在は Stage0 の生の結果だけを見る。canonical 側の manual 保護は一切変更していない
+    // (canonical への書き込みは従来どおり review 経由のみ)。
+    // --- canonical fallback 経路(Plan §7)------------------------------------
+    //
+    // freshで取得できなかった項目のうち、canonicalに確定情報があるものを
+    // 「今回は再確認できていない既知情報」として合成する。fresh と偽装しないため
+    // evidence_basis="existing_canonical" / confidence=null / source_ids=[] を付ける。
+    // 対象は CANONICAL_FALLBACK_KEYS の3項目のみ。
+    //
+    // 上記2経路の導出は純関数 `buildDeterministicItems` に集約している。
+    // Workflow 本体はテストで丸ごとmockされるため、この相互作用をWorkflow内へ
+    // インライン展開すると再びテスト不能になる(Q1が検知されなかった原因)。
+    const deterministic = buildDeterministicItems({
+      freshPlacesBasicInfo: stage0.placesBasicInfo,
+      canonicalBasicInfo: basicInfo,
+    });
+    const deterministicItems = deterministic.items;
+    // deterministicに確定した項目はGemini対象から除外する
+    // (偽装経路が構造的に消え、同時にStage2の出力tokenも減る)。
+    const deterministicKeys = deterministic.deterministicKeys;
 
     // Stage1: Source Discovery(Google Search)。
     const stage1 = await stage1Step(store);
+    stage1Usage = stage1.usageMetadata;
 
     // known_store_data(既存DBの公開URL)をSource Registryへ優先seedする。
     const knownEntries = buildKnownStoreDataEntries(knownStoreDataUrls);
     const mergedRegistry = mergeKnownStoreDataIntoRegistry(stage1.sourceRegistry, knownEntries);
-    await persistSourceRegistryStep(runId, mergedRegistry);
+    // known official URL と Google Search 候補が同一ページであることをコード側で
+    // 決定的に確認できた場合のみ統合する(Q5、Plan §8.2)。trust boundary は無改変で、
+    // 統合できなければ従来どおりの判定になる(退化ではない)。
+    const resolvedRegistry = await resolveAndPersistSourceRegistryStep(
+      runId,
+      mergedRegistry,
+      knownStoreDataUrls.map((u) => u.url),
+    );
 
     await markStageStep(runId, "researching");
 
     // Stage2: URL Context + Structured Output(単一call)。Stage1のSearch Notesも渡す。
-    const stage2Result = await stage2Step(store, mergedRegistry, stage1.searchNotes, deterministicKeys);
+    const stage2Result = await stage2Step(store, resolvedRegistry, stage1.searchNotes, deterministicKeys);
 
-    const urlContextAppliedRegistry = applyUrlContextStatus(mergedRegistry, [stage2Result.urlContextMetadata]);
+    const urlContextAppliedRegistry = applyUrlContextStatus(resolvedRegistry, [stage2Result.urlContextMetadata]);
     // fix/ai-research-source-identity-integrity: url_context成功=ページ取得成功であり
     // 「対象店舗のページだった」ことを意味しない(実機smokeで確認した誤ったHotPepper URL
     // の事故)。Stage2の`source_verifications`とStoreIdentityをコード側で突合し、
@@ -497,6 +738,23 @@ export async function storeResearchWorkflow(
 
     // Stage1のSearch Notes(store_fact、key/value構造化済み)をSource RegistryのIDへ解決する
     // (feat/ai-research-quality-refinement、Tier BのSearchFact照合に使う)。
+    //
+    // ## alias統合で破棄されたcandidateのSearchFactは意図的に捨てる
+    //
+    // `resolveOfficialAliases` が `gemini_search_candidate` を known_store_data エントリへ
+    // 統合すると、そのredirect URLはregistryから消えるため下の lookup が miss し、
+    // 対応するSearchFactは `sourceId === undefined` として除外される。**これは意図的**:
+    //
+    // - Tier B(`isTierBEligible`、`research-result-schema.ts:752`)は
+    //   `discovery_provenance === "known_store_data"` のみを許可する。統合**前**の
+    //   candidate 由来SearchFactはそもそもTier B対象外であり、捨てても
+    //   confirmed判定にも `pruneUnverifiedSourceIds` の表示にも影響しない。
+    // - 逆に統合先(known_store_data)のIDへ**rewriteすると**、Stage1の検索スニペット
+    //   由来の値が「known_store_dataのSearchFact」に化けてTier B適格になってしまう。
+    //   それはredirect一致を根拠にtrust boundaryを緩める行為であり、本PRの方針
+    //   (false positiveよりfalse negativeを優先)に反する。
+    //
+    // したがって「rewriteしない = 捨てる」が正しい。
     const registryIdByUrl = new Map(finalRegistry.map((s) => [s.grounding_redirect_url, s.id]));
     const searchFacts: SearchFact[] = stage1.searchNotes
       .filter((n): n is SearchNote & { key: string; value: string } => !!n.key && !!n.value)
@@ -511,10 +769,13 @@ export async function storeResearchWorkflow(
     const aiItemsWithContext = appendConfirmedMediaContext(mediaCorrectedItems, finalRegistry);
 
     const finalItems = finalizeResearchItems({
-      aiItems: [...aiItemsWithContext, ...deterministicPlacesItems],
+      aiItems: [...aiItemsWithContext, ...deterministicItems],
       nonAiItems: buildNonAiItems(),
       sourceRegistry: finalRegistry,
-      placesVerifiedKeys: placesConfirmedBypassKeys,
+      placesVerifiedKeys: deterministic.placesConfirmedKeys,
+      // 実際に合成したcanonical fallback itemのkeyだけを渡す。trust boundary側では
+      // `evidence_basis==="existing_canonical"` とのANDで判定される(二重防御)。
+      canonicalVerifiedKeys: deterministic.canonicalConfirmedKeys,
       searchFacts,
     });
 
@@ -557,7 +818,7 @@ export async function storeResearchWorkflow(
   } catch (err) {
     // running状態から抜け出せない状態を作らない(Plan §17の必須要件)。
     // Workflow自体もfailedとして記録されるようre-throwする(観測性の二重化)。
-    await markFailedStep(runId, err);
+    await markFailedStep(runId, err, stage1Usage);
     throw err;
   }
 }

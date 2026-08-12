@@ -159,7 +159,10 @@ describe("buildStage2Prompt", () => {
 
   it("evidenceを簡潔にする指示を含む(MAX_TOKENS対策、fix/ai-research-stage2-max-tokens)が、判定基準を弱める文言は含まない", () => {
     const prompt = buildStage2Prompt({ store: STORE, items: combinedItems, sourceRegistry: registry });
-    expect(prompt).toContain("1〜2文");
+    // feat/ai-research-quality-ux-hardening: 「1〜2文」は上限として弱かったため
+    // 「1文・全角60字以内」へ**定量化**した(Plan §10.3-3)。指示を緩めたのではなく
+    // 厳しくした変更であり、テストもその新しい仕様を固定する。
+    expect(prompt).toContain("1文・全角60字以内");
     expect(prompt).not.toContain("判定を緩め");
   });
 
@@ -343,5 +346,68 @@ describe("buildStage2Prompt", () => {
       const prompt = buildStage2Prompt({ store: STORE, items, sourceRegistry: registry });
       expect(prompt).not.toContain("「確認できない」ことの扱いに関する注意");
     });
+  });
+});
+
+/**
+ * 出力量・優先取得ヒント(feat/ai-research-quality-ux-hardening、Plan §8.2 A / §10.3-3)。
+ */
+describe("buildStage2Prompt — 優先取得ヒントと出力簡潔化", () => {
+  const REG = [
+    {
+      id: "S01",
+      title: "公式サイト(登録情報)",
+      grounding_redirect_url: "https://robata-jun.com/",
+      resolved_url: null,
+      resolve_status: "skipped" as const,
+      source_type: "official_site" as const,
+      discovery_provenance: "known_store_data" as const,
+      url_context_status: "not_attempted" as const,
+    },
+    {
+      id: "S02",
+      title: "食べログ",
+      grounding_redirect_url: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/x",
+      resolved_url: null,
+      resolve_status: "skipped" as const,
+      source_type: "gourmet_site" as const,
+      discovery_provenance: "gemini_search_candidate" as const,
+      url_context_status: "not_attempted" as const,
+    },
+  ];
+  const ITEMS = [
+    { key: "concept", label: "コンセプト", research_policy: "FACT_OR_HEARING" as const },
+  ];
+
+  it("known_store_data のURLにだけ優先取得ヒントを付す", () => {
+    const prompt = buildStage2Prompt({ store: STORE, items: ITEMS, sourceRegistry: REG });
+    const s01Line = prompt.split("\n").find((l) => l.startsWith("- S01:"));
+    const s02Line = prompt.split("\n").find((l) => l.startsWith("- S02:"));
+    expect(s01Line).toContain("登録済み公式URL / 優先的に取得すること");
+    expect(s02Line).not.toContain("優先的に取得すること");
+  });
+
+  it("公式サイトだけで済ませない指示は残す(情報源の分散を維持)", () => {
+    const prompt = buildStage2Prompt({ store: STORE, items: ITEMS, sourceRegistry: REG });
+    expect(prompt).toContain("公式サイトの情報だけで全項目を済ませないでください");
+  });
+
+  it("evidenceの長さ制限を定量化する(1文・全角60字以内)", () => {
+    const prompt = buildStage2Prompt({ store: STORE, items: ITEMS, sourceRegistry: REG });
+    expect(prompt).toContain("1文・全角60字以内");
+  });
+
+  it("判定基準や情報量を削ってはいけない旨の指示を必ず残す", () => {
+    const prompt = buildStage2Prompt({ store: STORE, items: ITEMS, sourceRegistry: REG });
+    expect(prompt).toContain("情報量そのものを");
+    expect(prompt).toContain("削ることは絶対にしないでください");
+  });
+
+  it("source_verifications の relation / observed_* / identity検証の要求は削らない", () => {
+    const prompt = buildStage2Prompt({ store: STORE, items: ITEMS, sourceRegistry: REG });
+    expect(prompt).toContain("source_verifications");
+    expect(prompt).toContain("observed_title / observed_name / observed_address / observed_phone");
+    expect(prompt).toContain('"target_store"');
+    expect(prompt).toContain("コピーしてはいけません");
   });
 });

@@ -12,7 +12,7 @@
  * PoCと同様の単一callへ統合(FACT + FACT_OR_HEARING + ANALYSISを1プロンプトで扱う)。
  * Gemini API呼出をrunあたりStage1・Stage2の原則2回に戻す。
  *
- * fix/ai-research-stage2-max-tokens での変更: Stage2 combined化に伴い42項目分の
+ * fix/ai-research-stage2-max-tokens での変更: Stage2 combined化に伴い41項目分の
  * evidenceが冗長になるとGemini 3系のthinking token込みでmaxOutputTokens上限に達し、
  * JSON出力が打ち切られる事象を実機smoke testで確認した(判定基準は変更せず、evidenceの
  * 文章量のみ1〜2文へ簡潔化する指示を追加)。
@@ -287,10 +287,20 @@ not_foundだったことを理由に「発信頻度に伸びしろがある」�
 export function buildStage2Prompt(params: BuildStage2PromptParams): string {
   const { store, items, sourceRegistry, searchNotes = [] } = params;
 
+  // known_store_data(アプリが登録済みの公式URL)には優先取得のヒントを付す
+  // (feat/ai-research-quality-ux-hardening、Plan §8.2 A)。
+  // これは**取得確率を上げるための補助**であり、confirmed の判定には一切影響しない
+  // (判定は url_context 成功 + identity + deriveTrustedSourceType のみで決まる)。
   const sourceListText =
     sourceRegistry.length > 0
       ? sourceRegistry
-          .map((s) => `- ${s.id}: ${s.grounding_redirect_url} (${s.title})`)
+          .map((s) => {
+            const hint =
+              s.discovery_provenance === "known_store_data"
+                ? " [登録済み公式URL / 優先的に取得すること]"
+                : "";
+            return `- ${s.id}: ${s.grounding_redirect_url} (${s.title})${hint}`;
+          })
           .join("\n")
       : "(情報源が発見されませんでした。全項目について確認できない旨を報告してください。)";
 
@@ -394,7 +404,8 @@ ${
 判定してください。**
 
 Source Registryの**各URL(source_id)ごとに個別に**、以下をsource_verificationsとして
-報告してください(registryに列挙された全source_idについて1件ずつ報告することが望ましい):
+報告してください(registryに列挙された全source_idについて1件ずつ報告することが望ましい。
+ただし relation="unrelated" の場合は observed_* をすべて null、note を空文字にしてよい):
 
 - source_id: 対象のSource Registry id(例: "S04")。
 - relation: 取得した本文の内容から判断した、対象店舗との関係。
@@ -408,7 +419,7 @@ Source Registryの**各URL(source_id)ごとに個別に**、以下をsource_veri
   実際に確認できた**店舗名・住所・電話番号のみを書いてください。**プロンプト冒頭の
   「対象店舗」情報をコピーしてはいけません。** 本文に明示されていない項目はnullにして
   ください(推測で埋めないこと)。
-- note: 判断の根拠を1文程度で。
+- note: 判断の根拠を**20字以内**で。該当する根拠が無い場合は空文字でよい。
 
 relation="target_store"と申告しても、observed_name/observed_address/observed_phoneが
 プロンプト冒頭の対象店舗と一致するかは別途コード側で機械的に検証します。実際には
@@ -433,10 +444,11 @@ ${perItemInstructions ? `\n${perItemInstructions}\n` : ""}${
     : ""
 }
 # 出力の簡潔さ(重要)
-${items.length}件すべてについて回答するため、各項目の evidence は要点のみ**1〜2文**で
-簡潔に記載してください(長い引用や冗長な説明は避けること)。value も必要以上に長い文章に
-しないでください。ただし、判定基準(confirmed/inferred等の分類の厳密さ)や情報量そのものを
-削ることは絶対にしないでください。簡潔さは文章表現の問題であり、判定の緩さとは無関係です。
+${items.length}件すべてについて回答するため、各項目の evidence は要点のみ
+**1文・全角60字以内**で簡潔に記載してください(長い引用や冗長な説明は避けること)。
+value も必要以上に長い文章にしないでください。ただし、判定基準(confirmed/inferred等の
+分類の厳密さ)や情報量そのものを削ることは絶対にしないでください。簡潔さは文章表現の
+問題であり、判定の緩さとは無関係です。
 
 # 出典の参照方法(重要)
 出典は上記Source Registryの **id のみ**(例: "S01")で参照してください。URLそのものを

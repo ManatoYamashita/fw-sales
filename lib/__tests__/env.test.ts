@@ -68,20 +68,24 @@ describe("getGeminiModel", () => {
 });
 
 describe("getResearchMaxOutputTokens (fix/ai-research-stage2-max-tokens)", () => {
-  it("未設定なら16384 (Stage2統合後の実機smoke testでthoughts+candidatesが8192上限に到達し失敗した実測に基づく引き上げ)", () => {
-    expect(getResearchMaxOutputTokens()).toBe(16384);
-  });
-
-  it("RESEARCH_MAX_OUTPUT_TOKENS設定時はその値を返す", () => {
-    process.env.RESEARCH_MAX_OUTPUT_TOKENS = "24576";
+  it("未設定なら24576 (feat/ai-research-quality-ux-hardening: 16384では成功Runが既に上限の81.7%を消費していた実測に基づく引き上げ)", () => {
     expect(getResearchMaxOutputTokens()).toBe(24576);
   });
 
+  it("gemini-3.6-flash の output token limit (65,536) を超えない", () => {
+    expect(getResearchMaxOutputTokens()).toBeLessThanOrEqual(65536);
+  });
+
+  it("RESEARCH_MAX_OUTPUT_TOKENS設定時はその値を返す", () => {
+    process.env.RESEARCH_MAX_OUTPUT_TOKENS = "32768";
+    expect(getResearchMaxOutputTokens()).toBe(32768);
+  });
+
   it.each(INVALID_POSITIVE_INT_VALUES)(
-    "不正値 %o は既定16384へフォールバックする(readPositiveInt仕様)",
+    "不正値 %o は既定24576へフォールバックする(readPositiveInt仕様)",
     (raw) => {
       process.env.RESEARCH_MAX_OUTPUT_TOKENS = raw;
-      expect(getResearchMaxOutputTokens()).toBe(16384);
+      expect(getResearchMaxOutputTokens()).toBe(24576);
     },
   );
 

@@ -538,3 +538,110 @@ describe("Stage0の明示timeout (runtime reliability hardening、F5)", () => {
     expect(result.warning).not.toContain("places/abc123");
   });
 });
+
+/**
+ * Stage0 の診断可視化(feat/ai-research-quality-ux-hardening、Plan §6.3)。
+ *
+ * 従来 `Stage0PlacesResult` は `{placesBasicInfo, warning}` のみで、
+ * **成功時は何も残らなかった**。`google_place_id=null` の店舗で Text Search が
+ * strong match したのかどうかを後から観測する手段が無く、実機事象の切り分けで
+ * Supabase を直接開く必要があった。値そのものは載せず、種別のみを返す。
+ */
+describe("Stage0PlacesResult.diagnostic (Plan §6.3)", () => {
+  it("place_id経路で成功したら path=place_id / outcome=matched / review_fields_present=true", async () => {
+    mockGetPlaceById.mockResolvedValue(PLACE_RESULT);
+    const result = await runStage0PlacesResync({
+      googlePlaceId: "places/abc123",
+      store: STORE,
+      now: NOW,
+    });
+    expect(result.diagnostic.path).toBe("place_id");
+    expect(result.diagnostic.outcome).toBe("matched");
+    expect(result.diagnostic.review_fields_present).toBe(true);
+  });
+
+  it("place_idが無くText Searchでstrong matchしたら path=text_search / outcome=matched", async () => {
+    mockSearchPlaces.mockResolvedValue([PLACE_RESULT]);
+    const result = await runStage0PlacesResync({
+      googlePlaceId: null,
+      store: STORE,
+      now: NOW,
+    });
+    expect(result.diagnostic.path).toBe("text_search");
+    expect(result.diagnostic.outcome).toBe("matched");
+    expect(result.diagnostic.review_fields_present).toBe(true);
+  });
+
+  it("strong matchが0件なら outcome=no_match", async () => {
+    mockSearchPlaces.mockResolvedValue([]);
+    const result = await runStage0PlacesResync({ googlePlaceId: null, store: STORE, now: NOW });
+    expect(result.diagnostic.outcome).toBe("no_match");
+    expect(result.diagnostic.review_fields_present).toBe(false);
+  });
+
+  it("strong matchが複数なら outcome=ambiguous", async () => {
+    mockSearchPlaces.mockResolvedValue([
+      { ...PLACE_RESULT, placeId: "places/a" },
+      { ...PLACE_RESULT, placeId: "places/b" },
+    ]);
+    const result = await runStage0PlacesResync({ googlePlaceId: null, store: STORE, now: NOW });
+    expect(result.diagnostic.outcome).toBe("ambiguous");
+  });
+
+  it("timeoutは outcome=timeout、その他API失敗は outcome=api_error", async () => {
+    const timeoutErr = Object.assign(new Error("The operation was aborted"), {
+      name: "TimeoutError",
+    });
+    mockGetPlaceById.mockRejectedValue(timeoutErr);
+    const timedOut = await runStage0PlacesResync({
+      googlePlaceId: "places/abc123",
+      store: STORE,
+      now: NOW,
+    });
+    expect(timedOut.diagnostic.outcome).toBe("timeout");
+
+    mockGetPlaceById.mockReset();
+    mockGetPlaceById.mockRejectedValue(new Error("Places API エラー (500): boom"));
+    const apiError = await runStage0PlacesResync({
+      googlePlaceId: "places/abc123",
+      store: STORE,
+      now: NOW,
+    });
+    expect(apiError.diagnostic.outcome).toBe("api_error");
+  });
+
+  it("place_id経路で該当なし(null)なら outcome=no_match", async () => {
+    mockGetPlaceById.mockResolvedValue(null);
+    const result = await runStage0PlacesResync({
+      googlePlaceId: "places/abc123",
+      store: STORE,
+      now: NOW,
+    });
+    expect(result.diagnostic.path).toBe("place_id");
+    expect(result.diagnostic.outcome).toBe("no_match");
+  });
+
+  it("rating/userRatingCountが取れなかった場合は review_fields_present=false", async () => {
+    mockGetPlaceById.mockResolvedValue({ ...PLACE_RESULT, rating: null, userRatingsTotal: null });
+    const result = await runStage0PlacesResync({
+      googlePlaceId: "places/abc123",
+      store: STORE,
+      now: NOW,
+    });
+    expect(result.diagnostic.outcome).toBe("matched");
+    expect(result.diagnostic.review_fields_present).toBe(false);
+  });
+
+  it("diagnosticに店舗名・place_id・評価値などの個別情報を含めない(sanitized)", async () => {
+    mockGetPlaceById.mockResolvedValue(PLACE_RESULT);
+    const result = await runStage0PlacesResync({
+      googlePlaceId: "places/abc123",
+      store: STORE,
+      now: NOW,
+    });
+    const serialized = JSON.stringify(result.diagnostic);
+    expect(serialized).not.toContain("places/abc123");
+    expect(serialized).not.toContain("炉端ジュン");
+    expect(serialized).not.toContain("4.2");
+  });
+});

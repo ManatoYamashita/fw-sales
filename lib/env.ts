@@ -108,18 +108,39 @@ export function getResearchGeminiModel(): string {
 /**
  * AI 店舗調査の1回の生成で許す出力トークン上限。
  *
- * 営業資産生成(`MAX_OUTPUT_TOKENS = 4096`, `lib/ai/client.ts`)より大きい既定値
- * (16384)を設定する。Stage2はFACT/FACT_OR_HEARING/ANALYSIS計42項目を1回の
+ * 営業資産生成(`MAX_OUTPUT_TOKENS = 4096`, `lib/ai/client.ts`)より大きい既定値を設定する。
+ * Stage2はFACT(20)/FACT_OR_HEARING(4)/ANALYSIS(17)の**計41項目**を1回の
  * Structured Output応答で返す(fix/ai-research-poc-like-retrieval でFACT/ANALYSIS
- * 2call構成から単一callへ統合)。Gemini 3系はthinkingが既定で有効で、thinking
- * tokenもこの出力枠を消費するため、実機smoke testで
- * `thoughtsTokenCount + candidatesTokenCount` が8192の上限にほぼ到達し
- * (8185/8192)、JSON出力が打ち切られ Stage2 全体が失敗する事象を確認した
- * (2026-08-03 Preview smoke test)。この実測を踏まえ8192→16384へ引き上げる。
+ * 2call構成から単一callへ統合。deterministic に確定した項目は `excludeKeys` で
+ * さらに除外されるため実際はこれ以下になる)。
+ *
+ * ## 引き上げの経緯(いずれも実測ベース)
+ *
+ * - 8192 → 16384(2026-08-03 Preview smoke): Gemini 3系はthinkingが既定で有効で、
+ *   thinking tokenもこの出力枠を消費する。`thoughtsTokenCount + candidatesTokenCount`
+ *   が8192上限にほぼ到達し(8185/8192)、JSON出力が打ち切られ Stage2 全体が失敗した。
+ * - 16384 → 24576(2026-08-11 Preview、feat/ai-research-quality-ux-hardening):
+ *   **成功した run ですら既に上限の 81.7% を消費していた**
+ *   (`thoughts 7,213 + candidates 6,177 = 13,390 / 16,384`)。残ヘッドルーム 2,994 token は
+ *   URL Context で読むページ量の揺らぎで容易に飛び、実際に別店舗で
+ *   `fatal:max_tokens` が発生した。24576 なら同じ消費量で 56%、
+ *   thinking/candidates 比が 1.17 → 2.5 になっても耐える。
+ *
+ * ## なぜ 24576 か(上限ではない)
+ *
+ * `gemini-3.6-flash` の output token limit は **65,536**(公式ドキュメント)であり、
+ * 24576 はその 37.5%。さらに上げる余地はあるが、Stage2 の step timeout
+ * (`GEMINI_STAGE_TIMEOUT_MS = 240_000`)内に収める必要があるため、
+ * まず 24576 で実測してから判断する。
+ *
+ * **課金について**: 上限を上げるだけで固定量が課金されるわけではない(課金は実使用分)。
+ * ただし従来 MAX_TOKENS で打ち切られていた run は最後まで生成するため追加 token を
+ * 使用しうる。実測は `token_usage`(成功・失敗の両方で保存される)で行う。
+ *
  * `RESEARCH_MAX_OUTPUT_TOKENS` で上書き可能。
  */
 export function getResearchMaxOutputTokens(): number {
-  return readPositiveInt("RESEARCH_MAX_OUTPUT_TOKENS", 16384);
+  return readPositiveInt("RESEARCH_MAX_OUTPUT_TOKENS", 24576);
 }
 
 /**

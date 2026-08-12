@@ -89,6 +89,22 @@ export interface AnalysisInput {
  * SDK の生エラーメッセージには API キー値や request ID が混入することがあるため、
  * 必ず本型に変換してから上位に流すこと。
  */
+/**
+ * Gemini の `usageMetadata` から取り出した **数値のみ** の内訳
+ * (feat/ai-research-quality-ux-hardening、Theme 5B)。
+ *
+ * `lib/ai/research/client.ts:UsageMetadataLike` と同形だが、`lib/ai/client.ts` は
+ * research モジュールへ依存しないため独立して定義する(依存方向を逆転させない)。
+ * **数値以外のフィールドを増やさないこと。** DB とログの両方へ流れる。
+ */
+export interface AiTokenUsage {
+  promptTokenCount: number | null;
+  candidatesTokenCount: number | null;
+  toolUsePromptTokenCount: number | null;
+  thoughtsTokenCount: number | null;
+  totalTokenCount: number | null;
+}
+
 export type AiClientError =
   | { kind: "missing_api_key" }
   | { kind: "timeout" }
@@ -100,8 +116,14 @@ export type AiClientError =
    * 構造化フィールド (`candidates[0].finishReason`) から判定するため、SDK のエラー文面に
    * 依存しない。Gemini 3 系は thinking が既定で有効で思考トークンも出力枠を消費するため、
    * 本移行で現実的に起こりうる失敗として専用分類にしている。
+   *
+   * `usage` は **数値のみ** の sanitized な内訳(feat/ai-research-quality-ux-hardening、
+   * Theme 5B)。実機の MAX_TOKENS run では `token_usage = null` になり、
+   * thinking と candidates のどちらが伸びたのかを事後に判断できなかった。
+   * この失敗経路でのみ usage を運ぶことで、`markFailedStep` が DB へ保存し
+   * 対策の効果測定ができるようにする。**raw response / prompt は絶対に載せない。**
    */
-  | { kind: "max_tokens" }
+  | { kind: "max_tokens"; usage?: AiTokenUsage }
   | { kind: "api_error"; status: number }
   | { kind: "network_error" }
   | { kind: "unknown"; message: string };

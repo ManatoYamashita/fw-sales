@@ -409,7 +409,7 @@ describe("runStructuredUrlContext (Stage2)", () => {
     expect(result.rawText).toBe('{"items":[]}');
   });
 
-  it("既定のRESEARCH_MAX_OUTPUT_TOKENSは16384(実機smoke testで8192上限到達を確認、fix/ai-research-stage2-max-tokens)", async () => {
+  it("既定のRESEARCH_MAX_OUTPUT_TOKENSは24576(feat/ai-research-quality-ux-hardening: 16384では成功runが上限の81.7%を消費していた実測に基づく引き上げ)", async () => {
     mockGenerateContent.mockResolvedValue({
       text: "{}",
       candidates: [{ finishReason: "STOP" }],
@@ -421,7 +421,7 @@ describe("runStructuredUrlContext (Stage2)", () => {
       AbortSignal.timeout(1000),
     );
 
-    expect(lastCallArgs().config.maxOutputTokens).toBe(16384);
+    expect(lastCallArgs().config.maxOutputTokens).toBe(24576);
   });
 
   it("RESEARCH_MAX_OUTPUT_TOKENS環境変数で上書きできる", async () => {
@@ -439,5 +439,108 @@ describe("runStructuredUrlContext (Stage2)", () => {
 
     expect(lastCallArgs().config.maxOutputTokens).toBe(20000);
     delete process.env.RESEARCH_MAX_OUTPUT_TOKENS;
+  });
+});
+
+/**
+ * MAX_TOKENS observability(feat/ai-research-quality-ux-hardening、Plan §11 / Theme 5B)。
+ *
+ * 実機の MAX_TOKENS run では `token_usage = null` だった。原因は
+ * `response.usageMetadata` を読まずに throw していたため。この時点では usage は
+ * スコープ内に存在しており、**数値だけを** sanitized に取り出せる。
+ */
+describe("MAX_TOKENS時のusage observability (Theme 5B)", () => {
+  const JSON_SCHEMA = { type: "object", properties: {} };
+  const USAGE = {
+    promptTokenCount: 5344,
+    candidatesTokenCount: 6177,
+    toolUsePromptTokenCount: 83456,
+    thoughtsTokenCount: 18500,
+    totalTokenCount: 113477,
+  };
+
+  function mockMaxTokens() {
+    mockGenerateContent.mockResolvedValue({
+      text: '{"items": [{"key": "business_hours_holidays"',
+      candidates: [{ finishReason: "MAX_TOKENS", urlContextMetadata: { urlMetadata: [] } }],
+      usageMetadata: USAGE,
+    });
+  }
+
+  it("AiClientError(max_tokens)にusageを載せてworkflowまで運ぶ", async () => {
+    mockMaxTokens();
+    await expect(
+      createResearchGeminiClient().runStructuredUrlContext(
+        { prompt: "p", jsonSchema: JSON_SCHEMA },
+        AbortSignal.timeout(1000),
+      ),
+    ).rejects.toMatchObject({
+      kind: "max_tokens",
+      usage: {
+        promptTokenCount: 5344,
+        candidatesTokenCount: 6177,
+        thoughtsTokenCount: 18500,
+        toolUsePromptTokenCount: 83456,
+        totalTokenCount: 113477,
+      },
+    });
+  });
+
+  it("configured_max_output_tokensを含むstructured logを出す", async () => {
+    mockMaxTokens();
+    process.env.RESEARCH_MAX_OUTPUT_TOKENS = "24576";
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await createResearchGeminiClient()
+        .runStructuredUrlContext({ prompt: "p", jsonSchema: JSON_SCHEMA }, AbortSignal.timeout(1000))
+        .catch(() => {});
+      const call = spy.mock.calls.find((c) => c[0] === "[research.gemini] max_tokens");
+      expect(call).toBeDefined();
+      expect(call![1]).toMatchObject({
+        stage: "stage2",
+        configured_max_output_tokens: 24576,
+        thoughts_token_count: 18500,
+        candidates_token_count: 6177,
+        prompt_token_count: 5344,
+        tool_use_prompt_token_count: 83456,
+        total_token_count: 113477,
+      });
+    } finally {
+      spy.mockRestore();
+      delete process.env.RESEARCH_MAX_OUTPUT_TOKENS;
+    }
+  });
+
+  it("ログに raw response / prompt / candidate text を一切含めない", async () => {
+    mockMaxTokens();
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await createResearchGeminiClient()
+        .runStructuredUrlContext(
+          { prompt: "SECRET_PROMPT_TEXT", jsonSchema: JSON_SCHEMA },
+          AbortSignal.timeout(1000),
+        )
+        .catch(() => {});
+      const serialized = JSON.stringify(spy.mock.calls);
+      expect(serialized).not.toContain("SECRET_PROMPT_TEXT");
+      expect(serialized).not.toContain("business_hours_holidays");
+      expect(serialized).not.toContain("test-key");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("usageMetadataが取得できない場合もthrow自体は従来どおり動く", async () => {
+    mockGenerateContent.mockResolvedValue({
+      text: "{",
+      candidates: [{ finishReason: "MAX_TOKENS", urlContextMetadata: { urlMetadata: [] } }],
+      usageMetadata: undefined,
+    });
+    await expect(
+      createResearchGeminiClient().runStructuredUrlContext(
+        { prompt: "p", jsonSchema: JSON_SCHEMA },
+        AbortSignal.timeout(1000),
+      ),
+    ).rejects.toMatchObject({ kind: "max_tokens" });
   });
 });

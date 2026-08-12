@@ -39,6 +39,10 @@ const EVIDENCE_BASIS_LABELS: Record<string, string> = {
   url_context: "✓ ページ本文で確認",
   search_note: "🔎 検索結果情報で確認",
   mixed: "✓🔎 ページ本文+検索結果情報で確認",
+  // feat/ai-research-quality-ux-hardening(Plan §7.3): canonical fallback。
+  // **「今回確認した」とは書かない。** 登録済みの既知情報であることを明示し、
+  // fresh(places / url_context / search_note)と視覚的に区別する。
+  existing_canonical: "🗂 登録済み情報(今回のWeb再確認なし)",
 };
 
 export interface DecideInput {
@@ -161,6 +165,10 @@ export function ResearchItemCard({ item, label, sourceRegistry, decision, busy, 
       )}
 
       {!editing && (
+        // feat/ai-research-quality-ux-hardening(Plan §12.3): 実運用の頻度順に並べ替える。
+        // 「AIが調査した値は基本採用。おかしいものだけ編集/却下。skipはほぼ使わない」
+        // という操作モデルに合わせ、採用 → 編集して採用 → 却下 → スキップ の順にし、
+        // `スキップ` は削除せず視覚的優先度だけ下げる(明示的な「判断しない」の記録は残す)。
         <div className="flex flex-wrap items-center gap-2 pt-1">
           {item.status !== "conflict" && (
             <Button
@@ -171,6 +179,11 @@ export function ResearchItemCard({ item, label, sourceRegistry, decision, busy, 
               onClick={() => onDecide({ decision: "adopted" })}
             >
               採用
+            </Button>
+          )}
+          {item.status !== "conflict" && (
+            <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => setEditing(true)}>
+              編集して採用
             </Button>
           )}
           <Button
@@ -185,17 +198,12 @@ export function ResearchItemCard({ item, label, sourceRegistry, decision, busy, 
           <Button
             type="button"
             size="sm"
-            variant={decision?.decision === "skipped" ? "secondary" : "outline"}
+            variant={decision?.decision === "skipped" ? "secondary" : "ghost"}
             disabled={busy}
             onClick={() => onDecide({ decision: "skipped" })}
           >
             スキップ
           </Button>
-          {item.status !== "conflict" && (
-            <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => setEditing(true)}>
-              編集して採用
-            </Button>
-          )}
         </div>
       )}
     </div>

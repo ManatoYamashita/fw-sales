@@ -42,11 +42,51 @@ import {
 // テストへの影響を避けるため、このモジュールからも re-export して公開APIを維持する。
 export { deriveSearchIdentityName, isNameMatch };
 
+/** Stage0 がどちらの経路を通ったか。 */
+export type Stage0Path = "place_id" | "text_search";
+
+/** Stage0 の結末。値そのものは含めず種別のみ。 */
+export type Stage0Outcome = "matched" | "no_match" | "ambiguous" | "timeout" | "api_error";
+
+/**
+ * Stage0 の sanitized な診断情報(feat/ai-research-quality-ux-hardening、Plan §6.3)。
+ *
+ * 従来は失敗時の `warning` しか残らず、**成功時は何も観測できなかった**。
+ * `google_place_id=null` の店舗で Text Search が strong match したのかどうかを
+ * 後から判断する手段が無く、実機事象の切り分けで DB を直接開く必要があった。
+ *
+ * **店舗名・place_id・住所・評価値などの個別情報は一切含めない。**
+ * DBへは保存せず、structured log へのみ出す(migration 不要)。
+ */
+export interface Stage0Diagnostic {
+  path: Stage0Path;
+  outcome: Stage0Outcome;
+  /** `rating` / `userRatingCount` を実際に取得できたか(**値そのものは載せない**)。 */
+  review_fields_present: boolean;
+}
+
 export interface Stage0PlacesResult {
   /** 取得できた場合のみ非空。`filled_by: "places"` がスタンプ済み(in-memory専用)。 */
   placesBasicInfo: Partial<BasicInfo>;
   /** 失敗の場合のみ非null。run.warnings へ追加することを想定した平易な文言。 */
   warning: string | null;
+  /** 成功・失敗を問わず必ず埋まる sanitized な診断情報(structured log 用)。 */
+  diagnostic: Stage0Diagnostic;
+}
+
+/** `classifyPlacesError` の分類から診断 outcome を導く(timeout だけを区別する)。 */
+function outcomeFromErrorKind(kind: string): Stage0Outcome {
+  return kind === "timeout" ? "timeout" : "api_error";
+}
+
+/**
+ * `review_avg` / `review_count` が実際に埋まったかを判定する。
+ * `placeResultToBasicInfo` は rating/userRatingsTotal が無い場合これらを射影しない。
+ */
+function hasReviewFields(placesBasicInfo: Partial<BasicInfo>): boolean {
+  return (
+    placesBasicInfo.review_avg?.value != null || placesBasicInfo.review_count?.value != null
+  );
 }
 
 /**
@@ -158,13 +198,29 @@ export async function runStage0PlacesResync(params: {
         return {
           placesBasicInfo: {},
           warning: "Google Placesの店舗情報を再取得できませんでした(該当なし)。既存情報のみで調査を続行します。",
+          diagnostic: { path: "place_id", outcome: "no_match", review_fields_present: false },
         };
       }
-      return { placesBasicInfo: placeResultToBasicInfo(place, now), warning: null };
+      const placesBasicInfo = placeResultToBasicInfo(place, now);
+      return {
+        placesBasicInfo,
+        warning: null,
+        diagnostic: {
+          path: "place_id",
+          outcome: "matched",
+          review_fields_present: hasReviewFields(placesBasicInfo),
+        },
+      };
     } catch (err) {
+      const kind = classifyPlacesError(err);
       return {
         placesBasicInfo: {},
-        warning: `Google Places再同期に失敗しました (${classifyPlacesError(err)})。既存情報のみで調査を続行します。`,
+        warning: `Google Places再同期に失敗しました (${kind})。既存情報のみで調査を続行します。`,
+        diagnostic: {
+          path: "place_id",
+          outcome: outcomeFromErrorKind(kind),
+          review_fields_present: false,
+        },
       };
     }
   }
@@ -178,17 +234,37 @@ export async function runStage0PlacesResync(params: {
       // (無理に埋めない、Plan v3.2の自動Text Searchスコープ外方針の精神を維持)。
       // API自体は成功しているため、完全silentにせずsanitizedな診断種別のみ記録する
       // (feat/ai-research-searchfact-places-match、候補店舗名等は一切含めない)。
-      const diagnostic = diagnosePlacesMatch(candidates, store);
+      const matchKind = diagnosePlacesMatch(candidates, store);
       return {
         placesBasicInfo: {},
-        warning: `Google Places候補が一意に特定できませんでした (${diagnostic})。既存情報のみで調査を続行します。`,
+        warning: `Google Places候補が一意に特定できませんでした (${matchKind})。既存情報のみで調査を続行します。`,
+        diagnostic: {
+          path: "text_search",
+          outcome: matchKind === "places_search_ambiguous" ? "ambiguous" : "no_match",
+          review_fields_present: false,
+        },
       };
     }
-    return { placesBasicInfo: placeResultToBasicInfo(matched, now), warning: null };
+    const placesBasicInfo = placeResultToBasicInfo(matched, now);
+    return {
+      placesBasicInfo,
+      warning: null,
+      diagnostic: {
+        path: "text_search",
+        outcome: "matched",
+        review_fields_present: hasReviewFields(placesBasicInfo),
+      },
+    };
   } catch (err) {
+    const kind = classifyPlacesError(err);
     return {
       placesBasicInfo: {},
-      warning: `Google Places検索に失敗しました (${classifyPlacesError(err)})。既存情報のみで調査を続行します。`,
+      warning: `Google Places検索に失敗しました (${kind})。既存情報のみで調査を続行します。`,
+      diagnostic: {
+        path: "text_search",
+        outcome: outcomeFromErrorKind(kind),
+        review_fields_present: false,
+      },
     };
   }
 }

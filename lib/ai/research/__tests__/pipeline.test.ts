@@ -27,6 +27,9 @@ const {
   runStage2,
   buildNonAiItems,
   buildDeterministicPlacesItems,
+  buildCanonicalFallbackItems,
+  buildDeterministicItems,
+  deriveCanonicalFallbackConfirmedKeys,
   deriveDeterministicPlacesConfirmedKeys,
   applyUrlContextStatus,
   applySourceIdentityVerification,
@@ -1137,5 +1140,406 @@ describe("upgradeMediaCoverageFromRegistry (feat/ai-research-final-quality、fix
     expect(mediaCoverageItem.status).toBe("confirmed");
     expect(mediaCoverageItem.value).toBe("食べログ、じゃらんnet");
     expect(mediaCoverageItem.source_ids.sort()).toEqual(["S01", "S02"]);
+  });
+});
+
+/**
+ * fresh Places / canonical fallback の分離
+ * (feat/ai-research-quality-ux-hardening、Plan §6 / §7)。
+ */
+describe("buildDeterministicPlacesItems — fresh起点 (Plan §6.1)", () => {
+  const freshField = (value: string | null) => ({
+    value,
+    tier: "A" as const,
+    filled_by: "places" as const,
+    updated_at: "2026-08-12T00:00:00.000Z",
+  });
+  const manualField = (value: string | null, updatedAt = "2026-08-04T09:00:00.000Z") => ({
+    value,
+    tier: "A" as const,
+    filled_by: "manual" as const,
+    updated_at: updatedAt,
+  });
+
+  it("Q1回帰: canonicalがmanualでも、fresh Placesがあればconfirmedを合成する", () => {
+    // 実機事象(炉端ジュン): canonical review_avg が filled_by="manual" のため
+    // deterministic item が1件も作られず、Gemini担当 → not_found に退化していた。
+    const fresh = { review_avg: freshField("4.4") };
+    const canonical = { review_avg: manualField("4.2") };
+    const items = buildDeterministicPlacesItems(fresh, new Set(["review_avg"]), canonical);
+    expect(items).toHaveLength(1);
+    expect(items[0]!.status).toBe("confirmed");
+    expect(items[0]!.value).toBe("4.4");
+    expect(items[0]!.evidence_basis).toBe("places");
+  });
+
+  it("freshとcanonicalが異なる場合はfreshを採用し、warningに両方の値を出す", () => {
+    const fresh = { review_avg: freshField("4.4") };
+    const canonical = { review_avg: manualField("4.2") };
+    const items = buildDeterministicPlacesItems(fresh, new Set(["review_avg"]), canonical);
+    expect(items[0]!.value).toBe("4.4");
+    expect(items[0]!.warning).toContain("4.2");
+    expect(items[0]!.warning).toContain("4.4");
+  });
+
+  it("freshとcanonicalが同じ値ならwarningを付けない", () => {
+    const fresh = { review_avg: freshField("4.2") };
+    const canonical = { review_avg: manualField("4.2") };
+    const items = buildDeterministicPlacesItems(fresh, new Set(["review_avg"]), canonical);
+    expect(items[0]!.warning).toBeUndefined();
+  });
+
+  it("canonicalを渡さない場合もfresh単独で合成できる", () => {
+    const fresh = { review_count: freshField("51") };
+    const items = buildDeterministicPlacesItems(fresh, new Set(["review_count"]));
+    expect(items).toHaveLength(1);
+    expect(items[0]!.value).toBe("51");
+  });
+
+  it("evidenceは『今回の調査時点』であることを明示する", () => {
+    const items = buildDeterministicPlacesItems(
+      { review_avg: freshField("4.4") },
+      new Set(["review_avg"]),
+    );
+    expect(items[0]!.evidence).toContain("今回");
+    expect(items[0]!.evidence).toContain("Google Places");
+  });
+});
+
+describe("buildCanonicalFallbackItems (Plan §7)", () => {
+  const manualField = (value: string | null, updatedAt = "2026-08-04T09:00:00.000Z") => ({
+    value,
+    tier: "A" as const,
+    filled_by: "manual" as const,
+    updated_at: updatedAt,
+  });
+  const placesField = (value: string | null) => ({
+    value,
+    tier: "A" as const,
+    filled_by: "places" as const,
+    updated_at: "2026-07-01T00:00:00.000Z",
+  });
+
+  it("human-reviewedなofficial_siteをexisting_canonicalとして合成する", () => {
+    const items = buildCanonicalFallbackItems(
+      { official_site: manualField("あり (https://robata-jun.com/)") },
+      new Set(),
+    );
+    const official = items.find((i) => i.key === "official_site");
+    expect(official?.status).toBe("confirmed");
+    expect(official?.value).toBe("あり (https://robata-jun.com/)");
+    expect(official?.evidence_basis).toBe("existing_canonical");
+    expect(official?.source_ids).toEqual([]);
+    expect(official?.confidence).toBeNull();
+  });
+
+  it("承認レビュー指摘1: official_site が filled_by=places なら fallback しない", () => {
+    const items = buildCanonicalFallbackItems(
+      { official_site: placesField("あり (https://example.test/)") },
+      new Set(),
+    );
+    expect(items.find((i) => i.key === "official_site")).toBeUndefined();
+  });
+
+  it("review_avgはfilled_byがplacesでもfallbackする(過去に機械確認された値)", () => {
+    const items = buildCanonicalFallbackItems({ review_avg: placesField("4.2") }, new Set());
+    expect(items.find((i) => i.key === "review_avg")?.value).toBe("4.2");
+  });
+
+  it("evidenceに『今回のWeb再確認はできていません』と最終更新日を含める(freshと偽装しない)", () => {
+    const items = buildCanonicalFallbackItems(
+      { review_avg: manualField("4.2", "2026-08-04T09:00:00.000Z") },
+      new Set(),
+    );
+    expect(items[0]!.evidence).toContain("2026-08-04");
+    expect(items[0]!.evidence).toContain("今回のWeb再確認はできていません");
+  });
+
+  it("既にfreshで生成済みのkeyは重複合成しない", () => {
+    const items = buildCanonicalFallbackItems(
+      { review_avg: manualField("4.2"), review_count: manualField("45") },
+      new Set(["review_avg"]),
+    );
+    expect(items.map((i) => i.key)).toEqual(["review_count"]);
+  });
+
+  it("allowlist外のkeyは合成しない(調査結果が既存値のエコーにならないこと)", () => {
+    const items = buildCanonicalFallbackItems(
+      { concept: manualField("東北の郷土料理"), store_name: manualField("炉端ジュン") },
+      new Set(),
+    );
+    expect(items).toEqual([]);
+  });
+
+  it("canonicalが空なら何も合成しない(退化ではなく現状維持)", () => {
+    expect(buildCanonicalFallbackItems({}, new Set())).toEqual([]);
+  });
+});
+
+describe("deriveCanonicalFallbackConfirmedKeys (Plan §7.1.1)", () => {
+  it("実際に合成したitemのkeyだけを返す", () => {
+    const items = buildCanonicalFallbackItems(
+      {
+        review_avg: {
+          value: "4.2",
+          tier: "A" as const,
+          filled_by: "manual" as const,
+          updated_at: "2026-08-04T00:00:00.000Z",
+        },
+      },
+      new Set(),
+    );
+    expect(deriveCanonicalFallbackConfirmedKeys(items)).toEqual(new Set(["review_avg"]));
+  });
+
+  it("合成itemが0件なら空集合", () => {
+    expect(deriveCanonicalFallbackConfirmedKeys([])).toEqual(new Set());
+  });
+});
+
+/**
+ * Stage0 → deterministic items のデータフロー統合検証
+ * (feat/ai-research-quality-ux-hardening、Plan §15 横断 / Q18)。
+ *
+ * 実機バグ(Q1)の発生地点は `workflows/store-research.ts` の
+ * 「`mergeBasicInfo` した結果から Places 検証済みkeyを導く」という**2行の相互作用**
+ * だった。Workflow 本体は統合テストで丸ごと mock されるため、この相互作用には
+ * 単体テストが存在しなかった(`deriveDeterministicPlacesConfirmedKeys` の JSDoc が
+ * 同じ理由で純関数化された前例)。
+ *
+ * 本 describe は、その相互作用を純関数 `buildDeterministicItems` として切り出し、
+ * 「canonical が manual でも fresh があれば confirmed になる」ことを固定する。
+ */
+describe("buildDeterministicItems — Stage0とcanonicalの相互作用 (Q18)", () => {
+  const fresh = (value: string) => ({
+    value,
+    tier: "A" as const,
+    filled_by: "places" as const,
+    updated_at: "2026-08-12T00:00:00.000Z",
+  });
+  const manual = (value: string, updatedAt = "2026-08-04T09:00:00.000Z") => ({
+    value,
+    tier: "A" as const,
+    filled_by: "manual" as const,
+    updated_at: updatedAt,
+  });
+
+  it("実機ケース: canonical manual 4.2 + fresh Places 4.4 → fresh を confirmed で採用する", () => {
+    const result = buildDeterministicItems({
+      freshPlacesBasicInfo: { review_avg: fresh("4.4"), review_count: fresh("51") },
+      canonicalBasicInfo: {
+        review_avg: manual("4.2"),
+        review_count: manual("45"),
+        official_site: manual("あり (https://robata-jun.com/)"),
+      },
+    });
+
+    const reviewAvg = result.items.find((i) => i.key === "review_avg");
+    expect(reviewAvg?.status).toBe("confirmed");
+    expect(reviewAvg?.value).toBe("4.4");
+    expect(reviewAvg?.evidence_basis).toBe("places");
+    expect(result.placesConfirmedKeys).toEqual(new Set(["review_avg", "review_count"]));
+  });
+
+  it("実機ケース: fresh が取れない場合は canonical を existing_canonical で提示する", () => {
+    const result = buildDeterministicItems({
+      freshPlacesBasicInfo: {},
+      canonicalBasicInfo: {
+        review_avg: manual("4.2"),
+        review_count: manual("45"),
+        official_site: manual("あり (https://robata-jun.com/)"),
+      },
+    });
+
+    expect(result.deterministicKeys.sort()).toEqual(
+      ["official_site", "review_avg", "review_count"].sort(),
+    );
+    for (const item of result.items) {
+      expect(item.status).toBe("confirmed");
+      expect(item.evidence_basis).toBe("existing_canonical");
+      expect(item.confidence).toBeNull();
+      expect(item.source_ids).toEqual([]);
+      expect(item.evidence).toContain("今回のWeb再確認はできていません");
+    }
+    expect(result.placesConfirmedKeys.size).toBe(0);
+    expect(result.canonicalConfirmedKeys).toEqual(
+      new Set(["review_avg", "review_count", "official_site"]),
+    );
+  });
+
+  it("fresh と canonical が混在する場合、key単位で正しく振り分ける", () => {
+    const result = buildDeterministicItems({
+      freshPlacesBasicInfo: { review_avg: fresh("4.4") },
+      canonicalBasicInfo: {
+        review_avg: manual("4.2"),
+        review_count: manual("45"),
+        official_site: manual("あり (https://robata-jun.com/)"),
+      },
+    });
+    expect(result.placesConfirmedKeys).toEqual(new Set(["review_avg"]));
+    expect(result.canonicalConfirmedKeys).toEqual(new Set(["review_count", "official_site"]));
+    // 同じ key が両方に入ることはない(重複itemを作らない)
+    expect(result.deterministicKeys.length).toBe(new Set(result.deterministicKeys).size);
+  });
+
+  it("canonicalもfreshも無ければ何も合成しない(従来どおりGemini担当・退化ではない)", () => {
+    const result = buildDeterministicItems({
+      freshPlacesBasicInfo: {},
+      canonicalBasicInfo: {},
+    });
+    expect(result.items).toEqual([]);
+    expect(result.deterministicKeys).toEqual([]);
+  });
+
+  it("BLOCKER2防御: fresh が6key返しても trust boundary へ渡すのは review_avg/review_count のみ", () => {
+    const result = buildDeterministicItems({
+      freshPlacesBasicInfo: {
+        store_name: fresh("炉端ジュン"),
+        address: fresh("東京都渋谷区1-2-3"),
+        cuisine_genre: fresh("居酒屋"),
+        phone: fresh("03-1234-5678"),
+        review_avg: fresh("4.4"),
+        review_count: fresh("51"),
+      },
+      canonicalBasicInfo: {},
+    });
+    expect(result.placesConfirmedKeys).toEqual(new Set(["review_avg", "review_count"]));
+    expect(result.deterministicKeys.sort()).toEqual(["review_avg", "review_count"]);
+  });
+
+  it("承認レビュー指摘1: canonical official_site が places 由来なら fallback しない", () => {
+    const result = buildDeterministicItems({
+      freshPlacesBasicInfo: {},
+      canonicalBasicInfo: {
+        official_site: {
+          value: "あり (https://example.test/)",
+          tier: "A" as const,
+          filled_by: "places" as const,
+          updated_at: "2026-07-01T00:00:00.000Z",
+        },
+      },
+    });
+    expect(result.items).toEqual([]);
+  });
+
+  it("合成した全itemがfinalizeResearchItemsを通過してconfirmedを維持する(end-to-end)", () => {
+    const derived = buildDeterministicItems({
+      freshPlacesBasicInfo: { review_avg: fresh("4.4") },
+      canonicalBasicInfo: { official_site: manual("あり (https://robata-jun.com/)") },
+    });
+    const finalized = finalizeResearchItems({
+      aiItems: derived.items,
+      nonAiItems: [],
+      sourceRegistry: [],
+      placesVerifiedKeys: derived.placesConfirmedKeys,
+      canonicalVerifiedKeys: derived.canonicalConfirmedKeys,
+    });
+    expect(finalized.find((i) => i.key === "review_avg")?.status).toBe("confirmed");
+    expect(finalized.find((i) => i.key === "official_site")?.status).toBe("confirmed");
+    expect(finalized.find((i) => i.key === "official_site")?.value).toBe(
+      "あり (https://robata-jun.com/)",
+    );
+  });
+
+  it("同じkeyのAI生成item(evidence_basisなし)は canonicalVerifiedKeys があっても降格する", () => {
+    // excludeKeys の regression で AI 生成 item が混入した場合の二重防御。
+    const derived = buildDeterministicItems({
+      freshPlacesBasicInfo: {},
+      canonicalBasicInfo: { official_site: manual("あり (https://robata-jun.com/)") },
+    });
+    const aiItem = {
+      key: "official_site",
+      research_policy: "FACT" as const,
+      status: "confirmed" as const,
+      value: "あり (https://偽サイト.example/)",
+      evidence: "AIが自力で発見したと主張",
+      source_ids: [],
+    };
+    const finalized = finalizeResearchItems({
+      aiItems: [aiItem],
+      nonAiItems: [],
+      sourceRegistry: [],
+      canonicalVerifiedKeys: derived.canonicalConfirmedKeys,
+    });
+    expect(finalized[0]!.status).toBe("not_found");
+    expect(finalized[0]!.value).toBeNull();
+  });
+});
+
+/**
+ * applyUrlContextStatus の URL 正規化(Q6、Plan §8.2 B1)。
+ *
+ * 従来は `retrievedUrl` と `grounding_redirect_url` の**文字列完全一致**のみで
+ * 突合しており、末尾スラッシュ差等で url_context 成功を取りこぼしていた。
+ * 既存の完全一致ケースは正規化後も一致するため、既存テストはそのまま通る。
+ */
+describe("applyUrlContextStatus — URL正規化 (Q6)", () => {
+  const entry = (url: string): SourceRegistryEntry => ({
+    id: "S01",
+    title: "公式サイト(登録情報)",
+    grounding_redirect_url: url,
+    resolved_url: null,
+    resolve_status: "skipped",
+    source_type: "official_site",
+    discovery_provenance: "known_store_data",
+    url_context_status: "not_attempted",
+    identity_status: "target_match",
+  });
+
+  it("末尾スラッシュ差を吸収してsuccessを反映する", () => {
+    const result = applyUrlContextStatus(
+      [entry("https://robata-jun.com/")],
+      [{ urlMetadata: [{ retrievedUrl: "https://robata-jun.com", status: "URL_RETRIEVAL_STATUS_SUCCESS" }] }],
+    );
+    expect(result[0]!.url_context_status).toBe("success");
+  });
+
+  it("scheme/hostnameのcase差を吸収する", () => {
+    const result = applyUrlContextStatus(
+      [entry("https://robata-jun.com/")],
+      [{ urlMetadata: [{ retrievedUrl: "HTTPS://Robata-Jun.COM/", status: "URL_RETRIEVAL_STATUS_SUCCESS" }] }],
+    );
+    expect(result[0]!.url_context_status).toBe("success");
+  });
+
+  it("fragment差を吸収する", () => {
+    const result = applyUrlContextStatus(
+      [entry("https://robata-jun.com/")],
+      [{ urlMetadata: [{ retrievedUrl: "https://robata-jun.com/#menu", status: "URL_RETRIEVAL_STATUS_SUCCESS" }] }],
+    );
+    expect(result[0]!.url_context_status).toBe("success");
+  });
+
+  it("www.の有無は吸収しない(別ホストの可能性、false negativeを優先)", () => {
+    const result = applyUrlContextStatus(
+      [entry("https://robata-jun.com/")],
+      [{ urlMetadata: [{ retrievedUrl: "https://www.robata-jun.com/", status: "URL_RETRIEVAL_STATUS_SUCCESS" }] }],
+    );
+    expect(result[0]!.url_context_status).toBe("not_attempted");
+  });
+
+  it("pathが違えば反映しない(origin-only matchをしない)", () => {
+    const result = applyUrlContextStatus(
+      [entry("https://robata-jun.com/")],
+      [{ urlMetadata: [{ retrievedUrl: "https://robata-jun.com/menu", status: "URL_RETRIEVAL_STATUS_SUCCESS" }] }],
+    );
+    expect(result[0]!.url_context_status).toBe("not_attempted");
+  });
+
+  it("パース不能なretrievedUrlは無視する(例外を投げない)", () => {
+    const result = applyUrlContextStatus(
+      [entry("https://robata-jun.com/")],
+      [{ urlMetadata: [{ retrievedUrl: "not a url", status: "URL_RETRIEVAL_STATUS_SUCCESS" }] }],
+    );
+    expect(result[0]!.url_context_status).toBe("not_attempted");
+  });
+
+  it("grounding redirect URL(パース可能)も従来どおり一致する", () => {
+    const redirect = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc";
+    const result = applyUrlContextStatus(
+      [entry(redirect)],
+      [{ urlMetadata: [{ retrievedUrl: redirect, status: "URL_RETRIEVAL_STATUS_SUCCESS" }] }],
+    );
+    expect(result[0]!.url_context_status).toBe("success");
   });
 });
