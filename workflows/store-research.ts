@@ -820,6 +820,12 @@ export async function storeResearchWorkflow(
           // 食べログ検索の mandatory attempt を実際に行ったか(PR #180 BLOCKER 1)。
           // false でも run は succeeded のまま継続する(observability のみ)。
           tabelog_search_attempted: stage1.tabelogSearchAttempted,
+          // 検索実行後にどこで食べログが消えたかを次回 smoke で分離するための診断値。
+          // emitted=false / mentions_domain=true なら「SOURCE ブロック内に書いたが
+          // 既存 parser の要求形式を満たさなかった」、両方 false なら
+          // 「モデル出力に食べログ SOURCE 自体が無い」と読む。いずれも run は失敗させない。
+          tabelog_source_emitted: stage1.tabelogSourceEmitted,
+          tabelog_source_block_mentions_domain: stage1.tabelogSourceBlockMentionsDomain,
         },
         stage2_combined: stage2Result.usageMetadata,
       },

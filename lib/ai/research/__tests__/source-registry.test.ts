@@ -18,6 +18,8 @@ import {
   isValidCandidateUrl,
   parseSourceBlocks,
   parseSearchNotes,
+  hasTabelogSourceBlock,
+  sourceBlocksMentionTabelogDomain,
   type GroundingMetadataLike,
 } from "../source-registry";
 
@@ -516,5 +518,133 @@ describe("buildSourceRegistry の多様性capping (feat/ai-research-source-diver
     // (多様な候補が他に存在する場合のみ、ドメイン上限が実際の絞り込みとして機能する)。
     const registry = buildSourceRegistry(null, blocks);
     expect(registry.length).toBe(10);
+  });
+});
+
+/**
+ * Tabelog source の Stage1 observability(PR #180、read-only audit の follow-up)。
+ *
+ * ## 背景
+ *
+ * `tabelog_search_attempted = true`(実際の server-side tool invocation の
+ * `args.queries` 由来、CONFIRMED)にもかかわらず Source Registry に食べログが 0 件だった。
+ * read-only audit により、以下が確定している:
+ *
+ * - Google Search server-side tool response は検索結果 URL/title/snippet を
+ *   クライアントへ返さない(`toolResponse.response` は `search_suggestions` のみ)。
+ *   → `tabelog_result_observed` は原理的に実装不能。
+ * - 正常な `tabelog.com` URL が `[SOURCE]` として出力されていれば
+ *   `parseSourceBlocks` → `isValidCandidateUrl` → `capWithDiversity`(10件 < 上限15件、
+ *   backfill あり)を通過して registry へ残る。cap による drop は DISPROVED。
+ *
+ * したがって残る可能性は
+ * (A) モデルが `[SOURCE]` として食べログを一切出していない
+ * (B) `[SOURCE]` ブロック内に URL を書いたが既存 parser の要求形式を満たさなかった
+ * の2つで、この2つの boolean が次回 smoke でそれを分離する。
+ *
+ * ## 判定の非対称性(意図的)
+ *
+ * - `hasTabelogSourceBlock`: **既存 `parseSourceBlocks` の結果のみ**を見る。
+ *   parser の production semantics は一切変えない。
+ * - `sourceBlocksMentionTabelogDomain`: `[SOURCE]…[/SOURCE]` の **body 内部だけ**を走査する。
+ *   全文 `text.includes("tabelog.com")` は `[QUERY]site:tabelog.com …[/QUERY]` の
+ *   自己申告だけで true になり diagnostic として無意味なので採用しない。
+ */
+describe("hasTabelogSourceBlock / sourceBlocksMentionTabelogDomain (Stage1 observability)", () => {
+  const block = (body: string) => `[SOURCE]\n${body}\n[/SOURCE]`;
+  const RETTY = block(
+    "url: https://retty.me/area/PRE14/ARE57/100001730030/\ntitle: Retty\ntype: gourmet_site\nwhy_useful: y",
+  );
+
+  it("1. 正常な[SOURCE]のTabelog URL → mentions=true / emitted=true", () => {
+    const text = block(
+      "url: https://tabelog.com/kanagawa/A1401/A140104/14099999/\ntitle: 食べログ\ntype: gourmet_site\nwhy_useful: y",
+    );
+    expect(sourceBlocksMentionTabelogDomain(text)).toBe(true);
+    expect(hasTabelogSourceBlock(text)).toBe(true);
+  });
+
+  it("2. www サブドメインも Tabelog として扱う → true / true", () => {
+    const text = block(
+      "url: https://www.tabelog.com/kanagawa/A1401/A140104/14099999/\ntitle: 食べログ\ntype: gourmet_site\nwhy_useful: y",
+    );
+    expect(sourceBlocksMentionTabelogDomain(text)).toBe(true);
+    expect(hasTabelogSourceBlock(text)).toBe(true);
+  });
+
+  it("3. SOURCE block内にURLはあるが既存parser形式(url:)ではない → mentions=true / emitted=false", () => {
+    const text = block("https://tabelog.com/kanagawa/A1401/A140104/14099999/");
+    expect(sourceBlocksMentionTabelogDomain(text)).toBe(true);
+    expect(hasTabelogSourceBlock(text)).toBe(false);
+  });
+
+  it("4. [QUERY]の自己申告だけで SOURCE は Retty のみ → mentions=false / emitted=false", () => {
+    const text = `[QUERY]site:tabelog.com 関内 なむら[/QUERY]\n[QUERY]関内 なむら 食べログ[/QUERY]\n${RETTY}`;
+    expect(sourceBlocksMentionTabelogDomain(text)).toBe(false);
+    expect(hasTabelogSourceBlock(text)).toBe(false);
+  });
+
+  it("5. SOURCE block外の通常本文にだけ tabelog.com が現れる → false / false", () => {
+    const text = `食べログ(https://tabelog.com/)には掲載がありました。\n${RETTY}`;
+    expect(sourceBlocksMentionTabelogDomain(text)).toBe(false);
+    expect(hasTabelogSourceBlock(text)).toBe(false);
+  });
+
+  it("6. lookalike: evil-tabelog.com は Tabelog として扱わない", () => {
+    const withUrlField = block(
+      "url: https://evil-tabelog.com/kanagawa/\ntitle: 食べログ\ntype: gourmet_site\nwhy_useful: y",
+    );
+    expect(sourceBlocksMentionTabelogDomain(withUrlField)).toBe(false);
+    expect(hasTabelogSourceBlock(withUrlField)).toBe(false);
+    expect(sourceBlocksMentionTabelogDomain(block("https://evil-tabelog.com/"))).toBe(false);
+  });
+
+  it("7. lookalike: tabelog.com.example.com は Tabelog として扱わない", () => {
+    const withUrlField = block(
+      "url: https://tabelog.com.example.com/kanagawa/\ntitle: 食べログ\ntype: gourmet_site\nwhy_useful: y",
+    );
+    expect(sourceBlocksMentionTabelogDomain(withUrlField)).toBe(false);
+    expect(hasTabelogSourceBlock(withUrlField)).toBe(false);
+    expect(sourceBlocksMentionTabelogDomain(block("https://tabelog.com.example.com/"))).toBe(false);
+  });
+
+  it("hostname は大文字小文字を正規化する", () => {
+    const text = block(
+      "url: https://WWW.TABELOG.COM/kanagawa/\ntitle: 食べログ\ntype: gourmet_site\nwhy_useful: y",
+    );
+    expect(sourceBlocksMentionTabelogDomain(text)).toBe(true);
+    expect(hasTabelogSourceBlock(text)).toBe(true);
+  });
+
+  it("8. 複数SOURCEのうち1件だけ Tabelog → true / true", () => {
+    const tabelog = block(
+      "url: https://tabelog.com/kanagawa/A1401/A140104/14099999/\ntitle: 食べログ\ntype: gourmet_site\nwhy_useful: y",
+    );
+    const casa = block(
+      "url: https://casabrutus.com/article/1\ntitle: Casa BRUTUS\ntype: article\nwhy_useful: y",
+    );
+    const text = `${casa}\n${RETTY}\n${tabelog}`;
+    expect(sourceBlocksMentionTabelogDomain(text)).toBe(true);
+    expect(hasTabelogSourceBlock(text)).toBe(true);
+  });
+
+  it("9. SOURCEブロックが1件も無い → false / false", () => {
+    const text = "[QUERY]関内 なむら[/QUERY]\n情報源は見つかりませんでした。";
+    expect(sourceBlocksMentionTabelogDomain(text)).toBe(false);
+    expect(hasTabelogSourceBlock(text)).toBe(false);
+  });
+
+  it("空文字でも例外を投げない", () => {
+    expect(sourceBlocksMentionTabelogDomain("")).toBe(false);
+    expect(hasTabelogSourceBlock("")).toBe(false);
+  });
+
+  it("http:// のTabelog URLも検出する(scheme非依存でhostnameのみ見る)", () => {
+    expect(sourceBlocksMentionTabelogDomain(block("http://tabelog.com/x/"))).toBe(true);
+  });
+
+  it("parseSourceBlocks の production semantics を変更していない(壊れたblockは依然として無視)", () => {
+    const broken = block("https://tabelog.com/example/");
+    expect(parseSourceBlocks(broken)).toEqual([]);
   });
 });

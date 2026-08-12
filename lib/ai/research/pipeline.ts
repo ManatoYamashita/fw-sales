@@ -16,7 +16,14 @@
 import "server-only";
 
 import { RESEARCH_POLICY_ITEMS, getResearchPolicy } from "@/lib/domain/research-policy";
-import { buildSourceRegistry, parseSearchNotes, type GroundingMetadataLike, type SearchNote } from "./source-registry";
+import {
+  buildSourceRegistry,
+  parseSearchNotes,
+  hasTabelogSourceBlock,
+  sourceBlocksMentionTabelogDomain,
+  type GroundingMetadataLike,
+  type SearchNote,
+} from "./source-registry";
 import { buildStage1Prompt, buildStage2Prompt, selectAiResearchItems, type StoreIdentity } from "./prompts";
 import { buildStage2JsonSchema, buildStage2ResponseZodSchema } from "./schema-builder";
 import { createResearchGeminiClient, type UsageMetadataLike, type UrlContextMetadataLike } from "./client";
@@ -64,6 +71,19 @@ export interface Stage1Outcome {
    */
   tabelogSearchAttempted: boolean;
   /**
+   * 既存 `parseSourceBlocks` が読み取れた `[SOURCE]` に食べログURLが含まれたか
+   * (診断用、PR #180)。`tabelogSearchAttempted` が「検索を実行したか」なのに対し、
+   * こちらは「モデルが SOURCE として出力したか」。
+   */
+  tabelogSourceEmitted: boolean;
+  /**
+   * `[SOURCE]…[/SOURCE]` の body 内部に食べログドメインのURL言及があったか(診断用)。
+   * `tabelogSourceEmitted === false` かつ本値が `true` なら、モデルは SOURCE ブロック内へ
+   * 書いたが既存 parser の要求形式(`url:` 行)を満たさなかったことを意味する。
+   * いずれの値も run の成否・Source Registry の選択・prompt には影響しない。
+   */
+  tabelogSourceBlockMentionsDomain: boolean;
+  /**
    * Stage1のGoogle Search実行時に得られた補助情報(feat/ai-research-source-diversity)。
    * URL Context本文取得より一段弱い根拠として、Stage2プロンプトへ受け渡す。
    */
@@ -85,6 +105,10 @@ export async function runStage1(
     searchCallCount: result.searchCallCount,
     searchQueryCount: result.searchQueryCount,
     tabelogSearchAttempted: result.tabelogSearchAttempted,
+    // 診断値のみ。Source Registry の構築結果には影響させない(上の buildSourceRegistry は
+    // これらの値を一切参照しない)。応答テキストは boolean 化した時点で捨て、永続化しない。
+    tabelogSourceEmitted: hasTabelogSourceBlock(result.text),
+    tabelogSourceBlockMentionsDomain: sourceBlocksMentionTabelogDomain(result.text),
     searchNotes: parseSearchNotes(result.text),
   };
 }

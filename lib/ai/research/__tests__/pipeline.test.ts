@@ -150,6 +150,95 @@ describe("runStage1", () => {
     expect(result.tabelogSearchAttempted).toBe(false);
     expect(result.sourceRegistry).toHaveLength(1);
   });
+
+  /**
+   * Tabelog source の Stage1 observability(PR #180、read-only audit の follow-up)。
+   *
+   * `tabelog_search_attempted`(検索を実行したか)だけでは、
+   * 「検索結果に食べログが出なかった」のか「モデルが [SOURCE] として出さなかった」のかを
+   * 区別できない。Stage1 応答テキストから boolean 2つを導出して次回 smoke で分離する。
+   * production behavior(registry 選択 / prompt / Gemini call 数)は一切変えない。
+   */
+  describe("tabelog source diagnostics", () => {
+    const stage1 = (text: string) => ({
+      text,
+      groundingMetadata: null,
+      usageMetadata: null,
+      searchCallCount: 3,
+      searchQueryCount: 12,
+      tabelogSearchAttempted: true,
+    });
+    const RETTY_BLOCK =
+      "[SOURCE]\nurl: https://retty.me/area/PRE14/ARE57/100001730030/\ntitle: Retty\ntype: gourmet_site\nwhy_useful: y\n[/SOURCE]";
+
+    it("正常な Tabelog SOURCE → emitted=true / mentionsDomain=true", async () => {
+      mockRunSourceDiscovery.mockResolvedValue(
+        stage1(
+          "[SOURCE]\nurl: https://tabelog.com/kanagawa/A1401/A140104/14099999/\ntitle: 食べログ\ntype: gourmet_site\nwhy_useful: y\n[/SOURCE]",
+        ),
+      );
+      const result = await runStage1(STORE, AbortSignal.timeout(1000));
+      expect(result.tabelogSourceEmitted).toBe(true);
+      expect(result.tabelogSourceBlockMentionsDomain).toBe(true);
+    });
+
+    it("SOURCE block内にURLはあるが parser 形式不正 → emitted=false / mentionsDomain=true", async () => {
+      mockRunSourceDiscovery.mockResolvedValue(
+        stage1("[SOURCE]\nhttps://tabelog.com/kanagawa/A1401/A140104/14099999/\n[/SOURCE]"),
+      );
+      const result = await runStage1(STORE, AbortSignal.timeout(1000));
+      expect(result.tabelogSourceEmitted).toBe(false);
+      expect(result.tabelogSourceBlockMentionsDomain).toBe(true);
+    });
+
+    it("[QUERY]の自己申告だけ(SOURCEはRettyのみ)→ 両方 false / 既存diagnosticsは不変", async () => {
+      mockRunSourceDiscovery.mockResolvedValue(
+        stage1(`[QUERY]site:tabelog.com 関内 なむら[/QUERY]\n${RETTY_BLOCK}`),
+      );
+      const result = await runStage1(STORE, AbortSignal.timeout(1000));
+      expect(result.tabelogSourceEmitted).toBe(false);
+      expect(result.tabelogSourceBlockMentionsDomain).toBe(false);
+      expect(result.tabelogSearchAttempted).toBe(true);
+      expect(result.searchCallCount).toBe(3);
+      expect(result.searchQueryCount).toBe(12);
+    });
+
+    it("12. tabelogSourceEmitted=false でも run を失敗させず Source Registry を通常どおり構築する", async () => {
+      mockRunSourceDiscovery.mockResolvedValue(stage1(RETTY_BLOCK));
+      const result = await runStage1(STORE, AbortSignal.timeout(1000));
+      expect(result.tabelogSourceEmitted).toBe(false);
+      expect(result.sourceRegistry).toHaveLength(1);
+      expect(result.sourceRegistry[0]!.source_type).toBe("gourmet_site");
+    });
+
+    it("11. 永続化される stage1_diagnostics に raw text / raw URL / raw query が含まれない", async () => {
+      const rawUrl = "https://tabelog.com/kanagawa/A1401/A140104/14099999/";
+      mockRunSourceDiscovery.mockResolvedValue(
+        stage1(
+          `[QUERY]site:tabelog.com 関内 なむら[/QUERY]\n[SOURCE]\nurl: ${rawUrl}\ntitle: 食べログ 関内 なむら\ntype: gourmet_site\nwhy_useful: y\n[/SOURCE]`,
+        ),
+      );
+      const result = await runStage1(STORE, AbortSignal.timeout(1000));
+
+      // `workflows/store-research.ts:persistSucceededStep` が保存する形をそのまま組み立てる。
+      const persisted = {
+        search_call_count: result.searchCallCount,
+        search_query_count: result.searchQueryCount,
+        tabelog_search_attempted: result.tabelogSearchAttempted,
+        tabelog_source_emitted: result.tabelogSourceEmitted,
+        tabelog_source_block_mentions_domain: result.tabelogSourceBlockMentionsDomain,
+      };
+      expect(typeof persisted.tabelog_source_emitted).toBe("boolean");
+      expect(typeof persisted.tabelog_source_block_mentions_domain).toBe("boolean");
+
+      const serialized = JSON.stringify(persisted);
+      expect(serialized).not.toContain(rawUrl);
+      expect(serialized).not.toContain("tabelog.com");
+      expect(serialized).not.toContain("なむら");
+      expect(serialized).not.toContain("[SOURCE]");
+      expect(serialized).not.toContain("site:");
+    });
+  });
 });
 
 describe("runStage2 (統合、FACT+FACT_OR_HEARING+ANALYSISを1回で扱う)", () => {

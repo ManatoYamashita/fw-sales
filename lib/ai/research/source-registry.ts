@@ -100,10 +100,7 @@ const MAX_SEARCH_NOTES = 20;
  */
 export function parseSourceBlocks(text: string): ParsedSourceBlock[] {
   const blocks: ParsedSourceBlock[] = [];
-  const blockRe = /\[SOURCE\]([\s\S]*?)\[\/SOURCE\]/g;
-  let match: RegExpExecArray | null;
-  while ((match = blockRe.exec(text)) !== null) {
-    const body = match[1] ?? "";
+  for (const body of sourceBlockBodies(text)) {
     const url = extractField(body, "url");
     if (!url) continue;
     blocks.push({
@@ -114,6 +111,24 @@ export function parseSourceBlocks(text: string): ParsedSourceBlock[] {
     });
   }
   return blocks;
+}
+
+/**
+ * `[SOURCE]…[/SOURCE]` の **body 文字列だけ**を出現順に返す。
+ *
+ * `parseSourceBlocks`(production semantics: `url:` 行が取れないブロックは破棄)と
+ * `sourceBlocksMentionTabelogDomain`(diagnostic: 書式不正でも body 内を走査したい)の
+ * 両方が同じ区切り規則を使うための共通化。区切りの正規表現を2箇所に複製して
+ * drift させないためだけの抽出であり、`parseSourceBlocks` の判定は変えていない。
+ */
+function sourceBlockBodies(text: string): string[] {
+  const bodies: string[] = [];
+  const blockRe = /\[SOURCE\]([\s\S]*?)\[\/SOURCE\]/g;
+  let match: RegExpExecArray | null;
+  while ((match = blockRe.exec(text)) !== null) {
+    bodies.push(match[1] ?? "");
+  }
+  return bodies;
 }
 
 function extractField(block: string, fieldName: string): string | null {
@@ -210,6 +225,90 @@ export function isValidCandidateUrl(raw: string): boolean {
   if (parsed.username !== "" || parsed.password !== "") return false;
 
   return true;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Tabelog source diagnostics (PR #180、Stage1 observability)           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 以下2つは **diagnostic 専用の純関数**であり、Source Registry の構築・選択には
+ * 一切関与しない(値を計算して `Stage1Outcome` へ載せるだけ)。
+ *
+ * ## 解こうとしている問題
+ *
+ * `tabelog_search_attempted = true`(実際の server-side tool invocation の
+ * `args.queries` 由来)にもかかわらず Source Registry に食べログが 0 件だった。
+ * Google Search の server-side tool response は検索結果 URL/title/snippet を
+ * クライアントへ返さない(実キャプチャで `toolResponse.response` は
+ * `search_suggestions` のみ)ため「検索結果に出たか」は原理的に観測できない。
+ * 観測できるのは Stage1 応答テキストまでで、そこで以下2つを区別する:
+ *
+ * - `hasTabelogSourceBlock`: 既存 parser が読める `[SOURCE]` として出力されたか
+ * - `sourceBlocksMentionTabelogDomain`: `[SOURCE]` body 内に URL の言及はあったか
+ *
+ * 前者 false + 後者 true なら「書式不正で parser が取れなかった」、
+ * 両方 false なら「モデル出力に食べログ SOURCE 自体が存在しない」と分離できる。
+ */
+const TABELOG_APEX_DOMAIN = "tabelog.com";
+
+/**
+ * hostname が食べログのものか判定する。lookalike ドメインを弾くため、
+ * **部分文字列一致ではなく apex 一致 / サブドメイン一致のみ**を許可する:
+ * - `tabelog.com` → true
+ * - `www.tabelog.com` → true
+ * - `evil-tabelog.com` → false(apex が異なる)
+ * - `tabelog.com.example.com` → false(apex は `example.com`)
+ */
+function isTabelogHostname(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return host === TABELOG_APEX_DOMAIN || host.endsWith(`.${TABELOG_APEX_DOMAIN}`);
+}
+
+/** URL文字列をparseし、hostnameが食べログなら true(parse不能なら false)。 */
+function isTabelogUrl(raw: string): boolean {
+  try {
+    return isTabelogHostname(new URL(raw.trim()).hostname);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * **既存 `parseSourceBlocks` が読み取れた** `[SOURCE]` の中に食べログURLがあるか。
+ *
+ * parser の production semantics は変更していないため、`url:` 行が無い等で
+ * `parseSourceBlocks` が破棄したブロックはここでも false になる
+ * (それを別途観測するのが `sourceBlocksMentionTabelogDomain`)。
+ */
+export function hasTabelogSourceBlock(text: string): boolean {
+  return parseSourceBlocks(text).some((block) => isTabelogUrl(block.url));
+}
+
+/** `[SOURCE]` body 内のURL様トークン抽出(diagnostic専用の粗い抽出)。 */
+const URL_TOKEN_PATTERN = /https?:\/\/[^\s<>"'`)\]]+/gi;
+
+/**
+ * `[SOURCE]…[/SOURCE]` の **body 内部に限定して**、食べログドメインのURLへの言及があるか。
+ *
+ * **Stage1 全文に対する `text.includes("tabelog.com")` は意図的に採用しない。**
+ * `[QUERY]site:tabelog.com …[/QUERY]` という検索クエリの自己申告だけで true になり、
+ * 「SOURCE 化されたか」の diagnostic として意味を持たなくなるため。
+ *
+ * `url:` 行の形式を満たさない書き方(body に URL を直書きしただけ等)でも true になる
+ * のが `hasTabelogSourceBlock` との差分であり、この2値の組み合わせが観測の目的。
+ *
+ * 判定は `new URL()` の hostname を経由するため、scheme 無しのドメイン言及
+ * (例: `title: 食べログ (tabelog.com)`)は false になる(false positive より
+ * false negative を優先する既存方針に合わせる)。
+ */
+export function sourceBlocksMentionTabelogDomain(text: string): boolean {
+  for (const body of sourceBlockBodies(text)) {
+    for (const token of body.match(URL_TOKEN_PATTERN) ?? []) {
+      if (isTabelogUrl(token)) return true;
+    }
+  }
+  return false;
 }
 
 type DraftEntry = Omit<SourceRegistryEntry, "id">;
