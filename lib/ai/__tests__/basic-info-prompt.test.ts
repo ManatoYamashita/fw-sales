@@ -328,3 +328,38 @@ describe("buildSalesAssetsPrompt - 純関数", () => {
     expect(a).toEqual(b);
   });
 });
+
+/**
+ * 役割ラベル付き複数電話番号の consumer 回帰
+ * (PR #180 final smoke hardening、Issue B)。
+ *
+ * `phone` の canonical 値が単一番号から
+ * `店舗直通: ... / 予約・問い合わせ(食べログ): ...` の複合文字列になっても、
+ * 営業資産生成プロンプトが壊れないことを固定する
+ * (`nearest_station` が既に複数サブ情報を1文字列で持つのと同じ扱い)。
+ */
+describe("buildBasicInfoBlock — 役割ラベル付き電話番号 (Issue B)", () => {
+  const field = (value: string) => ({
+    value,
+    tier: "A" as const,
+    filled_by: "manual" as const,
+    updated_at: "2026-08-12T00:00:00.000Z",
+  });
+
+  it("複数番号の文字列をそのまま1行として出力する", () => {
+    const block = buildBasicInfoBlock({
+      phone: field("店舗直通: 045-305-6536 / 予約・問い合わせ(食べログ): 050-5869-4190"),
+    });
+    expect(block).toContain("電話番号: 店舗直通: 045-305-6536 / 予約・問い合わせ(食べログ): 050-5869-4190");
+  });
+
+  it("単一番号の従来形式も従来どおり出力する", () => {
+    const block = buildBasicInfoBlock({ phone: field("045-305-6536") });
+    expect(block).toContain("電話番号: 045-305-6536");
+  });
+
+  it("空値は従来どおり省略する", () => {
+    const block = buildBasicInfoBlock({ phone: { ...field(""), value: "" } });
+    expect(block).not.toContain("電話番号");
+  });
+});

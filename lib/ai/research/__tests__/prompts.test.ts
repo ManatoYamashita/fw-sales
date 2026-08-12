@@ -411,3 +411,110 @@ describe("buildStage2Prompt — 優先取得ヒントと出力簡潔化", () => 
     expect(prompt).toContain("コピーしてはいけません");
   });
 });
+
+/**
+ * phone の複数番号併記指示(PR #180 final smoke hardening、Issue B)。
+ *
+ * root cause は「canonical値を1つ選び、他の番号はevidence内へ補足」という
+ * **single value を明示要求する指示**だった。役割ラベル付き併記へ変更する。
+ */
+describe("buildStage2Prompt — phone の複数番号併記 (Issue B)", () => {
+  const PHONE_ITEMS = [{ key: "phone", label: "電話番号", research_policy: "FACT" }];
+  const REG = [
+    {
+      id: "S01",
+      title: "食べログ",
+      grounding_redirect_url: "https://tabelog.com/x/",
+      resolved_url: null,
+      resolve_status: "skipped" as const,
+      source_type: "gourmet_site" as const,
+      discovery_provenance: "gemini_search_candidate" as const,
+      url_context_status: "not_attempted" as const,
+    },
+  ];
+  const prompt = () => buildStage2Prompt({ store: STORE, items: PHONE_ITEMS, sourceRegistry: REG });
+
+  it("「canonical値を1つ選び」という single value 要求を含まない(root cause)", () => {
+    expect(prompt()).not.toContain("canonical値を1つ選び");
+  });
+
+  it("役割ラベル付きで全て併記するよう指示する", () => {
+    const p = prompt();
+    expect(p).toContain("役割ラベル付きで全て併記");
+    expect(p).toContain("店舗直通: 045-305-6536 / 予約・問い合わせ(食べログ): 050-5869-4190");
+  });
+
+  it("050を店舗直通と書かないよう明示する(意味を取り違えさせない)", () => {
+    expect(prompt()).toContain("050番号を「店舗直通」と書いてはいけません");
+  });
+
+  it("valueに書いた番号をevidenceにも書くよう要求する(deterministic検証と対)", () => {
+    expect(prompt()).toContain("valueに書いた電話番号は、必ずevidenceにも同じ番号を書いて");
+  });
+
+  it("用途不明な番号でconflictにしない既存方針は維持する", () => {
+    expect(prompt()).toContain('矛盾する場合のみ"conflict"');
+  });
+});
+
+/**
+ * 電話番号を持つ店舗ページの意図的な探索(PR #180 final smoke hardening、Issue B-A)。
+ *
+ * ## 背景(実機: 関内 なむら / run research_run_mspjq6q1_1n1q4e)
+ *
+ * 食べログ店舗ページには「予約・お問い合わせ 050-5869-4190」と
+ * 「電話番号 045-305-6536」の2番号があるが、**この run の Source Registry に
+ * 食べログのエントリ自体が存在しなかった**(Safari Online / Casa BRUTUS /
+ * 実食レポ記事 / Retty / competitor のみ)。
+ *
+ * 旧 prompt は「店舗名 + 食べログ」を**任意の例**として挙げるだけで、
+ * 「電話番号(特に予約・問い合わせ番号)を掲載するページを探す」という
+ * **目的ベースの指示が存在しなかった**。
+ *
+ * ## 設計方針(固定する不変条件)
+ *
+ * - 特定サイト(食べログ)の強制ではなく、**電話番号・予約導線を持つ店舗ページ**を
+ *   目的として探させる。食べログが無い店舗でも他 source で正常継続する
+ * - 店舗名・番号のハードコードをしない
+ * - Stage1 の Gemini 呼び出し回数は増やさない(同一 prompt 内の指示のみ)
+ */
+describe("buildStage1Prompt — 電話番号 source の探索 (Issue B-A)", () => {
+  it("予約・問い合わせ番号を掲載するページを探す目的指示を含む", () => {
+    const prompt = buildStage1Prompt(STORE);
+    expect(prompt).toContain("予約・問い合わせ");
+    expect(prompt).toContain("電話番号");
+  });
+
+  it("coverage floor に「電話番号・予約導線」カテゴリを含む", () => {
+    const prompt = buildStage1Prompt(STORE);
+    const floorSection = prompt.slice(prompt.indexOf("最低限、以下のカテゴリすべてについて"));
+    expect(floorSection).toContain("電話番号・予約導線");
+  });
+
+  it("検索クエリ例に「店舗名 + 予約」「店舗名 + 電話番号」を含む", () => {
+    const prompt = buildStage1Prompt(STORE);
+    expect(prompt).toContain("店舗名 + 予約");
+    expect(prompt).toContain("店舗名 + 電話番号");
+  });
+
+  it("グルメ/予約ポータルの例示は維持する(食べログを含むが強制はしない)", () => {
+    const prompt = buildStage1Prompt(STORE);
+    expect(prompt).toContain("食べログ");
+    expect(prompt).toContain("ホットペッパー");
+    // 「必ず食べログを使え」という強制表現は入れない
+    expect(prompt).not.toContain("必ず食べログ");
+  });
+
+  it("特定店舗名・特定電話番号をハードコードしない", () => {
+    const prompt = buildStage1Prompt(STORE);
+    expect(prompt).not.toContain("なむら");
+    expect(prompt).not.toContain("050-5869-4190");
+    expect(prompt).not.toContain("045-305-6536");
+  });
+
+  it("見つからないカテゴリを無理に埋めない旨の既存方針を維持する", () => {
+    const prompt = buildStage1Prompt(STORE);
+    expect(prompt).toContain("すべてに情報源が");
+    expect(prompt).toContain("見つからないカテゴリを");
+  });
+});

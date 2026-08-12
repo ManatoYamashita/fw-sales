@@ -38,6 +38,7 @@ import {
 } from "./evidence-precedence";
 import { deriveFreshPlacesVerifiedKeys } from "./places-verified";
 import { normalizeUrlForMatch } from "./url-normalize";
+import { enforcePhoneNumbersBackedByEvidence } from "./phone-evidence";
 import type { BasicInfo } from "@/types/basic-info";
 
 /* ------------------------------------------------------------------ */
@@ -763,14 +764,20 @@ export function finalizeResearchItems(params: FinalizeParams): ResearchItem[] {
     canonicalVerifiedKeys,
   } = params;
   const merged = [...aiItems, ...nonAiItems];
-  return merged.map((item) =>
-    applyDeterministicValidation(item, {
+  return merged.map((item) => {
+    const validated = applyDeterministicValidation(item, {
       sourceRegistry,
       placesVerifiedKeys,
       searchFacts,
       canonicalVerifiedKeys,
-    }),
-  );
+    });
+    // `phone` は役割ラベル付きで複数番号を保持できるようにした(Issue B)。
+    // 番号を複数書けるとモデルが実在しない番号を生成するリスクが増えるため、
+    // 「value の全番号が evidence にも現れる」ことを deterministic に要求する。
+    // 既存の trust boundary(url_context / identity / source_ids)は
+    // `applyDeterministicValidation` が担い、ここは番号そのものの裏付けだけを見る。
+    return enforcePhoneNumbersBackedByEvidence(validated);
+  });
 }
 
 export type { GroundingMetadataLike, SearchNote };

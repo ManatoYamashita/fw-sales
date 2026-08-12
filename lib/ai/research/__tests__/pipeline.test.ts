@@ -1543,3 +1543,204 @@ describe("applyUrlContextStatus — URL正規化 (Q6)", () => {
     expect(result[0]!.url_context_status).toBe("success");
   });
 });
+
+/**
+ * phone の複数番号保持 — finalizeResearchItems 経由の統合検証
+ * (PR #180 final smoke hardening、Issue B)。
+ */
+describe("finalizeResearchItems — phone の複数番号 (Issue B)", () => {
+  const TABELOG: SourceRegistryEntry = {
+    id: "S01",
+    title: "tabelog.com",
+    grounding_redirect_url: "https://tabelog.com/kanagawa/A1401/A140104/14099999/",
+    resolved_url: null,
+    resolve_status: "skipped",
+    source_type: "gourmet_site",
+    discovery_provenance: "gemini_search_candidate",
+    url_context_status: "success",
+    identity_status: "target_match",
+  };
+
+  const phoneItem = (value: string, evidence: string, sourceIds = ["S01"]) => ({
+    key: "phone",
+    research_policy: "FACT" as const,
+    status: "confirmed" as const,
+    value,
+    evidence,
+    source_ids: sourceIds,
+  });
+
+  function finalizePhone(item: ReturnType<typeof phoneItem>, registry = [TABELOG]) {
+    return finalizeResearchItems({ aiItems: [item], nonAiItems: [], sourceRegistry: registry })[0]!;
+  }
+
+  it("店舗直通のみ: confirmed(単一番号でも evidence に番号が必要、Issue B-3)", () => {
+    const result = finalizePhone(
+      phoneItem("045-305-6536", "食べログの店舗ページに電話番号 045-305-6536 と記載。"),
+    );
+    expect(result.status).toBe("confirmed");
+    expect(result.value).toBe("045-305-6536");
+  });
+
+  it("予約用050のみ: confirmed(045が無くても捨てない)", () => {
+    const result = finalizePhone(
+      phoneItem(
+        "予約・問い合わせ(食べログ): 050-5869-4190",
+        "食べログに予約・お問い合わせ 050-5869-4190 と記載。",
+      ),
+    );
+    expect(result.status).toBe("confirmed");
+    expect(result.value).toContain("050-5869-4190");
+  });
+
+  it("実機ケース: 店舗直通 + 予約用050 の両方を役割ラベル付きで保持する", () => {
+    const result = finalizePhone(
+      phoneItem(
+        "店舗直通: 045-305-6536 / 予約・問い合わせ(食べログ): 050-5869-4190",
+        "食べログに電話番号 045-305-6536、予約・お問い合わせ 050-5869-4190 と記載。",
+      ),
+    );
+    expect(result.status).toBe("confirmed");
+    expect(result.value).toContain("045-305-6536");
+    expect(result.value).toContain("050-5869-4190");
+    expect(result.value).toContain("店舗直通");
+    expect(result.value).toContain("予約");
+  });
+
+  it("同一番号の表記違いは重複扱いしない(降格させない)", () => {
+    const result = finalizePhone(
+      phoneItem("045-305-6536 / 0453056536", "掲載番号は 045-305-6536。"),
+    );
+    expect(result.status).toBe("confirmed");
+  });
+
+  it("evidence に無い050(モデル生成)は confirmed にしない", () => {
+    const result = finalizePhone(
+      phoneItem(
+        "店舗直通: 045-305-6536 / 予約: 050-0000-0000",
+        "食べログに電話番号 045-305-6536 と記載。",
+      ),
+    );
+    expect(result.status).toBe("not_found");
+    expect(result.value).toBeNull();
+  });
+
+  it("url_context 未取得の source しか無ければ、番号が揃っていても confirmed にしない", () => {
+    const notFetched: SourceRegistryEntry = { ...TABELOG, url_context_status: "not_attempted" };
+    const result = finalizePhone(
+      phoneItem(
+        "店舗直通: 045-305-6536 / 予約: 050-5869-4190",
+        "電話番号 045-305-6536 と 050-5869-4190。",
+      ),
+      [notFetched],
+    );
+    expect(result.status).toBe("not_found");
+  });
+
+  it("identity が target_match でない source は根拠にできない(第三者店舗の050を採用しない)", () => {
+    const otherStore: SourceRegistryEntry = { ...TABELOG, identity_status: "unrelated" };
+    const result = finalizePhone(
+      phoneItem(
+        "店舗直通: 045-305-6536 / 予約: 050-5869-4190",
+        "電話番号 045-305-6536 と 050-5869-4190。",
+      ),
+      [otherStore],
+    );
+    expect(result.status).toBe("not_found");
+  });
+
+  it("source_ids が registry に存在しなければ confirmed にしない", () => {
+    const result = finalizePhone(
+      phoneItem(
+        "店舗直通: 045-305-6536 / 予約: 050-5869-4190",
+        "電話番号 045-305-6536 と 050-5869-4190。",
+        ["S99"],
+      ),
+    );
+    expect(result.status).toBe("not_found");
+  });
+});
+
+/**
+ * evidence_basis 別経路の非退化(PR #180 final smoke hardening、Issue B-3)。
+ *
+ * AI 生成 phone には「value の番号が evidence にもある」ことを要求するが、
+ * コード側が合成した deterministic / canonical fallback item にはこの要件を課さない。
+ */
+describe("finalizeResearchItems — phone の evidence_basis 別経路 (Issue B-3)", () => {
+  it("単一番号のAI生成phoneでもevidenceに番号が無ければ降格する", () => {
+    const registry: SourceRegistryEntry[] = [
+      {
+        id: "S01",
+        title: "tabelog.com",
+        grounding_redirect_url: "https://tabelog.com/x/",
+        resolved_url: null,
+        resolve_status: "skipped",
+        source_type: "gourmet_site",
+        discovery_provenance: "gemini_search_candidate",
+        url_context_status: "success",
+        identity_status: "target_match",
+      },
+    ];
+    const result = finalizeResearchItems({
+      aiItems: [
+        {
+          key: "phone",
+          research_policy: "FACT",
+          status: "confirmed",
+          value: "045-305-6536",
+          evidence: "公式サイトに店舗の電話番号として明記されています。",
+          source_ids: ["S01"],
+        },
+      ],
+      nonAiItems: [],
+      sourceRegistry: registry,
+    });
+    expect(result[0]!.status).toBe("not_found");
+  });
+
+  it("deterministic Places item(evidence_basis=places)は evidence 要件で壊れない", () => {
+    const placesPhone = {
+      key: "phone",
+      research_policy: "FACT" as const,
+      status: "confirmed" as const,
+      value: "045-305-6536",
+      evidence: "今回の調査時点のGoogle Placesで確認した値です。",
+      source_ids: [],
+      confidence: 100,
+      evidence_basis: "places" as const,
+    };
+    const result = finalizeResearchItems({
+      aiItems: [placesPhone],
+      nonAiItems: [],
+      sourceRegistry: [],
+      placesVerifiedKeys: new Set(["phone"]),
+    });
+    expect(result[0]!.status).toBe("confirmed");
+    expect(result[0]!.value).toBe("045-305-6536");
+  });
+
+  it("canonical fallback item(evidence_basis=existing_canonical)は evidence 要件で壊れない", () => {
+    const canonicalPhone = {
+      key: "phone",
+      research_policy: "FACT" as const,
+      status: "confirmed" as const,
+      value: "店舗直通: 045-305-6536 / 予約・問い合わせ(食べログ): 050-5869-4190",
+      evidence:
+        "登録済みの基本情報として保持されている値です(最終更新 2026-08-04)。今回のWeb再確認はできていません。",
+      source_ids: [],
+      confidence: null,
+      evidence_basis: "existing_canonical" as const,
+    };
+    const result = finalizeResearchItems({
+      aiItems: [canonicalPhone],
+      nonAiItems: [],
+      sourceRegistry: [],
+      canonicalVerifiedKeys: new Set(["phone"]),
+    });
+    expect(result[0]!.status).toBe("confirmed");
+    // 役割ラベルが維持されること
+    expect(result[0]!.value).toContain("店舗直通");
+    expect(result[0]!.value).toContain("予約・問い合わせ");
+  });
+});
