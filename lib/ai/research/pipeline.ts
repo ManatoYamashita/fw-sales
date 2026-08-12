@@ -38,7 +38,10 @@ import {
 } from "./evidence-precedence";
 import { deriveFreshPlacesVerifiedKeys } from "./places-verified";
 import { normalizeUrlForMatch } from "./url-normalize";
-import { enforcePhoneNumbersBackedByEvidence } from "./phone-evidence";
+import {
+  enforcePhoneNumbersBackedByEvidence,
+  isConflictCandidateEvidenceBacked,
+} from "./phone-evidence";
 import type { BasicInfo } from "@/types/basic-info";
 
 /* ------------------------------------------------------------------ */
@@ -53,6 +56,13 @@ export interface Stage1Outcome {
   searchCallCount: number;
   /** 上記に含まれた検索クエリの合計件数(診断用)。 */
   searchQueryCount: number;
+  /**
+   * 食べログ検索の mandatory attempt を実際に行ったか(診断用、PR #180 BLOCKER 1)。
+   * 判定は `client.ts` が server-side tool invocation の `args.queries` から行い、
+   * ここへ届く時点で既に boolean 化されている(raw query は保持しない)。
+   * `false` でも run を失敗させない(observability のみ)。
+   */
+  tabelogSearchAttempted: boolean;
   /**
    * Stage1のGoogle Search実行時に得られた補助情報(feat/ai-research-source-diversity)。
    * URL Context本文取得より一段弱い根拠として、Stage2プロンプトへ受け渡す。
@@ -74,6 +84,7 @@ export async function runStage1(
     usageMetadata: result.usageMetadata,
     searchCallCount: result.searchCallCount,
     searchQueryCount: result.searchQueryCount,
+    tabelogSearchAttempted: result.tabelogSearchAttempted,
     searchNotes: parseSearchNotes(result.text),
   };
 }
@@ -770,6 +781,10 @@ export function finalizeResearchItems(params: FinalizeParams): ResearchItem[] {
       placesVerifiedKeys,
       searchFacts,
       canonicalVerifiedKeys,
+      // conflict candidate へも phone の value/evidence 自己整合性を要求する(BLOCKER 2)。
+      // trust boundary 本体(url_context / identity / competitor / 一次情報)は
+      // `validateConflictCandidateTrust` が key 非依存で担い、ここは key 固有ルールのみ。
+      conflictCandidateEvidenceGuard: isConflictCandidateEvidenceBacked,
     });
     // `phone` は役割ラベル付きで複数番号を保持できるようにした(Issue B)。
     // 番号を複数書けるとモデルが実在しない番号を生成するリスクが増えるため、

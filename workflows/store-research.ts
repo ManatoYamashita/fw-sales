@@ -811,9 +811,15 @@ export async function storeResearchWorkflow(
       sourceRegistry: finalRegistry,
       tokenUsage: {
         stage1: stage1.usageMetadata,
+        // jsonb (`store_research_runs.token_usage`) 配下のため、フィールド追加に
+        // migration は不要。保存するのは件数と boolean のみで、検索クエリ文字列は
+        // `client.ts:extractSearchDiagnostics` の中で破棄済み(ここには届かない)。
         stage1_diagnostics: {
           search_call_count: stage1.searchCallCount,
           search_query_count: stage1.searchQueryCount,
+          // 食べログ検索の mandatory attempt を実際に行ったか(PR #180 BLOCKER 1)。
+          // false でも run は succeeded のまま継続する(observability のみ)。
+          tabelog_search_attempted: stage1.tabelogSearchAttempted,
         },
         stage2_combined: stage2Result.usageMetadata,
       },

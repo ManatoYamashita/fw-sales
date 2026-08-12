@@ -23,8 +23,9 @@ import { describe, it, expect } from "vitest";
 import {
   extractPhoneNumbers,
   enforcePhoneNumbersBackedByEvidence,
+  isConflictCandidateEvidenceBacked,
 } from "../phone-evidence";
-import type { ResearchItem } from "@/lib/ai/research-result-schema";
+import type { ResearchItem, ResearchItemCandidate } from "@/lib/ai/research-result-schema";
 
 function phoneItem(overrides: Partial<ResearchItem> = {}): ResearchItem {
   return {
@@ -211,5 +212,147 @@ describe("enforcePhoneNumbersBackedByEvidence — 単一番号と evidence_basis
   it("value に番号が1件も無い場合は何もしない(役割ラベルだけ等)", () => {
     const item = aiPhone("非公開", "電話番号は公開されていません。");
     expect(enforcePhoneNumbersBackedByEvidence(item)).toBe(item);
+  });
+});
+
+/**
+ * conflict candidate への同じ AI 自己整合性チェック
+ * (PR #180 final smoke hardening、BLOCKER 2 の candidate evidence 検証)。
+ *
+ * `enforcePhoneNumbersBackedByEvidence` は `status === "confirmed"` だけを対象にする
+ * ため、`status === "conflict"` の各 candidate には効かない。conflict でも
+ * 「candidate.value に書いた番号は candidate.evidence にも書く」という同じ要件を課し、
+ * 満たさない candidate は trusted candidate として扱わない。
+ *
+ * ## trust level(confirmed 側と同じ限界)
+ *
+ * これは **AI 自己整合性チェック**であって source 本文の deterministic 照合ではない。
+ * URL Context は取得したページ本文をアプリコードへ返さないため、value と evidence の
+ * 両方へ同じ hallucinated 番号が書かれた場合は検出できない。source 側の信頼性は
+ * `research-result-schema.ts:isVerifiedSourceForItem`(url_context 成功 + identity)が担う。
+ */
+describe("isConflictCandidateEvidenceBacked", () => {
+  const conflictPhone = (overrides: Partial<ResearchItem> = {}): ResearchItem =>
+    ({
+      key: "phone",
+      research_policy: "FACT",
+      status: "conflict",
+      value: null,
+      evidence: "情報源間で電話番号が食い違います。",
+      source_ids: [],
+      ...overrides,
+    }) as ResearchItem;
+
+  const candidate = (
+    value: string,
+    evidence: string,
+    overrides: Partial<ResearchItemCandidate> = {},
+  ): ResearchItemCandidate => ({
+    candidate_id: "a",
+    label: "候補A",
+    value,
+    evidence,
+    source_ids: ["S01"],
+    ...overrides,
+  });
+
+  it("8. candidate.value の番号が candidate.evidence に無ければ false", () => {
+    const result = isConflictCandidateEvidenceBacked(
+      conflictPhone(),
+      candidate("045-305-6539", "別の情報源に掲載されていました。"),
+    );
+    expect(result).toBe(false);
+  });
+
+  it("candidate.value の番号が candidate.evidence にあれば true", () => {
+    const result = isConflictCandidateEvidenceBacked(
+      conflictPhone(),
+      candidate("045-305-6536", "食べログに電話番号 045-305-6536 と記載。"),
+    );
+    expect(result).toBe(true);
+  });
+
+  it("9. 表記差(ハイフンの有無)は同一とみなす", () => {
+    expect(
+      isConflictCandidateEvidenceBacked(
+        conflictPhone(),
+        candidate("045-305-6536", "掲載番号は 0453056536。"),
+      ),
+    ).toBe(true);
+  });
+
+  it("別番号は同一視しない(下1桁違いは裏付けとみなさない)", () => {
+    expect(
+      isConflictCandidateEvidenceBacked(
+        conflictPhone(),
+        candidate("045-305-6536", "掲載番号は 045-305-6537。"),
+      ),
+    ).toBe(false);
+  });
+
+  it("複数番号の candidate は全ての番号が evidence に現れる場合のみ true", () => {
+    expect(
+      isConflictCandidateEvidenceBacked(
+        conflictPhone(),
+        candidate(
+          "店舗直通: 045-305-6536 / 予約: 050-5869-4190",
+          "045-305-6536 と 050-5869-4190 の2番号が併記。",
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      isConflictCandidateEvidenceBacked(
+        conflictPhone(),
+        candidate("店舗直通: 045-305-6536 / 予約: 050-5869-4190", "045-305-6536 のみ記載。"),
+      ),
+    ).toBe(false);
+  });
+
+  it("phone 以外の key には適用しない(常に true)", () => {
+    expect(
+      isConflictCandidateEvidenceBacked(
+        conflictPhone({ key: "seat_count" }),
+        candidate("49席", "根拠に番号は現れない。"),
+      ),
+    ).toBe(true);
+  });
+
+  it("value に電話番号が1件も含まれない candidate は対象外(常に true)", () => {
+    expect(
+      isConflictCandidateEvidenceBacked(conflictPhone(), candidate("非公開", "掲載なし。")),
+    ).toBe(true);
+  });
+
+  it("evidence_basis が places / existing_canonical の item は対象外(退化させない)", () => {
+    for (const basis of ["places", "existing_canonical"] as const) {
+      expect(
+        isConflictCandidateEvidenceBacked(
+          conflictPhone({ evidence_basis: basis }),
+          candidate("045-305-6536", "コード側の定型文(番号を含まない)。"),
+        ),
+      ).toBe(true);
+    }
+  });
+});
+
+/**
+ * 10. 用途が異なる2番号は conflict ではなく1 value へ併記する
+ * (050 + 045 semantics、既存方針の維持を固定する回帰テスト)。
+ */
+describe("050(予約) + 045(店舗直通)の併記セマンティクス", () => {
+  it("用途ラベル付きの併記 value は confirmed のまま維持される(conflict化しない)", () => {
+    const item: ResearchItem = {
+      key: "phone",
+      research_policy: "FACT",
+      status: "confirmed",
+      value: "店舗直通: 045-305-6536 / 予約・問い合わせ(食べログ): 050-5869-4190",
+      evidence: "食べログに電話番号 045-305-6536、予約・お問い合わせ 050-5869-4190 と記載。",
+      source_ids: ["S01"],
+      evidence_basis: "url_context",
+    };
+    const result = enforcePhoneNumbersBackedByEvidence(item);
+    expect(result.status).toBe("confirmed");
+    expect(result.candidates).toBeUndefined();
+    expect(extractPhoneNumbers(result.value)).toEqual(["0453056536", "05058694190"]);
   });
 });

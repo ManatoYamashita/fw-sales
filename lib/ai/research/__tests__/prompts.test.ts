@@ -455,6 +455,16 @@ describe("buildStage2Prompt — phone の複数番号併記 (Issue B)", () => {
   it("用途不明な番号でconflictにしない既存方針は維持する", () => {
     expect(prompt()).toContain('矛盾する場合のみ"conflict"');
   });
+
+  it("conflict時は各candidateのvalueの番号をそのcandidateのevidenceにも書くよう要求する(BLOCKER 2)", () => {
+    const p = prompt();
+    expect(p).toContain("各candidateのvalueに書いた電話番号");
+    expect(p).toContain("そのcandidateのevidenceにも同じ番号");
+  });
+
+  it("用途が異なる2番号をconflict化しない方針を明示する(050 + 045 semantics)", () => {
+    expect(prompt()).toContain("用途が異なる番号は捨てずに");
+  });
 });
 
 /**
@@ -497,12 +507,10 @@ describe("buildStage1Prompt — 電話番号 source の探索 (Issue B-A)", () =
     expect(prompt).toContain("店舗名 + 電話番号");
   });
 
-  it("グルメ/予約ポータルの例示は維持する(食べログを含むが強制はしない)", () => {
+  it("グルメ/予約ポータルの例示は維持する", () => {
     const prompt = buildStage1Prompt(STORE);
     expect(prompt).toContain("食べログ");
     expect(prompt).toContain("ホットペッパー");
-    // 「必ず食べログを使え」という強制表現は入れない
-    expect(prompt).not.toContain("必ず食べログ");
   });
 
   it("特定店舗名・特定電話番号をハードコードしない", () => {
@@ -516,5 +524,75 @@ describe("buildStage1Prompt — 電話番号 source の探索 (Issue B-A)", () =
     const prompt = buildStage1Prompt(STORE);
     expect(prompt).toContain("すべてに情報源が");
     expect(prompt).toContain("見つからないカテゴリを");
+  });
+});
+
+/**
+ * 食べログ検索の mandatory attempt(PR #180 final smoke hardening、BLOCKER 1)。
+ *
+ * ## 背景(実機: 関内 なむら / run research_run_msprr298_4sdc9t)
+ *
+ * 食べログ店舗ページに「予約・お問い合わせ 050-5869-4190」と「電話番号 045-305-6536」の
+ * 両方があるにもかかわらず、Source Registry 10件に食べログが1件も入らなかった
+ * (Casa BRUTUS / 実食レポ記事 / Retty / Safari Online / competitor 等のみ)。
+ *
+ * 直前の hardening で `店舗名 + 食べログ` / `店舗名 + 予約` / `店舗名 + 電話番号` の
+ * クエリ例と「電話番号・予約導線」coverage floor を追加し、検索行動自体は増えた
+ * (search_call_count 2→3 / search_query_count 8→12)。しかしいずれも
+ * **「店舗の状況に応じて必要なものを選んでください」という optional 扱い**であり、
+ * モデルが Retty 等で coverage を満たしたと判断すると食べログ探索まで到達しない。
+ *
+ * ## 固定する不変条件
+ *
+ * - mandatory なのは**検索を試みること**であって、食べログを採用することではない
+ * - 検索結果に実際に URL が出た場合のみ SOURCE 候補にする(ID の推測・組み立て禁止)
+ * - 食べログが存在しない店舗では通常どおり継続する
+ * - 「食べログだから信頼できる/confirmed」にはしない(同定・採否は後続で判定)
+ * - 店舗名・URL・電話番号のハードコードをしない
+ * - Gemini 呼び出し回数は増やさない(同一 Stage1 prompt 内の指示のみ)
+ */
+describe("buildStage1Prompt — 食べログ検索の mandatory attempt (BLOCKER 1)", () => {
+  const prompt = () => buildStage1Prompt(STORE);
+
+  it("11a. 食べログ検索を必ず試みる mandatory 指示を含む", () => {
+    const text = prompt();
+    expect(text).toContain("必ず実行する検索");
+    expect(text).toContain("site:tabelog.com");
+    expect(text).toContain("毎回必ず1回は検索を試みて");
+  });
+
+  it("11b. mandatory なのは検索の試行であって採用ではないことを明示する", () => {
+    const text = prompt();
+    expect(text).toContain("「検索を試みること」であって");
+    expect(text).toContain("必ず採用すること」ではありません");
+  });
+
+  it("11c. 食べログというだけで信頼できる根拠にはならない旨を明示する", () => {
+    expect(prompt()).toContain("掲載されているという事実そのものは");
+  });
+
+  it("12. 検索結果に食べログが出なければ SOURCE を出さず通常継続する旨を含む", () => {
+    const text = prompt();
+    expect(text).toContain("表示されなかった場合");
+    expect(text).toContain("通常どおり");
+  });
+
+  it("13. 店舗ID推測・組み立て禁止の既存ルールを維持する", () => {
+    const text = prompt();
+    expect(text).toContain("IDを推測・生成・組み立てることは絶対に禁止");
+    expect(text).toContain("検索結果に実際に表示されたURLをそのまま書き写す");
+  });
+
+  it("一致した食べログ結果は SOURCE 枠に余裕がある限り優先的に残すよう指示する", () => {
+    const text = prompt();
+    expect(text).toContain("SOURCE枠に余裕がある限り");
+  });
+
+  it("mandatory 化しても店舗名・URL・電話番号をハードコードしない", () => {
+    const text = prompt();
+    expect(text).not.toContain("なむら");
+    expect(text).not.toContain("050-5869-4190");
+    expect(text).not.toContain("045-305-6536");
+    expect(text).not.toContain("tabelog.com/kanagawa");
   });
 });

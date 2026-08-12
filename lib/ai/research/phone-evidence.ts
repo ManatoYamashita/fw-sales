@@ -43,7 +43,7 @@
  */
 
 import { normalizePhone } from "./identity-match";
-import type { ResearchItem } from "@/lib/ai/research-result-schema";
+import type { ResearchItem, ResearchItemCandidate } from "@/lib/ai/research-result-schema";
 
 /** 日本の電話番号として妥当な桁数レンジ(市外局番込み)。 */
 const MIN_PHONE_DIGITS = 10;
@@ -75,6 +75,20 @@ export function extractPhoneNumbers(text: string | null | undefined): string[] {
 
 const UNBACKED_PHONE_WARNING =
   "value に含まれる電話番号の一部が根拠(evidence)に現れないため自動的に格下げしました。";
+
+/**
+ * `value` に書かれた全ての電話番号が `evidence` にも現れるかを判定する共通述語。
+ * 番号が1件も書かれていない `value`(例:「非公開」)は対象外として `true` を返す。
+ */
+function areValuePhonesBackedByEvidence(
+  value: string | null | undefined,
+  evidence: string | null | undefined,
+): boolean {
+  const numbersInValue = extractPhoneNumbers(value);
+  if (numbersInValue.length === 0) return true;
+  const numbersInEvidence = new Set(extractPhoneNumbers(evidence));
+  return numbersInValue.every((number) => numbersInEvidence.has(number));
+}
 
 /**
  * AI が生成したものではない経路の `evidence_basis`。
@@ -117,13 +131,7 @@ export function enforcePhoneNumbersBackedByEvidence(item: ResearchItem): Researc
   if (item.key !== "phone" || item.status !== "confirmed") return item;
   if (item.evidence_basis != null && NON_AI_EVIDENCE_BASES.has(item.evidence_basis)) return item;
 
-  const numbersInValue = extractPhoneNumbers(item.value);
-  // 電話番号が1件も書かれていない value(例:「非公開」)は対象外。
-  if (numbersInValue.length === 0) return item;
-
-  const numbersInEvidence = new Set(extractPhoneNumbers(item.evidence));
-  const allBacked = numbersInValue.every((n) => numbersInEvidence.has(n));
-  if (allBacked) return item;
+  if (areValuePhonesBackedByEvidence(item.value, item.evidence)) return item;
 
   return {
     ...item,
@@ -133,4 +141,47 @@ export function enforcePhoneNumbersBackedByEvidence(item: ResearchItem): Researc
     candidates: undefined,
     warning: item.warning ? `${UNBACKED_PHONE_WARNING} ${item.warning}` : UNBACKED_PHONE_WARNING,
   };
+}
+
+/**
+ * conflict の1 candidate について、`candidate.value` の全番号が `candidate.evidence` にも
+ * 現れるかを判定する(PR #180 final smoke hardening、BLOCKER 2)。
+ *
+ * `research-result-schema.ts:ResearchValidationContext.conflictCandidateEvidenceGuard`
+ * へ渡す実装。`false` を返した candidate は trusted candidate として扱われず、
+ * conflict の選択肢から除外される。
+ *
+ * ## なぜ conflict にも必要か
+ *
+ * `enforcePhoneNumbersBackedByEvidence` は `status === "confirmed"` のみを対象とするため、
+ * `status === "conflict"` の candidate には一切効かない。conflict の候補は
+ * そのままユーザーへ選択肢として提示され、採用されれば canonical `basic_info` へ入る。
+ * 「confirmed だけ番号裏付けを要求し、conflict candidate は素通り」という非対称は
+ * 誤った番号がむしろ通りやすい経路になるため、同じ要件を課す。
+ *
+ * ## この検証の trust level(confirmed 側と同じ限界)
+ *
+ * これは **AI 自己整合性チェック**であり、**source 本文の deterministic 照合ではない**。
+ * URL Context は取得したページ本文をアプリコードへ返さない(`UrlContextMetadata` は
+ * `retrievedUrl` / `urlRetrievalStatus` のみ)ため、モデルが `value` と `evidence` の
+ * 両方へ同じ hallucinated 番号を書いた場合は検出できない。source 側の信頼性は
+ * `research-result-schema.ts:isVerifiedSourceForItem`(url_context 成功 + identity
+ * target_match + 非competitor)が独立に担い、本関数はそこへ1段足すものである。
+ *
+ * ## 適用範囲
+ *
+ * `item.key === "phone"` のみ。それ以外の key には現状ルールが無いため常に `true` を返す
+ * (この関数はすべての key に対して呼ばれる汎用 guard として使われる)。
+ * `evidence_basis` が `places` / `existing_canonical` の item は evidence がコード側の
+ * 定型文なので対象外にする(`enforcePhoneNumbersBackedByEvidence` と同じ判断)。
+ *
+ * 純関数。
+ */
+export function isConflictCandidateEvidenceBacked(
+  item: ResearchItem,
+  candidate: ResearchItemCandidate,
+): boolean {
+  if (item.key !== "phone") return true;
+  if (item.evidence_basis != null && NON_AI_EVIDENCE_BASES.has(item.evidence_basis)) return true;
+  return areValuePhonesBackedByEvidence(candidate.value, candidate.evidence);
 }

@@ -301,6 +301,14 @@ describe("stuck run 判定の安全下限(fix: PR #180 review Finding 3)", () =>
     expect(getSafeExpiryBudgetBreakdownMs().gemini).toBe(perStage * GEMINI_STAGE_COUNT);
   });
 
+  // PR #180 final smoke hardening: Stage1 prompt へ mandatory な検索試行の指示を追加し、
+  // conflict candidate の trust 検証を追加したが、いずれも既存 prompt / 既存 deterministic
+  // validation の内部で完結する。Gemini provider call 数は Stage1 + Stage2 の 2 回のまま
+  // でなければならない(検索クエリ数が増えることと provider call が増えることは別)。
+  it("通常runのGemini provider call数は2(Stage1 + Stage2)のまま", () => {
+    expect(GEMINI_STAGE_COUNT).toBe(2);
+  });
+
   // Workflow側のstep `.maxRetries` は共有定数(STAGE0_MAX_RETRIES / DB_STEP_MAX_RETRIES)を
   // 参照している。step関数自体はexportしていないため呼び出し回数の実行時検証はできないが、
   // budget側がその定数から導出されていることは固定できる。片方だけ値を変えれば

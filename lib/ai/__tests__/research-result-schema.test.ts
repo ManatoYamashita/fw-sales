@@ -14,6 +14,8 @@ import {
   enforceStatusValueInvariant,
   sanitizeSourceIds,
   validateConflictShape,
+  validateConflictCandidateTrust,
+  isVerifiedSourceForItem,
   validateResearchItemStatus,
   applyDeterministicValidation,
   pruneUnverifiedSourceIds,
@@ -1641,5 +1643,342 @@ describe("canonicalVerifiedKeys bypass (承認レビュー指摘1)", () => {
     });
     expect(result.status).toBe("external_data_required");
     expect(result.value).toBeNull();
+  });
+});
+
+/**
+ * conflict candidate の trust boundary 検証(PR #180 final smoke hardening、BLOCKER 2)。
+ *
+ * ## 背景(実機: 関内 なむら / run research_run_msprr298_4sdc9t)
+ *
+ * `phone` が `status="conflict"` で返り、candidate B の唯一の出典 S01 は
+ * `url_context_status="success"` だが `identity_status="uncertain"` だった。
+ * つまり**対象店舗のページだとコード側で確認できていない情報源**を根拠にした候補が、
+ * そのままユーザーへ「候補B」として提示されていた。
+ *
+ * ## root cause
+ *
+ * `validateResearchItemStatus` は先頭で `status !== "confirmed"` を early return する
+ * ため conflict を一切検証しない。`validateConflictShape` も「candidate 2件以上 /
+ * 異なる値2種類以上 / candidate_id 重複」という**形状**しか見ておらず、candidate 単位の
+ * url_context / identity / competitor 適格性を検証していなかった。
+ * これは phone 固有ではなく conflict 全般の trust boundary gap である。
+ *
+ * ## 固定する不変条件
+ *
+ * confirmed と conflict candidate で trust ルールを二重実装しない
+ * (両者とも `isVerifiedSourceForItem` を経由する)。
+ *
+ * ## 意図的に採らないルール
+ *
+ * 「canonical(`stores.phone`)と異なる番号だから候補を削除」というルールにはしない。
+ * 番号が正しく変更されたケースを壊すため。除外理由はあくまで identity / url_context の
+ * trust boundary を満たさないことに限る。
+ */
+describe("validateConflictCandidateTrust (BLOCKER 2)", () => {
+  const phoneItem = (candidates: ResearchItemCandidate[]): ResearchItem =>
+    makeItem({
+      key: "phone",
+      research_policy: "FACT",
+      status: "conflict",
+      value: null,
+      source_ids: [],
+      candidates,
+    });
+
+  const verified = (id: string, overrides: Partial<SourceRegistryEntry> = {}) =>
+    makeSource({
+      id,
+      url_context_status: "success",
+      identity_status: "target_match",
+      ...overrides,
+    });
+
+  const candA = (source_ids: string[], evidence = "045-305-6536 と記載。") => ({
+    candidate_id: "a",
+    label: "候補A",
+    value: "045-305-6536",
+    evidence,
+    source_ids,
+  });
+  const candB = (source_ids: string[], evidence = "045-305-6539 と記載。") => ({
+    candidate_id: "b",
+    label: "候補B",
+    value: "045-305-6539",
+    evidence,
+    source_ids,
+  });
+
+  it("1. url_context成功 + target_match の source を持つ candidate は残る", () => {
+    const item = phoneItem([candA(["S02"]), candB(["S03"])]);
+    const result = validateConflictCandidateTrust(item, {
+      sourceRegistry: [verified("S02"), verified("S03")],
+    });
+    expect(result.status).toBe("conflict");
+    expect(result.candidates?.map((c) => c.candidate_id)).toEqual(["a", "b"]);
+  });
+
+  it("2. identity_status=uncertain の source しか持たない candidate は除外される(実機事象)", () => {
+    const item = phoneItem([candA(["S02"]), candB(["S01"])]);
+    const result = validateConflictCandidateTrust(item, {
+      sourceRegistry: [verified("S02"), verified("S01", { identity_status: "uncertain" })],
+    });
+    expect(result.candidates?.some((c) => c.candidate_id === "b")).not.toBe(true);
+  });
+
+  it("3. unrelated の source しか持たない candidate は除外される", () => {
+    const item = phoneItem([candA(["S02"]), candB(["S01"])]);
+    const result = validateConflictCandidateTrust(item, {
+      sourceRegistry: [verified("S02"), verified("S01", { identity_status: "unrelated" })],
+    });
+    expect(result.candidates?.some((c) => c.candidate_id === "b")).not.toBe(true);
+  });
+
+  it("4. competitor source を自店 phone の candidate 根拠に使うと除外される", () => {
+    const item = phoneItem([candA(["S02"]), candB(["S01"])]);
+    const result = validateConflictCandidateTrust(item, {
+      sourceRegistry: [
+        verified("S02"),
+        verified("S01", { source_type: "competitor", identity_status: "competitor_match" }),
+      ],
+    });
+    expect(result.candidates?.some((c) => c.candidate_id === "b")).not.toBe(true);
+  });
+
+  it("url_context_status が success でない source しか持たない candidate は除外される", () => {
+    const item = phoneItem([candA(["S02"]), candB(["S01"])]);
+    const result = validateConflictCandidateTrust(item, {
+      sourceRegistry: [verified("S02"), verified("S01", { url_context_status: "error" })],
+    });
+    expect(result.candidates?.some((c) => c.candidate_id === "b")).not.toBe(true);
+  });
+
+  it("candidate.source_ids は不適格な id だけを刈り込み、適格な id が残れば candidate を維持する", () => {
+    const item = phoneItem([candA(["S02", "S09"]), candB(["S03"])]);
+    const result = validateConflictCandidateTrust(item, {
+      sourceRegistry: [
+        verified("S02"),
+        verified("S03"),
+        verified("S09", { identity_status: "uncertain" }),
+      ],
+    });
+    expect(result.status).toBe("conflict");
+    expect(result.candidates?.find((c) => c.candidate_id === "a")?.source_ids).toEqual(["S02"]);
+  });
+
+  it("5. 2候補のうち1件だけ trusted なら confirmed へ縮約する", () => {
+    const item = phoneItem([candA(["S02"]), candB(["S01"])]);
+    const result = validateConflictCandidateTrust(item, {
+      sourceRegistry: [verified("S02"), verified("S01", { identity_status: "uncertain" })],
+    });
+    expect(result.status).toBe("confirmed");
+    expect(result.value).toBe("045-305-6536");
+    expect(result.evidence).toBe("045-305-6536 と記載。");
+    expect(result.source_ids).toEqual(["S02"]);
+    expect(result.candidates).toBeUndefined();
+  });
+
+  it("5b. 縮約後も通常の confirmed validation を通す(candidate trust だけで confirmed を確定させない)", () => {
+    const item = phoneItem([candA(["S02"]), candB(["S01"])]);
+
+    const kept = applyDeterministicValidation(item, {
+      sourceRegistry: [verified("S02"), verified("S01", { identity_status: "uncertain" })],
+    });
+    expect(kept.status).toBe("confirmed");
+    expect(kept.evidence_basis).toBe("url_context");
+
+    // 縮約先 source 自体が identity 不適格になると、縮約しても confirmed は維持されない。
+    const downgraded = applyDeterministicValidation(item, {
+      sourceRegistry: [
+        verified("S02", { identity_status: "uncertain" }),
+        verified("S01", { identity_status: "uncertain" }),
+      ],
+    });
+    expect(downgraded.status).toBe("not_found");
+  });
+
+  it("6. 2候補ともに trusted で値が異なるなら conflict を維持する", () => {
+    const item = phoneItem([candA(["S02"]), candB(["S03"])]);
+    const result = applyDeterministicValidation(item, {
+      sourceRegistry: [verified("S02"), verified("S03")],
+    });
+    expect(result.status).toBe("conflict");
+    expect(result.candidates).toHaveLength(2);
+  });
+
+  it("7. trusted candidate が0件なら FACT の phone は not_found へ safe downgrade する", () => {
+    const item = phoneItem([candA(["S01"]), candB(["S04"])]);
+    const result = validateConflictCandidateTrust(item, {
+      sourceRegistry: [
+        verified("S01", { identity_status: "uncertain" }),
+        verified("S04", { identity_status: "unrelated" }),
+      ],
+    });
+    expect(result.status).toBe("not_found");
+    expect(result.value).toBeNull();
+    expect(result.candidates).toBeUndefined();
+  });
+
+  it("trusted candidate が0件の ANALYSIS 項目は inferred ではなく not_found へ倒す(AIのvalueを残さない)", () => {
+    const item = makeItem({
+      key: "market_demand",
+      research_policy: "ANALYSIS",
+      status: "conflict",
+      value: "需要は非常に高い",
+      source_ids: [],
+      candidates: [
+        { candidate_id: "a", label: "候補A", value: "高い", evidence: "e1", source_ids: ["S01"] },
+        { candidate_id: "b", label: "候補B", value: "低い", evidence: "e2", source_ids: ["S04"] },
+      ],
+    });
+    const result = validateConflictCandidateTrust(item, {
+      sourceRegistry: [
+        verified("S01", { identity_status: "uncertain" }),
+        verified("S04", { identity_status: "unrelated" }),
+      ],
+    });
+    expect(result.status).toBe("not_found");
+    expect(result.value).toBeNull();
+  });
+
+  it("trusted candidate が2件以上でも値が1種類なら実質的な競合ではないため confirmed へ縮約する", () => {
+    const item = phoneItem([
+      candA(["S02"]),
+      candB(["S01"]),
+      { candidate_id: "c", label: "候補C", value: "045-305-6536", evidence: "同番号。", source_ids: ["S03"] },
+    ]);
+    const result = validateConflictCandidateTrust(item, {
+      sourceRegistry: [
+        verified("S02"),
+        verified("S03"),
+        verified("S01", { identity_status: "uncertain" }),
+      ],
+    });
+    expect(result.status).toBe("confirmed");
+    expect(result.value).toBe("045-305-6536");
+    expect(result.source_ids).toEqual(["S02", "S03"]);
+  });
+
+  it("PRIMARY_SOURCE_REQUIRED_KEYS の項目は conflict candidate でも一次情報を要求する(既存 confirmed ルールを迂回させない)", () => {
+    const item = makeItem({
+      key: "concept",
+      research_policy: "FACT_OR_HEARING",
+      status: "conflict",
+      value: null,
+      source_ids: [],
+      candidates: [
+        { candidate_id: "a", label: "候補A", value: "郷土料理", evidence: "e1", source_ids: ["S05"] },
+        { candidate_id: "b", label: "候補B", value: "創作和食", evidence: "e2", source_ids: ["S06"] },
+      ],
+    });
+    // 両方とも url_context 成功 + target_match だが、自己申告 official_site の
+    // gemini_search_candidate なので `deriveTrustedSourceType` は undefined を返す。
+    const result = validateConflictCandidateTrust(item, {
+      sourceRegistry: [
+        verified("S05", {
+          discovery_provenance: "gemini_search_candidate",
+          source_type: "official_site",
+        }),
+        verified("S06", {
+          discovery_provenance: "gemini_search_candidate",
+          source_type: "official_site",
+        }),
+      ],
+    });
+    expect(result.status).toBe("hearing_required");
+    expect(result.candidates).toBeUndefined();
+  });
+
+  it("競合項目では competitor_match を根拠として許容する(既存 identity ルールの再利用)", () => {
+    const item = makeItem({
+      key: "competitor_stores",
+      research_policy: "ANALYSIS",
+      status: "conflict",
+      value: null,
+      source_ids: [],
+      candidates: [
+        { candidate_id: "a", label: "候補A", value: "A店", evidence: "e1", source_ids: ["S02"] },
+        { candidate_id: "b", label: "候補B", value: "B店", evidence: "e2", source_ids: ["S03"] },
+      ],
+    });
+    const result = validateConflictCandidateTrust(item, {
+      sourceRegistry: [
+        verified("S02", { identity_status: "competitor_match", source_type: "gourmet_site" }),
+        verified("S03", { identity_status: "competitor_match", source_type: "gourmet_site" }),
+      ],
+    });
+    expect(result.status).toBe("conflict");
+    expect(result.candidates).toHaveLength(2);
+  });
+
+  it("status !== conflict の項目は変更しない(参照同一性)", () => {
+    const item = makeItem({ status: "confirmed", value: "17:00-24:00" });
+    expect(validateConflictCandidateTrust(item, { sourceRegistry: [] })).toBe(item);
+  });
+
+  it("すべての candidate が適格なら変更せず返す(参照同一性)", () => {
+    const item = phoneItem([candA(["S02"]), candB(["S03"])]);
+    const result = validateConflictCandidateTrust(item, {
+      sourceRegistry: [verified("S02"), verified("S03")],
+    });
+    expect(result).toBe(item);
+  });
+
+  it("conflictCandidateEvidenceGuard が false を返した candidate は trusted として扱わない(key固有ルールの注入点)", () => {
+    const item = phoneItem([candA(["S02"]), candB(["S03"], "根拠に番号が現れない文。")]);
+    const result = validateConflictCandidateTrust(item, {
+      sourceRegistry: [verified("S02"), verified("S03")],
+      conflictCandidateEvidenceGuard: (_item, candidate) => candidate.candidate_id !== "b",
+    });
+    expect(result.status).toBe("confirmed");
+    expect(result.value).toBe("045-305-6536");
+  });
+});
+
+describe("isVerifiedSourceForItem (confirmed と conflict candidate で共通の source 適格判定)", () => {
+  it("url_context 成功 + target_match なら適格", () => {
+    const entry = makeSource({ url_context_status: "success", identity_status: "target_match" });
+    expect(isVerifiedSourceForItem(entry, "phone")).toBe(true);
+  });
+
+  it("url_context が成功していなければ不適格", () => {
+    const entry = makeSource({
+      url_context_status: "not_attempted",
+      identity_status: "target_match",
+    });
+    expect(isVerifiedSourceForItem(entry, "phone")).toBe(false);
+  });
+
+  it("identity_status が uncertain なら不適格", () => {
+    const entry = makeSource({ url_context_status: "success", identity_status: "uncertain" });
+    expect(isVerifiedSourceForItem(entry, "phone")).toBe(false);
+  });
+
+  it("source_type=competitor は自店項目で不適格", () => {
+    const entry = makeSource({
+      url_context_status: "success",
+      identity_status: "target_match",
+      source_type: "competitor",
+    });
+    expect(isVerifiedSourceForItem(entry, "phone")).toBe(false);
+  });
+
+  it("一次情報必須keyでは known_store_data の official_site のみ適格", () => {
+    const known = makeSource({
+      url_context_status: "success",
+      identity_status: "target_match",
+      discovery_provenance: "known_store_data",
+      source_type: "official_site",
+    });
+    const selfReported = makeSource({
+      url_context_status: "success",
+      identity_status: "target_match",
+      discovery_provenance: "gemini_search_candidate",
+      source_type: "official_site",
+    });
+    expect(isVerifiedSourceForItem(known, "concept")).toBe(true);
+    expect(isVerifiedSourceForItem(selfReported, "concept")).toBe(false);
+    // 一次情報必須でないkeyでは、自己申告typeでも url_context + identity で適格。
+    expect(isVerifiedSourceForItem(selfReported, "phone")).toBe(true);
   });
 });

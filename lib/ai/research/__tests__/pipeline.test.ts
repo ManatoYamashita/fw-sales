@@ -112,6 +112,44 @@ describe("runStage1", () => {
     expect(result.sourceRegistry).toEqual([]);
     expect(result.searchCallCount).toBe(1);
   });
+
+  // PR #180 final smoke hardening、BLOCKER 1 observability。
+  // client 側で boolean 化された `tabelogSearchAttempted` を Stage1Outcome まで
+  // そのまま伝播させる(raw query は client 側で既に破棄されている)。
+  it.each([true, false])(
+    "tabelogSearchAttempted=%s を Stage1Outcome へ伝播する",
+    async (attempted) => {
+      mockRunSourceDiscovery.mockResolvedValue({
+        text: "見つかりませんでした",
+        groundingMetadata: null,
+        usageMetadata: null,
+        searchCallCount: 3,
+        searchQueryCount: 12,
+        tabelogSearchAttempted: attempted,
+      });
+
+      const result = await runStage1(STORE, AbortSignal.timeout(1000));
+      expect(result.tabelogSearchAttempted).toBe(attempted);
+      // 既存 diagnostics の挙動は不変。
+      expect(result.searchCallCount).toBe(3);
+      expect(result.searchQueryCount).toBe(12);
+    },
+  );
+
+  it("tabelogSearchAttempted=false でも run は継続する(failedにしない)", async () => {
+    mockRunSourceDiscovery.mockResolvedValue({
+      text: `[SOURCE]\nurl: https://vertexaisearch.cloud.google.com/grounding-api-redirect/x\ntitle: Retty\ntype: gourmet_site\nwhy_useful: y\n[/SOURCE]`,
+      groundingMetadata: null,
+      usageMetadata: null,
+      searchCallCount: 3,
+      searchQueryCount: 12,
+      tabelogSearchAttempted: false,
+    });
+
+    const result = await runStage1(STORE, AbortSignal.timeout(1000));
+    expect(result.tabelogSearchAttempted).toBe(false);
+    expect(result.sourceRegistry).toHaveLength(1);
+  });
 });
 
 describe("runStage2 (統合、FACT+FACT_OR_HEARING+ANALYSISを1回で扱う)", () => {

@@ -163,6 +163,148 @@ describe("runSourceDiscovery (Stage1)", () => {
     expect(result.searchQueryCount).toBe(0);
   });
 
+  /**
+   * 食べログ検索の実行有無 observability(PR #180 final smoke hardening、BLOCKER 1)。
+   *
+   * ## 取得元(重要)
+   *
+   * Stage1 モデル出力の `[QUERY]` 自己申告**ではなく**、
+   * `toolConfig.includeServerSideToolInvocations` により応答に含まれる
+   * **実際の server-side tool invocation の `toolCall.args.queries`** から判定する。
+   * `[QUERY]` はモデルが「実行したつもり」を書くだけで、実行の証拠にならない。
+   *
+   * ## privacy
+   *
+   * raw query 文字列は boolean 化した時点で破棄し、`Stage1CallResult` にも
+   * DB diagnostics にも log にも残さない(既存の searchCallCount/searchQueryCount と同方針)。
+   */
+  describe("tabelogSearchAttempted (BLOCKER 1 observability)", () => {
+    const withQueries = (...calls: string[][]) => ({
+      text: "discovery text",
+      candidates: [
+        {
+          content: {
+            parts: calls.map((queries) => ({
+              toolCall: { toolType: "GOOGLE_SEARCH_WEB", args: { queries } },
+            })),
+          },
+        },
+      ],
+      usageMetadata: {},
+    });
+
+    const run = async () =>
+      createResearchGeminiClient().runSourceDiscovery("p", AbortSignal.timeout(1000));
+
+    it("1. 実際の toolCall query に「食べログ」が含まれれば true", async () => {
+      mockGenerateContent.mockResolvedValue(withQueries(["関内 なむら 食べログ"]));
+      expect((await run()).tabelogSearchAttempted).toBe(true);
+    });
+
+    it("2. site:tabelog.com 形式でも true", async () => {
+      mockGenerateContent.mockResolvedValue(withQueries(["site:tabelog.com 関内 なむら"]));
+      expect((await run()).tabelogSearchAttempted).toBe(true);
+    });
+
+    it("大文字混じりのドメイン表記も正規化して true", async () => {
+      mockGenerateContent.mockResolvedValue(withQueries(["site:Tabelog.COM 関内 なむら"]));
+      expect((await run()).tabelogSearchAttempted).toBe(true);
+    });
+
+    it("3. Retty / 電話番号検索だけなら false", async () => {
+      mockGenerateContent.mockResolvedValue(
+        withQueries(["関内 なむら Retty", "関内 なむら 電話番号", "045-305-6536"]),
+      );
+      expect((await run()).tabelogSearchAttempted).toBe(false);
+    });
+
+    it("4. toolCall が無ければ false", async () => {
+      mockGenerateContent.mockResolvedValue({
+        text: "discovery text",
+        candidates: [{ content: { parts: [{ text: "自由記述のみ" }] } }],
+        usageMetadata: {},
+      });
+      expect((await run()).tabelogSearchAttempted).toBe(false);
+    });
+
+    it("[QUERY]自己申告だけでは true にしない(取得元は server-side tool invocation)", async () => {
+      mockGenerateContent.mockResolvedValue({
+        text: "[QUERY]関内 なむら 食べログ[/QUERY]",
+        candidates: [{ content: { parts: [{ toolCall: { args: { queries: ["関内 なむら"] } } }] } }],
+        usageMetadata: {},
+      });
+      expect((await run()).tabelogSearchAttempted).toBe(false);
+    });
+
+    it("5. 複数 tool call のうち1件だけ食べログでも true", async () => {
+      mockGenerateContent.mockResolvedValue(
+        withQueries(["関内 なむら 口コミ", "関内 なむら 席数"], ["関内 なむら 食べログ"]),
+      );
+      expect((await run()).tabelogSearchAttempted).toBe(true);
+    });
+
+    it("6. raw query 文字列を Stage1CallResult へ持ち出さない", async () => {
+      const rawQuery = "関内 なむら 食べログ 予約";
+      mockGenerateContent.mockResolvedValue(withQueries([rawQuery]));
+      const result = await run();
+
+      expect(result.tabelogSearchAttempted).toBe(true);
+      expect(JSON.stringify(result)).not.toContain(rawQuery);
+      expect(JSON.stringify(result)).not.toContain("食べログ");
+    });
+
+    it("6b. raw query を console へ出力しない", async () => {
+      const rawQuery = "関内 なむら 食べログ 予約";
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        mockGenerateContent.mockResolvedValue(withQueries([rawQuery]));
+        await run();
+        for (const spy of [logSpy, infoSpy, warnSpy, errorSpy]) {
+          const emitted = JSON.stringify(spy.mock.calls);
+          expect(emitted).not.toContain(rawQuery);
+          expect(emitted).not.toContain("食べログ");
+        }
+      } finally {
+        for (const spy of [logSpy, infoSpy, warnSpy, errorSpy]) spy.mockRestore();
+      }
+    });
+
+    it("7. searchCallCount / searchQueryCount の既存挙動を壊さない", async () => {
+      mockGenerateContent.mockResolvedValue(
+        withQueries(["関内 なむら 食べログ", "関内 なむら 口コミ"], ["関内 なむら 席数"]),
+      );
+      const result = await run();
+      expect(result.searchCallCount).toBe(2);
+      expect(result.searchQueryCount).toBe(3);
+      expect(result.tabelogSearchAttempted).toBe(true);
+    });
+
+    it("queries が配列でない tool call を安全に無視する", async () => {
+      mockGenerateContent.mockResolvedValue({
+        text: "discovery text",
+        candidates: [
+          {
+            content: {
+              parts: [
+                { toolCall: { args: { queries: "食べログ" } } },
+                { toolCall: { args: { queries: [123, null, "関内 なむら 食べログ"] } } },
+              ],
+            },
+          },
+        ],
+        usageMetadata: {},
+      });
+      const result = await run();
+      expect(result.searchCallCount).toBe(2);
+      // 文字列以外は数えず、文字列の中身だけで判定する。
+      expect(result.searchQueryCount).toBe(3);
+      expect(result.tabelogSearchAttempted).toBe(true);
+    });
+  });
+
   it("応答が空ならunknownエラーを投げる", async () => {
     mockGenerateContent.mockResolvedValue({ text: "", candidates: [{}] });
 

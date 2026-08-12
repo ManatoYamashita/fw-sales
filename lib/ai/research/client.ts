@@ -50,6 +50,20 @@ export interface Stage1CallResult {
   searchCallCount: number;
   /** 上記tool callに含まれた検索クエリの合計件数。 */
   searchQueryCount: number;
+  /**
+   * 食べログ(グルメポータル)向けの検索を実際に試みたか
+   * (PR #180 final smoke hardening、BLOCKER 1 observability)。
+   *
+   * **判定元は Stage1 モデル出力の `[QUERY]` 自己申告ではなく、
+   * server-side tool invocation の実際の `toolCall.args.queries`。**
+   * `[QUERY]` は「実行したつもり」を書けてしまうため、mandatory search attempt の
+   * 遵守確認には使えない。
+   *
+   * `false` でも run は失敗させない(モデルの tool choice による一時的な非遵守で
+   * 正常な調査全体を落とすのは強すぎるため)。次回 Preview smoke の必須確認項目として
+   * 観測できるようにするための診断値。
+   */
+  tabelogSearchAttempted: boolean;
 }
 
 export interface Stage2CallResult {
@@ -69,17 +83,39 @@ export interface ResearchGeminiClient {
 }
 
 /**
+ * 食べログ向け検索と判定するクエリ内の部分文字列(小文字化後に比較する)。
+ * 「食べログ」表記と `site:tabelog.com` 形式の両方を拾う。
+ * ここに現れるのは**サイトの識別子のみ**であり、店舗名・電話番号は含めない。
+ */
+const TABELOG_QUERY_MARKERS = ["食べログ", "tabelog.com"] as const;
+
+function isTabelogQuery(query: string): boolean {
+  const normalized = query.toLowerCase();
+  return TABELOG_QUERY_MARKERS.some((marker) => normalized.includes(marker));
+}
+
+/**
  * server-side tool invocation parts(`toolConfig.includeServerSideToolInvocations`有効時に
- * 含まれる)から、Google Searchの呼出回数・クエリ件数のみを抽出する。
- * クエリ文字列そのものはここで破棄し、件数だけを返す(個人情報・生レスポンス非保存の方針)。
+ * 含まれる)から、Google Searchの呼出回数・クエリ件数・食べログ検索の試行有無のみを抽出する。
+ *
+ * **クエリ文字列そのものはこの関数の中だけで評価し、返り値へは一切載せない**
+ * (個人情報・生レスポンス非保存の方針)。呼び出し元へ渡るのは件数2つと boolean 1つだけで、
+ * `Stage1CallResult` → `Stage1Outcome` → DB `token_usage.stage1_diagnostics` の
+ * どの段階にも raw query は存在しない。log へも出さない。
+ *
+ * `tabelogSearchAttempted` の判定元は**実際の tool invocation の `args.queries`** であり、
+ * モデルが本文へ書く `[QUERY]` 自己申告ではない(PR #180 BLOCKER 1)。
  */
 function extractSearchDiagnostics(
   parts: unknown,
-): { searchCallCount: number; searchQueryCount: number } {
-  if (!Array.isArray(parts)) return { searchCallCount: 0, searchQueryCount: 0 };
+): { searchCallCount: number; searchQueryCount: number; tabelogSearchAttempted: boolean } {
+  if (!Array.isArray(parts)) {
+    return { searchCallCount: 0, searchQueryCount: 0, tabelogSearchAttempted: false };
+  }
 
   let searchCallCount = 0;
   let searchQueryCount = 0;
+  let tabelogSearchAttempted = false;
   for (const part of parts as Array<{ toolCall?: { args?: Record<string, unknown> } }>) {
     const args = part.toolCall?.args;
     if (!args) continue;
@@ -87,9 +123,14 @@ function extractSearchDiagnostics(
     const queries = args.queries;
     if (Array.isArray(queries)) {
       searchQueryCount += queries.length;
+      for (const query of queries) {
+        if (typeof query === "string" && isTabelogQuery(query)) {
+          tabelogSearchAttempted = true;
+        }
+      }
     }
   }
-  return { searchCallCount, searchQueryCount };
+  return { searchCallCount, searchQueryCount, tabelogSearchAttempted };
 }
 
 function extractUsageMetadata(um: unknown): UsageMetadataLike | null {
@@ -196,9 +237,8 @@ export function createResearchGeminiClient(): ResearchGeminiClient {
         }
 
         const candidate = response.candidates?.[0];
-        const { searchCallCount, searchQueryCount } = extractSearchDiagnostics(
-          candidate?.content?.parts,
-        );
+        const { searchCallCount, searchQueryCount, tabelogSearchAttempted } =
+          extractSearchDiagnostics(candidate?.content?.parts);
 
         return {
           text,
@@ -206,6 +246,7 @@ export function createResearchGeminiClient(): ResearchGeminiClient {
           usageMetadata: extractUsageMetadata(response.usageMetadata),
           searchCallCount,
           searchQueryCount,
+          tabelogSearchAttempted,
         };
       } catch (err) {
         throw normalizeAndLog("stage1", err);

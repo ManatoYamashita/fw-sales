@@ -741,6 +741,33 @@ function isIdentityAcceptableForItem(entry: SourceRegistryEntry, itemKey: string
 }
 
 /**
+ * Source Registryエントリを、その`itemKey`の **confirmed 相当の根拠**として使ってよいか
+ * を判定する単一の真実(PR #180 final smoke hardening、BLOCKER 2)。
+ *
+ * `validateResearchItemStatus`のpath 2(URL Context本文取得成功経路)の判定条件を
+ * そのまま関数として切り出したもので、判定内容は一切変えていない:
+ *
+ * 1. `url_context_status === "success"`(本文取得に成功している)
+ * 2. `source_type !== "competitor"`(競合店舗のページを自店項目の根拠にしない)
+ * 3. `PRIMARY_SOURCE_REQUIRED_KEYS`の項目は`deriveTrustedSourceType`が
+ *    `official_site`/`official_sns`を返すこと(本人発信の一次情報要求)
+ * 4. `isIdentityAcceptableForItem`(対象keyのカテゴリに応じた`identity_status`)
+ *
+ * 切り出した理由: conflict の candidate も同じ trust boundary を通す必要があるが
+ * (`validateConflictCandidateTrust`)、confirmed 側と conflict 側でルールを
+ * 二重実装すると片方だけが更新されて乖離する。両者がこの1関数を参照する。
+ */
+export function isVerifiedSourceForItem(entry: SourceRegistryEntry, itemKey: string): boolean {
+  if (entry.url_context_status !== "success") return false;
+  if (entry.source_type === "competitor") return false;
+  if (PRIMARY_SOURCE_REQUIRED_KEYS.has(itemKey)) {
+    const trustedType = deriveTrustedSourceType(entry);
+    if (trustedType === undefined || !PRIMARY_SOURCE_TYPES.has(trustedType)) return false;
+  }
+  return isIdentityAcceptableForItem(entry, itemKey);
+}
+
+/**
  * Tier B(SearchFact)による今回の実機smoke事故を踏まえた方針(fix/ai-research-source-identity-integrity):
  * 第三者(known_store_data以外)のSearchFact-onlyエビデンスは、target項目のconfirmedの
  * 根拠に**使わない**。`hotpepper.jp`のような信頼済みhostnameであっても、実際に指している
@@ -774,6 +801,22 @@ function isTierBEligible(entry: SourceRegistryEntry): boolean {
  * 丸ごとnot_foundへ格下げされ消えていた。
  */
 const MULTI_SOURCE_AGGREGATION_KEYS: ReadonlySet<string> = new Set(["media_coverage"]);
+
+/**
+ * conflict の candidate に対する **key固有の追加エビデンス検証** の注入点
+ * (PR #180 final smoke hardening、BLOCKER 2)。
+ * `false` を返した candidate は trusted candidate として扱わない。
+ *
+ * 本モジュール(`research-result-schema.ts`)は client からも import されうる
+ * 純粋なスキーマ/検証層であり、`server-only` を含む `lib/ai/research/*` へ依存できない。
+ * そのため phone 等の key 固有ルールは実装をこちらへ持ち込まず、呼び出し側
+ * (`lib/ai/research/pipeline.ts`)から注入する。conflict candidate の trust boundary
+ * 自体(url_context / identity / competitor / 一次情報)は key 非依存で本モジュールが担う。
+ */
+export type ConflictCandidateEvidenceGuard = (
+  item: ResearchItem,
+  candidate: ResearchItemCandidate,
+) => boolean;
 
 /** `validateResearchItemStatus` の判定コンテキスト。 */
 export interface ResearchValidationContext {
@@ -815,6 +858,13 @@ export interface ResearchValidationContext {
    * (`pipeline.ts:deriveCanonicalFallbackConfirmedKeys`)。
    */
   canonicalVerifiedKeys?: ReadonlySet<string>;
+  /**
+   * conflict candidate へ追加で適用する key 固有のエビデンス検証
+   * (PR #180 final smoke hardening、BLOCKER 2)。未指定なら追加検証を行わない。
+   * 現状の唯一の実装は `lib/ai/research/phone-evidence.ts:isConflictCandidateEvidenceBacked`
+   * (phone の「candidate.value の全番号が candidate.evidence にも現れる」自己整合性)。
+   */
+  conflictCandidateEvidenceGuard?: ConflictCandidateEvidenceGuard;
 }
 
 /**
@@ -905,19 +955,12 @@ export function validateResearchItemStatus(
   // - 実機smoke事故: `url_context_status==="success"`(=ページ取得成功)だけでは
   //   「対象店舗のページだった」ことを一切保証しない。`identity_status`
   //   (`isIdentityAcceptableForItem`)による識別確認を必須にする。
-  const requiresPrimarySource = PRIMARY_SOURCE_REQUIRED_KEYS.has(item.key);
+  // 判定条件そのものは `isVerifiedSourceForItem` へ切り出した(PR #180 BLOCKER 2)。
+  // conflict candidate 側(`validateConflictCandidateTrust`)と同じ関数を参照することで、
+  // confirmed と conflict で trust ルールが二重実装・乖離するのを防ぐ。
   const verifiedIds = new Set(
     context.sourceRegistry
-      .filter((entry) => {
-        if (entry.url_context_status !== "success") return false;
-        if (entry.source_type === "competitor") return false;
-        if (requiresPrimarySource) {
-          const trustedType = deriveTrustedSourceType(entry);
-          if (trustedType === undefined || !PRIMARY_SOURCE_TYPES.has(trustedType)) return false;
-        }
-        if (!isIdentityAcceptableForItem(entry, item.key)) return false;
-        return true;
-      })
+      .filter((entry) => isVerifiedSourceForItem(entry, item.key))
       .map((entry) => entry.id),
   );
   const hasVerifiedSource = item.source_ids.some((id) => verifiedIds.has(id));
@@ -1003,6 +1046,152 @@ export function validateResearchItemStatus(
     ...nullifyForNoInfoStatus(item, downgradedStatus),
     status: downgradedStatus,
     warning: appendWarning(item.warning, downgradeNote),
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/*  conflict candidate の trust boundary (PR #180 BLOCKER 2)             */
+/* ------------------------------------------------------------------ */
+
+const UNTRUSTED_CANDIDATE_SOURCE_NOTE =
+  "対象店舗のページとして確認できない情報源のみに依拠した候補を除外しました。";
+const UNBACKED_CANDIDATE_EVIDENCE_NOTE =
+  "根拠(evidence)に現れない値を含む候補を除外しました。";
+
+/**
+ * conflict の各 candidate を、その item key の confirmed 根拠として使える source だけで
+ * 再評価する(PR #180 final smoke hardening、BLOCKER 2)。
+ *
+ * ## 修正した trust boundary gap
+ *
+ * `validateResearchItemStatus` は `status !== "confirmed"` を先頭で early return する
+ * ため conflict を検証しない。`validateConflictShape` も candidate 件数・値の異同・
+ * `candidate_id` 重複という**形状**しか見ていない。結果として
+ * 「`url_context_status="success"` だが `identity_status="uncertain"`」のような、
+ * **対象店舗のページだとコード側で確認できていない情報源**だけを根拠にした候補が、
+ * conflict の選択肢としてそのままユーザーへ提示されていた(実機: 関内 なむらの `phone`)。
+ * これは phone 固有ではなく conflict 全般の gap である。
+ *
+ * ## 処理順序
+ *
+ * 1. 各 candidate の `source_ids` から `isVerifiedSourceForItem` を満たさない id を除去
+ *    (confirmed 側の path 2 とまったく同じ判定関数を使う。二重実装しない)。
+ * 2. `context.conflictCandidateEvidenceGuard` が `false` を返す candidate を除外
+ *    (key 固有ルールの注入点。phone の value/evidence 自己整合性など)。
+ * 3. 適格な source が1件も残らなかった candidate を除外。
+ * 4. 残った candidate 数と値の異同で分岐:
+ *    - **0件** → `getInvalidStatusFallback` による安全側降格(FACT/ANALYSIS→not_found、
+ *      FACT_OR_HEARING→hearing_required)。ここで `getConfirmedDowngradeStatus`
+ *      (ANALYSIS→inferred)を使わないのは、conflict item の `value` は「答え」ではなく
+ *      根拠を失った状態であり、AIの自由記述 value を inferred として残すと
+ *      trust boundary の抜け道になるため。
+ *    - **値が1種類** → 実質的に競合していないので confirmed へ縮約する。
+ *      **この関数だけで confirmed を確定させない。** 後続の `validateResearchItemStatus`
+ *      を必ず通し、そこで通常の confirmed 判定(evidence_basis 付与を含む)を受ける。
+ *    - **値が2種類以上** → conflict を維持(candidate は適格 source のみへ絞り込み済み)。
+ *
+ * ## 意図的に採らないルール
+ *
+ * canonical(`stores.phone` 等)と異なる値だから候補を落とす、というルールにはしない。
+ * 値が正しく変更されたケースを壊すため。除外理由は identity / url_context / 一次情報要求
+ * という既存 trust boundary を満たさないことに限る。
+ *
+ * 呼び出し前提: `validateConflictShape` の後、`validateResearchItemStatus` の前に適用すること
+ * (`applyDeterministicValidation` がこの順序を保証する)。
+ *
+ * 純関数。入力を変更せず、変更が無ければ**同一参照**を返す。
+ */
+export function validateConflictCandidateTrust(
+  item: ResearchItem,
+  context: ResearchValidationContext,
+): ResearchItem {
+  if (item.status !== "conflict") return item;
+
+  const candidates = item.candidates ?? [];
+  const verifiedIds = new Set(
+    context.sourceRegistry
+      .filter((entry) => isVerifiedSourceForItem(entry, item.key))
+      .map((entry) => entry.id),
+  );
+  const evidenceGuard = context.conflictCandidateEvidenceGuard;
+
+  const trusted: ResearchItemCandidate[] = [];
+  let droppedUntrustedSource = false;
+  let droppedUnbackedEvidence = false;
+
+  for (const candidate of candidates) {
+    if (evidenceGuard !== undefined && !evidenceGuard(item, candidate)) {
+      droppedUnbackedEvidence = true;
+      continue;
+    }
+    const trustedSourceIds = candidate.source_ids.filter((id) => verifiedIds.has(id));
+    if (trustedSourceIds.length === 0) {
+      droppedUntrustedSource = true;
+      continue;
+    }
+    trusted.push(
+      trustedSourceIds.length === candidate.source_ids.length
+        ? candidate
+        : { ...candidate, source_ids: trustedSourceIds },
+    );
+  }
+
+  const dropNote = [
+    droppedUntrustedSource ? UNTRUSTED_CANDIDATE_SOURCE_NOTE : null,
+    droppedUnbackedEvidence ? UNBACKED_CANDIDATE_EVIDENCE_NOTE : null,
+  ]
+    .filter((note): note is string => note !== null)
+    .join(" ");
+
+  // D: 信頼できる候補が1件も残らない → policyごとの安全側statusへ降格する。
+  if (trusted.length === 0) {
+    const fallback = getInvalidStatusFallback(item.research_policy);
+    return {
+      ...nullifyForNoInfoStatus(item, fallback),
+      status: fallback,
+      warning: appendWarning(
+        item.warning,
+        `${dropNote} 提示できる候補が残らなかったため${fallback}へ補正しました。`.trim(),
+      ),
+    };
+  }
+
+  const distinctValues = new Set(trusted.map((candidate) => candidate.value.trim()));
+
+  // C: 残った候補の値が1種類 → 実質的に競合していないので confirmed へ縮約する。
+  //    `confidence` は null にする(AIが申告した確信度は「conflictである」ことに対する
+  //    ものであり、縮約後の単一値の確信度としては流用できないため)。
+  if (distinctValues.size === 1) {
+    const primary = trusted[0]!;
+    const mergedSourceIds = Array.from(
+      new Set(trusted.flatMap((candidate) => candidate.source_ids)),
+    );
+    return {
+      ...item,
+      status: "confirmed",
+      value: primary.value,
+      evidence: primary.evidence,
+      source_ids: mergedSourceIds,
+      confidence: null,
+      candidates: undefined,
+      warning: appendWarning(
+        item.warning,
+        `${dropNote} 残った候補が1つだったため競合を解消しました。`.trim(),
+      ),
+    };
+  }
+
+  // B: conflict を維持する。落ちた候補が無く source_ids の刈り込みも無ければ元の参照を返す。
+  const unchanged =
+    trusted.length === candidates.length &&
+    trusted.every((candidate, index) => candidate === candidates[index]);
+  if (unchanged) return item;
+
+  return {
+    ...item,
+    candidates: trusted,
+    // 候補は落ちず source_ids の刈り込みだけだった場合は、警告を出すほどの事象ではない。
+    warning: dropNote === "" ? item.warning : appendWarning(item.warning, dropNote),
   };
 }
 
@@ -1180,9 +1369,17 @@ export function enforceStatusValueInvariant(item: ResearchItem): ResearchItem {
 /**
  * 1項目に対し、決定的な検証パイプラインを順序どおりに適用する:
  * `enforceResearchPolicy` → `enforceStatusForPolicy` → `sanitizeSourceIds` →
- * `validateConflictShape` → `validateResearchItemStatus`。この順序には意味があり、
+ * `validateConflictShape` → `validateConflictCandidateTrust` →
+ * `validateResearchItemStatus`。この順序には意味があり、
  * 後段は前段の是正結果を前提とする(例: confirmed判定は sanitize 済みの
  * source_ids のみを見る)。
+ *
+ * `validateConflictCandidateTrust`(PR #180 BLOCKER 2)は
+ * `validateConflictShape`(AIが返した candidates の**形状**の妥当性)の後、
+ * `validateResearchItemStatus`(confirmed の trust 判定)の**前**に置く:
+ * - 形状是正の前に走らせると、重複 candidate_id 等を含む未整形の候補を評価してしまう。
+ * - status 判定の後に走らせると、candidate を confirmed へ縮約した場合に
+ *   通常の confirmed 判定を受けられなくなる(candidate trust だけで confirmed が確定してしまう)。
  *
  * 純関数。入力を変更せず、新しい `ResearchItem` を返す。
  */
@@ -1194,7 +1391,8 @@ export function applyDeterministicValidation(
   const statusEnforced = enforceStatusForPolicy(policyEnforced);
   const sourceIdsSanitized = sanitizeSourceIds(statusEnforced, context.sourceRegistry);
   const conflictValidated = validateConflictShape(sourceIdsSanitized);
-  const statusValidated = validateResearchItemStatus(conflictValidated, context);
+  const candidateTrusted = validateConflictCandidateTrust(conflictValidated, context);
+  const statusValidated = validateResearchItemStatus(candidateTrusted, context);
   const invariantEnforced = enforceStatusValueInvariant(statusValidated);
   const sourceIdsPruned = pruneUnverifiedSourceIds(invariantEnforced, context);
   return flagEvidenceSourceIdMismatch(sourceIdsPruned);
