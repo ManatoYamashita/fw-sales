@@ -294,9 +294,17 @@ export function buildNonAiItems(): ResearchItem[] {
 /**
  * Google Placesがdeterministicに確定できるkey(review_avg/review_count限定)。
  *
- * 店舗名/住所/業種/電話番号はGemini + 既存`placesVerifiedKeys`バイパスで実測上すでに
- * confirmedできており、Placesで一律上書きすると電話番号のroleの違い(店舗直通/予約専用等、
- * Stage2プロンプトの較正対象)のような有用な情報を失うリスクがあるため対象外とする。
+ * 店舗名/住所/業種/電話番号を対象外とするのは、Placesで一律上書きすると電話番号の
+ * roleの違い(店舗直通/予約専用等、Stage2プロンプトの較正対象)のような有用な情報を
+ * 失うリスクがあるため。
+ *
+ * なお、この4項目は`placesVerifiedKeys`バイパス経由でもconfirmedにならない。
+ * `deriveDeterministicPlacesConfirmedKeys`(BLOCKER2の修正)が
+ * trust boundaryへ渡す集合を本定数の2keyへ絞り込むためである
+ * (以前のコメントは「Gemini + placesVerifiedKeysバイパスで既にconfirmedできている」と
+ * 記述していたが、絞り込み導入時点で事実と乖離していた。PR #180監査で発見、
+ * コメントのみ修正し挙動は変更していない)。この4項目をPlaces由来でconfirmedにするかは
+ * 別途の設計判断とする。
  * `review_avg`/`review_count`はWeb調査でGeminiが正確に再現しづらく(Google公式評価を
  * 直接掲載する第三者サイトが少ない)、Places側で確定できるなら常にそちらを優先すべき
  * 数少ない項目のため、この2keyに限定してGemini対象からも除外する

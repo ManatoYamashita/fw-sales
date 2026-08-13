@@ -9,6 +9,9 @@
  * `deriveErrorKind`)のみを検証する。
  */
 
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { FatalError, RetryableError } from "workflow";
 import type { AiClientError } from "@/lib/ai/client";
@@ -1374,5 +1377,75 @@ describe("F2: Workflow 由来 write の CAS(terminal immutability)", () => {
     it("safe expiry margin(30分)は変わらない", () => {
       expect(MIN_SAFE_EXPIRES_MARGIN_MINUTES).toBe(30);
     });
+  });
+});
+
+/**
+ * Stage0 Places Identity Recovery (PR #180 pre-merge fix).
+ *
+ * loadStoreStep / stage0PlacesStep are "use step" functions and are not exported,
+ * so the wiring cannot be exercised directly. Two complementary guards are used:
+ *
+ * 1. Type level - PlacesSearchIdentity has no `genre`, so it is NOT assignable to
+ *    StoreIdentity. Passing it to stage1Step / stage2Step /
+ *    applySourceIdentityVerification is a compile error (`pnpm typecheck`).
+ *    This is the guarantee that F1 is not made worse.
+ * 2. Source level - the reverse direction (passing the Stage1/Stage2 `store` into
+ *    Stage0 again) is NOT a type error, because StoreIdentity is structurally
+ *    assignable to PlacesSearchIdentity. The assertions below pin the call sites so
+ *    that regression is detected. Precedent for reading source in a test:
+ *    app/(main)/stores/__tests__/area-search-no-deep-research.test.ts
+ */
+describe("Stage0 Places Identity Recovery wiring (PR #180 pre-merge fix)", () => {
+  const source = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "../store-research.ts"),
+    "utf-8",
+  );
+
+  it("Stage0 receives placesSearchIdentity, never the Stage1/Stage2 StoreIdentity", () => {
+    expect(source).toContain("stage0PlacesStep(googlePlaceId, placesSearchIdentity)");
+    expect(source).not.toContain("stage0PlacesStep(googlePlaceId, store)");
+  });
+
+  it("stage0PlacesStep is typed as PlacesSearchIdentity", () => {
+    expect(source).toMatch(/stage0PlacesStep\([\s\S]*?store: PlacesSearchIdentity/);
+  });
+
+  it("Stage1 / Stage2 still receive the unchanged StoreIdentity", () => {
+    expect(source).toContain("await stage1Step(store)");
+    expect(source).toContain("stage2Step(store, resolvedRegistry");
+  });
+
+  it("applySourceIdentityVerification target identity is unchanged", () => {
+    expect(source).toMatch(
+      /applySourceIdentityVerification\(\s*urlContextAppliedRegistry,\s*stage2Result\.sourceVerifications,\s*store,/,
+    );
+  });
+
+  it("loadStoreStep builds placesSearchIdentity from the store row", () => {
+    expect(source).toContain("placesSearchIdentity: buildPlacesSearchIdentity(store)");
+  });
+
+  it("StoreIdentity built by loadStoreStep still uses the raw scalar columns", () => {
+    expect(source).toMatch(
+      /store: \{\s*name: store\.name,\s*address: store\.address,\s*phone: store\.phone,\s*genre: store\.genre,\s*\}/,
+    );
+  });
+
+  it("Gemini call count is unchanged (2 stages)", () => {
+    expect(GEMINI_STAGE_COUNT).toBe(2);
+  });
+
+  it("DB step count is unchanged (6)", () => {
+    expect(DB_STEP_COUNT).toBe(6);
+  });
+
+  it("Stage0 remains a single best-effort attempt (no retry)", () => {
+    expect(STAGE0_MAX_RETRIES).toBe(0);
+    expect(STAGE0_PLACES_TIMEOUT_MS).toBe(15_000);
+  });
+
+  it("safe expiry margin is unchanged (30 min)", () => {
+    expect(MIN_SAFE_EXPIRES_MARGIN_MINUTES).toBe(30);
   });
 });

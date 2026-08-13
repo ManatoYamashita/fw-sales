@@ -645,3 +645,236 @@ describe("Stage0PlacesResult.diagnostic (Plan §6.3)", () => {
     expect(serialized).not.toContain("4.2");
   });
 });
+
+/**
+ * Stage0 Places Identity Recovery(PR #180 pre-merge fix)。
+ *
+ * `stores.prefecture` / `stores.city` が Stage0 へ届かず、`store.address === ""` の
+ * 店舗で Places 応答が丸ごと破棄されていた data plumbing bug の回帰テスト。
+ * strong match の判定規則(`isNameMatch` / `isAddressMatch` /
+ * `hasBanchiLevelSpecificity` / `normalizePhone` / 一意性)は1行も変更していないため、
+ * ここで検証するのは**入力が届いた場合に何が起きるか**だけである。
+ */
+describe("Stage0 Places Identity Recovery (PR #180 pre-merge fix)", () => {
+  /** 告膳の実機ケース: 住所も電話もスカラー列が空で、prefecture/city 側に番地がある。 */
+  const KOKUZEN_PLACE = {
+    placeId: "places/kokuzen",
+    name: "告膳",
+    formattedAddress: "日本、〒359-1123 埼玉県所沢市日吉町１９−１２",
+    lat: 35.79,
+    lng: 139.46,
+    phone: "",
+    rating: 4.3,
+    userRatingsTotal: 87,
+    types: ["japanese_restaurant", "restaurant"],
+    googleMapsUri: null,
+  };
+
+  describe("修正前後の対照(合成住所が届くかどうかだけが違う)", () => {
+    it("before: address も phone も空だと strong match できず places_search_no_match になる", async () => {
+      mockSearchPlaces.mockResolvedValue([KOKUZEN_PLACE]);
+      const result = await runStage0PlacesResync({
+        googlePlaceId: null,
+        store: { name: "告膳", address: "", phone: "" },
+        now: NOW,
+      });
+      expect(result.placesBasicInfo).toEqual({});
+      expect(result.diagnostic.outcome).toBe("no_match");
+      expect(result.warning).toContain("places_search_no_match");
+    });
+
+    it("after: prefecture/city 由来の番地レベル住所が届けば strong match が成立する", async () => {
+      mockSearchPlaces.mockResolvedValue([KOKUZEN_PLACE]);
+      const result = await runStage0PlacesResync({
+        googlePlaceId: null,
+        store: { name: "告膳", address: "埼玉県所沢市日吉町19-12", phone: "" },
+        now: NOW,
+      });
+      expect(result.warning).toBeNull();
+      expect(result.diagnostic.outcome).toBe("matched");
+      expect(result.diagnostic.review_fields_present).toBe(true);
+      expect(result.placesBasicInfo.review_avg?.value).toBe("4.3");
+      expect(result.placesBasicInfo.review_count?.value).toBe("87");
+    });
+
+    it("合成住所は Places の textQuery(area)へも渡る", async () => {
+      mockSearchPlaces.mockResolvedValue([KOKUZEN_PLACE]);
+      await runStage0PlacesResync({
+        googlePlaceId: null,
+        store: { name: "告膳", address: "埼玉県所沢市日吉町19-12", phone: "" },
+        now: NOW,
+      });
+      expect(mockSearchPlaces).toHaveBeenCalledWith("告膳", "埼玉県所沢市日吉町19-12", undefined);
+    });
+  });
+
+  describe("strong match の不変条件は緩めていない", () => {
+    it("名前一致のみ(住所も電話も無い)なら no_match のまま", async () => {
+      mockSearchPlaces.mockResolvedValue([{ ...KOKUZEN_PLACE, formattedAddress: "" }]);
+      const result = await runStage0PlacesResync({
+        googlePlaceId: null,
+        store: { name: "告膳", address: "埼玉県所沢市日吉町19-12", phone: "" },
+        now: NOW,
+      });
+      expect(result.diagnostic.outcome).toBe("no_match");
+    });
+
+    it("合成住所が市区町村どまり(番地なし)なら no_match のまま", async () => {
+      // `hasBanchiLevelSpecificity`(identity-match.ts)が両側に数字-数字を要求するため、
+      // 「埼玉県所沢市」だけでは同じ市内の別店舗へ誤マッチしない。
+      mockSearchPlaces.mockResolvedValue([KOKUZEN_PLACE]);
+      const result = await runStage0PlacesResync({
+        googlePlaceId: null,
+        store: { name: "告膳", address: "埼玉県所沢市", phone: "" },
+        now: NOW,
+      });
+      expect(result.diagnostic.outcome).toBe("no_match");
+      expect(result.placesBasicInfo).toEqual({});
+    });
+
+    it("番地が異なれば no_match のまま", async () => {
+      mockSearchPlaces.mockResolvedValue([KOKUZEN_PLACE]);
+      const result = await runStage0PlacesResync({
+        googlePlaceId: null,
+        store: { name: "告膳", address: "埼玉県所沢市日吉町2-3", phone: "" },
+        now: NOW,
+      });
+      expect(result.diagnostic.outcome).toBe("no_match");
+    });
+
+    it("strong 候補が複数なら ambiguous(採用しない)", async () => {
+      mockSearchPlaces.mockResolvedValue([
+        { ...KOKUZEN_PLACE, placeId: "places/a" },
+        { ...KOKUZEN_PLACE, placeId: "places/b" },
+      ]);
+      const result = await runStage0PlacesResync({
+        googlePlaceId: null,
+        store: { name: "告膳", address: "埼玉県所沢市日吉町19-12", phone: "" },
+        now: NOW,
+      });
+      expect(result.diagnostic.outcome).toBe("ambiguous");
+      expect(result.placesBasicInfo).toEqual({});
+    });
+  });
+
+  /**
+   * `identity_inputs` は「Places へ住所/電話が届いたか」だけを sanitized に残す。
+   * 値そのもの(住所・電話番号・place_id)は絶対に含めない。
+   */
+  describe("diagnostic.identity_inputs", () => {
+    it("住所・電話が両方揃っていれば true / true", async () => {
+      mockSearchPlaces.mockResolvedValue([PLACE_RESULT]);
+      const result = await runStage0PlacesResync({
+        googlePlaceId: null,
+        store: STORE,
+        now: NOW,
+      });
+      expect(result.diagnostic.identity_inputs).toEqual({
+        has_address: true,
+        has_phone: true,
+      });
+    });
+
+    it("住所だけ届いた場合は has_address=true / has_phone=false", async () => {
+      mockSearchPlaces.mockResolvedValue([KOKUZEN_PLACE]);
+      const result = await runStage0PlacesResync({
+        googlePlaceId: null,
+        store: { name: "告膳", address: "埼玉県所沢市日吉町19-12", phone: "" },
+        now: NOW,
+      });
+      expect(result.diagnostic.identity_inputs).toEqual({
+        has_address: true,
+        has_phone: false,
+      });
+    });
+
+    it("どちらも届かなければ false / false(修正前の告膳の状態)", async () => {
+      mockSearchPlaces.mockResolvedValue([]);
+      const result = await runStage0PlacesResync({
+        googlePlaceId: null,
+        store: { name: "告膳", address: "", phone: "" },
+        now: NOW,
+      });
+      expect(result.diagnostic.identity_inputs).toEqual({
+        has_address: false,
+        has_phone: false,
+      });
+    });
+
+    it("has_phone は正規化後の数字有無で判定する(「不明」等は false)", async () => {
+      // `normalizePhone` は数字以外を全て除去するため、これらは match でも使われない。
+      mockSearchPlaces.mockResolvedValue([]);
+      const result = await runStage0PlacesResync({
+        googlePlaceId: null,
+        store: { name: "告膳", address: "", phone: "不明" },
+        now: NOW,
+      });
+      expect(result.diagnostic.identity_inputs.has_phone).toBe(false);
+    });
+
+    it("空白のみの住所は has_address=false", async () => {
+      mockSearchPlaces.mockResolvedValue([]);
+      const result = await runStage0PlacesResync({
+        googlePlaceId: null,
+        store: { name: "告膳", address: "   ", phone: "" },
+        now: NOW,
+      });
+      expect(result.diagnostic.identity_inputs.has_address).toBe(false);
+    });
+
+    it("place_id 経路・API 失敗・timeout でも identity_inputs が必ず埋まる", async () => {
+      mockGetPlaceById.mockResolvedValue(PLACE_RESULT);
+      const viaPlaceId = await runStage0PlacesResync({
+        googlePlaceId: "places/abc123",
+        store: STORE,
+        now: NOW,
+      });
+      expect(viaPlaceId.diagnostic.identity_inputs).toEqual({
+        has_address: true,
+        has_phone: true,
+      });
+
+      mockGetPlaceById.mockReset();
+      mockGetPlaceById.mockRejectedValue(new Error("Places API エラー (500): boom"));
+      const failed = await runStage0PlacesResync({
+        googlePlaceId: "places/abc123",
+        store: STORE,
+        now: NOW,
+      });
+      expect(failed.diagnostic.outcome).toBe("api_error");
+      expect(failed.diagnostic.identity_inputs).toEqual({
+        has_address: true,
+        has_phone: true,
+      });
+
+      mockSearchPlaces.mockRejectedValue(
+        Object.assign(new Error("aborted"), { name: "TimeoutError" }),
+      );
+      const timedOut = await runStage0PlacesResync({
+        googlePlaceId: null,
+        store: { name: "告膳", address: "埼玉県所沢市日吉町19-12", phone: "" },
+        now: NOW,
+      });
+      expect(timedOut.diagnostic.outcome).toBe("timeout");
+      expect(timedOut.diagnostic.identity_inputs).toEqual({
+        has_address: true,
+        has_phone: false,
+      });
+    });
+
+    it("identity_inputs に住所・電話・place_id の値そのものを含めない(sanitized)", async () => {
+      mockSearchPlaces.mockResolvedValue([KOKUZEN_PLACE]);
+      const result = await runStage0PlacesResync({
+        googlePlaceId: null,
+        store: { name: "告膳", address: "埼玉県所沢市日吉町19-12", phone: "04-2998-6543" },
+        now: NOW,
+      });
+      const serialized = JSON.stringify(result.diagnostic);
+      expect(serialized).not.toContain("埼玉県");
+      expect(serialized).not.toContain("日吉町");
+      expect(serialized).not.toContain("2998");
+      expect(serialized).not.toContain("告膳");
+      expect(serialized).not.toContain("places/kokuzen");
+    });
+  });
+});

@@ -49,6 +49,37 @@ export type Stage0Path = "place_id" | "text_search";
 export type Stage0Outcome = "matched" | "no_match" | "ambiguous" | "timeout" | "api_error";
 
 /**
+ * strong match の2つのゲート(住所一致 / 電話一致)へ、そもそも入力が届いていたか
+ * (PR #180 pre-merge fix: Stage0 Places Identity Recovery)。
+ *
+ * `findStrongMatches` は `store.address.trim() !== ""` と
+ * `normalizePhone(store.phone) !== ""` を前提条件にしており、どちらも空だと
+ * **候補が正しくても strong match が構造的に成立しない**。この2つの boolean が無いと、
+ * `places_search_no_match` を見たときに
+ *
+ * - 住所は届いたが候補と一致しなかった(= Places 側 or 住所データの問題)
+ * - そもそも住所が届いていなかった(= data plumbing の問題)
+ *
+ * を実機ログから切り分けられない。実際 `stores.prefecture` / `stores.city` が
+ * Stage0 へ渡っていなかった bug は、この観測点が無かったために発見が遅れた。
+ *
+ * **住所・電話番号・place_id の値そのものは絶対に含めない**(boolean のみ)。
+ */
+export interface Stage0IdentityInputs {
+  /** `trim` 後に非空の住所が渡されたか。 */
+  has_address: boolean;
+  /**
+   * `normalizePhone` 後に数字が1桁以上残る電話番号が渡されたか。
+   *
+   * 生の非空判定ではなく正規化後で見るのは、`stores.phone` が `text().notNull()` で
+   * フォーマット検証を持たず「不明」「未掲載」「-」のような値が実在しうるため。
+   * これらは `findStrongMatches` の電話一致でも使われない(正規化後に "" になる)ので、
+   * 診断も同じ基準に揃える。
+   */
+  has_phone: boolean;
+}
+
+/**
  * Stage0 の sanitized な診断情報(feat/ai-research-quality-ux-hardening、Plan §6.3)。
  *
  * 従来は失敗時の `warning` しか残らず、**成功時は何も観測できなかった**。
@@ -63,6 +94,8 @@ export interface Stage0Diagnostic {
   outcome: Stage0Outcome;
   /** `rating` / `userRatingCount` を実際に取得できたか(**値そのものは載せない**)。 */
   review_fields_present: boolean;
+  /** strong match のゲートへ住所/電話が届いていたか(**値そのものは載せない**)。 */
+  identity_inputs: Stage0IdentityInputs;
 }
 
 export interface Stage0PlacesResult {
@@ -87,6 +120,20 @@ function hasReviewFields(placesBasicInfo: Partial<BasicInfo>): boolean {
   return (
     placesBasicInfo.review_avg?.value != null || placesBasicInfo.review_count?.value != null
   );
+}
+
+/**
+ * `findStrongMatches` が住所一致 / 電話一致で使う前提条件と**同じ判定**で、
+ * 入力が届いていたかだけを boolean 化する(値は載せない)。
+ */
+function deriveIdentityInputs(store: {
+  address: string;
+  phone: string;
+}): Stage0IdentityInputs {
+  return {
+    has_address: store.address.trim() !== "",
+    has_phone: normalizePhone(store.phone) !== "",
+  };
 }
 
 /**
@@ -190,6 +237,8 @@ export async function runStage0PlacesResync(params: {
   const { googlePlaceId, store, now, timeoutMs } = params;
   // 未指定時は `undefined` を渡す = `lib/places/google.ts` 側で `signal` を付けない。
   const requestOptions = timeoutMs === undefined ? undefined : { timeoutMs };
+  // 成功・失敗・経路を問わず全ての return で同じ値を載せる(観測の欠損を作らない)。
+  const identityInputs = deriveIdentityInputs(store);
 
   if (googlePlaceId !== null && googlePlaceId.trim() !== "") {
     try {
@@ -198,7 +247,12 @@ export async function runStage0PlacesResync(params: {
         return {
           placesBasicInfo: {},
           warning: "Google Placesの店舗情報を再取得できませんでした(該当なし)。既存情報のみで調査を続行します。",
-          diagnostic: { path: "place_id", outcome: "no_match", review_fields_present: false },
+          diagnostic: {
+            path: "place_id",
+            outcome: "no_match",
+            review_fields_present: false,
+            identity_inputs: identityInputs,
+          },
         };
       }
       const placesBasicInfo = placeResultToBasicInfo(place, now);
@@ -209,6 +263,7 @@ export async function runStage0PlacesResync(params: {
           path: "place_id",
           outcome: "matched",
           review_fields_present: hasReviewFields(placesBasicInfo),
+          identity_inputs: identityInputs,
         },
       };
     } catch (err) {
@@ -220,6 +275,7 @@ export async function runStage0PlacesResync(params: {
           path: "place_id",
           outcome: outcomeFromErrorKind(kind),
           review_fields_present: false,
+          identity_inputs: identityInputs,
         },
       };
     }
@@ -242,6 +298,7 @@ export async function runStage0PlacesResync(params: {
           path: "text_search",
           outcome: matchKind === "places_search_ambiguous" ? "ambiguous" : "no_match",
           review_fields_present: false,
+          identity_inputs: identityInputs,
         },
       };
     }
@@ -253,6 +310,7 @@ export async function runStage0PlacesResync(params: {
         path: "text_search",
         outcome: "matched",
         review_fields_present: hasReviewFields(placesBasicInfo),
+        identity_inputs: identityInputs,
       },
     };
   } catch (err) {
@@ -264,6 +322,7 @@ export async function runStage0PlacesResync(params: {
         path: "text_search",
         outcome: outcomeFromErrorKind(kind),
         review_fields_present: false,
+        identity_inputs: identityInputs,
       },
     };
   }

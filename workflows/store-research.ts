@@ -68,6 +68,10 @@ import {
   mergeKnownStoreDataIntoRegistry,
 } from "@/lib/ai/research/source-registry";
 import { runStage0PlacesResync, type Stage0PlacesResult } from "@/lib/ai/research/places-stage0";
+import {
+  buildPlacesSearchIdentity,
+  type PlacesSearchIdentity,
+} from "@/lib/ai/research/places-search-identity";
 import { resolveOfficialAliases } from "@/lib/ai/research/official-alias";
 import {
   GEMINI_STAGE_TIMEOUT_MS,
@@ -596,7 +600,19 @@ export async function writeRunningRun(
 /* ------------------------------------------------------------------ */
 
 interface LoadedStore {
+  /**
+   * Stage1 / Stage2 prompt と `applySourceIdentityVerification` が使う identity。
+   * **PR #180 pre-merge fix でも一切変更していない**(F1 を悪化させないため。
+   * 詳細は `lib/ai/research/places-search-identity.ts` の JSDoc)。
+   */
   store: StoreIdentity;
+  /**
+   * **Stage0 Google Places 専用**の identity(PR #180 pre-merge fix)。
+   * `stores.prefecture` / `stores.city` を合成して Places の検索クエリと
+   * strong match 判定へ届ける。`genre` を持たないため `StoreIdentity` へ
+   * 構造的に代入できず、Stage1 / Stage2 へ誤って渡すとコンパイルエラーになる。
+   */
+  placesSearchIdentity: PlacesSearchIdentity;
   basicInfo: BasicInfo;
   googlePlaceId: string | null;
   knownStoreDataUrls: ReturnType<typeof buildKnownStoreDataUrls>;
@@ -615,6 +631,7 @@ async function loadStoreStep(storeId: string): Promise<LoadedStore> {
       phone: store.phone,
       genre: store.genre,
     },
+    placesSearchIdentity: buildPlacesSearchIdentity(store),
     basicInfo: store.basic_info,
     googlePlaceId: store.google_place_id,
     knownStoreDataUrls: buildKnownStoreDataUrls(store),
@@ -639,7 +656,7 @@ markStageStep.maxRetries = DB_STEP_MAX_RETRIES;
  */
 async function stage0PlacesStep(
   googlePlaceId: string | null,
-  store: StoreIdentity,
+  store: PlacesSearchIdentity,
 ): Promise<Stage0PlacesResult> {
   "use step";
   return runStage0PlacesResync({
@@ -897,14 +914,17 @@ export async function storeResearchWorkflow(
   let stage1Diagnostics: Stage1Diagnostics | null = null;
 
   try {
-    const { store, basicInfo, googlePlaceId, knownStoreDataUrls } = await loadStoreStep(storeId);
+    const { store, placesSearchIdentity, basicInfo, googlePlaceId, knownStoreDataUrls } =
+      await loadStoreStep(storeId);
 
     await markStageStep(runId, "discovering");
 
     // Stage0: Places軽量再同期(best-effort)。in-memoryでのみ利用し、DBへは書き込まない。
     // google_place_idが無い場合はText Search fallback(strong matchのみ採用)を試みる
     // (feat/ai-research-quality-refinement)。
-    const stage0 = await stage0PlacesStep(googlePlaceId, store);
+    // ★ Stage0 だけが `placesSearchIdentity` を受け取る(PR #180 pre-merge fix)。
+    // Stage1 / Stage2 / applySourceIdentityVerification は従来どおり `store` を使う。
+    const stage0 = await stage0PlacesStep(googlePlaceId, placesSearchIdentity);
 
     // Stage0の結末をsanitizedにログへ残す(feat/ai-research-quality-ux-hardening、Plan §6.3)。
     // 従来は失敗時のwarningしか残らず、google_place_idが無い店舗でText Searchが
