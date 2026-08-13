@@ -117,13 +117,47 @@ describe("isTargetStoreMatch (fix/ai-research-source-identity-integrity、FIX3)"
     });
 
     it("正常な電話番号の表記ゆれ一致は維持する(修正で壊さないことの確認)", () => {
-      // 注: `normalizePhone` は `/[^\d]/g` で除去するため `\d` はASCII数字のみ。
-      // 全角数字の吸収は現状の仕様外であり、本修正のscopeでも変更しない。
       for (const observedPhone of ["04-7199-7985", "(04) 7199 7985", "tel: 04.7199.7985"]) {
         expect(
           isTargetStoreMatch({ name: "炉端ジュン", address: null, phone: observedPhone }, TARGET_STORE),
         ).toBe(true);
       }
+    });
+
+    /**
+     * 全角・dash-like Unicode の吸収(PR #180 final merge-blocker fix、F3)。
+     *
+     * 修正前は `normalizePhone` が ASCII 限定の `\d` で数字以外を除去していたため、
+     * モデルが `observed_phone` を全角で報告すると正規化結果が `""` になり、
+     * 非空ガードによって**電話一致が常に成立しない false negative** になっていた。
+     * 表記正規化のみを行い、桁の推測・国番号変換・先頭0の付与はしない。
+     */
+    it.each([
+      ["全角数字 + 全角ハイフン", "０４－７１９９－７９８５"],
+      ["MINUS SIGN(U+2212)", "04−7199−7985"],
+      ["全角括弧 + 全角数字", "（０４）７１９９－７９８５"],
+    ])("observed_phone が %s でも target の ASCII 表記と電話一致する", (_label, observedPhone) => {
+      expect(
+        isTargetStoreMatch({ name: "炉端ジュン", address: null, phone: observedPhone }, TARGET_STORE),
+      ).toBe(true);
+    });
+
+    it("target 側が全角でも observed 側の ASCII 表記と電話一致する", () => {
+      expect(
+        isTargetStoreMatch(
+          { name: "炉端ジュン", address: null, phone: "04-7199-7985" },
+          { ...TARGET_STORE, phone: "０４－７１９９－７９８５" },
+        ),
+      ).toBe(true);
+    });
+
+    it("正規化しても別番号は同一視しない", () => {
+      expect(
+        isTargetStoreMatch(
+          { name: "炉端ジュン", address: null, phone: "０４－７１９９－７９８６" },
+          TARGET_STORE,
+        ),
+      ).toBe(false);
     });
   });
 });
@@ -139,6 +173,17 @@ describe("isNameMatch / isAddressMatch / normalizePhone (re-export確認、fix/a
 
   it("normalizePhoneは数字以外を除去する", () => {
     expect(normalizePhone("04-7199-7985")).toBe("0471997985");
+  });
+
+  it("normalizePhoneは全角数字・dash-like Unicodeを吸収する(F3)", () => {
+    expect(normalizePhone("０４－７１９９－７９８５")).toBe("0471997985");
+    expect(normalizePhone("04−7199−7985")).toBe("0471997985");
+    expect(normalizePhone("（０４）７１９９　７９８５")).toBe("0471997985");
+  });
+
+  it("normalizePhoneは桁の推測・国番号変換・先頭0の付与をしない(表記正規化のみ)", () => {
+    expect(normalizePhone("+81-4-7199-7985")).toBe("81471997985");
+    expect(normalizePhone("非公開")).toBe("");
   });
 
   it("deriveSearchIdentityNameは先頭の管理タグを除去する", () => {

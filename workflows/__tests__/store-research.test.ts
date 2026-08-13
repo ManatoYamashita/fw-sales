@@ -38,7 +38,20 @@ import { getResearchRunExpiresMarginMinutes } from "@/lib/env";
 // (`classifyForWorkflowRetry` / `deriveErrorKind`)のみを検証するため、
 // これらを軽量モックに差し替えて DB 接続を避ける。
 vi.mock("server-only", () => ({}));
-vi.mock("@/lib/repositories", () => ({ repos: {} }));
+
+/**
+ * F2(PR #180 final merge-blocker fix)のため、`repos.researchRun` は
+ * 制御可能な mock にする。CAS(`updateIfRunning`)の戻り値で
+ * 「running のまま」「既に terminal」を表現する。
+ */
+const mockResearchRun = vi.hoisted(() => ({
+  updateIfRunning: vi.fn(),
+  get: vi.fn(),
+  update: vi.fn(),
+}));
+vi.mock("@/lib/repositories", () => ({
+  repos: { researchRun: mockResearchRun, store: { get: vi.fn() } },
+}));
 vi.mock("@/lib/ai/research/pipeline", () => ({
   runStage1: vi.fn(),
   runStage2: vi.fn(),
@@ -78,6 +91,11 @@ const {
   deriveErrorKind,
   buildFailureRecord,
   extractFailureTokenUsage,
+  writeRunningRun,
+  persistSucceededRun,
+  persistFailedRun,
+  RunSupersededError,
+  isRunSupersededError,
 } = await import(
   "../store-research"
 );
@@ -1107,6 +1125,254 @@ describe("MAX_TOKENS cause の shape guard (最終レビュー指摘)", () => {
     expect(JSON.stringify((classified as { cause?: unknown }).cause)).not.toContain("SECRET");
     expect(extractFailureTokenUsage(classified, null)).toEqual({
       stage2: { promptTokenCount: 10 },
+    });
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  F2: terminal immutability / Workflow ownership                     */
+/*  (PR #180 final merge-blocker fix)                                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * ## 何を固定するか
+ *
+ * `startResearchRunAction` は expires_at を過ぎた running run を
+ * `failed / stuck_run_timeout` へ倒してから新しい run を作る。この時点で旧 Workflow が
+ * 生きていると、旧 Workflow の DB step が terminal な run を書き換えられた
+ * (監査 F2、CONFIRMED)。特に `persistSucceededStep` は `status: "succeeded"` を
+ * 無条件に書くため failed が succeeded へ**復活**し、復活した run は
+ * `listStoreIdsNeedingReview` に載って review の一括採用で canonical へ入りえた。
+ *
+ * 本 describe は「terminal になった run へは Workflow から一切書けない」ことを、
+ * status だけでなく stage / source_registry / result / token_usage / error_* まで
+ * 含めて固定する。
+ *
+ * mock の `updateIfRunning` は CAS の結果そのものを表現する:
+ * - 非 null = `status = 'running'` だったので更新できた
+ * - null    = 0行更新(run 不存在 / terminal)なので**1列も書いていない**
+ */
+describe("F2: Workflow 由来 write の CAS(terminal immutability)", () => {
+  const RUN_ID = "research_run_old";
+
+  function makeRun(overrides: Record<string, unknown> = {}) {
+    return {
+      id: RUN_ID,
+      store_id: "store_1",
+      status: "running",
+      stage: "discovering",
+      result: null,
+      source_registry: [],
+      review_decisions: {},
+      review_completed_at: null,
+      token_usage: null,
+      warnings: [],
+      error_kind: null,
+      error_message: null,
+      started_at: "2026-08-13T00:00:00.000Z",
+      expires_at: "2026-08-13T00:30:00.000Z",
+      finished_at: null,
+      ...overrides,
+    };
+  }
+
+  const succeededParams = {
+    items: [],
+    sourceRegistry: [],
+    tokenUsage: { stage1: null },
+    warnings: [],
+  };
+
+  beforeEach(() => {
+    mockResearchRun.updateIfRunning.mockReset();
+    mockResearchRun.get.mockReset();
+    mockResearchRun.update.mockReset();
+  });
+
+  describe("RunSupersededError", () => {
+    it("FatalError.is() が true(step retry を消費させない)", () => {
+      expect(FatalError.is(new RunSupersededError())).toBe(true);
+    });
+
+    it("RetryableError.is() は false(provider の一時エラーとして扱わない)", () => {
+      expect(RetryableError.is(new RunSupersededError())).toBe(false);
+    });
+
+    it("message に runId・店舗情報・raw data を含まない(固定文言のみ)", () => {
+      const message = new RunSupersededError().message;
+      expect(message).not.toContain(RUN_ID);
+      expect(message).not.toContain("store_1");
+      expect(message).toContain("superseded");
+    });
+
+    it("isRunSupersededError は name で cross-realm 判定する", () => {
+      expect(isRunSupersededError(new RunSupersededError())).toBe(true);
+      const hydrated = new Error("x");
+      hydrated.name = "RunSupersededError";
+      expect(isRunSupersededError(hydrated)).toBe(true);
+      expect(isRunSupersededError(new Error("x"))).toBe(false);
+    });
+
+    it("error_kind は sanitized token を持たない(retry exhausted と誤分類されない)", () => {
+      expect(deriveErrorKind(new RunSupersededError())).toBe("fatal");
+    });
+  });
+
+  describe("writeRunningRun(markStageStep / resolveAndPersistSourceRegistryStep の実体)", () => {
+    it("13. running run への write は成功し、通常の Workflow 挙動を変えない", async () => {
+      mockResearchRun.updateIfRunning.mockResolvedValue(makeRun({ stage: "researching" }));
+
+      await expect(writeRunningRun(mockResearchRun, RUN_ID, { stage: "researching" })).resolves.toBeUndefined();
+
+      expect(mockResearchRun.updateIfRunning).toHaveBeenCalledWith(RUN_ID, {
+        stage: "researching",
+      });
+      expect(mockResearchRun.update).not.toHaveBeenCalled();
+    });
+
+    it("8. 遅れて届いた markStageStep は failed run を書き換えられない", async () => {
+      mockResearchRun.updateIfRunning.mockResolvedValue(null);
+
+      await expect(writeRunningRun(mockResearchRun, RUN_ID, { stage: "researching" })).rejects.toSatisfy(
+        isRunSupersededError,
+      );
+      expect(mockResearchRun.update).not.toHaveBeenCalled();
+    });
+
+    it("9. 遅れて届いた Source Registry 永続化は failed run を書き換えられない", async () => {
+      mockResearchRun.updateIfRunning.mockResolvedValue(null);
+
+      await expect(writeRunningRun(mockResearchRun, RUN_ID, { source_registry: [] })).rejects.toSatisfy(
+        isRunSupersededError,
+      );
+      expect(mockResearchRun.update).not.toHaveBeenCalled();
+    });
+
+    it("CAS miss は非 running への write を1回も再試行しない(単発で throw する)", async () => {
+      mockResearchRun.updateIfRunning.mockResolvedValue(null);
+
+      await expect(writeRunningRun(mockResearchRun, RUN_ID, { stage: "done" })).rejects.toThrow();
+      expect(mockResearchRun.updateIfRunning).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("persistSucceededRun", () => {
+    it("7. superseded された旧 run を succeeded へ復活させない(F2 の中核回帰テスト)", async () => {
+      // 旧 run は stuck 判定で failed / stuck_run_timeout になっている。
+      mockResearchRun.updateIfRunning.mockResolvedValue(null);
+      mockResearchRun.get.mockResolvedValue(
+        makeRun({ status: "failed", error_kind: "stuck_run_timeout", stage: "researching" }),
+      );
+
+      await expect(persistSucceededRun(mockResearchRun, RUN_ID, succeededParams)).rejects.toSatisfy(
+        isRunSupersededError,
+      );
+      expect(mockResearchRun.update).not.toHaveBeenCalled();
+    });
+
+    it("running run なら succeeded を書き込み、確認の再readをしない", async () => {
+      mockResearchRun.updateIfRunning.mockResolvedValue(
+        makeRun({ status: "succeeded", stage: "done" }),
+      );
+
+      await expect(persistSucceededRun(mockResearchRun, RUN_ID, succeededParams)).resolves.toBeUndefined();
+
+      const patch = mockResearchRun.updateIfRunning.mock.calls[0]![1] as Record<string, unknown>;
+      expect(patch.status).toBe("succeeded");
+      expect(patch.stage).toBe("done");
+      expect(patch.finished_at).toEqual(expect.any(String));
+      expect(mockResearchRun.get).not.toHaveBeenCalled();
+    });
+
+    it("12. DB commit 成功後の step retry は idempotent success として扱う", async () => {
+      // 2回目の実行では自分が書いた succeeded/done が既に入っているため CAS miss になる。
+      mockResearchRun.updateIfRunning.mockResolvedValue(null);
+      mockResearchRun.get.mockResolvedValue(makeRun({ status: "succeeded", stage: "done" }));
+
+      await expect(persistSucceededRun(mockResearchRun, RUN_ID, succeededParams)).resolves.toBeUndefined();
+    });
+
+    it("succeeded でも stage が done でなければ superseded として扱う(安全側)", async () => {
+      mockResearchRun.updateIfRunning.mockResolvedValue(null);
+      mockResearchRun.get.mockResolvedValue(makeRun({ status: "succeeded", stage: "researching" }));
+
+      await expect(persistSucceededRun(mockResearchRun, RUN_ID, succeededParams)).rejects.toSatisfy(
+        isRunSupersededError,
+      );
+    });
+
+    it("run が消えている場合も superseded として扱う", async () => {
+      mockResearchRun.updateIfRunning.mockResolvedValue(null);
+      mockResearchRun.get.mockResolvedValue(null);
+
+      await expect(persistSucceededRun(mockResearchRun, RUN_ID, succeededParams)).rejects.toSatisfy(
+        isRunSupersededError,
+      );
+    });
+  });
+
+  describe("persistFailedRun", () => {
+    it("running run には従来どおり failed / error_kind / token_usage を書き込む", async () => {
+      mockResearchRun.updateIfRunning.mockResolvedValue(makeRun({ status: "failed" }));
+      const err = new FatalError("Gemini呼出が失敗しました(auth_error)");
+
+      await persistFailedRun(mockResearchRun, RUN_ID, err, { promptTokenCount: 1 } as never, null);
+
+      const patch = mockResearchRun.updateIfRunning.mock.calls[0]![1] as Record<string, unknown>;
+      expect(patch.status).toBe("failed");
+      expect(patch.error_kind).toBe("fatal:auth_error");
+      expect(patch.token_usage).toEqual({ stage1: { promptTokenCount: 1 } });
+    });
+
+    it("10. 遅れて届いた失敗記録は stuck_run_timeout を上書きしない", async () => {
+      mockResearchRun.updateIfRunning.mockResolvedValue(null);
+
+      await persistFailedRun(mockResearchRun, RUN_ID, new FatalError("Gemini呼出が失敗しました(auth_error)"));
+
+      expect(mockResearchRun.update).not.toHaveBeenCalled();
+      // CAS 経路以外から書き込む手段を持たないため、既存の error_kind は保持される。
+      expect(mockResearchRun.updateIfRunning).toHaveBeenCalledTimes(1);
+    });
+
+    it("11. CAS miss でも throw しない(catch → 失敗記録 → 再throw の再帰を作らない)", async () => {
+      mockResearchRun.updateIfRunning.mockResolvedValue(null);
+
+      await expect(persistFailedRun(mockResearchRun, RUN_ID, new RunSupersededError())).resolves.toBeUndefined();
+    });
+
+    it("RunSupersededError を受け取っても失敗記録の書式は sanitized のまま", async () => {
+      mockResearchRun.updateIfRunning.mockResolvedValue(makeRun({ status: "failed" }));
+
+      await persistFailedRun(mockResearchRun, RUN_ID, new RunSupersededError());
+
+      const patch = mockResearchRun.updateIfRunning.mock.calls[0]![1] as Record<string, unknown>;
+      expect(patch.error_message).toBe("AI店舗調査に失敗しました");
+      expect(String(patch.error_message)).not.toContain(RUN_ID);
+      expect(String(patch.error_message)).not.toContain("superseded");
+    });
+  });
+
+  describe("14. provider 呼出構成への影響が無いこと", () => {
+    it("Gemini provider call 数(Stage1 + Stage2)は 2 のまま", () => {
+      expect(GEMINI_STAGE_COUNT).toBe(2);
+    });
+
+    it("Gemini stage の maxRetries は変更していない", () => {
+      expect(GEMINI_STAGE_MAX_RETRIES).toBe(1);
+    });
+
+    it("DB step の maxRetries は変更していない", () => {
+      expect(DB_STEP_MAX_RETRIES).toBe(1);
+    });
+
+    it("RunSupersededError は retryable な sanitized kind に含まれない", () => {
+      for (const token of RETRYABLE_SANITIZED_KINDS) {
+        expect(new RunSupersededError().message).not.toContain(`(${token})`);
+      }
+    });
+
+    it("safe expiry margin(30分)は変わらない", () => {
+      expect(MIN_SAFE_EXPIRES_MARGIN_MINUTES).toBe(30);
     });
   });
 });

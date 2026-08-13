@@ -124,8 +124,30 @@ export function isAddressMatch(placeAddress: string, storeAddress: string): bool
   return a.includes(b) || b.includes(a);
 }
 
+/**
+ * 電話番号文字列の**表記正規化のみ**を行う(PR #180 final merge-blocker fix、F3)。
+ *
+ * 1. `NFKC` — 全角数字(`０`)・全角括弧(`（）`)・全角ハイフン(`U+FF0D`)・
+ *    全角空白(`U+3000`)を半角へ畳む
+ * 2. `unifyDashLikeChars` — `NFKC` が変換しない `U+2212`(MINUS SIGN)等の
+ *    dash-like Unicode を ASCII ハイフンへ統一する(同関数の JSDoc に、実 API 応答で
+ *    `NFKC` が `U+2212` を変換しないことを確認した記録がある)
+ *
+ * 監査(PR #180)で、この前処理が無いために全角表記の電話番号が
+ * `normalizePhone` で `""` になり、`isTargetStoreMatch` の電話一致が常に不成立という
+ * false negative になっていたこと、および `phone-evidence.ts` の番号抽出が
+ * 全角番号を1件も拾えず evidence 裏付け検査を素通りしていたことが実測で確認された。
+ * 両者が同じ規則を共有するよう、正規化はここに一本化する。
+ *
+ * **表記の畳み込みだけを行う。** 桁数の推測、国番号(`+81`)の変換、先頭 `0` の付与
+ * といった意味的な補正は一切しない(別番号を同一視しないため)。
+ */
+export function normalizePhoneText(raw: string): string {
+  return unifyDashLikeChars(raw.normalize("NFKC"));
+}
+
 export function normalizePhone(phone: string): string {
-  return phone.replace(/[^\d]/g, "");
+  return normalizePhoneText(phone).replace(/[^\d]/g, "");
 }
 
 /**

@@ -31,7 +31,12 @@ function makeSelectProxy(terminal: unknown[]): object {
   return new Proxy({}, handler);
 }
 
-function makeWriteCapture() {
+/**
+ * `returningRows` は `updateIfRunning`(単一 atomic UPDATE + RETURNING)用。
+ * 従来の `update()` は `.where()` を await するだけで `.returning()` を呼ばないため、
+ * どちらの chain も同じ mock で表現できる。
+ */
+function makeWriteCapture(returningRows: unknown[] = []) {
   const inserted: Record<string, unknown>[] = [];
   const updated: Record<string, unknown>[] = [];
 
@@ -45,15 +50,29 @@ function makeWriteCapture() {
   const update = vi.fn(() => ({
     set: (set: Record<string, unknown>) => {
       updated.push(set);
-      return { where: () => Promise.resolve([]) };
+      const where = () => {
+        const chain = {
+          returning: () => Promise.resolve(returningRows),
+          then: (
+            onFulfilled: (v: unknown[]) => unknown,
+            onRejected?: (e: unknown) => unknown,
+          ) => Promise.resolve([] as unknown[]).then(onFulfilled, onRejected),
+        };
+        return chain;
+      };
+      return { where };
     },
   }));
 
   return { insert, update, inserted, updated };
 }
 
-function makeMockExecutor(selectRows: unknown[] = [], selectDistinctRows: unknown[] = []) {
-  const { insert, update, inserted, updated } = makeWriteCapture();
+function makeMockExecutor(
+  selectRows: unknown[] = [],
+  selectDistinctRows: unknown[] = [],
+  returningRows: unknown[] = [],
+) {
+  const { insert, update, inserted, updated } = makeWriteCapture(returningRows);
   return {
     select: vi.fn().mockReturnValue(makeSelectProxy(selectRows)),
     selectDistinct: vi.fn().mockReturnValue(makeSelectProxy(selectDistinctRows)),
@@ -337,5 +356,125 @@ describe("makeResearchRunRepo.update", () => {
     });
 
     expect(result?.warnings).toEqual(["Places情報の再取得に失敗しました"]);
+  });
+});
+
+/**
+ * `updateIfRunning` — Workflow 由来 write の compare-and-swap
+ * (PR #180 final merge-blocker fix、F2)。
+ *
+ * `update()` の `SELECT → JS マージ → 全列 SET` と異なり、
+ * `UPDATE ... WHERE id = ? AND status = 'running' RETURNING *` の**単一文**で完結する。
+ * 0行更新(= run 不存在 / terminal)は `null` を返し、**1列も書き込まない**。
+ *
+ * mock は SQL の `WHERE` を評価しないため、「terminal run に対して 0 行更新になる」
+ * ケースは `returningRows: []` で表現する(RETURNING が空 = 0行更新、が本実装の
+ * 唯一の判定材料であるため、この表現で production semantics と等価になる)。
+ */
+describe("makeResearchRunRepo.updateIfRunning", () => {
+  it("1. running run を更新し、更新後の行を返す", async () => {
+    const updatedRow = makeExistingRow({ status: "succeeded", stage: "done" });
+    const executor = makeMockExecutor([], [], [updatedRow]);
+    const repo = makeResearchRunRepo(executor as unknown as DbClient);
+
+    const result = await repo.updateIfRunning("research_run_existing", {
+      status: "succeeded",
+      stage: "done",
+    });
+
+    expect(result?.status).toBe("succeeded");
+    expect(result?.stage).toBe("done");
+    expect(executor.updated).toHaveLength(1);
+  });
+
+  it("2. failed run(0行更新)は null を返す", async () => {
+    const executor = makeMockExecutor([], [], []);
+    const repo = makeResearchRunRepo(executor as unknown as DbClient);
+
+    const result = await repo.updateIfRunning("research_run_failed", { status: "succeeded" });
+
+    expect(result).toBeNull();
+  });
+
+  it("3. succeeded run(0行更新)は null を返す", async () => {
+    const executor = makeMockExecutor([], [], []);
+    const repo = makeResearchRunRepo(executor as unknown as DbClient);
+
+    const result = await repo.updateIfRunning("research_run_succeeded", { stage: "done" });
+
+    expect(result).toBeNull();
+  });
+
+  it("4. 存在しない id(0行更新)は null を返す", async () => {
+    const executor = makeMockExecutor([], [], []);
+    const repo = makeResearchRunRepo(executor as unknown as DbClient);
+
+    const result = await repo.updateIfRunning("research_run_missing", { status: "failed" });
+
+    expect(result).toBeNull();
+  });
+
+  it("5. patch に含まれない列を SET 句へ含めない(全列 SET にしない)", async () => {
+    const executor = makeMockExecutor([], [], [makeExistingRow({ stage: "researching" })]);
+    const repo = makeResearchRunRepo(executor as unknown as DbClient);
+
+    await repo.updateIfRunning("research_run_existing", { stage: "researching" });
+
+    expect(executor.updated[0]).toEqual({ stage: "researching" });
+    // 全列 SET だった `update()` と異なり、result / source_registry / status 等は
+    // SET 句に載らない(late write が他列を巻き戻さない)。
+    expect(Object.keys(executor.updated[0]!)).toEqual(["stage"]);
+  });
+
+  it("6. 明示的な null は SET 句へ含める(undefined とは区別する)", async () => {
+    const executor = makeMockExecutor([], [], [makeExistingRow()]);
+    const repo = makeResearchRunRepo(executor as unknown as DbClient);
+
+    await repo.updateIfRunning("research_run_existing", {
+      error_kind: null,
+      error_message: undefined,
+    });
+
+    expect(executor.updated[0]).toEqual({ error_kind: null });
+    expect(Object.keys(executor.updated[0]!)).not.toContain("error_message");
+  });
+
+  it("SELECT を先行させない(read-modify-write を使わない)", async () => {
+    const executor = makeMockExecutor([], [], [makeExistingRow()]);
+    const repo = makeResearchRunRepo(executor as unknown as DbClient);
+
+    await repo.updateIfRunning("research_run_existing", { status: "failed" });
+
+    expect(executor.select).not.toHaveBeenCalled();
+  });
+
+  it("更新対象フィールドが1つも無い patch は書き込まず null を返す", async () => {
+    const executor = makeMockExecutor([], [], [makeExistingRow()]);
+    const repo = makeResearchRunRepo(executor as unknown as DbClient);
+
+    const result = await repo.updateIfRunning("research_run_existing", { status: undefined });
+
+    expect(result).toBeNull();
+    expect(executor.updated).toHaveLength(0);
+    expect(executor.update).not.toHaveBeenCalled();
+  });
+
+  it("jsonb 列(result / source_registry / token_usage / warnings)も更新できる", async () => {
+    const executor = makeMockExecutor([], [], [makeExistingRow()]);
+    const repo = makeResearchRunRepo(executor as unknown as DbClient);
+
+    await repo.updateIfRunning("research_run_existing", {
+      result: [],
+      source_registry: [],
+      token_usage: { stage1: null },
+      warnings: ["w"],
+    });
+
+    expect(executor.updated[0]).toEqual({
+      result: [],
+      source_registry: [],
+      token_usage: { stage1: null },
+      warnings: ["w"],
+    });
   });
 });

@@ -75,6 +75,59 @@ describe("extractPhoneNumbers", () => {
   });
 });
 
+/**
+ * Unicode 表記差の吸収(PR #180 final merge-blocker fix、F3 Bug A)。
+ *
+ * 監査で、`PHONE_LIKE_PATTERN` が先頭・末尾を ASCII `[0-9]` に固定し、
+ * `normalizePhone` の `\d` も ASCII 限定であるため、**全角数字の電話番号が
+ * 1件も抽出されず evidence 裏付け検査を素通りする**ことが実測で確認された。
+ * 混在ケース(片方が全角)では ASCII 側だけが検査され、全角側は無検査で
+ * canonical へ到達しうる。
+ *
+ * `U+2212`(MINUS SIGN)は **NFKC では変換されない**ことも実測で確認済み
+ * (`identity-match.ts:unifyDashLikeChars` の JSDoc が Google Places 応答で
+ * 同じ事実を記録している)。したがって NFKC だけでは不十分で、
+ * dash-like Unicode の統一が併せて必要になる。
+ */
+describe("extractPhoneNumbers — Unicode 表記差(F3 Bug A)", () => {
+  const EXPECTED_045 = ["0453056536"];
+
+  it.each([
+    ["ASCII ハイフン", "045-305-6536"],
+    ["全角数字 + 全角ハイフン(U+FF0D)", "０４５－３０５－６５３６"],
+    ["半角括弧", "(045) 305-6536"],
+    ["空白区切り", "045 305 6536"],
+    ["MINUS SIGN(U+2212)", "045−305−6536"],
+    ["HYPHEN(U+2010)", "045‐305‐6536"],
+    ["全角括弧 + 全角数字", "（０４５）３０５－６５３６"],
+  ])("%s の 045 番号を同一の正規化結果へ吸収する", (_label, input) => {
+    expect(extractPhoneNumbers(input)).toEqual(EXPECTED_045);
+  });
+
+  it.each([
+    ["ASCII", "050-5869-4190"],
+    ["全角", "０５０－５８６９－４１９０"],
+    ["MINUS SIGN", "050−5869−4190"],
+  ])("%s の 050 番号を抽出する", (_label, input) => {
+    expect(extractPhoneNumbers(input)).toEqual(["05058694190"]);
+  });
+
+  it("全角と ASCII が混在する複数番号を2件とも抽出する(片方だけ検査される穴を塞ぐ)", () => {
+    expect(
+      extractPhoneNumbers("店舗直通: ０４５－３０５－６５３６ / 予約: 050-5869-4190"),
+    ).toEqual(["0453056536", "05058694190"]);
+  });
+
+  it("表記だけが違う同一番号は重複させない(全角 + ASCII)", () => {
+    expect(extractPhoneNumbers("０４５－３０５－６５３６ / 045-305-6536")).toEqual(EXPECTED_045);
+  });
+
+  it("正規化しても桁数レンジ(10〜11桁)の判定は変わらない", () => {
+    // 全角の席数・年月日を電話番号として拾わない。
+    expect(extractPhoneNumbers("席数: ４９席、２０２４年６月２１日オープン")).toEqual([]);
+  });
+});
+
 describe("enforcePhoneNumbersBackedByEvidence — 複数番号", () => {
 
   it("複数番号がすべて evidence に現れていれば confirmed を維持する", () => {
@@ -209,9 +262,79 @@ describe("enforcePhoneNumbersBackedByEvidence — 単一番号と evidence_basis
     expect(enforcePhoneNumbersBackedByEvidence(item).status).toBe("not_found");
   });
 
-  it("value に番号が1件も無い場合は何もしない(役割ラベルだけ等)", () => {
-    const item = aiPhone("非公開", "電話番号は公開されていません。");
+  /**
+   * ## 意図的な仕様変更(PR #180 final merge-blocker fix、F3)
+   *
+   * 旧仕様は「value に番号が1件も無ければ何もしない」だった(`numbersInValue.length === 0`
+   * を vacuous に `true` としていた)。しかし `phone` は FACT であり、canonical
+   * `stores.basic_info.phone` の contract は**架電可能な番号**である。
+   * 「非公開」「未掲載」「不明」「-」といった非番号文字列が AI 生成の confirmed として
+   * canonical へ入る経路を閉じるため、AI 生成経路では **番号1件以上**を必須にする。
+   *
+   * 「掲載が無かった」という調査情報は `evidence` に残るため失われない。
+   * FACT の status 空間に「確認できた不在」を表す値が無い以上、
+   * false positive より false negative を優先する既存方針に沿う判断である。
+   */
+  it.each(["非公開", "未掲載", "不明", "-", "電話番号の記載なし", ""])(
+    "AI生成の confirmed phone で value=%p(電話番号0件)は confirmed を維持しない",
+    (value) => {
+      const result = enforcePhoneNumbersBackedByEvidence(
+        aiPhone(value, "店舗ページに電話番号の掲載がありませんでした。"),
+      );
+      expect(result.status).toBe("not_found");
+      expect(result.value).toBeNull();
+      expect(result.confidence).toBeNull();
+      expect(result.warning).toBeTruthy();
+    },
+  );
+
+  it("電話番号0件で降格しても evidence は調査情報として残す", () => {
+    const evidence = "店舗ページに電話番号の掲載がありませんでした。";
+    const result = enforcePhoneNumbersBackedByEvidence(aiPhone("非公開", evidence));
+    expect(result.evidence).toBe(evidence);
+  });
+
+  it("evidence_basis=places / existing_canonical は電話番号0件でも対象外(例外を拡張しない)", () => {
+    for (const basis of ["places", "existing_canonical"] as const) {
+      const item = aiPhone("非公開", "コード側の定型文。", { evidence_basis: basis });
+      expect(enforcePhoneNumbersBackedByEvidence(item)).toBe(item);
+    }
+  });
+
+  it("phone 以外の key は電話番号0件でも降格しない", () => {
+    const item = aiPhone("49席", "公式サイトに49席と記載。", { key: "seat_count" });
     expect(enforcePhoneNumbersBackedByEvidence(item)).toBe(item);
+  });
+
+  it("value が全角 / evidence が ASCII の同一番号 → confirmed のまま(表記差は同一視)", () => {
+    const item = aiPhone("０４５－３０５－６５３６", "食べログに電話番号 045-305-6536 と記載。");
+    expect(enforcePhoneNumbersBackedByEvidence(item).status).toBe("confirmed");
+  });
+
+  it("value が ASCII / evidence が全角の同一番号 → confirmed のまま", () => {
+    const item = aiPhone("045-305-6536", "食べログに電話番号 ０４５－３０５－６５３６ と記載。");
+    expect(enforcePhoneNumbersBackedByEvidence(item).status).toBe("confirmed");
+  });
+
+  it("value が全角 / evidence が別番号 → not_found(正規化しても別番号は同一視しない)", () => {
+    const item = aiPhone("０４５－３０５－６５３６", "掲載番号は 045-305-6537。");
+    expect(enforcePhoneNumbersBackedByEvidence(item).status).toBe("not_found");
+  });
+
+  it("全角 + ASCII 混在の複数番号で片方だけ evidence に無ければ not_found(全角側も検査される)", () => {
+    const item = aiPhone(
+      "店舗直通: ０４５－３０５－６５３６ / 予約: 050-5869-4190",
+      "予約番号は 050-5869-4190 のみ記載。",
+    );
+    expect(enforcePhoneNumbersBackedByEvidence(item).status).toBe("not_found");
+  });
+
+  it("全角 + ASCII 混在の複数番号が両方 evidence にあれば confirmed のまま", () => {
+    const item = aiPhone(
+      "店舗直通: ０４５－３０５－６５３６ / 予約: 050-5869-4190",
+      "電話番号 045-305-6536、予約 ０５０－５８６９－４１９０ と記載。",
+    );
+    expect(enforcePhoneNumbersBackedByEvidence(item).status).toBe("confirmed");
   });
 });
 
@@ -317,10 +440,68 @@ describe("isConflictCandidateEvidenceBacked", () => {
     ).toBe(true);
   });
 
-  it("value に電話番号が1件も含まれない candidate は対象外(常に true)", () => {
+  /**
+   * ## 意図的な仕様変更(PR #180 final merge-blocker fix、F3)
+   *
+   * confirmed 側と同じ理由で、conflict candidate も **番号1件以上**を必須にする。
+   * candidate は選択されればそのまま canonical `basic_info.phone` へ入るため、
+   * confirmed 側だけを締めると非番号値がむしろ通りやすい経路になる。
+   */
+  it.each(["非公開", "未掲載", "不明", "-", ""])(
+    "value=%p(電話番号0件)の candidate は trusted candidate として扱わない",
+    (value) => {
+      expect(isConflictCandidateEvidenceBacked(conflictPhone(), candidate(value, "掲載なし。"))).toBe(
+        false,
+      );
+    },
+  );
+
+  it("candidate.value が全角 / evidence が ASCII の同一番号なら true", () => {
     expect(
-      isConflictCandidateEvidenceBacked(conflictPhone(), candidate("非公開", "掲載なし。")),
+      isConflictCandidateEvidenceBacked(
+        conflictPhone(),
+        candidate("０４５－３０５－６５３６", "食べログに 045-305-6536 と記載。"),
+      ),
     ).toBe(true);
+  });
+
+  it("candidate.value が MINUS SIGN 区切りでも evidence と一致すれば true", () => {
+    expect(
+      isConflictCandidateEvidenceBacked(
+        conflictPhone(),
+        candidate("045−305−6536", "掲載番号は 045-305-6536。"),
+      ),
+    ).toBe(true);
+  });
+
+  it("全角 candidate が evidence の別番号としか一致しなければ false", () => {
+    expect(
+      isConflictCandidateEvidenceBacked(
+        conflictPhone(),
+        candidate("０４５－３０５－６５３６", "掲載番号は 045-305-6537。"),
+      ),
+    ).toBe(false);
+  });
+
+  it("全角 + ASCII 混在の複数番号 candidate は全番号が evidence にある場合のみ true", () => {
+    expect(
+      isConflictCandidateEvidenceBacked(
+        conflictPhone(),
+        candidate(
+          "店舗直通: ０４５－３０５－６５３６ / 予約: 050-5869-4190",
+          "045-305-6536 と ０５０－５８６９－４１９０ の2番号が併記。",
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      isConflictCandidateEvidenceBacked(
+        conflictPhone(),
+        candidate(
+          "店舗直通: ０４５－３０５－６５３６ / 予約: 050-5869-4190",
+          "050-5869-4190 のみ記載。",
+        ),
+      ),
+    ).toBe(false);
   });
 
   it("evidence_basis が places / existing_canonical の item は対象外(退化させない)", () => {

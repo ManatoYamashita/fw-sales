@@ -89,6 +89,7 @@ import {
 import type { SearchNote } from "@/lib/ai/research/source-registry";
 import type { UsageMetadataLike } from "@/lib/ai/research/client";
 import type { BasicInfo } from "@/types/basic-info";
+import type { StoreResearchRun, StoreResearchRunPatch } from "@/types/research-run";
 import { nowIso } from "@/lib/utils/date";
 
 /**
@@ -491,6 +492,106 @@ export function deriveErrorKind(err: unknown): string {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Workflow ownership / terminal immutability (PR #180 F2)             */
+/* ------------------------------------------------------------------ */
+
+/** `RunSupersededError` の message。外部値を一切埋め込まない固定文言。 */
+const RUN_SUPERSEDED_MESSAGE =
+  "この調査runは既に終了状態のため処理を中断しました(superseded)。";
+
+/**
+ * 自分が実行している run が既に terminal(`status !== "running"`)になっていたことを表す
+ * 内部専用エラー(PR #180 final merge-blocker fix、F2)。
+ *
+ * ## 何を防ぐか
+ *
+ * `startResearchRunAction` は expires_at を過ぎた running run を
+ * `failed / stuck_run_timeout` へ倒してから新しい run を作る。この時点で旧 Workflow が
+ * まだ生きていると、旧 Workflow の DB step が terminal な run を書き換えられた
+ * (監査 F2、CONFIRMED)。特に `persistSucceededStep` は `status: "succeeded"` を
+ * 無条件に書くため、failed が succeeded へ**復活**していた。
+ *
+ * `repos.researchRun.updateIfRunning` が 0 行更新(= CAS miss)を返したとき、
+ * 「この run はもう自分のものではない」と判断して本エラーを投げ、Gemini 呼出を含む
+ * 以降の処理へ進ませない。
+ *
+ * ## `FatalError` を継承せず `fatal = true` を持つ理由
+ *
+ * `@workflow/errors` の `FatalError.is()` は `name === "FatalError"` **または**
+ * `fatal === true` own property で判定し、後者は「`FatalError` の直接のサブクラスでない
+ * 構造化エラークラスが retry 不要を伝える方法」として公式に用意されている
+ * (同パッケージ `dist/index.d.ts` の `FatalError` JSDoc)。一方 SDK の serialization は
+ * `value.name === "FatalError"` で reducer を選ぶため、`FatalError` を継承したうえで
+ * `name` を変えると FatalError reducer から外れる。独立クラス + `fatal = true` が
+ * 「step を retry させない」と「serialization を壊さない」を両立する。
+ *
+ * message は固定文言のみで、runId・店舗情報・provider 応答を一切含まない
+ * (`buildFailureRecord` の sanitize 方針と同じ)。
+ */
+export class RunSupersededError extends Error {
+  /** `FatalError.is()` に retry 不要を伝えるマーカー(step retry を消費させない)。 */
+  readonly fatal = true;
+
+  constructor() {
+    super(RUN_SUPERSEDED_MESSAGE);
+    this.name = "RunSupersededError";
+  }
+}
+
+/** cross-realm 安全な `RunSupersededError` 判定(`FatalError.is()` と同じ duck typing)。 */
+export function isRunSupersededError(err: unknown): boolean {
+  return err instanceof Error && err.name === "RunSupersededError";
+}
+
+/**
+ * ResearchRun への書込み口(`repos.researchRun` の必要最小限の構造的部分型)。
+ *
+ * ## なぜ `repos` を直接参照せず引数で受け取るのか
+ *
+ * Vercel Workflow のコンパイラは、`"use step"` **の外側**にあるコード
+ * (= workflow bundle 側)から Node.js 依存モジュールへ到達できない。
+ * `repos` は `postgres` に依存するため、CAS ヘルパーを module scope へ置いたうえで
+ * `repos` を直接参照すると
+ * `You are attempting to use "postgres" which depends on Node.js modules` で
+ * ビルドが落ちる(実際に本 PR の実装中に再現した)。
+ *
+ * 書込み口を引数として受け取れば、`repos` の参照は `"use step"` 関数の内側だけに
+ * 留まり、ヘルパー本体は純粋なロジックとして単体テストできる。
+ */
+interface ResearchRunWriter {
+  updateIfRunning(
+    id: string,
+    patch: StoreResearchRunPatch,
+  ): Promise<StoreResearchRun | null>;
+  get(id: string): Promise<StoreResearchRun | null>;
+}
+
+/**
+ * Workflow 由来の ResearchRun write の唯一の入口(PR #180 F2)。
+ *
+ * `repos.researchRun.update()` を Workflow から直接呼んではいけない。
+ * `update()` は status 条件を持たないため、terminal な run を書き換えられる。
+ *
+ * CAS miss(0行更新)は `RunSupersededError` を投げる。**失敗記録の write だけは
+ * 例外**で、`persistFailedRun` が `updateIfRunning` を直接呼んで no-op 化する
+ * (同関数の JSDoc 参照)。
+ */
+export async function writeRunningRun(
+  repo: ResearchRunWriter,
+  runId: string,
+  patch: StoreResearchRunPatch,
+): Promise<void> {
+  const updated = await repo.updateIfRunning(runId, patch);
+  if (updated === null) {
+    console.warn("[research.workflow] superseded run write skipped", {
+      runId,
+      fields: Object.keys(patch),
+    });
+    throw new RunSupersededError();
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /*  Steps                                                              */
 /* ------------------------------------------------------------------ */
 
@@ -526,7 +627,7 @@ async function markStageStep(
   stage: "discovering" | "researching" | "done",
 ): Promise<void> {
   "use step";
-  await repos.researchRun.update(runId, { stage });
+  await writeRunningRun(repos.researchRun, runId, { stage });
 }
 markStageStep.maxRetries = DB_STEP_MAX_RETRIES;
 
@@ -599,7 +700,7 @@ async function resolveAndPersistSourceRegistryStep(
     skipped_unsupported_host: aliased.skippedUnsupportedHost,
     failures: aliased.failures,
   });
-  await repos.researchRun.update(runId, { source_registry: aliased.registry });
+  await writeRunningRun(repos.researchRun, runId, { source_registry: aliased.registry });
   return aliased.registry;
 }
 resolveAndPersistSourceRegistryStep.maxRetries = DB_STEP_MAX_RETRIES;
@@ -633,9 +734,35 @@ interface FinalizeStepParams {
   warnings: string[];
 }
 
-async function persistSucceededStep(runId: string, params: FinalizeStepParams): Promise<void> {
-  "use step";
-  await repos.researchRun.update(runId, {
+/**
+ * 成功結果を永続化する(PR #180 F2 で CAS 化)。
+ *
+ * ## CAS miss の2通りを区別する
+ *
+ * `updateIfRunning` が 0 行更新を返す理由は2つあり、**取り違えてはいけない**:
+ *
+ * 1. **step retry**: DB commit は成功したが応答/ネットワーク側で失敗し、
+ *    step が再実行された。この時点で run は既に自分が書いた `succeeded`。
+ *    → **idempotent success** として扱う(ここで失敗させると、正常に完了した run を
+ *    無駄に failed へ倒してしまう)。
+ * 2. **superseded**: stuck 判定で別の書き手が terminal にした。
+ *    → `RunSupersededError`。
+ *
+ * 判別には `status === "succeeded"` **かつ** `stage === "done"` を使う。
+ * この組み合わせを書くのは本関数だけである:
+ * - `startResearchRunAction` の stuck 処理と `persistFailedRun` は `status: "failed"`
+ * - review 系 Server Action は `status` / `stage` を一切書かない
+ * - `markStageStep` が書く `stage: "done"` は存在しない(渡すのは discovering / researching のみ)
+ *
+ * したがって「succeeded かつ done」は自分の commit が既に通った証拠であり、
+ * result 本文の突き合わせのような過剰な比較は不要。
+ */
+export async function persistSucceededRun(
+  repo: ResearchRunWriter,
+  runId: string,
+  params: FinalizeStepParams,
+): Promise<void> {
+  const updated = await repo.updateIfRunning(runId, {
     status: "succeeded",
     stage: "done",
     result: params.items,
@@ -644,19 +771,76 @@ async function persistSucceededStep(runId: string, params: FinalizeStepParams): 
     warnings: params.warnings,
     finished_at: nowIso(),
   });
+  if (updated !== null) return;
+
+  const current = await repo.get(runId);
+  if (current?.status === "succeeded" && current.stage === "done") {
+    console.info("[research.workflow] succeeded persist retried after commit", { runId });
+    return;
+  }
+
+  console.warn("[research.workflow] superseded run write skipped", {
+    runId,
+    fields: ["status", "stage", "result", "source_registry", "token_usage", "warnings", "finished_at"],
+  });
+  throw new RunSupersededError();
+}
+
+async function persistSucceededStep(runId: string, params: FinalizeStepParams): Promise<void> {
+  "use step";
+  await persistSucceededRun(repos.researchRun, runId, params);
 }
 persistSucceededStep.maxRetries = DB_STEP_MAX_RETRIES;
 
-async function markFailedStep(
+/**
+ * 失敗を永続化する(PR #180 F2 で CAS 化)。
+ *
+ * ## CAS miss でも **throw しない**
+ *
+ * Workflow 本体の catch は必ずこの関数を通る。ここで `RunSupersededError` を投げると
+ *
+ * ```
+ * step が RunSupersededError
+ *   → workflow catch
+ *   → 失敗記録 write
+ *   → CAS miss
+ *   → 再び throw(二次エラー)
+ * ```
+ *
+ * という再帰的な失敗連鎖になる。CAS miss は「別の書き手が既に terminal state を
+ * 確定させた」という**正常な結末**であり、その内容(例: `stuck_run_timeout`)を
+ * 上書きしてはならない。したがって silent no-op + sanitized な `console.warn` に留める。
+ */
+export async function persistFailedRun(
+  repo: ResearchRunWriter,
   runId: string,
   err: unknown,
   stage1Usage: UsageMetadataLike | null = null,
   stage1Diagnostics: Stage1Diagnostics | null = null,
 ): Promise<void> {
-  "use step";
   // `error_message` は固定文言のみ。raw なエラー内容は DB へ保存しない
   // (`buildFailureRecord` の JSDoc 参照、監査指摘 3)。
   const failure = buildFailureRecord(err);
+  // Theme 5B: 失敗時も token 内訳を残す(取得できていない場合は patch に含めない)。
+  // PR #180: Stage1 完了済みなら diagnostics も同じ patch へ含める
+  // (従来は成功パスでしか保存されず、Stage2 失敗のたびに失われていた)。
+  const tokenUsage = extractFailureTokenUsage(err, stage1Usage, stage1Diagnostics);
+  const updated = await repo.updateIfRunning(runId, {
+    status: "failed",
+    ...failure,
+    ...(tokenUsage === null ? {} : { token_usage: tokenUsage }),
+    finished_at: nowIso(),
+  });
+
+  if (updated === null) {
+    // 既に terminal。既存の error_kind(`stuck_run_timeout` 等)を保持する。
+    console.warn("[research.workflow] superseded run failure write skipped", {
+      runId,
+      error_kind: failure.error_kind,
+    });
+    return;
+  }
+
   // 失敗を Vercel Function logs にも残す(runtime reliability hardening、F3)。
   // 従来 `workflows/` と `lib/ai/` には console 出力が1つも無く、run 失敗の診断には
   // Supabase を直接開いて `store_research_runs` を見るしかなかった。
@@ -669,16 +853,16 @@ async function markFailedStep(
     error_kind: failure.error_kind,
     retry_exhausted: failure.error_kind.startsWith("retryable_exhausted"),
   });
-  // Theme 5B: 失敗時も token 内訳を残す(取得できていない場合は patch に含めない)。
-  // PR #180: Stage1 完了済みなら diagnostics も同じ patch へ含める
-  // (従来は成功パスでしか保存されず、Stage2 失敗のたびに失われていた)。
-  const tokenUsage = extractFailureTokenUsage(err, stage1Usage, stage1Diagnostics);
-  await repos.researchRun.update(runId, {
-    status: "failed",
-    ...failure,
-    ...(tokenUsage === null ? {} : { token_usage: tokenUsage }),
-    finished_at: nowIso(),
-  });
+}
+
+async function markFailedStep(
+  runId: string,
+  err: unknown,
+  stage1Usage: UsageMetadataLike | null = null,
+  stage1Diagnostics: Stage1Diagnostics | null = null,
+): Promise<void> {
+  "use step";
+  await persistFailedRun(repos.researchRun, runId, err, stage1Usage, stage1Diagnostics);
 }
 markFailedStep.maxRetries = DB_STEP_MAX_RETRIES;
 

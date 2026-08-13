@@ -61,6 +61,41 @@ export interface ResearchRunRepository {
   update(id: string, patch: StoreResearchRunPatch): Promise<StoreResearchRun | null>;
 
   /**
+   * **`status === "running"` の run に限り**部分更新する compare-and-swap
+   * (PR #180 final merge-blocker fix、F2)。
+   *
+   * - `status === "running"` → 単一の atomic `UPDATE ... WHERE id = ? AND status = 'running'`
+   *   を実行し、更新後の行を返す
+   * - run が存在しない、または `status !== "running"` → **1列も書き込まず** `null` を返す
+   * - `patch` に更新対象フィールドが1つも無い(全て `undefined`)場合も書き込まず `null`
+   *   を返す(呼び出し側のバグ。実際の呼び出しは常に1つ以上のフィールドを渡す)
+   *
+   * ## なぜ必要か(terminal immutability)
+   *
+   * `update()` は `SELECT → JS マージ → 全列 SET` の read-modify-write であり、
+   * ロックも status 条件も持たない。そのため stuck run を
+   * `startResearchRunAction`(`lib/actions/research-run-actions.ts`)が
+   * `failed / stuck_run_timeout` へ倒して新 run を作った**後**でも、生き残っていた
+   * 旧 Workflow の step が `status: "succeeded"` を書き戻して terminal state を復活
+   * させられた(監査 F2、CONFIRMED)。復活した run は
+   * `listStoreIdsNeedingReview` に載り、review の一括採用で古い結果が canonical
+   * `stores.basic_info` へ入りうる。
+   *
+   * 部分ユニークインデックス `store_research_runs_running_store_idx` は
+   * `WHERE status = 'running'` のみを対象とするため、`succeeded` への復活を防げない。
+   *
+   * ## 使い分け
+   *
+   * **Workflow(`workflows/store-research.ts`)由来の write は必ずこちらを使うこと。**
+   * review 系 Server Action(採用/却下/スキップ・レビュー完了)は `succeeded` な run を
+   * 更新するため対象外で、従来どおり `update()` + `getForUpdate()` の行ロックを使う。
+   */
+  updateIfRunning(
+    id: string,
+    patch: StoreResearchRunPatch,
+  ): Promise<StoreResearchRun | null>;
+
+  /**
    * 行ロック付き(`SELECT ... FOR UPDATE`)で1行取得する(feat/research-review-write-integrity、
    * MAJOR10)。同一runに対する複数のレビュー書込み操作(採用/却下/スキップ、一括採用、
    * レビュー完了)が並行実行された場合の lost update を防ぐために使う。

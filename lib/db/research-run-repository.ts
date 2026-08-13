@@ -35,6 +35,49 @@ import { getResearchRunExpiresMarginMinutes } from "@/lib/env";
 type StoreResearchRunSelectRow = typeof storeResearchRuns.$inferSelect;
 
 /**
+ * `updateIfRunning` が SET 句へ載せてよい列の allowlist
+ * (PR #180 final merge-blocker fix、F2)。
+ *
+ * `StoreResearchRunPatch` のキーと1:1で対応する。`satisfies` により、patch 型へ
+ * フィールドが増えたのにここへ追加し忘れた場合は**型エラーにならず静かに無視される**
+ * ことを避けたいが、逆方向(ここに存在しないキーを patch から拾う)は
+ * 構造的に起こらないようにする。allowlist を経由することで、想定外のキーや
+ * prototype 由来のプロパティが SET 句へ流れ込む余地を無くす。
+ */
+const PATCHABLE_COLUMNS = [
+  "status",
+  "stage",
+  "result",
+  "source_registry",
+  "review_decisions",
+  "review_completed_at",
+  "token_usage",
+  "warnings",
+  "error_kind",
+  "error_message",
+  "finished_at",
+] as const satisfies readonly (keyof StoreResearchRunPatch)[];
+
+type StoreResearchRunUpdateSet = Partial<typeof storeResearchRuns.$inferInsert>;
+
+/**
+ * `StoreResearchRunPatch` を drizzle の SET 句へ変換する。
+ *
+ * - `undefined` のフィールドは**更新対象外**として SET 句に含めない
+ * - `null` は「明示的に null へ更新する」意図として SET 句に含める
+ */
+function buildPatchSet(patch: StoreResearchRunPatch): StoreResearchRunUpdateSet {
+  const set: StoreResearchRunUpdateSet = {};
+  for (const column of PATCHABLE_COLUMNS) {
+    const value = patch[column];
+    if (value === undefined) continue;
+    // allowlist 経由の代入のため、キーは必ず実在の列名に対応する。
+    (set as Record<string, unknown>)[column] = value;
+  }
+  return set;
+}
+
+/**
  * jsonb 列の防御的パース。drizzle が jsonb を自動 parse するため通常は
  * オブジェクト/配列が渡るが、破損データ混入時は安全な既定値にフェイルセーフする
  * (`parseStoredBasicInfo` と同じ方針、`lib/db/store-repository.ts` 参照)。
@@ -206,6 +249,33 @@ export function makeResearchRunRepo(
         .where(eq(storeResearchRuns.id, id));
 
       return next;
+    },
+
+    /**
+     * `status = 'running'` を条件に含む**単一の atomic UPDATE**で部分更新する
+     * (PR #180 final merge-blocker fix、F2)。
+     *
+     * `update()` の `SELECT → JS マージ → 全列 SET` は意図的に使わない。
+     * read と write の間に status が変わる TOCTOU が残るうえ、全列 SET は
+     * patch に含まれない列まで巻き戻すため。ここでは patch に存在する列だけを
+     * SET し、`RETURNING` で更新後の行をそのまま受け取る。
+     *
+     * 0行更新(run 不存在 / `status !== 'running'`)は `null` を返す。
+     * 呼び出し側(Workflow)はこれを「この run はもう自分のものではない」と解釈する。
+     */
+    async updateIfRunning(id, patch: StoreResearchRunPatch) {
+      const set = buildPatchSet(patch);
+      // 更新対象が1つも無い patch で `.set({})` を発行しない(drizzle が例外を投げる)。
+      if (Object.keys(set).length === 0) return null;
+
+      const rows = await executor
+        .update(storeResearchRuns)
+        .set(set)
+        .where(and(eq(storeResearchRuns.id, id), eq(storeResearchRuns.status, "running")))
+        .returning();
+
+      const row = rows[0];
+      return row ? fromDbRow(row) : null;
     },
   };
 }
