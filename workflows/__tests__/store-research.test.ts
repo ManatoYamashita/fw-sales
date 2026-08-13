@@ -1416,10 +1416,34 @@ describe("Stage0 Places Identity Recovery wiring (PR #180 pre-merge fix)", () =>
     expect(source).toContain("stage2Step(store, resolvedRegistry");
   });
 
-  it("applySourceIdentityVerification target identity is unchanged", () => {
+  /**
+   * PR #180 Sparse Store Source Identity Recovery で、比較 anchor は
+   * `StoreIdentity` から `SourceVerificationTarget` へ変わった。
+   * ただし **Stage1 / Stage2 が受け取る identity は変わっていない**(上のテストで固定)。
+   */
+  it("applySourceIdentityVerification receives the post-Stage2 verification target", () => {
     expect(source).toMatch(
-      /applySourceIdentityVerification\(\s*urlContextAppliedRegistry,\s*stage2Result\.sourceVerifications,\s*store,/,
+      /applySourceIdentityVerification\(\s*urlContextAppliedRegistry,\s*stage2Result\.sourceVerifications,\s*verificationTarget,/,
     );
+  });
+
+  it("verification target is built only from StoreIdentity + Stage0 verifiedIdentity", () => {
+    expect(source).toContain(
+      "buildSourceVerificationTarget(store, stage0.verifiedIdentity)",
+    );
+  });
+
+  it("fresh Places identity never reaches Stage1 / Stage2 inputs", () => {
+    // `verifiedIdentity` / `verificationTarget` が Gemini 呼び出しの引数に現れないこと。
+    // (型レベルでも `SourceVerificationTarget` は `genre` を持たないため
+    //  `StoreIdentity` を要求する stage1Step / stage2Step へは渡せない。)
+    expect(source).not.toMatch(/stage1Step\([^)]*verifi/i);
+    expect(source).not.toMatch(/stage2Step\([^)]*verifi/i);
+    expect(source).not.toMatch(/runStage1\([^)]*verifi/i);
+    expect(source).not.toMatch(/runStage2\([^)]*verifi/i);
+    // Stage0 diagnostic ログにも verifiedIdentity を spread しない。
+    expect(source).toContain('console.info("[research.stage0] resync", { runId, ...stage0.diagnostic })');
+    expect(source).not.toMatch(/console\.\w+\([^)]*stage0\.verifiedIdentity/);
   });
 
   it("loadStoreStep builds placesSearchIdentity from the store row", () => {

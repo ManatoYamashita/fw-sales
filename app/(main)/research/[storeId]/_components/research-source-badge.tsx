@@ -52,6 +52,36 @@ export function getBadgeDisplay(entry: SourceRegistryEntry): BadgeDisplay {
   }
 }
 
+/**
+ * `identity_status === "uncertain"` のとき、Stage1 が発見した候補タイトルを
+ * **「未確認の検索候補」として**併記してよいか判定する
+ * (PR #180 Sparse Store Source Identity Recovery)。
+ *
+ * ## なぜ必要か
+ *
+ * `grounding_redirect_url` は transport host(`vertexaisearch.cloud.google.com`)のため
+ * `deriveDisplaySourceName` が hostname から媒体名を導出できず、未確認 entry は
+ * 「情報源(詳細不明)」としか表示されない。実機 run では 10 source 中 8 件がこの状態で、
+ * ユーザーは「AI が何を見て何に失敗したのか」を全く判断できなかった。
+ *
+ * ## 安全上の制約
+ *
+ * `entry.title` は **Stage1 モデルが生成した検索結果タイトル**であり、
+ * 過去に別店舗の URL へ自店名タイトルが付いていた事故がある。したがって:
+ *
+ * - `deriveDisplaySourceName` は**変更しない**。「情報源(詳細不明)」はそのまま残す
+ * - `isSourceLinkClickable` も**変更しない**。uncertain は引き続きクリック不可
+ * - confirmed 判定 / trust matrix / Tier B へ `entry.title` を新しく流さない
+ *   (本コンポーネントは表示専用で、`validateResearchItemStatus` からは呼ばれない)
+ * - 文言に必ず「検索候補」と「未確認」を含め、確認済みの出典と誤認させない
+ */
+export function shouldShowCandidateTitle(entry: SourceRegistryEntry): boolean {
+  return entry.identity_status === "uncertain" && entry.title.trim() !== "";
+}
+
+/** 未確認候補であることを打ち消せないよう、必ず両方の語を含む固定ラベル。 */
+const CANDIDATE_TITLE_LABEL = "検索候補(未確認)";
+
 export function SourceBadge({ entry }: { entry: SourceRegistryEntry }) {
   const url = entry.resolved_url ?? entry.grounding_redirect_url;
   const display = getBadgeDisplay(entry);
@@ -71,6 +101,22 @@ export function SourceBadge({ entry }: { entry: SourceRegistryEntry }) {
   // ユーザーが誤って誘導されないよう、未確認の候補URLはクリック不可にする
   // (known_store_data、またはtarget_match/competitor_match/contextualのいずれか)。
   if (!clickable) {
+    // 未確認 entry でも、Stage1 が拾った候補タイトルを「未確認の検索候補」として併記する。
+    // 確認済みの出典名(`displayName`)とは別行・別ラベルで示し、混同させない。
+    if (shouldShowCandidateTitle(entry)) {
+      return (
+        <span
+          className="inline-flex flex-col gap-0.5 cursor-default"
+          title={`${displayName}(URLの店舗同定が未確認のためリンクを無効にしています)`}
+        >
+          <span className="inline-flex items-center gap-1.5">{content}</span>
+          <span className="text-[11px] text-muted-foreground truncate max-w-[20rem]">
+            {CANDIDATE_TITLE_LABEL}: {entry.title}
+          </span>
+        </span>
+      );
+    }
+
     return (
       <span
         className="inline-flex items-center gap-1.5 cursor-default"

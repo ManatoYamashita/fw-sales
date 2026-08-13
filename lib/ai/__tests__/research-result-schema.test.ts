@@ -24,6 +24,7 @@ import {
   sortResearchItemsToCanonicalOrder,
   deriveTrustedSourceType,
   deriveDisplaySourceName,
+  deriveDowngradeReason,
   isSourceLinkClickable,
   flagEvidenceSourceIdMismatch,
   type ResearchItem,
@@ -1980,5 +1981,302 @@ describe("isVerifiedSourceForItem (confirmed と conflict candidate で共通の
     expect(isVerifiedSourceForItem(selfReported, "concept")).toBe(false);
     // 一次情報必須でないkeyでは、自己申告typeでも url_context + identity で適格。
     expect(isVerifiedSourceForItem(selfReported, "phone")).toBe(true);
+  });
+});
+
+/**
+ * confirmed 降格の理由文言(PR #180 Sparse Store Source Identity Recovery)。
+ *
+ * 実機 run(告膳)では引用元 10 source のうち 9 件が `url_context_status="success"` で
+ * **本文取得には成功していた**のに、53 項目中 19 項目が
+ * 「本文取得が確認できなかったため」という文言で降格していた。
+ *
+ * ただし `isVerifiedSourceForItem` の trust boundary は取得と identity 以外にも
+ * competitor 除外・`PRIMARY_SOURCE_REQUIRED_KEYS` の一次情報要求を持つため、
+ * 「取得成功 かつ target_match」でも confirmed になれないケースがある。
+ * そこで identity 文言を出すと再び事実と異なるので、**3 分類**にする。
+ *
+ * 判定は既存 trust helper(`isIdentityAcceptableForItem` /
+ * `getRequiredIdentityStatuses` / `isVerifiedSourceForItem` / `deriveTrustedSourceType`)を
+ * そのまま再利用し、drift させない。
+ */
+describe("deriveDowngradeReason (PR #180、3分類)", () => {
+  const ACQUISITION = "情報源の本文を取得できなかった";
+  const IDENTITY = "対象店舗のページであることを確認できなかった";
+  const ELIGIBILITY = "確認済みとして扱うために必要な情報源の条件を満たさなかった";
+  const PRIMARY = "本人発信の一次情報として確認できなかった";
+
+  const cite = (key: string, ids: string[]) => ({ key, source_ids: ids });
+
+  describe("層1: acquisition failure(本文取得できた source が0件)", () => {
+    it("A. url_context_status=error のみ → acquisition wording", () => {
+      const registry = [makeSource({ id: "S01", url_context_status: "error" })];
+      expect(deriveDowngradeReason(cite("seat_count", ["S01"]), registry)).toContain(ACQUISITION);
+    });
+
+    it("not_attempted のみ → acquisition wording", () => {
+      const registry = [makeSource({ id: "S01", url_context_status: "not_attempted" })];
+      expect(deriveDowngradeReason(cite("seat_count", ["S01"]), registry)).toContain(ACQUISITION);
+    });
+
+    it("source_ids が空 → acquisition wording", () => {
+      const registry = [makeSource({ id: "S01", url_context_status: "success" })];
+      expect(deriveDowngradeReason(cite("seat_count", []), registry)).toContain(ACQUISITION);
+    });
+
+    it("引用していない source が success でも acquisition wording", () => {
+      const registry = [
+        makeSource({ id: "S01", url_context_status: "error" }),
+        makeSource({ id: "S02", url_context_status: "success" }),
+      ];
+      expect(deriveDowngradeReason(cite("seat_count", ["S01"]), registry)).toContain(ACQUISITION);
+    });
+
+    it("registry に存在しない source_id は無視する", () => {
+      const registry = [makeSource({ id: "S01", url_context_status: "success" })];
+      expect(deriveDowngradeReason(cite("seat_count", ["S99"]), registry)).toContain(ACQUISITION);
+    });
+  });
+
+  describe("層2: identity failure(取得済みだが required identity を満たさない)", () => {
+    it("B. success + uncertain → identity wording", () => {
+      const registry = [
+        makeSource({ id: "S01", url_context_status: "success", identity_status: "uncertain" }),
+      ];
+      expect(deriveDowngradeReason(cite("seat_count", ["S01"]), registry)).toContain(IDENTITY);
+    });
+
+    it("success と error が混在していても、success 側が uncertain なら identity wording", () => {
+      const registry = [
+        makeSource({ id: "S01", url_context_status: "error" }),
+        makeSource({ id: "S02", url_context_status: "success", identity_status: "uncertain" }),
+      ];
+      expect(deriveDowngradeReason(cite("seat_count", ["S01", "S02"]), registry)).toContain(
+        IDENTITY,
+      );
+    });
+
+    it("F1. 競合項目は competitor_match が required(target_match では identity failure)", () => {
+      // COMPETITOR_ITEM_KEYS は competitor_match のみを required identity とする。
+      const registry = [
+        makeSource({ id: "S01", url_context_status: "success", identity_status: "target_match" }),
+      ];
+      expect(deriveDowngradeReason(cite("competitor_stores", ["S01"]), registry)).toContain(
+        IDENTITY,
+      );
+    });
+
+    it("F2. 文脈項目は contextual も required identity に含まれる(identity failure にならない)", () => {
+      // CONTEXTUAL_ITEM_KEYS は target_match / contextual の両方を許容する。
+      // identity は満たすので、止まるのは層3(source_type=competitor 除外)側になる。
+      const registry = [
+        makeSource({
+          id: "S01",
+          url_context_status: "success",
+          identity_status: "contextual",
+          source_type: "competitor",
+        }),
+      ];
+      const reason = deriveDowngradeReason(cite("trade_area", ["S01"]), registry);
+      expect(reason).not.toContain(IDENTITY);
+      expect(reason).toContain(ELIGIBILITY);
+    });
+
+    it("F3. 競合項目で competitor_match なら identity は満たす(層3以降へ進む)", () => {
+      const registry = [
+        makeSource({
+          id: "S01",
+          url_context_status: "success",
+          identity_status: "competitor_match",
+          source_type: "competitor",
+        }),
+      ];
+      expect(deriveDowngradeReason(cite("competitor_stores", ["S01"]), registry)).not.toContain(
+        IDENTITY,
+      );
+    });
+  });
+
+  describe("層3: source eligibility / trust failure", () => {
+    it("D. 一次情報必須 key + success + target_match + gourmet_site → 一次情報 wording", () => {
+      const registry = [
+        makeSource({
+          id: "S01",
+          url_context_status: "success",
+          identity_status: "target_match",
+          source_type: "gourmet_site",
+          discovery_provenance: "gemini_search_candidate",
+          grounding_redirect_url: "https://tabelog.com/tokyo/A1301/",
+        }),
+      ];
+      const reason = deriveDowngradeReason(cite("concept", ["S01"]), registry);
+      expect(reason).toContain(PRIMARY);
+      // identity は満たしているので identity wording にはならない。
+      expect(reason).not.toContain(IDENTITY);
+      expect(reason).not.toContain(ACQUISITION);
+    });
+
+    it.each(["owner_profile", "owner_career", "owner_philosophy", "concept"])(
+      "一次情報必須 key(%s)はすべて一次情報 wording",
+      (key) => {
+        const registry = [
+          makeSource({
+            id: "S01",
+            url_context_status: "success",
+            identity_status: "target_match",
+            source_type: "gourmet_site",
+            discovery_provenance: "gemini_search_candidate",
+            grounding_redirect_url: "https://tabelog.com/x/",
+          }),
+        ];
+        expect(deriveDowngradeReason(cite(key, ["S01"]), registry)).toContain(PRIMARY);
+      },
+    );
+
+    it("一次情報必須でない key が competitor source で止まる場合は汎用 eligibility wording", () => {
+      const registry = [
+        makeSource({
+          id: "S01",
+          url_context_status: "success",
+          identity_status: "target_match",
+          source_type: "competitor",
+        }),
+      ];
+      const reason = deriveDowngradeReason(cite("seat_count", ["S01"]), registry);
+      expect(reason).toContain(ELIGIBILITY);
+      expect(reason).not.toContain(PRIMARY);
+    });
+  });
+
+  it("G. 文言に URL / title / 店舗情報 / source id を含まない", () => {
+    const registry = [
+      makeSource({
+        id: "S01",
+        url_context_status: "success",
+        identity_status: "uncertain",
+        title: "告膳(所沢駅/和食) - ホットペッパーグルメ",
+        grounding_redirect_url:
+          "https://vertexaisearch.cloud.google.com/grounding-api-redirect/xyz",
+      }),
+    ];
+    for (const key of ["seat_count", "concept", "competitor_stores", "trade_area"]) {
+      const reason = deriveDowngradeReason(cite(key, ["S01"]), registry);
+      expect(reason).not.toContain("http");
+      expect(reason).not.toContain("告膳");
+      expect(reason).not.toContain("ホットペッパー");
+      expect(reason).not.toContain("S01");
+      expect(reason).not.toContain(key);
+    }
+  });
+
+  it("戻り値は必ず4つの固定文言のいずれか", () => {
+    const allowed = [ACQUISITION, IDENTITY, ELIGIBILITY, PRIMARY];
+    const registries = [
+      [makeSource({ id: "S01", url_context_status: "error" })],
+      [makeSource({ id: "S01", url_context_status: "success", identity_status: "uncertain" })],
+      [
+        makeSource({
+          id: "S01",
+          url_context_status: "success",
+          identity_status: "target_match",
+          source_type: "competitor",
+        }),
+      ],
+    ];
+    for (const registry of registries) {
+      for (const key of ["seat_count", "concept", "competitor_stores", "trade_area"]) {
+        const reason = deriveDowngradeReason(cite(key, ["S01"]), registry);
+        expect(allowed.some((w) => reason.includes(w))).toBe(true);
+      }
+    }
+  });
+});
+
+describe("validateResearchItemStatus の降格文言が source 状態を反映する (PR #180)", () => {
+  it("B. 本文取得成功 + 店舗同定失敗 → identity wording", () => {
+    const registry = [
+      makeSource({ id: "S01", url_context_status: "success", identity_status: "uncertain" }),
+    ];
+    const result = validateResearchItemStatus(makeItem({ source_ids: ["S01"] }), {
+      sourceRegistry: registry,
+    });
+    expect(result.status).toBe("not_found");
+    expect(result.warning).toContain("対象店舗のページであることを確認できなかった");
+    expect(result.warning).not.toContain("本文を取得できなかった");
+  });
+
+  it("A. 本文取得失敗 → acquisition wording(従来の意味を維持)", () => {
+    const registry = [
+      makeSource({ id: "S01", url_context_status: "error", identity_status: "target_match" }),
+    ];
+    const result = validateResearchItemStatus(makeItem({ source_ids: ["S01"] }), {
+      sourceRegistry: registry,
+    });
+    expect(result.status).toBe("not_found");
+    expect(result.warning).toContain("本文を取得できなかった");
+    expect(result.warning).not.toContain("対象店舗のページであることを確認できなかった");
+  });
+
+  it("C. 通常 FACT + success + target_match → 降格せず confirmed を維持する", () => {
+    const registry = [
+      makeSource({ id: "S01", url_context_status: "success", identity_status: "target_match" }),
+    ];
+    const result = validateResearchItemStatus(makeItem({ source_ids: ["S01"] }), {
+      sourceRegistry: registry,
+    });
+    expect(result.status).toBe("confirmed");
+    expect(result.warning ?? "").not.toContain("格下げ");
+  });
+
+  it("D. 一次情報必須 key + success + target_match + gourmet_site → 一次情報 wording", () => {
+    const registry = [
+      makeSource({
+        id: "S01",
+        url_context_status: "success",
+        identity_status: "target_match",
+        source_type: "gourmet_site",
+        discovery_provenance: "gemini_search_candidate",
+        grounding_redirect_url: "https://tabelog.com/tokyo/A1301/",
+      }),
+    ];
+    const result = validateResearchItemStatus(
+      makeItem({ key: "concept", research_policy: "FACT_OR_HEARING", source_ids: ["S01"] }),
+      { sourceRegistry: registry },
+    );
+    expect(result.status).toBe("hearing_required");
+    expect(result.warning).toContain("本人発信の一次情報として確認できなかった");
+    expect(result.warning).not.toContain("対象店舗のページであることを確認できなかった");
+  });
+
+  it("E. 一次情報必須 key + trusted official source → confirmed 維持", () => {
+    const registry = [
+      makeSource({
+        id: "S01",
+        url_context_status: "success",
+        identity_status: "target_match",
+        source_type: "official_site",
+        discovery_provenance: "known_store_data",
+      }),
+    ];
+    const result = validateResearchItemStatus(
+      makeItem({ key: "concept", research_policy: "FACT_OR_HEARING", source_ids: ["S01"] }),
+      { sourceRegistry: registry },
+    );
+    expect(result.status).toBe("confirmed");
+    expect(result.warning ?? "").not.toContain("格下げ");
+  });
+
+  it("降格時の status / value / source_ids は従来と同一(文言のみ変更)", () => {
+    const registry = [
+      makeSource({ id: "S01", url_context_status: "success", identity_status: "uncertain" }),
+    ];
+    const item = makeItem({ source_ids: ["S01"], value: "17:00-24:00" });
+    const result = validateResearchItemStatus(item, { sourceRegistry: registry });
+    expect(result.status).toBe("not_found");
+    expect(result.value).toBeNull();
+    expect(result.source_ids).toEqual(["S01"]);
+    expect(result.key).toBe(item.key);
+    expect(result.research_policy).toBe(item.research_policy);
+    expect(result.evidence_basis).toBeUndefined();
   });
 });

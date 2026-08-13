@@ -1039,14 +1039,92 @@ export function validateResearchItemStatus(
   }
 
   const downgradedStatus = getConfirmedDowngradeStatus(item.research_policy);
-  const downgradeNote =
-    "AIはconfirmedと判定しましたが、根拠となる情報源の本文取得が確認できなかったため自動的に格下げしました。";
 
   return {
     ...nullifyForNoInfoStatus(item, downgradedStatus),
     status: downgradedStatus,
-    warning: appendWarning(item.warning, downgradeNote),
+    warning: appendWarning(item.warning, deriveDowngradeReason(item, context.sourceRegistry)),
   };
+}
+
+/**
+ * confirmed 降格の理由文言(PR #180 Sparse Store Source Identity Recovery)。
+ *
+ * ## なぜ分けるか
+ *
+ * 従来は理由を問わず
+ * 「根拠となる情報源の**本文取得**が確認できなかったため」という単一文言だった。
+ * しかし実機 run(告膳)では引用元 10 source のうち 9 件が
+ * `url_context_status === "success"` で、**本文取得には成功していた**。
+ * 表示文言が事実と矛盾しており、53 項目中 19 項目がこの誤った説明で降格していた。
+ *
+ * 一方で `isVerifiedSourceForItem` の trust boundary は URL Context 取得と identity 以外にも
+ *
+ * - `source_type === "competitor"` の除外
+ * - `PRIMARY_SOURCE_REQUIRED_KEYS` の「本人発信の一次情報」要求
+ *   (`deriveTrustedSourceType` が `official_site` / `official_sns` を返すこと)
+ * - item key ごとの required identity(`getRequiredIdentityStatuses`)
+ *
+ * を持つ。したがって「URL Context 成功 かつ target_match」でも confirmed になれない
+ * ケースがあり、そこで identity 文言を出すと**再び事実と異なる警告**になる。
+ * 3 分類にして、どの層で止まったかを正しく示す。
+ *
+ * 文言が違うと営業担当の取るべきアクションも変わる:
+ * - 本文取得失敗 → 情報源が読めなかった(再調査で改善しうる)
+ * - 店舗同定失敗 → 店舗マスタの住所・電話が不足している可能性(マスタ整備が有効)
+ * - 情報源条件の不足 → 一次情報が見つかっていない(ヒアリング等の別手段が必要)
+ *
+ * ## 判定は既存 trust helper を再利用する(drift 防止)
+ *
+ * `isIdentityAcceptableForItem`(内部で `getRequiredIdentityStatuses` を使う)と
+ * `isVerifiedSourceForItem` を**そのまま呼ぶ**。競合項目(`COMPETITOR_ITEM_KEYS`)や
+ * 文脈項目(`CONTEXTUAL_ITEM_KEYS`)の required identity semantics もこれで自動的に
+ * 反映される(`target_match` 固定で判定しない)。判定ロジックを別実装しないこと。
+ *
+ * ## deterministic であること
+ *
+ * 判定材料は `item.source_ids` と Source Registry の構造化フィールドのみで、
+ * **AI に理由文を書かせない**。戻り値は本ファイルに書かれた固定文言のいずれかで、
+ * 店舗名・URL・`entry.title`・source id・モデル生成テキストを一切含まない。
+ *
+ * 純関数。入力を変更しない。
+ */
+const DOWNGRADE_REASON_ACQUISITION =
+  "AIはconfirmedと判定しましたが、根拠となる情報源の本文を取得できなかったため自動的に格下げしました。";
+const DOWNGRADE_REASON_IDENTITY =
+  "AIはconfirmedと判定しましたが、引用された情報源が対象店舗のページであることを確認できなかったため自動的に格下げしました。";
+const DOWNGRADE_REASON_SOURCE_ELIGIBILITY =
+  "AIはconfirmedと判定しましたが、確認済みとして扱うために必要な情報源の条件を満たさなかったため自動的に格下げしました。";
+const DOWNGRADE_REASON_PRIMARY_SOURCE =
+  "AIはconfirmedと判定しましたが、本人発信の一次情報として確認できなかったため自動的に格下げしました。";
+
+export function deriveDowngradeReason(
+  item: Pick<ResearchItem, "key" | "source_ids">,
+  sourceRegistry: readonly SourceRegistryEntry[],
+): string {
+  const entryById = new Map(sourceRegistry.map((entry) => [entry.id, entry]));
+  const cited = item.source_ids
+    .map((id) => entryById.get(id))
+    .filter((entry): entry is SourceRegistryEntry => entry !== undefined);
+
+  // 層1: そもそも本文を取得できた source を引用していない。
+  const retrieved = cited.filter((entry) => entry.url_context_status === "success");
+  if (retrieved.length === 0) return DOWNGRADE_REASON_ACQUISITION;
+
+  // 層2: 本文は取れているが、この key が要求する identity を満たす source が無い。
+  //      required identity は key のカテゴリで変わる(競合項目は competitor_match、
+  //      文脈項目は target_match/contextual)ため、既存 helper をそのまま使う。
+  const identityAccepted = retrieved.filter((entry) =>
+    isIdentityAcceptableForItem(entry, item.key),
+  );
+  if (identityAccepted.length === 0) return DOWNGRADE_REASON_IDENTITY;
+
+  // 層3: 取得も identity も満たすが `isVerifiedSourceForItem` が全 source で false。
+  //      = competitor 除外、または一次情報(official_site/official_sns)要求で止まっている。
+  //      本関数は降格時にしか呼ばれないため、ここに到達した時点で全 source が false である。
+  return PRIMARY_SOURCE_REQUIRED_KEYS.has(item.key)
+    ? DOWNGRADE_REASON_PRIMARY_SOURCE
+    : DOWNGRADE_REASON_SOURCE_ELIGIBILITY;
 }
 
 /* ------------------------------------------------------------------ */

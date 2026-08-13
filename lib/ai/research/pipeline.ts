@@ -42,7 +42,13 @@ import {
   type SourceType,
   type SourceVerification,
 } from "@/lib/ai/research-result-schema";
-import { isAddressMatch, isNameMatch, isTargetStoreMatch } from "./identity-match";
+import {
+  isAddressMatch,
+  isNameMatch,
+  isTargetStoreMatch,
+  normalizePhone,
+} from "./identity-match";
+import type { VerifiedPlacesIdentity } from "./places-stage0";
 import {
   CANONICAL_EVIDENCE_BASIS,
   CANONICAL_FALLBACK_KEYS,
@@ -647,6 +653,75 @@ export function applyUrlContextStatus(
   });
 }
 
+/**
+ * `applySourceIdentityVerification` が Web ページの `observed_*` と突き合わせる
+ * **比較 anchor**(PR #180 Sparse Store Source Identity Recovery)。
+ *
+ * ## なぜ `StoreIdentity` と別型にするのか
+ *
+ * PR #180 には accepted limitation として F1(Stage2 の prompt に載っている
+ * target identity をモデルが `observed_*` へコピーすれば、自己申告で `target_match` へ
+ * 昇格できてしまう)がある。本型には Stage0 の fresh Google Places 由来の値が
+ * 入りうるため、これが Stage1 / Stage2 の prompt へ流入すると F1 を悪化させる。
+ *
+ * 本型は **`genre` を持たない**。`StoreIdentity` は `genre` を必須とするため、
+ * `SourceVerificationTarget` を `stage1Step` / `stage2Step` / `buildStage1Prompt` /
+ * `buildStage2Prompt` / `runStage2` へ渡すと**コンパイルエラーになる**。
+ * これが「Gemini に見せない値である」ことのコンパイル時保証になる。
+ *
+ * ## 使ってよい場所
+ *
+ * Stage2 の Gemini 呼び出しが**完了した後**の `applySourceIdentityVerification` のみ。
+ */
+export interface SourceVerificationTarget {
+  name: string;
+  address: string;
+  phone: string;
+}
+
+/**
+ * `SourceVerificationTarget` を組み立てる(PR #180、**missing-only enrichment**)。
+ *
+ * ## 不変条件: 既存 `StoreIdentity` を fresh Places で上書きしない
+ *
+ * `stores.address` / `stores.phone` に有効値がある店舗では、**必ず従来値を使う**。
+ * fresh Places 値を優先すると、
+ *
+ * - 既に identity を持つ全店舗の verification 挙動が変わり、回帰面積が一気に広がる
+ * - Stage0 が誤った Place に strong match した場合、その誤りが
+ *   「既存の正しい住所」を押しのけて Web source 全体の判定基準になる
+ *
+ * ため、本 PR の対象を **「identity 欠落店舗の false negative 救済」だけ**に限定する。
+ *
+ * ## 有効値の判定
+ *
+ * - `address`: `trim()` 後に非空か(`isAddressMatch` が空文字を弾く条件と同じ)
+ * - `phone`: `normalizePhone()` 後に数字が残るか(`isTargetStoreMatch` の電話一致条件と同じ)。
+ *   `stores.phone` は `text().notNull()` でフォーマット検証が無く「不明」「未掲載」「-」
+ *   のような値が実在しうる。これらは正規化後 `""` になり電話一致に使われないため、
+ *   **欠落として扱い fresh Places で補完してよい**
+ *
+ * ## name
+ *
+ * 常に `StoreIdentity.name` を使う。Places の `displayName` は登録名と異なりうるうえ、
+ * `deriveSearchIdentityName` による営業管理タグ除去と `isNameMatch` の包含判定という
+ * 既存セマンティクスを変えないため。
+ *
+ * 純関数。入力を変更しない。
+ */
+export function buildSourceVerificationTarget(
+  store: StoreIdentity,
+  verifiedIdentity: VerifiedPlacesIdentity | null,
+): SourceVerificationTarget {
+  return {
+    name: store.name,
+    address:
+      store.address.trim() !== "" ? store.address : (verifiedIdentity?.address ?? ""),
+    phone:
+      normalizePhone(store.phone) !== "" ? store.phone : (verifiedIdentity?.phone ?? ""),
+  };
+}
+
 /** `identity_note`の最大文字数(prompt/DB肥大化防止、他のSearch Note系フィールドと同じ方針)。 */
 const MAX_IDENTITY_NOTE_LENGTH = 200;
 
@@ -671,7 +746,7 @@ const MAX_IDENTITY_NOTE_LENGTH = 200;
 export function applySourceIdentityVerification(
   sourceRegistry: readonly SourceRegistryEntry[],
   sourceVerifications: readonly SourceVerification[],
-  store: StoreIdentity,
+  target: SourceVerificationTarget,
 ): SourceRegistryEntry[] {
   const verificationById = new Map<string, SourceVerification>();
   for (const v of sourceVerifications) {
@@ -684,7 +759,7 @@ export function applySourceIdentityVerification(
     const verification = verificationById.get(entry.id);
     if (!verification) return entry;
 
-    const identityStatus = deriveIdentityStatusFromVerification(verification, store);
+    const identityStatus = deriveIdentityStatusFromVerification(verification, target);
     const note =
       verification.note.length > MAX_IDENTITY_NOTE_LENGTH
         ? `${verification.note.slice(0, MAX_IDENTITY_NOTE_LENGTH)}…`
@@ -696,7 +771,7 @@ export function applySourceIdentityVerification(
 
 function deriveIdentityStatusFromVerification(
   verification: SourceVerification,
-  store: StoreIdentity,
+  target: SourceVerificationTarget,
 ): IdentityStatus {
   switch (verification.relation) {
     case "target_store":
@@ -706,7 +781,7 @@ function deriveIdentityStatusFromVerification(
           address: verification.observed_address,
           phone: verification.observed_phone,
         },
-        store,
+        target,
       )
         ? "target_match"
         : "uncertain";

@@ -57,6 +57,7 @@ import {
   buildDeterministicItems,
   applyUrlContextStatus,
   applySourceIdentityVerification,
+  buildSourceVerificationTarget,
   upgradeMediaCoverageFromRegistry,
   appendConfirmedMediaContext,
   finalizeResearchItems,
@@ -987,12 +988,25 @@ export async function storeResearchWorkflow(
     const urlContextAppliedRegistry = applyUrlContextStatus(resolvedRegistry, [stage2Result.urlContextMetadata]);
     // fix/ai-research-source-identity-integrity: url_context成功=ページ取得成功であり
     // 「対象店舗のページだった」ことを意味しない(実機smokeで確認した誤ったHotPepper URL
-    // の事故)。Stage2の`source_verifications`とStoreIdentityをコード側で突合し、
+    // の事故)。Stage2の`source_verifications`と比較anchorをコード側で突合し、
     // `identity_status`をSource Registryへ反映する。追加のGemini呼出は発生しない。
+    //
+    // ★ 比較 anchor は `SourceVerificationTarget`(PR #180 Sparse Store Source Identity
+    // Recovery)。`stores.address` / `stores.phone` が**両方とも欠落**している店舗
+    // (実機: 告膳)では、`isTargetStoreMatch` の「住所一致 OR 電話一致」が構造的に
+    // 成立せず、正しいページでも必ず `uncertain` へ倒れていた。Stage0 の Text Search で
+    // strong match が一意成立した場合に限り、その fresh Places 値で**欠落分だけ**を補完する。
+    //
+    // この値は Stage2 の Gemini 呼び出しが完了した**後**にしか使わない。
+    // `stage1Step(store)` / `stage2Step(store, ...)` は従来どおり `StoreIdentity` を渡す
+    // (Gemini が見ていない値と post-hoc に照合することが目的であり、prompt へ入れると
+    // F1 を悪化させる)。`SourceVerificationTarget` は `genre` を持たないため
+    // `StoreIdentity` を要求する関数へは構造的に渡せない。
+    const verificationTarget = buildSourceVerificationTarget(store, stage0.verifiedIdentity);
     const finalRegistry = applySourceIdentityVerification(
       urlContextAppliedRegistry,
       stage2Result.sourceVerifications,
-      store,
+      verificationTarget,
     );
 
     // Stage1のSearch Notes(store_fact、key/value構造化済み)をSource RegistryのIDへ解決する

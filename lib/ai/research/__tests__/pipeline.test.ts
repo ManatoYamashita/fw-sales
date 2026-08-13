@@ -37,6 +37,7 @@ const {
   upgradeMediaCoverageFromRegistry,
   finalizeResearchItems,
   buildStage2RequestShape,
+  buildSourceVerificationTarget,
 } = await import("../pipeline");
 const { selectAiResearchItems } = await import("../prompts");
 const { RESEARCH_POLICY_ITEMS } = await import("@/lib/domain/research-policy");
@@ -2025,5 +2026,170 @@ describe("buildStage2RequestShape", () => {
       jsonSchema: SCHEMA,
     });
     expect(JSON.stringify(registry)).toBe(before);
+  });
+});
+
+/**
+ * `buildSourceVerificationTarget` — missing-only enrichment
+ * (PR #180 Sparse Store Source Identity Recovery)。
+ *
+ * **既存 StoreIdentity を fresh Places で上書きしない。**有効値がある店舗では必ず
+ * 従来値を使い、欠落しているフィールドだけを Stage0 の strong match 結果で補完する。
+ */
+describe("buildSourceVerificationTarget (missing-only enrichment)", () => {
+  const STORE_SPARSE = { name: "告膳", address: "", phone: "", genre: "和食" };
+  const STORE_FULL = {
+    name: "炉端ジュン",
+    address: "千葉県柏市旭町1-1-12",
+    phone: "04-7199-7985",
+    genre: "居酒屋",
+  };
+  const FRESH = { address: "埼玉県所沢市日吉町19-12", phone: "04-2998-6543" };
+
+  it("A. store.address が空なら fresh Places address を使う", () => {
+    const target = buildSourceVerificationTarget(STORE_SPARSE, FRESH);
+    expect(target.address).toBe("埼玉県所沢市日吉町19-12");
+  });
+
+  it("B. store.address に有効値があれば fresh を無視して既存値を使う(上書きしない)", () => {
+    const target = buildSourceVerificationTarget(STORE_FULL, FRESH);
+    expect(target.address).toBe("千葉県柏市旭町1-1-12");
+    expect(target.address).not.toBe(FRESH.address);
+  });
+
+  it("C. store.phone が空なら fresh Places phone を使う", () => {
+    const target = buildSourceVerificationTarget(STORE_SPARSE, FRESH);
+    expect(target.phone).toBe("04-2998-6543");
+  });
+
+  it("D. store.phone に有効番号があれば fresh を無視して既存値を使う", () => {
+    const target = buildSourceVerificationTarget(STORE_FULL, FRESH);
+    expect(target.phone).toBe("04-7199-7985");
+    expect(target.phone).not.toBe(FRESH.phone);
+  });
+
+  it.each(["不明", "未掲載", "-", "―", "非公開", "   "])(
+    "E. store.phone が %s(正規化後に空)なら欠落として fresh で補完する",
+    (raw) => {
+      const target = buildSourceVerificationTarget({ ...STORE_FULL, phone: raw }, FRESH);
+      expect(target.phone).toBe("04-2998-6543");
+    },
+  );
+
+  it("空白のみの address も欠落として扱う", () => {
+    const target = buildSourceVerificationTarget({ ...STORE_FULL, address: "   " }, FRESH);
+    expect(target.address).toBe(FRESH.address);
+  });
+
+  it("F. verifiedIdentity が null なら StoreIdentity の値だけを使う", () => {
+    expect(buildSourceVerificationTarget(STORE_FULL, null)).toEqual({
+      name: "炉端ジュン",
+      address: "千葉県柏市旭町1-1-12",
+      phone: "04-7199-7985",
+    });
+    expect(buildSourceVerificationTarget(STORE_SPARSE, null)).toEqual({
+      name: "告膳",
+      address: "",
+      phone: "",
+    });
+  });
+
+  it("name は常に StoreIdentity の値(Places の displayName を使わない)", () => {
+    expect(buildSourceVerificationTarget(STORE_SPARSE, FRESH).name).toBe("告膳");
+  });
+
+  it("戻り値は name / address / phone の3キーのみ(genre を持たない)", () => {
+    // `StoreIdentity` は `genre` 必須のため、`SourceVerificationTarget` は
+    // 構造的に `StoreIdentity` へ代入できない = Stage1/Stage2 へ渡すとコンパイルエラー。
+    expect(Object.keys(buildSourceVerificationTarget(STORE_FULL, FRESH)).sort()).toEqual([
+      "address",
+      "name",
+      "phone",
+    ]);
+  });
+
+  it("入力を変更しない(純関数)", () => {
+    const store = { ...STORE_SPARSE };
+    const fresh = { ...FRESH };
+    buildSourceVerificationTarget(store, fresh);
+    expect(store).toEqual(STORE_SPARSE);
+    expect(fresh).toEqual(FRESH);
+  });
+});
+
+/**
+ * sparse store の false negative 救済(PR #180)。
+ * fresh Places anchor があっても「名前一致 AND (住所一致 OR 電話一致)」は不変。
+ */
+describe("applySourceIdentityVerification with fresh Places anchor", () => {
+  const SPARSE_STORE = { name: "告膳", address: "", phone: "", genre: "和食" };
+  const FRESH = { address: "日本、〒359-1123 埼玉県所沢市日吉町１９−１２", phone: "04-2998-6543" };
+
+  const entry = (id: string) =>
+    ({
+      id,
+      title: "告膳(所沢駅/和食) - ホットペッパーグルメ",
+      grounding_redirect_url: `https://vertexaisearch.cloud.google.com/grounding-api-redirect/${id}`,
+      resolved_url: null,
+      resolve_status: "not_attempted",
+      source_type: "gourmet_site",
+      discovery_provenance: "gemini_search_candidate",
+      url_context_status: "success",
+      identity_status: "not_checked",
+    }) as unknown as SourceRegistryEntry;
+
+  const verification = (over: Record<string, unknown>) => [
+    {
+      source_id: "S01",
+      relation: "target_store",
+      observed_title: "t",
+      observed_name: "告膳",
+      observed_address: null,
+      observed_phone: null,
+      note: "",
+      ...over,
+    },
+  ] as unknown as Parameters<typeof applySourceIdentityVerification>[1];
+
+  const run = (over: Record<string, unknown>, fresh: typeof FRESH | null = FRESH) =>
+    applySourceIdentityVerification(
+      [entry("S01")],
+      verification(over),
+      buildSourceVerificationTarget(SPARSE_STORE, fresh),
+    )[0]!.identity_status;
+
+  it("fresh address と一致する observed_address があれば target_match", () => {
+    expect(run({ observed_address: "埼玉県所沢市日吉町19-12" })).toBe("target_match");
+  });
+
+  it("fresh phone と一致する observed_phone があれば target_match", () => {
+    expect(run({ observed_phone: "04-2998-6543" })).toBe("target_match");
+  });
+
+  it("name のみ(observed_address / observed_phone とも null)は uncertain のまま", () => {
+    expect(run({})).toBe("uncertain");
+  });
+
+  it("住所が別番地なら uncertain", () => {
+    expect(run({ observed_address: "埼玉県所沢市日吉町2-3" })).toBe("uncertain");
+  });
+
+  it("電話が別番号なら uncertain", () => {
+    expect(run({ observed_phone: "03-0000-0000" })).toBe("uncertain");
+  });
+
+  it("店名が一致しなければ住所が合っていても uncertain", () => {
+    expect(
+      run({ observed_name: "全く別の店", observed_address: "埼玉県所沢市日吉町19-12" }),
+    ).toBe("uncertain");
+  });
+
+  it("fresh anchor が無ければ従来どおり uncertain(修正前の状態を再現)", () => {
+    expect(run({ observed_address: "埼玉県所沢市日吉町19-12" }, null)).toBe("uncertain");
+  });
+
+  it("title が対象店舗名でも observed_* が無ければ target_match にしない", () => {
+    // entry.title は `isTargetStoreMatch` へ一切渡らない。
+    expect(run({ observed_name: null })).toBe("uncertain");
   });
 });

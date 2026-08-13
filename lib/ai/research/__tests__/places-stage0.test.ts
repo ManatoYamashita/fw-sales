@@ -862,6 +862,29 @@ describe("Stage0 Places Identity Recovery (PR #180 pre-merge fix)", () => {
       });
     });
 
+    it("diagnostic に verifiedIdentity(住所・電話の生値)が混入しない", async () => {
+      mockSearchPlaces.mockResolvedValue([KOKUZEN_PLACE]);
+      const result = await runStage0PlacesResync({
+        googlePlaceId: null,
+        store: { name: "告膳", address: "埼玉県所沢市日吉町19-12", phone: "" },
+        now: NOW,
+      });
+      // anchor は返るが、structured log へ出す diagnostic には入らない。
+      expect(result.verifiedIdentity).not.toBeNull();
+      const serialized = JSON.stringify(result.diagnostic);
+      expect(serialized).not.toContain("日吉町");
+      expect(serialized).not.toContain("埼玉県");
+      expect(serialized).not.toContain("2998");
+      expect(serialized).not.toContain("verifiedIdentity");
+      // diagnostic のキー集合は従来どおり(has_address / has_phone は boolean のみ)。
+      expect(Object.keys(result.diagnostic).sort()).toEqual([
+        "identity_inputs",
+        "outcome",
+        "path",
+        "review_fields_present",
+      ]);
+    });
+
     it("identity_inputs に住所・電話・place_id の値そのものを含めない(sanitized)", async () => {
       mockSearchPlaces.mockResolvedValue([KOKUZEN_PLACE]);
       const result = await runStage0PlacesResync({
@@ -875,6 +898,163 @@ describe("Stage0 Places Identity Recovery (PR #180 pre-merge fix)", () => {
       expect(serialized).not.toContain("2998");
       expect(serialized).not.toContain("告膳");
       expect(serialized).not.toContain("places/kokuzen");
+    });
+  });
+});
+
+/**
+ * Stage0 verified identity(PR #180 Sparse Store Source Identity Recovery)。
+ *
+ * `text_search` で strong match が**一意成立した場合のみ**、その Place の
+ * 住所・電話を post-Stage2 の比較 anchor として返す。それ以外の全経路で `null`。
+ * この不変条件は呼び出し側の責任ではなく `runStage0PlacesResync` の構築時に保証する。
+ */
+describe("Stage0PlacesResult.verifiedIdentity (PR #180)", () => {
+  const MATCHED_PLACE = {
+    placeId: "places/kokuzen",
+    name: "告膳",
+    formattedAddress: "日本、〒359-1123 埼玉県所沢市日吉町１９−１２",
+    lat: 35.79,
+    lng: 139.46,
+    phone: "04-2998-6543",
+    rating: 4.2,
+    userRatingsTotal: 40,
+    types: ["japanese_restaurant", "restaurant"],
+    googleMapsUri: null,
+  };
+  const SPARSE_STORE = { name: "告膳", address: "埼玉県所沢市日吉町19-12", phone: "" };
+
+  describe("text_search + strong match(唯一の安全な経路)", () => {
+    it("1. verifiedIdentity.address が matched の formattedAddress になる", async () => {
+      mockSearchPlaces.mockResolvedValue([MATCHED_PLACE]);
+      const result = await runStage0PlacesResync({
+        googlePlaceId: null,
+        store: SPARSE_STORE,
+        now: NOW,
+      });
+      expect(result.diagnostic.outcome).toBe("matched");
+      // 意味的補正はしない(住所正規化は `isAddressMatch` 側の責務)。
+      expect(result.verifiedIdentity?.address).toBe(MATCHED_PLACE.formattedAddress);
+    });
+
+    it("2. verifiedIdentity.phone が matched の phone になる", async () => {
+      mockSearchPlaces.mockResolvedValue([MATCHED_PLACE]);
+      const result = await runStage0PlacesResync({
+        googlePlaceId: null,
+        store: SPARSE_STORE,
+        now: NOW,
+      });
+      expect(result.verifiedIdentity?.phone).toBe("04-2998-6543");
+    });
+
+    it("3. Places が電話を返さなければ phone は空文字のまま(捏造しない)", async () => {
+      mockSearchPlaces.mockResolvedValue([{ ...MATCHED_PLACE, phone: "" }]);
+      const result = await runStage0PlacesResync({
+        googlePlaceId: null,
+        store: SPARSE_STORE,
+        now: NOW,
+      });
+      expect(result.verifiedIdentity).not.toBeNull();
+      expect(result.verifiedIdentity?.phone).toBe("");
+    });
+
+    it("9. name / place_id / rating / userRatingCount / genre を含まない", async () => {
+      mockSearchPlaces.mockResolvedValue([MATCHED_PLACE]);
+      const result = await runStage0PlacesResync({
+        googlePlaceId: null,
+        store: SPARSE_STORE,
+        now: NOW,
+      });
+      const identity = result.verifiedIdentity!;
+      expect(Object.keys(identity).sort()).toEqual(["address", "phone"]);
+      const serialized = JSON.stringify(identity);
+      expect(serialized).not.toContain("places/kokuzen");
+      expect(serialized).not.toContain("告膳");
+      expect(serialized).not.toContain("4.2");
+      expect(serialized).not.toContain("40");
+      expect(serialized).not.toContain("restaurant");
+    });
+  });
+
+  describe("安全でない経路はすべて null", () => {
+    it("4. text_search no_match → null", async () => {
+      mockSearchPlaces.mockResolvedValue([{ ...MATCHED_PLACE, formattedAddress: "" }]);
+      const result = await runStage0PlacesResync({
+        googlePlaceId: null,
+        store: SPARSE_STORE,
+        now: NOW,
+      });
+      expect(result.diagnostic.outcome).toBe("no_match");
+      expect(result.verifiedIdentity).toBeNull();
+    });
+
+    it("5. text_search ambiguous(strong 候補が複数)→ null", async () => {
+      mockSearchPlaces.mockResolvedValue([
+        { ...MATCHED_PLACE, placeId: "places/a" },
+        { ...MATCHED_PLACE, placeId: "places/b" },
+      ]);
+      const result = await runStage0PlacesResync({
+        googlePlaceId: null,
+        store: SPARSE_STORE,
+        now: NOW,
+      });
+      expect(result.diagnostic.outcome).toBe("ambiguous");
+      expect(result.verifiedIdentity).toBeNull();
+    });
+
+    it("6. text_search api_error → null", async () => {
+      mockSearchPlaces.mockRejectedValue(new Error("Places API エラー (500): boom"));
+      const result = await runStage0PlacesResync({
+        googlePlaceId: null,
+        store: SPARSE_STORE,
+        now: NOW,
+      });
+      expect(result.diagnostic.outcome).toBe("api_error");
+      expect(result.verifiedIdentity).toBeNull();
+    });
+
+    it("7. text_search timeout → null", async () => {
+      mockSearchPlaces.mockRejectedValue(
+        Object.assign(new Error("aborted"), { name: "TimeoutError" }),
+      );
+      const result = await runStage0PlacesResync({
+        googlePlaceId: null,
+        store: SPARSE_STORE,
+        now: NOW,
+      });
+      expect(result.diagnostic.outcome).toBe("timeout");
+      expect(result.verifiedIdentity).toBeNull();
+    });
+
+    it("8. place_id 経路は成功しても null(独立した identity 検証が無いため)", async () => {
+      mockGetPlaceById.mockResolvedValue(MATCHED_PLACE);
+      const result = await runStage0PlacesResync({
+        googlePlaceId: "places/kokuzen",
+        store: SPARSE_STORE,
+        now: NOW,
+      });
+      expect(result.diagnostic.path).toBe("place_id");
+      expect(result.diagnostic.outcome).toBe("matched");
+      expect(result.verifiedIdentity).toBeNull();
+    });
+
+    it("8b. place_id 経路の該当なし / 失敗も null", async () => {
+      mockGetPlaceById.mockResolvedValue(null);
+      const notFound = await runStage0PlacesResync({
+        googlePlaceId: "places/x",
+        store: SPARSE_STORE,
+        now: NOW,
+      });
+      expect(notFound.verifiedIdentity).toBeNull();
+
+      mockGetPlaceById.mockReset();
+      mockGetPlaceById.mockRejectedValue(new Error("Places API エラー (500): boom"));
+      const failed = await runStage0PlacesResync({
+        googlePlaceId: "places/x",
+        store: SPARSE_STORE,
+        now: NOW,
+      });
+      expect(failed.verifiedIdentity).toBeNull();
     });
   });
 });

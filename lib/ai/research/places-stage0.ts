@@ -98,6 +98,43 @@ export interface Stage0Diagnostic {
   identity_inputs: Stage0IdentityInputs;
 }
 
+/**
+ * Stage0 の Text Search で strong match が**一意に**成立した Place の
+ * 住所・電話番号(PR #180 Sparse Store Source Identity Recovery)。
+ *
+ * ## 用途
+ *
+ * Stage2 完了**後**の `applySourceIdentityVerification` で、モデルが Web 本文から
+ * 報告した `observed_address` / `observed_phone` と突き合わせる **anchor** としてのみ使う。
+ *
+ * ## なぜ必要か
+ *
+ * `isTargetStoreMatch`(`identity-match.ts`)は
+ * 「名前一致 AND (住所一致 OR 電話一致)」を要求し、比較相手が空文字の場合は
+ * `target.address.trim() !== ""` / `normalizePhone(target.phone) !== ""` のガードで
+ * **必ず false** になる。`stores.address` と `stores.phone` が両方空の店舗
+ * (実機: 告膳)では、Web ページが正しくても `target_match` が**構造的に成立しない**。
+ * 実機 run では 10 source 中 9 件が `url_context_status="success"` でありながら
+ * `target_match` が 0 件、53 項目中 19 項目が not_found へ降格していた。
+ *
+ * ## 安全上の制約(必ず守ること)
+ *
+ * - **`Stage1` / `Stage2` の prompt へ絶対に渡さない。** Gemini が見ていない値と
+ *   post-hoc に照合することが目的であり、prompt へ入れると F1(モデルが target identity を
+ *   observed_* へコピーして自己申告で昇格する問題)を悪化させる
+ * - **`text_search` かつ `outcome === "matched"` の分岐でのみ非 null にする。**
+ *   `place_id` 経路は `getPlaceById` の結果に独立した identity 検証が無いため対象外
+ * - **name / place_id / rating / userRatingCount / genre / raw API response を含めない。**
+ *   型として持てないようフィールドを 2 つに限定する
+ * - **structured log へ spread しない。** ログへ出すのは従来どおり `diagnostic` のみ
+ */
+export interface VerifiedPlacesIdentity {
+  /** Places の `formattedAddress`(生値)。正規化は `isAddressMatch` 側が行う。 */
+  address: string;
+  /** Places の `nationalPhoneNumber`。未取得時は空文字(捏造しない)。 */
+  phone: string;
+}
+
 export interface Stage0PlacesResult {
   /** 取得できた場合のみ非空。`filled_by: "places"` がスタンプ済み(in-memory専用)。 */
   placesBasicInfo: Partial<BasicInfo>;
@@ -105,6 +142,14 @@ export interface Stage0PlacesResult {
   warning: string | null;
   /** 成功・失敗を問わず必ず埋まる sanitized な診断情報(structured log 用)。 */
   diagnostic: Stage0Diagnostic;
+  /**
+   * **`text_search` で strong match が一意成立した場合のみ**非 null。
+   *
+   * `place_id` 経路 / `no_match` / `ambiguous` / `timeout` / `api_error` では必ず `null`。
+   * この「安全な経路でのみ非 null」は呼び出し側の責任ではなく、
+   * `runStage0PlacesResync` の**構築時の不変条件**として保証する。
+   */
+  verifiedIdentity: VerifiedPlacesIdentity | null;
 }
 
 /** `classifyPlacesError` の分類から診断 outcome を導く(timeout だけを区別する)。 */
@@ -253,6 +298,7 @@ export async function runStage0PlacesResync(params: {
             review_fields_present: false,
             identity_inputs: identityInputs,
           },
+          verifiedIdentity: null,
         };
       }
       const placesBasicInfo = placeResultToBasicInfo(place, now);
@@ -265,6 +311,7 @@ export async function runStage0PlacesResync(params: {
           review_fields_present: hasReviewFields(placesBasicInfo),
           identity_inputs: identityInputs,
         },
+        verifiedIdentity: null,
       };
     } catch (err) {
       const kind = classifyPlacesError(err);
@@ -277,6 +324,7 @@ export async function runStage0PlacesResync(params: {
           review_fields_present: false,
           identity_inputs: identityInputs,
         },
+        verifiedIdentity: null,
       };
     }
   }
@@ -300,6 +348,7 @@ export async function runStage0PlacesResync(params: {
           review_fields_present: false,
           identity_inputs: identityInputs,
         },
+        verifiedIdentity: null,
       };
     }
     const placesBasicInfo = placeResultToBasicInfo(matched, now);
@@ -312,6 +361,9 @@ export async function runStage0PlacesResync(params: {
         review_fields_present: hasReviewFields(placesBasicInfo),
         identity_inputs: identityInputs,
       },
+      // strong match が一意成立したこの分岐**だけ**が anchor を返す(構築時の不変条件)。
+      // 判定材料は `pickStrongPlaceMatch` の成立のみで、`BasicInfoField.filled_by` 等は使わない。
+      verifiedIdentity: { address: matched.formattedAddress, phone: matched.phone },
     };
   } catch (err) {
     const kind = classifyPlacesError(err);
@@ -324,6 +376,7 @@ export async function runStage0PlacesResync(params: {
         review_fields_present: false,
         identity_inputs: identityInputs,
       },
+      verifiedIdentity: null,
     };
   }
 }
