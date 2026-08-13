@@ -322,6 +322,103 @@ const PROVIDER_STATUS_PATTERN = /"status"\s*:\s*"([A-Z][A-Z0-9_]{2,63})"/;
 const PROVIDER_REASON_PATTERN = /"reason"\s*:\s*"([A-Z][A-Z0-9_]{2,63})"/;
 
 /**
+ * `error.message`(自由文)を分類した結果を表す**閉じた語彙**
+ * (PR #180、Stage2 400 INVALID_ARGUMENT の原因切り分け)。
+ *
+ * ## なぜ必要か
+ *
+ * 監査で、Gemini が Stage2 の 400 に対し `error.details[]` を**返していない**ことが
+ * 確定した(`provider_field_violations` / `provider_detail_types` がどちらも空。
+ * `extractDetailTypes` の shape guard は `@type` 末尾トークンを拾うだけで極めて緩く、
+ * details があれば必ず1件は通る)。したがって原因を説明している情報は
+ * `error.message` の自由文だけであり、現行コードはそれを一度も読んでいない。
+ *
+ * ## なぜ自由文を出さずに分類するのか
+ *
+ * `error.message` には prompt 断片・店舗名・住所・URL・request ID が含まれうる。
+ * そこで**自由文は内部でのみ評価し、外へ出すのは本 union の値だけ**にする。
+ * 返り値はソースコードに書かれた固定文字列のいずれかに限られるため、
+ * provider 由来の文字が1文字も外へ出ない(構造的な保証)。
+ */
+export type ProviderMessageClass =
+  | "invalid_json_payload"
+  | "invalid_response_schema"
+  | "invalid_argument_generic"
+  | "url_context_error"
+  | "token_limit"
+  | "unsupported_combination"
+  | "unclassified";
+
+/**
+ * `error.message` の分類ルール。**上から順に評価し、最初に一致したものを採る。**
+ *
+ * ## 順序の根拠
+ *
+ * Google の INVALID_ARGUMENT は
+ * `Invalid JSON payload received. Unknown name "x" at 'generation_config.response_json_schema'`
+ * のように「汎用の外枠 + 具体的な対象」という形を取ることがある。この場合
+ * 知りたいのは**対象がどこか**(URL Context なのか schema なのか)なので、
+ * 具体的な対象を指す pattern を汎用の外枠(`invalid_json_payload` /
+ * `invalid_argument_generic`)より先に評価する。
+ *
+ * ## pattern の狭さ
+ *
+ * 単独の `/schema/i` のような広い pattern は使わない(店舗名や prompt 断片に
+ * たまたま含まれる語で誤分類しうるため)。API request error として意味を持つ
+ * phrase に限定し、`response` 等の前置語を必須にしている。
+ */
+const PROVIDER_MESSAGE_PATTERNS: readonly (readonly [ProviderMessageClass, RegExp])[] = [
+  ["url_context_error", /\burl[\s_-]?context\b/i],
+  ["invalid_response_schema", /\bresponse[\s_-]?(json[\s_-]?)?schema\b/i],
+  [
+    "token_limit",
+    /\btoken count\b|\bexceeds the maximum\b|\btoo many tokens\b|\binput is too long\b|\brequest payload size exceeds\b/i,
+  ],
+  [
+    "unsupported_combination",
+    /\bis not supported\b|\bare not supported\b|\bcannot be used (?:together|with)\b|\bnot supported (?:with|together|for)\b/i,
+  ],
+  ["invalid_json_payload", /\binvalid json payload received\b/i],
+  ["invalid_argument_generic", /\brequest contains an invalid argument\b/i],
+] as const;
+
+/**
+ * `ApiError.message` の JSON から `error.message`(自由文)だけを取り出し、
+ * **閉じた語彙へ分類した結果のみ**を返す(PR #180)。
+ *
+ * - `Error` でない → `undefined`
+ * - `message` が JSON として解釈できない → `undefined`
+ * - `error` が object でない → `undefined`
+ * - `error.message` が string でない → `undefined`
+ * - string だが既知 pattern のいずれにも一致しない → `"unclassified"`
+ *
+ * `undefined` は「分類を試みられなかった(provider の自由文に到達できなかった)」、
+ * `"unclassified"` は「自由文はあったが未知の文言だった」を意味する。この2つを
+ * 区別できないと、parser のバグと未知の provider 文言を切り分けられない。
+ *
+ * **raw message・その断片・長さ・一致位置のいずれも返さない。** 純関数。
+ */
+export function classifyProviderMessage(err: unknown): ProviderMessageClass | undefined {
+  if (!(err instanceof Error)) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(err.message);
+  } catch {
+    return undefined;
+  }
+  if (typeof parsed !== "object" || parsed === null) return undefined;
+  const error = (parsed as { error?: unknown }).error;
+  if (typeof error !== "object" || error === null) return undefined;
+  const message = (error as { message?: unknown }).message;
+  if (typeof message !== "string") return undefined;
+
+  for (const [messageClass, pattern] of PROVIDER_MESSAGE_PATTERNS) {
+    if (pattern.test(message)) return messageClass;
+  }
+  return "unclassified";
+}
+
+/**
  * 構造化ログ専用の sanitized な provider 診断情報。
  * **`AiClientError` には載せない**(DB `error_message` / UI へ流出させないため)。
  */
@@ -348,6 +445,15 @@ export interface ProviderDiagnostics {
    * `type.googleapis.com/...` のような URL 形状は載せない。
    */
   provider_detail_types?: string[];
+  /**
+   * `error.message`(自由文)を**閉じた語彙へ分類した結果**(PR #180)。
+   * Gemini は Stage2 の 400 で `error.details[]` を返さないため、
+   * `provider_field_violations` / `provider_detail_types` は空になる。
+   * 原因を示す唯一の情報である自由文を、安全な固定トークンとして観測する。
+   *
+   * 値は必ず `ProviderMessageClass` のいずれか。provider 由来の文字は含まれない。
+   */
+  provider_message_class?: ProviderMessageClass;
 }
 
 /**
@@ -469,6 +575,32 @@ export function hasUnpairedSurrogate(text: string): boolean {
 }
 
 /**
+ * 文字列に **JSON/proto 変換で問題になりうる制御文字**が含まれるかを判定する
+ * (PR #180、Stage2 400 INVALID_ARGUMENT の候補観測)。
+ *
+ * 対象:
+ * - C0 制御文字(`U+0000`–`U+001F`)。ただし `\t`(09) / `\n`(0A) / `\r`(0D) は
+ *   prompt の整形に正当に使われるため除外する
+ * - `U+2028` LINE SEPARATOR / `U+2029` PARAGRAPH SEPARATOR
+ *
+ * `hasUnpairedSurrogate` と同じく **diagnostic 専用**。
+ * 入力文字列を変更せず、sanitize もせず、provider へは従来どおり同じ文字列を送る。
+ * 判定結果で prompt を書き換えたり run を失敗させたりしない。
+ *
+ * 純関数。boolean のみを返し、位置・文字コード・周辺文字は返さない。
+ */
+export function hasControlChars(text: string): boolean {
+  for (let i = 0; i < text.length; i += 1) {
+    const code = text.charCodeAt(i);
+    // C0 制御文字。\t(0x09) / \n(0x0A) / \r(0x0D) は正当な整形文字なので除外する。
+    if (code <= 0x1f && code !== 0x09 && code !== 0x0a && code !== 0x0d) return true;
+    // U+2028 LINE SEPARATOR / U+2029 PARAGRAPH SEPARATOR
+    if (code === 0x2028 || code === 0x2029) return true;
+  }
+  return false;
+}
+
+/**
  * SDK 生エラーから、**構造化ログへ出しても安全なスカラーだけ**を取り出す。
  *
  * ## なぜ必要か
@@ -513,6 +645,11 @@ export function extractProviderDiagnostics(err: unknown): ProviderDiagnostics {
     const detailTypes = extractDetailTypes(details);
     if (detailTypes !== undefined) diagnostics.provider_detail_types = detailTypes;
   }
+
+  // PR #180: details が無い場合(Stage2 400 の実機挙動)に残る唯一の signal。
+  // 自由文そのものではなく、閉じた語彙への分類結果だけを載せる。
+  const messageClass = classifyProviderMessage(err);
+  if (messageClass !== undefined) diagnostics.provider_message_class = messageClass;
 
   return diagnostics;
 }

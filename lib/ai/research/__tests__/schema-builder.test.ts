@@ -4,6 +4,8 @@
 
 import { describe, it, expect } from "vitest";
 import { buildStage2JsonSchema, buildStage2ResponseZodSchema } from "../schema-builder";
+import { selectAiResearchItems } from "../prompts";
+import { RESEARCH_POLICY_ITEMS } from "@/lib/domain/research-policy";
 
 /** JSON Schema はネストしたプレーンオブジェクトのため、テストでは緩い型で辿る。 */
 type JsonSchemaNode = Record<string, unknown>;
@@ -264,6 +266,136 @@ describe("evidence_basis を Stage2 schema へ公開しない (canonical bypass 
     if (parsed.success) {
       const item = parsed.data.items[0] as Record<string, unknown>;
       expect(item.evidence_basis).toBeUndefined();
+    }
+  });
+});
+
+/**
+ * 実際の Stage2 が生成する **現実的な key 数**での回帰テスト
+ * (PR #180、Stage2 400 INVALID_ARGUMENT 監査で発見したカバレッジ欠落)。
+ *
+ * 既存テストはすべて `allowedKeys: ["x"]` のような 1〜2 件の合成キーで、
+ * `selectAiResearchItems` → `buildStage2JsonSchema` の結合も、
+ * 実運用の 41 件 / 39 件も一度も通していなかった。
+ *
+ * ## 何を固定するか
+ *
+ * - `excludeKeys` 有無で **AI 対象件数が 41 / 39 になること**
+ * - どちらでも schema 生成が throw しないこと
+ * - `required` / `properties` / `propertyOrdering` が全ネストで整合すること
+ * - **enum 長以外の構造が 41 と 39 で完全に同一であること**
+ *   (= 39 件化そのものが schema を壊さないことの証明)
+ *
+ * Google API への live validation は行わない(ローカルの純関数検証のみ)。
+ */
+describe("realistic Stage2 schema (41-key / 39-key)", () => {
+  const registryIds = Array.from({ length: 12 }, (_, i) => `S${String(i + 1).padStart(2, "0")}`);
+
+  function buildFor(excludeKeys?: ReadonlySet<string>) {
+    const items = selectAiResearchItems(RESEARCH_POLICY_ITEMS, excludeKeys);
+    const allowedKeys = items.map((i) => i.key);
+    const schema = buildStage2JsonSchema({ allowedKeys, registryIds });
+    return { allowedKeys, schema };
+  }
+
+  /** `required` ⊆ `properties`、`propertyOrdering` が `properties` と一致することを検証する。 */
+  function expectConsistent(label: string, node: JsonSchemaNode) {
+    const properties = Object.keys((node.properties ?? {}) as JsonSchemaNode);
+    const required = (node.required ?? []) as string[];
+    const ordering = node.propertyOrdering as string[] | undefined;
+
+    expect(properties.length, `${label}: properties が空`).toBeGreaterThan(0);
+    for (const key of required) {
+      expect(properties, `${label}: required "${key}" が properties に無い`).toContain(key);
+    }
+    if (ordering !== undefined) {
+      expect([...ordering].sort(), `${label}: propertyOrdering と properties が不一致`).toEqual(
+        [...properties].sort(),
+      );
+    }
+  }
+
+  function expectAllNodesConsistent(schema: JsonSchemaNode) {
+    const properties = schema.properties as JsonSchemaNode;
+    const itemSchema = getItemSchema(schema);
+    const verificationSchema = (properties.source_verifications as JsonSchemaNode)
+      .items as JsonSchemaNode;
+    const storeIdentification = properties.store_identification as JsonSchemaNode;
+
+    expectConsistent("top-level", schema);
+    expectConsistent("items[]", itemSchema);
+    expectConsistent("source_verifications[]", verificationSchema);
+    expectConsistent("store_identification", storeIdentification);
+  }
+
+  it("excludeKeys 無しなら AI 対象は 41 件になる", () => {
+    const { allowedKeys } = buildFor();
+    expect(allowedKeys).toHaveLength(41);
+    // FACT 20 + FACT_OR_HEARING 4 + ANALYSIS 17 = 41(HEARING_ONLY / EXTERNAL は対象外)。
+    expect(new Set(allowedKeys).size).toBe(41);
+  });
+
+  it("Places deterministic な 2 key を除くと 39 件になる", () => {
+    const { allowedKeys } = buildFor(new Set(["review_avg", "review_count"]));
+    expect(allowedKeys).toHaveLength(39);
+    expect(allowedKeys).not.toContain("review_avg");
+    expect(allowedKeys).not.toContain("review_count");
+  });
+
+  it("41-key で schema 生成が throw せず、全ノードが整合する", () => {
+    const { schema } = buildFor();
+    expect(getItemSchema(schema).properties).toBeDefined();
+    expect((getItemSchema(schema).properties as JsonSchemaNode).key).toMatchObject({
+      enum: expect.any(Array),
+    });
+    expect(
+      ((getItemSchema(schema).properties as JsonSchemaNode).key as JsonSchemaNode).enum,
+    ).toHaveLength(41);
+    expectAllNodesConsistent(schema);
+  });
+
+  it("39-key で schema 生成が throw せず、全ノードが整合する", () => {
+    const { schema } = buildFor(new Set(["review_avg", "review_count"]));
+    expect(
+      ((getItemSchema(schema).properties as JsonSchemaNode).key as JsonSchemaNode).enum,
+    ).toHaveLength(39);
+    expectAllNodesConsistent(schema);
+  });
+
+  it("41-key と 39-key で enum 長以外の構造が完全に一致する", () => {
+    // enum の中身と長さをマスクしたスケルトンを比較する。
+    // 一致すれば「39 件化それ自体が schema を壊すことはない」と言える。
+    const mask = (node: unknown): unknown => {
+      if (Array.isArray(node)) return node.map(mask);
+      if (node === null || typeof node !== "object") return node;
+      const out: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+        out[k] = k === "enum" ? "<enum>" : mask(v);
+      }
+      return out;
+    };
+    const full = buildFor().schema;
+    const reduced = buildFor(new Set(["review_avg", "review_count"])).schema;
+    expect(JSON.stringify(mask(reduced))).toBe(JSON.stringify(mask(full)));
+  });
+
+  it.each([
+    ["41-key", undefined],
+    ["39-key", new Set(["review_avg", "review_count"])],
+  ])("%s の schema が Gemini 非対応キーワードを含まない", (_label, excludeKeys) => {
+    const { schema } = buildFor(excludeKeys as ReadonlySet<string> | undefined);
+    const serialized = JSON.stringify(schema);
+    for (const unsupported of [
+      '"$schema"',
+      '"minLength"',
+      '"maxLength"',
+      '"pattern"',
+      '"multipleOf"',
+      '"exclusiveMinimum"',
+      '"exclusiveMaximum"',
+      '"default"',
+    ]) {
+      expect(serialized).not.toContain(unsupported);
     }
   });
 });

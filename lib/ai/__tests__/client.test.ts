@@ -37,6 +37,8 @@ const {
   createGeminiClient,
   isAiClientError,
   extractProviderDiagnostics,
+  classifyProviderMessage,
+  hasControlChars,
   hasUnpairedSurrogate,
 } = await import("../client");
 
@@ -430,11 +432,14 @@ describe("extractProviderDiagnostics (sanitized provider診断、runtime reliabi
   it("Google標準のerror bodyからhttp_status/provider_status/provider_reasonを取り出す", () => {
     // `provider_detail_types` は PR #180 で追加した項目(`@type` の末尾トークンのみ)。
     // このfixtureの details は `google.rpc.ErrorInfo` なので "ErrorInfo" が入る。
+    // `provider_message_class` は PR #180 で追加(自由文を閉じた語彙へ分類したもの)。
+    // このfixtureの message は既知 pattern のいずれにも当たらないので "unclassified"。
     expect(extractProviderDiagnostics(apiError(429, RESOURCE_EXHAUSTED_BODY))).toEqual({
       http_status: 429,
       provider_status: "RESOURCE_EXHAUSTED",
       provider_reason: "RATE_LIMIT_EXCEEDED",
       provider_detail_types: ["ErrorInfo"],
+      provider_message_class: "unclassified",
     });
   });
 
@@ -457,6 +462,7 @@ describe("extractProviderDiagnostics (sanitized provider診断、runtime reliabi
       provider_status: "INVALID_ARGUMENT",
       provider_reason: "API_KEY_INVALID",
       provider_detail_types: ["ErrorInfo"],
+      provider_message_class: "unclassified",
     });
   });
 
@@ -784,5 +790,250 @@ describe("isAiClientError", () => {
     ["通常の Error", new Error("boom")],
   ])("%s は AiClientError と判定しない", (_label, value) => {
     expect(isAiClientError(value)).toBe(false);
+  });
+});
+
+/**
+ * `classifyProviderMessage` — provider の `error.message`(自由文)を
+ * **閉じた語彙**へ分類する(PR #180、Stage2 400 INVALID_ARGUMENT の原因切り分け)。
+ *
+ * 監査で Gemini が Stage2 の 400 に `error.details[]` を返さないことが確定したため、
+ * 原因を示す唯一の情報が自由文だけになった。自由文には prompt 断片・店舗名・住所・
+ * URL・request ID が含まれうるので、**外へ出すのは固定トークンだけ**にする。
+ */
+describe("classifyProviderMessage (PR #180、閉じた語彙への分類)", () => {
+  /** 実際の SDK と同じ形(`ApiError.message = JSON.stringify(errorBody)`)を作る。 */
+  function providerError(message: string, status = 400): Error & { status: number } {
+    return Object.assign(
+      new Error(JSON.stringify({ error: { code: status, message, status: "INVALID_ARGUMENT" } })),
+      { status },
+    );
+  }
+
+  /** 実装が返しうる固定トークンの全集合。ここに無い値を返してはいけない。 */
+  const ALLOWED_CLASSES = [
+    "invalid_json_payload",
+    "invalid_response_schema",
+    "invalid_argument_generic",
+    "url_context_error",
+    "token_limit",
+    "unsupported_combination",
+    "unclassified",
+  ] as const;
+
+  describe("既知 pattern の分類", () => {
+    it.each([
+      [
+        "invalid_json_payload",
+        'Invalid JSON payload received. Unknown name "foo" at \'generation_config\'.',
+      ],
+      [
+        "invalid_response_schema",
+        "The provided response schema is invalid: expected object at root.",
+      ],
+      ["invalid_response_schema", "generation_config.response_json_schema is malformed."],
+      ["invalid_response_schema", "Invalid value at 'generationConfig.responseJsonSchema'."],
+      ["invalid_argument_generic", "Request contains an invalid argument."],
+      ["url_context_error", "The url_context tool failed to process the supplied input."],
+      ["url_context_error", "URL Context is not available for this request."],
+      ["token_limit", "The input token count exceeds the maximum number of tokens allowed."],
+      ["token_limit", "Request payload size exceeds the limit."],
+      ["unsupported_combination", "Tool use with structured output is not supported."],
+      ["unsupported_combination", "Google Search and grounding cannot be used together."],
+    ])("%s に分類する", (expected, message) => {
+      expect(classifyProviderMessage(providerError(message))).toBe(expected);
+    });
+
+    it("より具体的な対象(url_context / response schema)を汎用の外枠より優先する", () => {
+      // Google の 400 は「汎用の外枠 + 具体的な対象」形になることがある。
+      // 知りたいのは対象がどこかなので、具体的な側を採る。
+      expect(
+        classifyProviderMessage(
+          providerError(
+            'Invalid JSON payload received. Unknown name "x" at \'generation_config.response_json_schema\'.',
+          ),
+        ),
+      ).toBe("invalid_response_schema");
+    });
+  });
+
+  describe("未知 message は unclassified になる", () => {
+    it.each([
+      ["空文字", ""],
+      ["未知の英文", "Something went terribly wrong on our side."],
+      ["日本語", "予期しないエラーが発生しました。"],
+      ["単に schema という語を含むだけの文", "The store schema drawing was rejected."],
+    ])("%s → unclassified", (_label, message) => {
+      expect(classifyProviderMessage(providerError(message))).toBe("unclassified");
+    });
+  });
+
+  describe("到達できない場合は undefined(unclassified と区別する)", () => {
+    it.each([
+      ["Error でない(文字列)", "boom"],
+      ["Error でない(null)", null],
+      ["Error でない(object)", { message: "x" }],
+    ])("%s → undefined", (_label, value) => {
+      expect(classifyProviderMessage(value)).toBeUndefined();
+    });
+
+    it("message が JSON でない → undefined", () => {
+      expect(classifyProviderMessage(new Error("not json at all"))).toBeUndefined();
+    });
+
+    it("JSON だが object でない → undefined", () => {
+      expect(classifyProviderMessage(new Error('"just a string"'))).toBeUndefined();
+      expect(classifyProviderMessage(new Error("123"))).toBeUndefined();
+      expect(classifyProviderMessage(new Error("null"))).toBeUndefined();
+    });
+
+    it("error フィールドが無い / object でない → undefined", () => {
+      expect(classifyProviderMessage(new Error(JSON.stringify({ code: 400 })))).toBeUndefined();
+      expect(classifyProviderMessage(new Error(JSON.stringify({ error: "boom" })))).toBeUndefined();
+      expect(classifyProviderMessage(new Error(JSON.stringify({ error: null })))).toBeUndefined();
+    });
+
+    it("error.message が string でない → undefined", () => {
+      expect(
+        classifyProviderMessage(new Error(JSON.stringify({ error: { message: 123 } }))),
+      ).toBeUndefined();
+      expect(
+        classifyProviderMessage(new Error(JSON.stringify({ error: { code: 400 } }))),
+      ).toBeUndefined();
+    });
+  });
+
+  it("返り値は必ず固定トークン集合のいずれか", () => {
+    const messages = [
+      "Invalid JSON payload received.",
+      "Request contains an invalid argument.",
+      "url_context failed",
+      "token count exceeded",
+      "is not supported",
+      "response schema invalid",
+      "完全に未知のメッセージ",
+    ];
+    for (const m of messages) {
+      expect(ALLOWED_CLASSES).toContain(classifyProviderMessage(providerError(m)));
+    }
+  });
+});
+
+/**
+ * 漏洩テスト(PR #180)。provider の自由文に機微な値を意図的に混ぜても、
+ * 返り値・`ProviderDiagnostics` を serialize したものに1文字も現れないことを固定する。
+ */
+describe("classifyProviderMessage / extractProviderDiagnostics の漏洩防止", () => {
+  const SECRETS = [
+    "https://example.com/secret/path?token=abc123",
+    "炉端ジュン",
+    "千葉県柏市旭町1-1-12",
+    "04-7199-7985",
+    "req-9f2c1d84-0000-4aaa-bbbb-1234567890ab",
+    "AIzaSyD-fake-key-value-for-test-0000000",
+  ] as const;
+
+  const leakyMessage =
+    `Invalid JSON payload received at ${SECRETS[0]} for store ${SECRETS[1]} ` +
+    `(${SECRETS[2]}, tel ${SECRETS[3]}). request_id=${SECRETS[4]} key=${SECRETS[5]} ` +
+    `prompt fragment: "あなたは店舗調査の専門アシスタントです"`;
+
+  const leakyError = Object.assign(
+    new Error(
+      JSON.stringify({ error: { code: 400, message: leakyMessage, status: "INVALID_ARGUMENT" } }),
+    ),
+    { status: 400 },
+  );
+
+  it("classifyProviderMessage の返り値に機微な値が含まれない", () => {
+    const result = classifyProviderMessage(leakyError);
+    expect(result).toBe("invalid_json_payload");
+    const serialized = JSON.stringify(result);
+    for (const secret of SECRETS) {
+      expect(serialized).not.toContain(secret);
+    }
+  });
+
+  it("ProviderDiagnostics を serialize しても機微な値が含まれない", () => {
+    const diagnostics = extractProviderDiagnostics(leakyError);
+    const serialized = JSON.stringify(diagnostics);
+    for (const secret of SECRETS) {
+      expect(serialized).not.toContain(secret);
+    }
+    expect(serialized).not.toContain("あなたは店舗調査");
+    expect(serialized).not.toContain("prompt fragment");
+    // 出てよいのは既存の列挙トークンと固定分類のみ。
+    expect(diagnostics.provider_status).toBe("INVALID_ARGUMENT");
+    expect(diagnostics.provider_message_class).toBe("invalid_json_payload");
+  });
+
+  it("ProviderDiagnostics のキー集合が想定どおり(未知フィールドを増やしていない)", () => {
+    const diagnostics = extractProviderDiagnostics(leakyError);
+    for (const key of Object.keys(diagnostics)) {
+      expect([
+        "http_status",
+        "provider_status",
+        "provider_reason",
+        "provider_field_violations",
+        "provider_detail_types",
+        "provider_message_class",
+      ]).toContain(key);
+    }
+  });
+
+  it("details が無くても provider_message_class だけは残る(実機 Stage2 400 の形)", () => {
+    const diagnostics = extractProviderDiagnostics(leakyError);
+    expect(diagnostics.provider_field_violations).toBeUndefined();
+    expect(diagnostics.provider_detail_types).toBeUndefined();
+    expect(diagnostics.provider_message_class).toBe("invalid_json_payload");
+  });
+
+  it("分類できない場合は provider_message_class をキーごと出さない", () => {
+    const nonJson = Object.assign(new Error("plain text error"), { status: 400 });
+    const diagnostics = extractProviderDiagnostics(nonJson);
+    expect("provider_message_class" in diagnostics).toBe(false);
+  });
+});
+
+/**
+ * `hasControlChars` — C0 制御文字 / U+2028 / U+2029 の有無だけを boolean で返す
+ * (PR #180)。`hasUnpairedSurrogate` と同じく診断専用で、入力を変更しない。
+ */
+describe("hasControlChars (PR #180、診断専用)", () => {
+  it("通常の日本語・英数字・記号は false", () => {
+    expect(hasControlChars("店舗名 ABC 123 -_/:?#[]@!$&'()*+,;=")).toBe(false);
+  });
+
+  it("tab / newline / carriage return は正当な整形文字なので false", () => {
+    expect(hasControlChars("a\tb\nc\r\nd")).toBe(false);
+  });
+
+  it.each([
+    ["NUL (U+0000)", "a\u0000b"],
+    ["U+0001", "a\u0001b"],
+    ["BS (U+0008)", "a\u0008b"],
+    ["VT (U+000B)", "a\u000Bb"],
+    ["FF (U+000C)", "a\u000Cb"],
+    ["U+000E", "a\u000Eb"],
+    ["US (U+001F)", "a\u001Fb"],
+    ["LINE SEPARATOR (U+2028)", "a\u2028b"],
+    ["PARAGRAPH SEPARATOR (U+2029)", "a\u2029b"],
+  ])("%s は true", (_label, text) => {
+    expect(hasControlChars(text)).toBe(true);
+  });
+
+  it("空文字は false", () => {
+    expect(hasControlChars("")).toBe(false);
+  });
+
+  it("入力文字列を変更しない(純関数)", () => {
+    const input = "a\u0000b";
+    const before = input;
+    hasControlChars(input);
+    expect(input).toBe(before);
+  });
+
+  it("絵文字・サロゲートペアを制御文字と誤判定しない", () => {
+    expect(hasControlChars("🍣寿司")).toBe(false);
   });
 });

@@ -26,7 +26,12 @@ import {
 } from "./source-registry";
 import { buildStage1Prompt, buildStage2Prompt, selectAiResearchItems, type StoreIdentity } from "./prompts";
 import { buildStage2JsonSchema, buildStage2ResponseZodSchema } from "./schema-builder";
-import { createResearchGeminiClient, type UsageMetadataLike, type UrlContextMetadataLike } from "./client";
+import {
+  createResearchGeminiClient,
+  type Stage2RequestShape,
+  type UsageMetadataLike,
+  type UrlContextMetadataLike,
+} from "./client";
 import {
   applyDeterministicValidation,
   deriveDisplaySourceName,
@@ -184,6 +189,59 @@ function validateStage2Coverage(
 }
 
 /**
+ * Stage2 request の **sanitized な形状診断**(count のみ)を構造化入力から組み立てる
+ * (PR #180、Stage2 400 INVALID_ARGUMENT observability)。
+ *
+ * ## なぜ prompt テキストから逆算しないのか
+ *
+ * URL 件数・項目件数・Search Note 件数はいずれも構造化データ(`allowedKeys` /
+ * `sourceRegistry` / `searchNotes`)として手元にある。prompt を正規表現で
+ * 走査して数え直すと、prompt 書式の変更で静かに壊れるうえ、URL 断片を
+ * 取り回す実装になり漏洩面が増える。構造化入力から直接数える。
+ *
+ * ## Search Note の件数
+ *
+ * `buildStage2Prompt` は `sourceRegistry` の `grounding_redirect_url` と一致する
+ * note だけを prompt へ埋め込む(一致しない URL は出典として引用できないため)。
+ * ここでも同じ条件で数え、**実際に prompt に入る件数**を返す。
+ *
+ * ## 不変条件
+ *
+ * 戻り値は number のみ。URL・prompt・schema 本文・店舗名・住所・電話番号を
+ * 1つも含まない(型として持てない)。純関数で、入力を変更しない。
+ */
+export function buildStage2RequestShape(params: {
+  allowedKeys: readonly string[];
+  sourceRegistry: readonly SourceRegistryEntry[];
+  searchNotes: readonly SearchNote[];
+  jsonSchema: Record<string, unknown>;
+}): Stage2RequestShape {
+  const { allowedKeys, sourceRegistry, searchNotes, jsonSchema } = params;
+
+  const urls = sourceRegistry.map((s) => s.grounding_redirect_url);
+  let invalidUrlCount = 0;
+  for (const url of urls) {
+    try {
+      new URL(url);
+    } catch {
+      invalidUrlCount += 1;
+    }
+  }
+
+  const registryUrls = new Set(urls);
+  const searchNoteCount = searchNotes.filter((n) => registryUrls.has(n.sourceUrl)).length;
+
+  return {
+    stage2_item_count: allowedKeys.length,
+    source_registry_count: sourceRegistry.length,
+    unique_url_count: registryUrls.size,
+    invalid_url_count: invalidUrlCount,
+    search_note_count: searchNoteCount,
+    schema_utf8_byte_count: new TextEncoder().encode(JSON.stringify(jsonSchema)).length,
+  };
+}
+
+/**
  * Stage2: AI対象項目(FACT + FACT_OR_HEARING + ANALYSIS、そのrunで実際に選択された件数)を
  * 1回のGemini呼出で生成する(fix/ai-research-poc-like-retrieval、PoCと同様の単一call構成へ回帰)。
  *
@@ -214,7 +272,21 @@ export async function runStage2(
   const jsonSchema = buildStage2JsonSchema({ allowedKeys, registryIds });
   const client = createResearchGeminiClient();
 
-  const result = await client.runStructuredUrlContext({ prompt, jsonSchema }, signal);
+  const result = await client.runStructuredUrlContext(
+    {
+      prompt,
+      jsonSchema,
+      // 失敗時ログ専用の sanitized な request 診断(count のみ、PR #180)。
+      // request 本体(prompt / jsonSchema / config)には一切影響しない。
+      diagnostics: buildStage2RequestShape({
+        allowedKeys,
+        sourceRegistry,
+        searchNotes,
+        jsonSchema,
+      }),
+    },
+    signal,
+  );
 
   let parsedJson: unknown;
   try {

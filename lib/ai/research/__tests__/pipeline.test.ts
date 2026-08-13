@@ -36,6 +36,7 @@ const {
   appendConfirmedMediaContext,
   upgradeMediaCoverageFromRegistry,
   finalizeResearchItems,
+  buildStage2RequestShape,
 } = await import("../pipeline");
 const { selectAiResearchItems } = await import("../prompts");
 const { RESEARCH_POLICY_ITEMS } = await import("@/lib/domain/research-policy");
@@ -1869,5 +1870,160 @@ describe("finalizeResearchItems — phone の evidence_basis 別経路 (Issue B-
     // 役割ラベルが維持されること
     expect(result[0]!.value).toContain("店舗直通");
     expect(result[0]!.value).toContain("予約・問い合わせ");
+  });
+});
+
+/**
+ * Stage2 request の sanitized な形状診断(PR #180、Stage2 400 observability)。
+ *
+ * count のみを構造化入力から導く純関数。URL・prompt・schema 本文・店舗情報を
+ * 1つも保持しないことを固定する。
+ */
+describe("buildStage2RequestShape", () => {
+  const entry = (id: string, url: string) =>
+    ({
+      id,
+      grounding_redirect_url: url,
+      title: "食べログ - 関内 なむら",
+      source_type: "gourmet_site",
+      discovery_provenance: "gemini_search_candidate",
+      url_context_status: "not_attempted",
+      identity_status: "not_checked",
+    }) as unknown as SourceRegistryEntry;
+
+  const REGISTRY = [
+    entry("S01", "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AAA"),
+    entry("S02", "https://vertexaisearch.cloud.google.com/grounding-api-redirect/BBB"),
+    entry("S03", "https://tabelog.com/kanagawa/A1401/A140104/14012345/"),
+  ];
+
+  const SCHEMA = { type: "object", properties: { a: { type: "string" } } };
+
+  it("構造化入力から count を導く", () => {
+    const shape = buildStage2RequestShape({
+      allowedKeys: ["store_name", "address", "phone"],
+      sourceRegistry: REGISTRY,
+      searchNotes: [],
+      jsonSchema: SCHEMA,
+    });
+    expect(shape.stage2_item_count).toBe(3);
+    expect(shape.source_registry_count).toBe(3);
+    expect(shape.unique_url_count).toBe(3);
+    expect(shape.invalid_url_count).toBe(0);
+    expect(shape.search_note_count).toBe(0);
+  });
+
+  it("重複 URL は unique_url_count に数えない", () => {
+    const dup = [...REGISTRY, entry("S04", REGISTRY[0]!.grounding_redirect_url)];
+    const shape = buildStage2RequestShape({
+      allowedKeys: [],
+      sourceRegistry: dup,
+      searchNotes: [],
+      jsonSchema: SCHEMA,
+    });
+    expect(shape.source_registry_count).toBe(4);
+    expect(shape.unique_url_count).toBe(3);
+  });
+
+  it("new URL() で解釈できない URL を invalid_url_count に数える", () => {
+    const withInvalid = [...REGISTRY, entry("S04", "not a url"), entry("S05", "")];
+    const shape = buildStage2RequestShape({
+      allowedKeys: [],
+      sourceRegistry: withInvalid,
+      searchNotes: [],
+      jsonSchema: SCHEMA,
+    });
+    expect(shape.invalid_url_count).toBe(2);
+  });
+
+  it("search_note_count は prompt へ実際に入る件数(registry と URL 一致したもの)だけを数える", () => {
+    // `buildStage2Prompt` は registry の URL と一致した note のみを埋め込む。
+    const notes = [
+      { sourceUrl: REGISTRY[0]!.grounding_redirect_url, kind: "store_fact", summary: "s" },
+      { sourceUrl: REGISTRY[1]!.grounding_redirect_url, kind: "review_signal", summary: "s" },
+      { sourceUrl: "https://unmatched.example.com/x", kind: "store_fact", summary: "s" },
+    ] as unknown as Parameters<typeof buildStage2RequestShape>[0]["searchNotes"];
+
+    const shape = buildStage2RequestShape({
+      allowedKeys: [],
+      sourceRegistry: REGISTRY,
+      searchNotes: notes,
+      jsonSchema: SCHEMA,
+    });
+    expect(shape.search_note_count).toBe(2);
+  });
+
+  it("schema_utf8_byte_count は JSON.stringify 後の UTF-8 バイト長", () => {
+    const shape = buildStage2RequestShape({
+      allowedKeys: [],
+      sourceRegistry: [],
+      searchNotes: [],
+      jsonSchema: SCHEMA,
+    });
+    expect(shape.schema_utf8_byte_count).toBe(
+      new TextEncoder().encode(JSON.stringify(SCHEMA)).length,
+    );
+  });
+
+  it("空の registry / allowedKeys でも例外を投げず 0 を返す", () => {
+    const shape = buildStage2RequestShape({
+      allowedKeys: [],
+      sourceRegistry: [],
+      searchNotes: [],
+      jsonSchema: {},
+    });
+    expect(shape.stage2_item_count).toBe(0);
+    expect(shape.source_registry_count).toBe(0);
+    expect(shape.unique_url_count).toBe(0);
+    expect(shape.invalid_url_count).toBe(0);
+    expect(shape.search_note_count).toBe(0);
+  });
+
+  it("戻り値に URL / title / schema 本文 / 店舗情報を保持しない", () => {
+    const shape = buildStage2RequestShape({
+      allowedKeys: ["store_name"],
+      sourceRegistry: REGISTRY,
+      searchNotes: [],
+      jsonSchema: SCHEMA,
+    });
+    const serialized = JSON.stringify(shape);
+    expect(serialized).not.toContain("https://");
+    expect(serialized).not.toContain("vertexaisearch");
+    expect(serialized).not.toContain("tabelog");
+    expect(serialized).not.toContain("なむら");
+    expect(serialized).not.toContain("食べログ");
+    expect(serialized).not.toContain("properties");
+  });
+
+  it("戻り値のキー集合と型が固定である(すべて number)", () => {
+    const shape = buildStage2RequestShape({
+      allowedKeys: ["a"],
+      sourceRegistry: REGISTRY,
+      searchNotes: [],
+      jsonSchema: SCHEMA,
+    });
+    expect(Object.keys(shape).sort()).toEqual([
+      "invalid_url_count",
+      "schema_utf8_byte_count",
+      "search_note_count",
+      "source_registry_count",
+      "stage2_item_count",
+      "unique_url_count",
+    ]);
+    for (const value of Object.values(shape)) {
+      expect(typeof value).toBe("number");
+    }
+  });
+
+  it("入力を変更しない(純関数)", () => {
+    const registry = [...REGISTRY];
+    const before = JSON.stringify(registry);
+    buildStage2RequestShape({
+      allowedKeys: ["a"],
+      sourceRegistry: registry,
+      searchNotes: [],
+      jsonSchema: SCHEMA,
+    });
+    expect(JSON.stringify(registry)).toBe(before);
   });
 });

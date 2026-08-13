@@ -380,8 +380,9 @@ describe("Gemini呼出失敗のsanitized structured log", () => {
     expect(errorSpy).toHaveBeenCalledTimes(1);
     const [message, fields] = errorSpy.mock.calls[0]!;
     expect(message).toBe("[research.gemini] call failed");
-    // `provider_detail_types` は PR #180 で追加(`@type` の末尾トークンのみ)。
-    // Stage1 の失敗ログには request 側 diagnostic(prompt_has_unpaired_surrogate)を付けない。
+    // `provider_detail_types` / `provider_message_class` は PR #180 で追加
+    // (前者は `@type` の末尾トークン、後者は自由文を閉じた語彙へ分類したもの)。
+    // Stage1 の失敗ログには request 側 diagnostic(prompt/count 系)を付けない。
     expect(fields).toEqual({
       stage: "stage1",
       kind: "rate_limit",
@@ -389,6 +390,7 @@ describe("Gemini呼出失敗のsanitized structured log", () => {
       provider_status: "RESOURCE_EXHAUSTED",
       provider_reason: "RATE_LIMIT_EXCEEDED",
       provider_detail_types: ["ErrorInfo"],
+      provider_message_class: "unclassified",
     });
   });
 
@@ -492,6 +494,137 @@ describe("Gemini呼出失敗のsanitized structured log", () => {
         .catch(() => undefined);
       const [, fields] = errorSpy.mock.calls[0]!;
       expect(fields).not.toHaveProperty("prompt_has_unpaired_surrogate");
+    });
+
+    /**
+     * Stage2 request の sanitized な形状診断(PR #180、Stage2 400 observability)。
+     * count と boolean のみ。raw prompt / URL / schema / 店舗情報は載せない。
+     */
+    describe("Stage2 request diagnostics", () => {
+      const SHAPE = {
+        stage2_item_count: 39,
+        source_registry_count: 12,
+        unique_url_count: 12,
+        invalid_url_count: 0,
+        search_note_count: 5,
+        schema_utf8_byte_count: 3360,
+      };
+
+      const failStage2WithShape = async (prompt: string) => {
+        mockGenerateContent.mockRejectedValue(
+          Object.assign(new Error(BAD_REQUEST_BODY), { status: 400 }),
+        );
+        await expect(
+          createResearchGeminiClient().runStructuredUrlContext(
+            { prompt, jsonSchema: { type: "object" }, diagnostics: SHAPE },
+            AbortSignal.timeout(1000),
+          ),
+        ).rejects.toMatchObject({ kind: "api_error", status: 400 });
+        return errorSpy.mock.calls[0]![1] as Record<string, unknown>;
+      };
+
+      it("呼び出し側から渡された count をそのままログへ出す", async () => {
+        const fields = await failStage2WithShape("調査プロンプト");
+        expect(fields).toMatchObject(SHAPE);
+      });
+
+      it("prompt 由来の値は client 側で算出する", async () => {
+        // "あいう" は UTF-16 で 3 コード単位、UTF-8 で 9 バイト。
+        const fields = await failStage2WithShape("あいう");
+        expect(fields.prompt_char_count).toBe(3);
+        expect(fields.prompt_utf8_byte_count).toBe(9);
+        expect(fields.has_control_chars).toBe(false);
+        expect(fields.prompt_has_unpaired_surrogate).toBe(false);
+      });
+
+      it("サロゲートペアの char/byte を正しく数える", async () => {
+        // "🍣" は UTF-16 で 2 コード単位、UTF-8 で 4 バイト。
+        const fields = await failStage2WithShape("🍣");
+        expect(fields.prompt_char_count).toBe(2);
+        expect(fields.prompt_utf8_byte_count).toBe(4);
+      });
+
+      it("制御文字があれば has_control_chars=true", async () => {
+        const fields = await failStage2WithShape("a\u0000b");
+        expect(fields.has_control_chars).toBe(true);
+      });
+
+      it("tab / newline だけなら has_control_chars=false", async () => {
+        const fields = await failStage2WithShape("a\tb\nc");
+        expect(fields.has_control_chars).toBe(false);
+      });
+
+      it("診断オブジェクトが raw prompt / URL / 店舗情報を保持しない", async () => {
+        const prompt =
+          "対象店舗: 関内 なむら / 住所: 神奈川県横浜市中区1-2-3 / 電話: 045-305-6536\n" +
+          "- S01: https://vertexaisearch.cloud.google.com/grounding-api-redirect/AAA (食べログ)";
+        const fields = await failStage2WithShape(prompt);
+        const serialized = JSON.stringify(fields);
+        expect(serialized).not.toContain("なむら");
+        expect(serialized).not.toContain("神奈川県");
+        expect(serialized).not.toContain("045-305-6536");
+        expect(serialized).not.toContain("vertexaisearch");
+        expect(serialized).not.toContain("https://");
+        expect(serialized).not.toContain("食べログ");
+        // 出るのは count / boolean と既存の列挙トークンだけ。
+        expect(fields.prompt_char_count).toBe(prompt.length);
+      });
+
+      it("診断の値すべてが number または boolean である", async () => {
+        const fields = await failStage2WithShape("プロンプト");
+        for (const key of [
+          "stage2_item_count",
+          "source_registry_count",
+          "unique_url_count",
+          "invalid_url_count",
+          "search_note_count",
+          "prompt_char_count",
+          "prompt_utf8_byte_count",
+          "schema_utf8_byte_count",
+        ]) {
+          expect(typeof fields[key]).toBe("number");
+        }
+        for (const key of ["has_control_chars", "prompt_has_unpaired_surrogate"]) {
+          expect(typeof fields[key]).toBe("boolean");
+        }
+      });
+
+      it("diagnostics 未指定でも例外にならず、prompt 由来の値だけが出る", async () => {
+        mockGenerateContent.mockRejectedValue(
+          Object.assign(new Error(BAD_REQUEST_BODY), { status: 400 }),
+        );
+        await expect(
+          createResearchGeminiClient().runStructuredUrlContext(
+            { prompt: "abc", jsonSchema: { type: "object" } },
+            AbortSignal.timeout(1000),
+          ),
+        ).rejects.toMatchObject({ kind: "api_error" });
+        const fields = errorSpy.mock.calls[0]![1] as Record<string, unknown>;
+        expect(fields.prompt_char_count).toBe(3);
+        // 数えられなかった値を 0 で捏造しない。
+        expect(fields).not.toHaveProperty("stage2_item_count");
+        expect(fields).not.toHaveProperty("source_registry_count");
+      });
+
+      it("diagnostics は provider へ送る request に一切影響しない", async () => {
+        await failStage2WithShape("送信プロンプト");
+        const call = mockGenerateContent.mock.calls.at(-1)!;
+        expect(call[0].contents[0].parts[0].text).toBe("送信プロンプト");
+        expect(call[0].config).not.toHaveProperty("diagnostics");
+        expect(JSON.stringify(call[0])).not.toContain("stage2_item_count");
+      });
+
+      it("成功パスでは診断ログを出さない", async () => {
+        mockGenerateContent.mockResolvedValue({
+          text: '{"ok":true}',
+          candidates: [{ finishReason: "STOP" }],
+        });
+        await createResearchGeminiClient().runStructuredUrlContext(
+          { prompt: "p", jsonSchema: { type: "object" }, diagnostics: SHAPE },
+          AbortSignal.timeout(1000),
+        );
+        expect(errorSpy).not.toHaveBeenCalled();
+      });
     });
   });
 

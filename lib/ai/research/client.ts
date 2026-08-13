@@ -21,6 +21,7 @@ import {
   normalizeSdkError,
   makeError,
   extractProviderDiagnostics,
+  hasControlChars,
   hasUnpairedSurrogate,
   type AiClientError,
 } from "@/lib/ai/client";
@@ -73,12 +74,79 @@ export interface Stage2CallResult {
   usageMetadata: UsageMetadataLike | null;
 }
 
+/**
+ * Stage2 request の**性質だけ**を表す sanitized な診断値(PR #180、Stage2 400 observability)。
+ *
+ * 監査で、Stage2 `400 INVALID_ARGUMENT` が
+ *
+ * - Stage0 Places 修正より前(2026-08-03)から断続的に発生していること
+ * - 41-key / 39-key のどちらでも発生し、どちらでも成功もしていること
+ * - 同一店舗・同一コードで数分後の再実行が成功する事例が複数あること
+ * - DB に残る Source Registry の特徴量(件数・URL 形式・重複・type 構成)では
+ *   400 と成功が一切分離しないこと
+ *
+ * が確定した。残る未観測の request 側 signal を、次回1回の smoke で確定させるために
+ * **count と boolean だけ**を記録する。
+ *
+ * ## 不変条件
+ *
+ * - **数値と boolean のみ。** URL・prompt 本文・schema 本文・店舗名・住所・電話番号を
+ *   1つも保持しない(型として持てない)
+ * - `AiClientError` にも DB にも載せない(ログ専用)。既存 `ProviderDiagnostics` と同じ境界
+ * - この値で prompt / schema / request を書き換えない。観測するだけ
+ * - 失敗時の catch 内でのみ組み立てる(成功パスにコストをかけない)
+ */
+/**
+ * **構造化入力から導ける**部分。`runStage2`(`pipeline.ts`)が
+ * `allowedKeys` / `sourceRegistry` / `searchNotes` / `jsonSchema` から組み立てる。
+ * prompt テキストの走査で再導出しない(構造化データがある値をテキスト解析しない)。
+ */
+export interface Stage2RequestShape {
+  /** Stage2 が担当する項目数(= `allowedKeys.length`)。41 / 39 を実測で確定させる。 */
+  stage2_item_count: number;
+  /** Source Registry のエントリ数(= prompt に列挙される URL 数)。 */
+  source_registry_count: number;
+  /** 上記のうち URL として一意なものの数。 */
+  unique_url_count: number;
+  /** `new URL()` が失敗したエントリ数。 */
+  invalid_url_count: number;
+  /** prompt に実際に埋め込まれる Search Note の件数(registry と URL 一致したもの)。 */
+  search_note_count: number;
+  /** `JSON.stringify(jsonSchema)` の UTF-8 バイト長。schema 本文は保持しない。 */
+  schema_utf8_byte_count: number;
+}
+
+/**
+ * **prompt の走査が必要な**部分。`runStructuredUrlContext` の catch 内でのみ算出する
+ * (成功パスにコストをかけない、という既存 `prompt_has_unpaired_surrogate` の方針を維持)。
+ */
+export interface Stage2PromptShape {
+  /** prompt の UTF-16 コード単位長。 */
+  prompt_char_count: number;
+  /** prompt の UTF-8 バイト長。 */
+  prompt_utf8_byte_count: number;
+  /** prompt に C0 制御文字 / U+2028 / U+2029 が含まれるか。 */
+  has_control_chars: boolean;
+  /** prompt に unpaired UTF-16 surrogate が含まれるか。 */
+  prompt_has_unpaired_surrogate: boolean;
+}
+
+export type Stage2RequestDiagnostics = Stage2RequestShape & Stage2PromptShape;
+
 export interface ResearchGeminiClient {
   /** Stage1: Google Search単独。Structured Outputは使わない。 */
   runSourceDiscovery(prompt: string, signal: AbortSignal): Promise<Stage1CallResult>;
   /** Stage2: URL Context単独 + Structured Output。 */
   runStructuredUrlContext(
-    params: { prompt: string; jsonSchema: Record<string, unknown> },
+    params: {
+      prompt: string;
+      jsonSchema: Record<string, unknown>;
+      /**
+       * 失敗時ログ専用の sanitized な request 診断(count のみ)。
+       * **provider へ送る request には一切影響しない。** 省略可(既存呼び出しの後方互換)。
+       */
+      diagnostics?: Stage2RequestShape;
+    },
     signal: AbortSignal,
   ): Promise<Stage2CallResult>;
 }
@@ -184,19 +252,14 @@ function logGeminiCallFailure(
  * 失敗ログにだけ添える **request 側の sanitized 診断**(PR #180、Stage2 400 observability)。
  *
  * `extractProviderDiagnostics` が provider 応答側を担うのに対し、こちらは
- * 「我々が送ったリクエストの性質」を boolean で記録する。
- * **boolean のみ。** raw prompt・文字位置・文字コード・周辺文字は一切出さない。
- * `AiClientError` にも DB にも載せない(ログ専用)。
+ * 「我々が送ったリクエストの性質」を count / boolean で記録する。
+ * **数値と boolean のみ。** raw prompt・URL・schema 本文・文字位置・文字コード・
+ * 周辺文字は一切出さない。`AiClientError` にも DB にも載せない(ログ専用)。
+ *
+ * 実体は `Stage2RequestDiagnostics`(公開型)。呼び出し側(`pipeline.ts`)が
+ * 構造化入力から組み立てたものをそのまま受け取る。
  */
-interface RequestDiagnostics {
-  /**
-   * Stage2 prompt に unpaired UTF-16 surrogate が含まれていたか。
-   * 実機の Stage2 `400 INVALID_ARGUMENT` について、
-   * 「動的 prompt の Unicode 不正」仮説を次回 smoke で直接検証するための観測値。
-   * **この値で prompt を書き換えたり run を失敗させたりしない。**
-   */
-  prompt_has_unpaired_surrogate: boolean;
-}
+type RequestDiagnostics = Partial<Stage2RequestDiagnostics>;
 
 /**
  * MAX_TOKENS 到達時の token 内訳を **sanitized な structured log** として記録する
@@ -282,7 +345,7 @@ export function createResearchGeminiClient(): ResearchGeminiClient {
       }
     },
 
-    async runStructuredUrlContext({ prompt, jsonSchema }, signal) {
+    async runStructuredUrlContext({ prompt, jsonSchema, diagnostics }, signal) {
       const apiKey = readEnv("GEMINI_API_KEY");
       if (!apiKey) throw makeError({ kind: "missing_api_key" });
 
@@ -342,9 +405,18 @@ export function createResearchGeminiClient(): ResearchGeminiClient {
           usageMetadata: extractUsageMetadata(response.usageMetadata),
         };
       } catch (err) {
-        // prompt は**一切変更せず**、失敗時にだけ性質を boolean で観測する(PR #180)。
+        // prompt は**一切変更せず**、失敗時にだけ性質を count / boolean で観測する(PR #180)。
         // 成功パスでは評価すらしない(失敗時のみのコスト)。
+        //
+        // `diagnostics` は呼び出し側(`runStage2`)が構造化入力(allowedKeys /
+        // sourceRegistry / searchNotes)から組み立てたもの。ここで prompt 本文から
+        // 逆算するのは prompt の文字数関連だけに留める(構造化入力がある値を
+        // テキスト解析で再導出しない)。
         throw normalizeAndLog("stage2", err, {
+          ...(diagnostics ?? {}),
+          prompt_char_count: prompt.length,
+          prompt_utf8_byte_count: new TextEncoder().encode(prompt).length,
+          has_control_chars: hasControlChars(prompt),
           prompt_has_unpaired_surrogate: hasUnpairedSurrogate(prompt),
         });
       }
