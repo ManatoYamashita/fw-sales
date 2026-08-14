@@ -2280,3 +2280,196 @@ describe("validateResearchItemStatus の降格文言が source 状態を反映�
     expect(result.evidence_basis).toBeUndefined();
   });
 });
+
+/* ------------------------------------------------------------------ */
+/*  competitor item の key-aware trust guard                            */
+/*  (PR #180 Competitor Source Trust False-Negative Fix)                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * `isVerifiedSourceForItem` の `source_type === "competitor"` 除外は、もともと
+ * 「競合店舗のページを**自店**項目の confirmed 根拠にしない」(MAJOR8)という意図で
+ * 入れたものだが item key を見ていなかったため、競合店舗そのものを調査対象とする
+ * `COMPETITOR_ITEM_KEYS` にも適用され自己矛盾していた:
+ *
+ * - `getRequiredIdentityStatuses` は競合項目に `competitor_match` を**要求**する。
+ * - 一方で無条件除外は `source_type==="competitor"` を**禁止**する。
+ *
+ * 結果、「Stage1 が競合ページとして発見し、Stage2 が本文を読んで競合ページだと確認した」
+ * という最も整合の取れた source だけが競合項目の根拠から落ちていた。
+ *
+ * 本 describe は修正後の不変条件を固定する。**自店項目側の拒否は一切緩めない。**
+ */
+describe("competitor item の key-aware trust guard (PR #180 competitor false-negative fix)", () => {
+  const COMPETITOR_KEYS = ["competitor_stores", "competitor_benchmark", "competitor_paid_ads"] as const;
+
+  /** 競合ページを Stage1 が competitor と型付けし、Stage2 が本文で競合と確認した source。 */
+  const competitorSource = (overrides: Partial<SourceRegistryEntry> = {}) =>
+    makeSource({
+      id: "S01",
+      source_type: "competitor",
+      discovery_provenance: "gemini_search_candidate",
+      url_context_status: "success",
+      identity_status: "competitor_match",
+      ...overrides,
+    });
+
+  const competitorItem = (key: string, overrides: Partial<ResearchItem> = {}) =>
+    makeItem({
+      key,
+      research_policy: "ANALYSIS",
+      status: "confirmed",
+      value: "鮨 ほそ川、鮨 山浦、鮨処 九十九 西武所沢店",
+      evidence: "各競合店のページ本文に店名・所在地の記載あり。",
+      source_ids: ["S01"],
+      ...overrides,
+    });
+
+  /* --- 1 / 8: 自店項目は従来どおり competitor source を拒否する ------------- */
+
+  it("1. 自店FACT項目は source_type=competitor + competitor_match でも verified にならない", () => {
+    expect(isVerifiedSourceForItem(competitorSource(), "business_hours_holidays")).toBe(false);
+  });
+
+  it("8. 通常の自店項目(address/phone/store_name等)は competitor source で confirmed にならない", () => {
+    for (const key of ["address", "phone", "store_name", "seat_count", "cuisine_genre"]) {
+      expect(isVerifiedSourceForItem(competitorSource(), key)).toBe(false);
+
+      const item = makeItem({ key, research_policy: "FACT", source_ids: ["S01"] });
+      const result = validateResearchItemStatus(item, { sourceRegistry: [competitorSource()] });
+      expect(result.status).not.toBe("confirmed");
+    }
+  });
+
+  it("文脈項目(trade_area/market_demand)も競合項目ではないため competitor source を拒否する", () => {
+    for (const key of ["trade_area", "market_demand"]) {
+      expect(isVerifiedSourceForItem(competitorSource({ identity_status: "contextual" }), key)).toBe(
+        false,
+      );
+    }
+  });
+
+  it("一次情報必須key(concept等)は competitor source を拒否する(guardは競合項目にのみ外れる)", () => {
+    for (const key of ["owner_profile", "owner_career", "owner_philosophy", "concept"]) {
+      expect(isVerifiedSourceForItem(competitorSource(), key)).toBe(false);
+    }
+  });
+
+  /* --- 2 / 3 / 4: 競合項目は competitor source を許可する ------------------- */
+
+  it.each(COMPETITOR_KEYS)(
+    "2-4. %s は URL Context 成功 + competitor_match + source_type=competitor で verified になる",
+    (key) => {
+      expect(isVerifiedSourceForItem(competitorSource(), key)).toBe(true);
+      expect(validateResearchItemStatus(competitorItem(key), {
+        sourceRegistry: [competitorSource()],
+      }).status).toBe("confirmed");
+    },
+  );
+
+  /* --- 5 / 6 / 7: 競合項目でも他の trust 条件は一切緩めない ----------------- */
+
+  it.each(COMPETITOR_KEYS)("5. %s は identity_status=target_match では verified にならない", (key) => {
+    const entry = competitorSource({ identity_status: "target_match" });
+    expect(isVerifiedSourceForItem(entry, key)).toBe(false);
+    expect(validateResearchItemStatus(competitorItem(key), { sourceRegistry: [entry] }).status).toBe(
+      "inferred",
+    );
+  });
+
+  it.each(COMPETITOR_KEYS)("6. %s は URL Context error なら verified にならない", (key) => {
+    for (const status of ["error", "not_attempted"] as const) {
+      const entry = competitorSource({ url_context_status: status });
+      expect(isVerifiedSourceForItem(entry, key)).toBe(false);
+      expect(
+        validateResearchItemStatus(competitorItem(key), { sourceRegistry: [entry] }).status,
+      ).toBe("inferred");
+    }
+  });
+
+  it.each(COMPETITOR_KEYS)("7. %s は identity_status=uncertain/unrelated では verified にならない", (key) => {
+    for (const status of ["uncertain", "unrelated", "not_checked"] as const) {
+      expect(isVerifiedSourceForItem(competitorSource({ identity_status: status }), key)).toBe(false);
+    }
+  });
+
+  /* --- 9: conflict candidate も同じ semantics を共有する -------------------- */
+
+  it("9. conflict candidate trust も isVerifiedSourceForItem 共有により同じ判定になる", () => {
+    const candidates: ResearchItemCandidate[] = [
+      {
+        candidate_id: "a",
+        label: "候補A",
+        value: "鮨 ほそ川、鮨 山浦",
+        evidence: "競合店ページ本文に記載。",
+        source_ids: ["S01"],
+      },
+      {
+        candidate_id: "b",
+        label: "候補B",
+        value: "鮨処 九十九 西武所沢店",
+        evidence: "識別未確認のページに記載。",
+        source_ids: ["S02"],
+      },
+    ];
+    const registry = [
+      competitorSource(),
+      competitorSource({ id: "S02", identity_status: "uncertain" }),
+    ];
+
+    // 競合項目: competitor source(competitor_match)の候補Aは適格として残り、
+    // uncertain の候補Bだけが落ちる。残りが1件になるため既存ルールで confirmed へ縮約される。
+    const competitorConflict = validateConflictCandidateTrust(
+      competitorItem("competitor_stores", { status: "conflict", value: null, source_ids: [], candidates }),
+      { sourceRegistry: registry },
+    );
+    expect(competitorConflict.status).toBe("confirmed");
+    expect(competitorConflict.value).toBe("鮨 ほそ川、鮨 山浦");
+    expect(competitorConflict.source_ids).toEqual(["S01"]);
+
+    // 自店項目: 同じ registry でも competitor source の候補Aは従来どおり落ちる。
+    // 候補Bも uncertain で落ちるため、適格候補が0件になり FACT の安全側 not_found へ降格する。
+    const selfConflict = validateConflictCandidateTrust(
+      makeItem({
+        key: "phone",
+        research_policy: "FACT",
+        status: "conflict",
+        value: null,
+        source_ids: [],
+        candidates,
+      }),
+      { sourceRegistry: registry },
+    );
+    expect(selfConflict.status).toBe("not_found");
+    expect(selfConflict.candidates).toBeUndefined();
+  });
+
+  /* --- 10: 実機(告膳)相当の end-to-end -------------------------------------- */
+
+  it("10. 実機相当: 競合店ページ(source_type=competitor)+competitor_match で competitor_stores が confirmed を維持する", () => {
+    const registry = [
+      competitorSource({
+        id: "S01",
+        title: "鮨 ほそ川(所沢)| 食べログ",
+        grounding_redirect_url: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/rival",
+      }),
+    ];
+    const result = applyDeterministicValidation(competitorItem("competitor_stores"), {
+      sourceRegistry: registry,
+    });
+
+    expect(result.status).toBe("confirmed");
+    expect(result.value).toBe("鮨 ほそ川、鮨 山浦、鮨処 九十九 西武所沢店");
+    expect(result.evidence_basis).toBe("url_context");
+    expect(result.warning ?? "").not.toContain("格下げ");
+    expect(result.source_ids).toEqual(["S01"]);
+  });
+
+  it("10'. 修正前に発生していた降格(inferred + 同定失敗文言)が再発しないこと", () => {
+    const result = applyDeterministicValidation(competitorItem("competitor_stores"), {
+      sourceRegistry: [competitorSource()],
+    });
+    expect(result.status).not.toBe("inferred");
+    expect(result.warning ?? "").not.toContain("対象店舗のページであることを確認できなかった");
+  });
+});

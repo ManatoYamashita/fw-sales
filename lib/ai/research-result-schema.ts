@@ -748,7 +748,9 @@ function isIdentityAcceptableForItem(entry: SourceRegistryEntry, itemKey: string
  * そのまま関数として切り出したもので、判定内容は一切変えていない:
  *
  * 1. `url_context_status === "success"`(本文取得に成功している)
- * 2. `source_type !== "competitor"`(競合店舗のページを自店項目の根拠にしない)
+ * 2. `source_type !== "competitor"`(競合店舗のページを**自店**項目の根拠にしない)。
+ *    ただし`COMPETITOR_ITEM_KEYS`は競合店舗そのものが調査対象なのでこの除外を適用しない
+ *    (下記「key-aware competitor guard」参照)。
  * 3. `PRIMARY_SOURCE_REQUIRED_KEYS`の項目は`deriveTrustedSourceType`が
  *    `official_site`/`official_sns`を返すこと(本人発信の一次情報要求)
  * 4. `isIdentityAcceptableForItem`(対象keyのカテゴリに応じた`identity_status`)
@@ -756,10 +758,45 @@ function isIdentityAcceptableForItem(entry: SourceRegistryEntry, itemKey: string
  * 切り出した理由: conflict の candidate も同じ trust boundary を通す必要があるが
  * (`validateConflictCandidateTrust`)、confirmed 側と conflict 側でルールを
  * 二重実装すると片方だけが更新されて乖離する。両者がこの1関数を参照する。
+ *
+ * ## key-aware competitor guard(PR #180 competitor false-negative fix)
+ *
+ * 条件2はもともと「競合店舗のページを**自店**項目のconfirmed根拠にしない」(MAJOR8)と
+ * いう意図で入れたものだが、item key を見ずに無条件だったため
+ * `COMPETITOR_ITEM_KEYS`(競合店舗そのものを調査対象とする3項目)にも適用され、
+ * 自己矛盾を起こしていた:
+ *
+ * - `getRequiredIdentityStatuses`は競合項目に`identity_status==="competitor_match"`を
+ *   **要求**する(= 競合店舗のページであることが必要条件)。
+ * - 一方で条件2は`source_type==="competitor"`を**禁止**する。
+ *
+ * 結果として「Stage1が競合ページとして発見し(`source_type="competitor"`)、
+ * Stage2が本文を読んで競合ページだと確認した(`relation="competitor"` →
+ * `competitor_match`)」という、**最も整合の取れたsourceだけ**が競合項目の根拠から
+ * 落ちていた(実機: 告膳の`competitor_stores`がANALYSIS降格で`inferred`)。
+ * 逆に`source_type`がgourmet_site等のままのsourceは同じ`competitor_match`でも
+ * 通っており、判定がStage1の自己申告typeに左右される不安定な状態だった。
+ *
+ * そこで除外を key-aware にする。**緩和ではなく矛盾の解消**である:
+ *
+ * - 自店項目(競合項目以外)の扱いは**完全に不変**。`source_type==="competitor"`は
+ *   従来どおり無条件で拒否する(`CONTEXTUAL_ITEM_KEYS`も競合項目ではないため対象外)。
+ * - 競合項目でも要求される証拠の強さは変わらない。`competitor_match`は
+ *   `pipeline.ts:deriveIdentityStatusFromVerification`が`relation==="competitor"`から
+ *   導出するもので、この修正の前後どちらでも競合項目のconfirmedには
+ *   「URL Context本文取得成功 AND Stage2が本文を読んで競合と判定」が必要である。
+ *   本修正で新たにconfirmedになるのは「Stage1のtypeも競合だった」場合だけで、
+ *   `source_type`が単独でtrustを**昇格**させる経路は増えていない
+ *   (`source_type`は自己申告なので、`deriveTrustedSourceType`を経ない生の値を
+ *   根拠として使わないという既存方針は維持される)。
+ *
+ * 変更しないこと: `relation`→`identity_status`の導出規則、
+ * `getRequiredIdentityStatuses`、`isIdentityAcceptableForItem`、
+ * `deriveTrustedSourceType`、`PRIMARY_SOURCE_REQUIRED_KEYS`、`SOURCE_TRUST_MATRIX`。
  */
 export function isVerifiedSourceForItem(entry: SourceRegistryEntry, itemKey: string): boolean {
   if (entry.url_context_status !== "success") return false;
-  if (entry.source_type === "competitor") return false;
+  if (entry.source_type === "competitor" && !COMPETITOR_ITEM_KEYS.has(itemKey)) return false;
   if (PRIMARY_SOURCE_REQUIRED_KEYS.has(itemKey)) {
     const trustedType = deriveTrustedSourceType(entry);
     if (trustedType === undefined || !PRIMARY_SOURCE_TYPES.has(trustedType)) return false;
@@ -1060,7 +1097,7 @@ export function validateResearchItemStatus(
  *
  * 一方で `isVerifiedSourceForItem` の trust boundary は URL Context 取得と identity 以外にも
  *
- * - `source_type === "competitor"` の除外
+ * - `source_type === "competitor"` の除外(自店項目のみ。競合項目には適用されない)
  * - `PRIMARY_SOURCE_REQUIRED_KEYS` の「本人発信の一次情報」要求
  *   (`deriveTrustedSourceType` が `official_site` / `official_sns` を返すこと)
  * - item key ごとの required identity(`getRequiredIdentityStatuses`)
@@ -1120,7 +1157,8 @@ export function deriveDowngradeReason(
   if (identityAccepted.length === 0) return DOWNGRADE_REASON_IDENTITY;
 
   // 層3: 取得も identity も満たすが `isVerifiedSourceForItem` が全 source で false。
-  //      = competitor 除外、または一次情報(official_site/official_sns)要求で止まっている。
+  //      = 自店項目での competitor 除外(競合項目には適用されない)、または
+  //        一次情報(official_site/official_sns)要求で止まっている。
   //      本関数は降格時にしか呼ばれないため、ここに到達した時点で全 source が false である。
   return PRIMARY_SOURCE_REQUIRED_KEYS.has(item.key)
     ? DOWNGRADE_REASON_PRIMARY_SOURCE
