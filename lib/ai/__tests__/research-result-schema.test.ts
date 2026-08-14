@@ -2000,9 +2000,15 @@ describe("isVerifiedSourceForItem (confirmed と conflict candidate で共通の
  * `getRequiredIdentityStatuses` / `isVerifiedSourceForItem` / `deriveTrustedSourceType`)を
  * そのまま再利用し、drift させない。
  */
-describe("deriveDowngradeReason (PR #180、3分類)", () => {
+describe("deriveDowngradeReason (PR #180、3層 + 層2 の key-aware 文言)", () => {
   const ACQUISITION = "情報源の本文を取得できなかった";
+  /** 層2 の既定文言(自店項目 = required identity が target_match のみ)。 */
   const IDENTITY = "対象店舗のページであることを確認できなかった";
+  /** 層2 の競合項目文言(F1)。 */
+  const IDENTITY_COMPETITOR = "引用された情報源を競合店舗の情報源として確認できなかった";
+  /** 層2 の文脈項目文言(F1)。 */
+  const IDENTITY_CONTEXTUAL =
+    "引用された情報源を対象店舗または商圏・市場の情報源として確認できなかった";
   const ELIGIBILITY = "確認済みとして扱うために必要な情報源の条件を満たさなかった";
   const PRIMARY = "本人発信の一次情報として確認できなかった";
 
@@ -2058,12 +2064,14 @@ describe("deriveDowngradeReason (PR #180、3分類)", () => {
 
     it("F1. 競合項目は competitor_match が required(target_match では identity failure)", () => {
       // COMPETITOR_ITEM_KEYS は competitor_match のみを required identity とする。
+      // 文言も競合項目用へ切り替わり、「対象店舗のページ」という語を使わない(F1)。
       const registry = [
         makeSource({ id: "S01", url_context_status: "success", identity_status: "target_match" }),
       ];
-      expect(deriveDowngradeReason(cite("competitor_stores", ["S01"]), registry)).toContain(
-        IDENTITY,
-      );
+      const reason = deriveDowngradeReason(cite("competitor_stores", ["S01"]), registry);
+      expect(reason).toContain(IDENTITY_COMPETITOR);
+      expect(reason).not.toContain(IDENTITY);
+      expect(reason).not.toContain("対象店舗");
     });
 
     it("F2. 文脈項目は contextual も required identity に含まれる(identity failure にならない)", () => {
@@ -2169,8 +2177,15 @@ describe("deriveDowngradeReason (PR #180、3分類)", () => {
     }
   });
 
-  it("戻り値は必ず4つの固定文言のいずれか", () => {
-    const allowed = [ACQUISITION, IDENTITY, ELIGIBILITY, PRIMARY];
+  it("戻り値は必ず固定文言のいずれか(層1 / 層2 の3種 / 層3 の2種)", () => {
+    const allowed = [
+      ACQUISITION,
+      IDENTITY,
+      IDENTITY_COMPETITOR,
+      IDENTITY_CONTEXTUAL,
+      ELIGIBILITY,
+      PRIMARY,
+    ];
     const registries = [
       [makeSource({ id: "S01", url_context_status: "error" })],
       [makeSource({ id: "S01", url_context_status: "success", identity_status: "uncertain" })],
@@ -2472,4 +2487,228 @@ describe("competitor item の key-aware trust guard (PR #180 competitor false-ne
     expect(result.status).not.toBe("inferred");
     expect(result.warning ?? "").not.toContain("対象店舗のページであることを確認できなかった");
   });
+});
+
+/* ------------------------------------------------------------------ */
+/*  層2 identity 文言の key-aware 化                                     */
+/*  (PR #180 Key-Aware Identity Downgrade Warning Fix、F1)              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * `deriveDowngradeReason` の層2(identity failure)は
+ * 「引用された情報源が**対象店舗のページ**であることを確認できなかったため」という
+ * 固定文言だった。しかし required identity は item key のカテゴリで変わる:
+ *
+ *     自店項目   : target_match
+ *     競合項目   : competitor_match
+ *     文脈項目   : target_match OR contextual
+ *
+ * 競合項目は対象店舗のページを**一度も要求していない**ため、この文言は事実と異なる。
+ * 実機 run(告膳)の `competitor_stores` がまさにこの状態で、引用元は
+ * 「所沢市の寿司ランキング」等の地域一覧ページ(= contextual)だったにもかかわらず
+ * 「対象店舗のページであることを確認できなかった」と表示されていた。
+ *
+ * 本 describe は key ごとの文言を固定する。**status 判定・trust boundary は変更していない。**
+ * 分類は `getRequiredIdentityStatuses` の返り値からのみ導出しており、key リストを
+ * 文言側で二重定義していないことも下の drift ガードで固定する。
+ */
+describe("層2 identity 文言の key-aware 化 (PR #180 F1)", () => {
+  const ACQUISITION = "情報源の本文を取得できなかった";
+  const IDENTITY_TARGET = "対象店舗のページであることを確認できなかった";
+  const IDENTITY_COMPETITOR = "引用された情報源を競合店舗の情報源として確認できなかった";
+  const IDENTITY_CONTEXTUAL =
+    "引用された情報源を対象店舗または商圏・市場の情報源として確認できなかった";
+  const ELIGIBILITY = "確認済みとして扱うために必要な情報源の条件を満たさなかった";
+  const PRIMARY = "本人発信の一次情報として確認できなかった";
+
+  const COMPETITOR_KEYS = ["competitor_stores", "competitor_benchmark", "competitor_paid_ads"];
+  const CONTEXTUAL_KEYS = ["trade_area", "market_demand"];
+  const PRIMARY_KEYS = ["owner_profile", "owner_career", "owner_philosophy", "concept"];
+
+  const cite = (key: string, ids: string[] = ["S01"]) => ({ key, source_ids: ids });
+
+  /** 本文取得には成功しているが、その key の required identity は満たさない source。 */
+  const retrievedButUnmatched = (identity_status: "uncertain" | "contextual" | "target_match") =>
+    makeSource({ id: "S01", url_context_status: "success", identity_status });
+
+  /* --- 1: 自店項目は既存文言を維持する ------------------------------------ */
+
+  it("1. 通常の自店 FACT 項目(success + uncertain)は従来どおり対象店舗 wording", () => {
+    for (const key of ["seat_count", "phone", "address", "business_hours_holidays"]) {
+      const reason = deriveDowngradeReason(cite(key), [retrievedButUnmatched("uncertain")]);
+      expect(reason).toContain(IDENTITY_TARGET);
+      expect(reason).not.toContain(IDENTITY_COMPETITOR);
+      expect(reason).not.toContain(IDENTITY_CONTEXTUAL);
+    }
+  });
+
+  /* --- 2 / 3 / 4: 競合項目 ------------------------------------------------- */
+
+  it.each(COMPETITOR_KEYS)(
+    "2-4. %s は競合 wording になり「対象店舗のページ」を含まない",
+    (key) => {
+      // 告膳実機と同じ入力: 地域ランキングページ(contextual)を引用している。
+      const reason = deriveDowngradeReason(cite(key), [retrievedButUnmatched("contextual")]);
+      expect(reason).toContain(IDENTITY_COMPETITOR);
+      expect(reason).not.toContain(IDENTITY_TARGET);
+      expect(reason).not.toContain("対象店舗");
+    },
+  );
+
+  it.each(COMPETITOR_KEYS)("2-4'. %s は uncertain / target_match でも競合 wording", (key) => {
+    for (const status of ["uncertain", "target_match"] as const) {
+      expect(deriveDowngradeReason(cite(key), [retrievedButUnmatched(status)])).toContain(
+        IDENTITY_COMPETITOR,
+      );
+    }
+  });
+
+  /* --- 5 / 6: 文脈項目 ----------------------------------------------------- */
+
+  it.each(CONTEXTUAL_KEYS)("5-6. %s は商圏・市場 wording になる", (key) => {
+    const reason = deriveDowngradeReason(cite(key), [retrievedButUnmatched("uncertain")]);
+    expect(reason).toContain(IDENTITY_CONTEXTUAL);
+    expect(reason).not.toContain(IDENTITY_TARGET);
+    expect(reason).not.toContain(IDENTITY_COMPETITOR);
+  });
+
+  /* --- 7 / 8 / 9: 層1・層3 は無変更 ---------------------------------------- */
+
+  it("7. 層1(本文取得失敗)は key を問わず既存の acquisition wording", () => {
+    const registry = [makeSource({ id: "S01", url_context_status: "error" })];
+    for (const key of ["seat_count", ...COMPETITOR_KEYS, ...CONTEXTUAL_KEYS, "concept"]) {
+      const reason = deriveDowngradeReason(cite(key), registry);
+      expect(reason).toContain(ACQUISITION);
+      expect(reason).not.toContain(IDENTITY_COMPETITOR);
+      expect(reason).not.toContain(IDENTITY_CONTEXTUAL);
+    }
+  });
+
+  it.each(PRIMARY_KEYS)("8. 層3 の一次情報必須 key(%s)は既存の一次情報 wording", (key) => {
+    const registry = [
+      makeSource({
+        id: "S01",
+        url_context_status: "success",
+        identity_status: "target_match",
+        source_type: "gourmet_site",
+        discovery_provenance: "gemini_search_candidate",
+        grounding_redirect_url: "https://tabelog.com/x/",
+      }),
+    ];
+    expect(deriveDowngradeReason(cite(key), registry)).toContain(PRIMARY);
+  });
+
+  it("9. 層3 の通常 key は既存の eligibility wording", () => {
+    const registry = [
+      makeSource({
+        id: "S01",
+        url_context_status: "success",
+        identity_status: "target_match",
+        source_type: "competitor",
+      }),
+    ];
+    const reason = deriveDowngradeReason(cite("seat_count"), registry);
+    expect(reason).toContain(ELIGIBILITY);
+    expect(reason).not.toContain(IDENTITY_TARGET);
+  });
+
+  /* --- 10: warning 以外のフィールドを変更しない ---------------------------- */
+
+  it("10. status / value / evidence / source_ids / evidence_basis は変更されない", () => {
+    const item = makeItem({
+      key: "competitor_stores",
+      research_policy: "ANALYSIS",
+      status: "confirmed",
+      value: "鮨 ほそ川、鮨 山浦、鮨処 九十九 西武所沢店",
+      evidence: "所沢駅周辺の寿司ランキング情報から競合店舗を確認。",
+      source_ids: ["S01"],
+      confidence: 70,
+    });
+    const result = validateResearchItemStatus(item, {
+      sourceRegistry: [retrievedButUnmatched("contextual")],
+    });
+
+    // ANALYSIS の confirmed 降格先は inferred。値は保持される(nullifyForNoInfoStatus の例外)。
+    expect(result.status).toBe("inferred");
+    expect(result.value).toBe(item.value);
+    expect(result.evidence).toBe(item.evidence);
+    expect(result.source_ids).toEqual(item.source_ids);
+    expect(result.confidence).toBe(70);
+    expect(result.key).toBe(item.key);
+    expect(result.research_policy).toBe(item.research_policy);
+    expect(result.evidence_basis).toBeUndefined();
+
+    // 変わるのは warning だけ。
+    expect(result.warning).toContain(IDENTITY_COMPETITOR);
+    expect(result.warning).not.toContain(IDENTITY_TARGET);
+  });
+
+  /* --- 11: 文言に外部由来の文字列を含めない ------------------------------- */
+
+  it("11. warning に URL / title / 店舗名 / source ID を含めない", () => {
+    const registry = [
+      makeSource({
+        id: "S01",
+        url_context_status: "success",
+        identity_status: "contextual",
+        title: "所沢市の寿司ランキングTOP10 - じゃらんnet",
+        grounding_redirect_url:
+          "https://vertexaisearch.cloud.google.com/grounding-api-redirect/xyz",
+      }),
+    ];
+    for (const key of ["seat_count", ...COMPETITOR_KEYS, ...CONTEXTUAL_KEYS, ...PRIMARY_KEYS]) {
+      const reason = deriveDowngradeReason(cite(key), registry);
+      expect(reason).not.toContain("http");
+      expect(reason).not.toContain("所沢");
+      expect(reason).not.toContain("じゃらん");
+      expect(reason).not.toContain("ランキング");
+      expect(reason).not.toContain("S01");
+      expect(reason).not.toContain(key);
+    }
+  });
+
+  /* --- drift ガード -------------------------------------------------------- */
+
+  it("文言の分類は required identity と 1:1 で対応する(trust semantics との drift 防止)", () => {
+    // 競合 wording ⇔ competitor_match を required にする key
+    for (const key of COMPETITOR_KEYS) {
+      expect(
+        isIdentityAcceptableForItemProbe(key, "competitor_match"),
+      ).toBe(true);
+      expect(isIdentityAcceptableForItemProbe(key, "target_match")).toBe(false);
+      expect(deriveDowngradeReason(cite(key), [retrievedButUnmatched("uncertain")])).toContain(
+        IDENTITY_COMPETITOR,
+      );
+    }
+    // 文脈 wording ⇔ contextual を許容する key
+    for (const key of CONTEXTUAL_KEYS) {
+      expect(isIdentityAcceptableForItemProbe(key, "contextual")).toBe(true);
+      expect(isIdentityAcceptableForItemProbe(key, "competitor_match")).toBe(false);
+      expect(deriveDowngradeReason(cite(key), [retrievedButUnmatched("uncertain")])).toContain(
+        IDENTITY_CONTEXTUAL,
+      );
+    }
+  });
+
+  /**
+   * `isIdentityAcceptableForItem` / `getRequiredIdentityStatuses` は非公開のため、
+   * `deriveDowngradeReason` の層構造を使って required identity を間接観測する。
+   * 層2 の文言が返っていなければ identity は満たされている(= 層3 まで進んでいる)。
+   */
+  function isIdentityAcceptableForItemProbe(key: string, identity: string): boolean {
+    const reason = deriveDowngradeReason(cite(key), [
+      makeSource({
+        id: "S01",
+        url_context_status: "success",
+        identity_status: identity as SourceRegistryEntry["identity_status"],
+        source_type: "competitor",
+      }),
+    ]);
+    // 層2 で止まっていなければ identity は満たしている。
+    return (
+      !reason.includes(IDENTITY_TARGET) &&
+      !reason.includes(IDENTITY_COMPETITOR) &&
+      !reason.includes(IDENTITY_CONTEXTUAL)
+    );
+  }
 });

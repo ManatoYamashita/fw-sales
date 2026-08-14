@@ -1111,6 +1111,11 @@ export function validateResearchItemStatus(
  * - 店舗同定失敗 → 店舗マスタの住所・電話が不足している可能性(マスタ整備が有効)
  * - 情報源条件の不足 → 一次情報が見つかっていない(ヒアリング等の別手段が必要)
  *
+ * さらに層2(同定失敗)は **item key ごとに required identity が異なる**ため、
+ * 文言も key に応じて切り替える(PR #180 F1、`deriveIdentityDowngradeReason`)。
+ * 競合項目は対象店舗のページを一度も要求していないので「対象店舗のページ」と
+ * 表示するのは事実と異なる。層1・層3 の文言は変更していない。
+ *
  * ## 判定は既存 trust helper を再利用する(drift 防止)
  *
  * `isIdentityAcceptableForItem`(内部で `getRequiredIdentityStatuses` を使う)と
@@ -1128,12 +1133,51 @@ export function validateResearchItemStatus(
  */
 const DOWNGRADE_REASON_ACQUISITION =
   "AIはconfirmedと判定しましたが、根拠となる情報源の本文を取得できなかったため自動的に格下げしました。";
-const DOWNGRADE_REASON_IDENTITY =
+const DOWNGRADE_REASON_IDENTITY_TARGET =
   "AIはconfirmedと判定しましたが、引用された情報源が対象店舗のページであることを確認できなかったため自動的に格下げしました。";
+const DOWNGRADE_REASON_IDENTITY_COMPETITOR =
+  "AIはconfirmedと判定しましたが、引用された情報源を競合店舗の情報源として確認できなかったため自動的に格下げしました。";
+const DOWNGRADE_REASON_IDENTITY_CONTEXTUAL =
+  "AIはconfirmedと判定しましたが、引用された情報源を対象店舗または商圏・市場の情報源として確認できなかったため自動的に格下げしました。";
 const DOWNGRADE_REASON_SOURCE_ELIGIBILITY =
   "AIはconfirmedと判定しましたが、確認済みとして扱うために必要な情報源の条件を満たさなかったため自動的に格下げしました。";
 const DOWNGRADE_REASON_PRIMARY_SOURCE =
   "AIはconfirmedと判定しましたが、本人発信の一次情報として確認できなかったため自動的に格下げしました。";
+
+/**
+ * 層2(identity failure)の文言を item key に応じて選ぶ
+ * (PR #180 key-aware identity downgrade warning fix、F1)。
+ *
+ * ## なぜ必要か
+ *
+ * 層2 は「required identity を満たす source が無い」という事象だが、**何が required か**は
+ * key のカテゴリで異なる(`getRequiredIdentityStatuses`)。にもかかわらず文言は
+ * 「対象店舗のページであることを確認できなかった」に固定されていた。
+ * 競合項目(`competitor_stores` 等)は対象店舗のページを**一度も要求していない**ため、
+ * この文言は事実と異なる。実機 run(告膳)の `competitor_stores` がまさにこの状態で、
+ * required は `competitor_match` なのに「対象店舗のページ」と表示されていた。
+ *
+ * ## 分類は key リストを再定義せず required identity から導く
+ *
+ * `COMPETITOR_ITEM_KEYS` / `CONTEXTUAL_ITEM_KEYS` を本関数側で二重定義すると、
+ * 将来 trust semantics 側だけが更新されて文言が drift する。判定の入力は
+ * `getRequiredIdentityStatuses(itemKey)` の**返り値のみ**とし、trust boundary と
+ * 同じ 1 つの真実から派生させる。
+ *
+ * Set の完全一致比較ではなく **`has()` による membership 判定**にしているのは、
+ * 将来 required identity に値が追加された場合に「どの集合とも一致せず default へ落ちる」
+ * という脆い壊れ方をさせないため。`competitor_match` を要求する key は competitor 文言、
+ * `contextual` を許容する key は商圏・市場文言、という意味論に直接対応する。
+ *
+ * 純関数。戻り値は本ファイル内の固定文言 3 種のいずれかで、店舗名・URL・source id・
+ * key 名・モデル生成テキストを一切含まない。
+ */
+function deriveIdentityDowngradeReason(itemKey: string): string {
+  const required = getRequiredIdentityStatuses(itemKey);
+  if (required.has("competitor_match")) return DOWNGRADE_REASON_IDENTITY_COMPETITOR;
+  if (required.has("contextual")) return DOWNGRADE_REASON_IDENTITY_CONTEXTUAL;
+  return DOWNGRADE_REASON_IDENTITY_TARGET;
+}
 
 export function deriveDowngradeReason(
   item: Pick<ResearchItem, "key" | "source_ids">,
@@ -1151,10 +1195,11 @@ export function deriveDowngradeReason(
   // 層2: 本文は取れているが、この key が要求する identity を満たす source が無い。
   //      required identity は key のカテゴリで変わる(競合項目は competitor_match、
   //      文脈項目は target_match/contextual)ため、既存 helper をそのまま使う。
+  //      文言も同じ required identity から導く(F1、`deriveIdentityDowngradeReason`)。
   const identityAccepted = retrieved.filter((entry) =>
     isIdentityAcceptableForItem(entry, item.key),
   );
-  if (identityAccepted.length === 0) return DOWNGRADE_REASON_IDENTITY;
+  if (identityAccepted.length === 0) return deriveIdentityDowngradeReason(item.key);
 
   // 層3: 取得も identity も満たすが `isVerifiedSourceForItem` が全 source で false。
   //      = 自店項目での competitor 除外(競合項目には適用されない)、または
