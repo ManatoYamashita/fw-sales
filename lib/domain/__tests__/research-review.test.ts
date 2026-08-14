@@ -9,6 +9,7 @@ import {
   isReviewableItem,
   isReviewFullyDecided,
   isRunStuck,
+  resolveSafeSourceUrls,
   resolveSourceUrls,
   selectPrimaryResearchRun,
 } from "../research-review";
@@ -83,6 +84,12 @@ function makeSource(overrides: Partial<SourceRegistryEntry> = {}): SourceRegistr
     source_type: "official_site",
     discovery_provenance: "google_grounding",
     url_context_status: "success",
+    // PR #180 F2: 既存テストの大半は「採用すれば source_urls が付く」前提で書かれている。
+    // `resolveSafeSourceUrls` が `isSourceLinkClickable` を通すようになったため、
+    // 既定を識別確認済み(target_match)にして既存の意図を保つ
+    // (`lib/ai/__tests__/research-result-schema.test.ts` の makeSource と同じ方針)。
+    // link safety ゲート自体を検証するテストは明示的に override する。
+    identity_status: "target_match",
     ...overrides,
   };
 }
@@ -515,5 +522,322 @@ describe("summarizeUndecided", () => {
 
   it("空配列でも安全に0を返す", () => {
     expect(summarizeUndecided([], {}).total).toBe(0);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  canonical source_urls の link safety                                */
+/*  (PR #180 F2 Canonical Source URL Provenance Safety Fix)             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * `stores.basic_info[key].source_urls` は保存されるだけの値ではなく、
+ *
+ * - `basic-info-field-row.tsx` が**ゲート無しの `<a href>`** として描画する
+ * - `basic-info-prompt.ts` が営業資産生成プロンプトへ「出典: …」として渡す
+ *
+ * という 2 経路で外部へ露出する。一方で調査レビュー UI には
+ * `isSourceLinkClickable` という誘導防止ガードが既にあり、識別確認済み
+ * (`target_match` / `competitor_match` / `contextual`)または `known_store_data`
+ * のみをクリック可能としている。採用操作がそのガードを迂回して canonical へ
+ * URL を運んでしまうのを塞ぐのが本 fix。
+ *
+ * **`isVerifiedSourceForItem`(confirmed の根拠判定)は使わない。** 意味が異なり、
+ * `source_urls` が実際に露出する唯一の tier である B(= inferred)でほぼ常に
+ * 空になってしまうため。
+ */
+describe("resolveSafeSourceUrls (PR #180 F2)", () => {
+  const URL_SAFE = "https://example.com/safe";
+  const URL_UNSAFE = "https://example.com/unsafe";
+
+  const src = (
+    id: string,
+    identity_status: SourceRegistryEntry["identity_status"],
+    resolved_url: string,
+    overrides: Partial<SourceRegistryEntry> = {},
+  ): SourceRegistryEntry =>
+    makeSource({
+      id,
+      identity_status,
+      resolved_url,
+      discovery_provenance: "gemini_search_candidate",
+      ...overrides,
+    });
+
+  /* --- 1 / 2 / 3: 未確認 identity は canonical 出典にしない ---------------- */
+
+  it("1. uncertain の source のみなら source_urls は空", () => {
+    const registry = [src("S01", "uncertain", URL_UNSAFE)];
+    expect(resolveSafeSourceUrls(["S01"], registry)).toEqual([]);
+  });
+
+  it("2. unrelated の source のみなら source_urls は空", () => {
+    const registry = [src("S01", "unrelated", URL_UNSAFE)];
+    expect(resolveSafeSourceUrls(["S01"], registry)).toEqual([]);
+  });
+
+  it("3. not_checked / identity_status 未設定なら source_urls は空", () => {
+    const explicit = [src("S01", "not_checked", URL_UNSAFE)];
+    expect(resolveSafeSourceUrls(["S01"], explicit)).toEqual([]);
+
+    const missing = [src("S01", undefined, URL_UNSAFE)];
+    expect(resolveSafeSourceUrls(["S01"], missing)).toEqual([]);
+  });
+
+  /* --- 4 / 5 / 6 / 7: 確認済み identity は保持する ------------------------- */
+
+  it("4. target_match は URL を保持する", () => {
+    expect(resolveSafeSourceUrls(["S01"], [src("S01", "target_match", URL_SAFE)])).toEqual([
+      URL_SAFE,
+    ]);
+  });
+
+  it("5. competitor_match は URL を保持する", () => {
+    expect(resolveSafeSourceUrls(["S01"], [src("S01", "competitor_match", URL_SAFE)])).toEqual([
+      URL_SAFE,
+    ]);
+  });
+
+  it("6. contextual は URL を保持する(告膳のランキングページ相当)", () => {
+    expect(resolveSafeSourceUrls(["S01"], [src("S01", "contextual", URL_SAFE)])).toEqual([
+      URL_SAFE,
+    ]);
+  });
+
+  it("7. known_store_data は identity_status を問わず URL を保持する", () => {
+    for (const status of ["not_checked", "uncertain", "unrelated", undefined] as const) {
+      const registry = [
+        src("S01", status, URL_SAFE, { discovery_provenance: "known_store_data" }),
+      ];
+      expect(resolveSafeSourceUrls(["S01"], registry)).toEqual([URL_SAFE]);
+    }
+  });
+
+  /* --- 8 / 9: 混在・全件除外 ---------------------------------------------- */
+
+  it("8. 混在時は safe のみを、元の順序を保って返す", () => {
+    const registry = [
+      src("S01", "uncertain", "https://example.com/1"),
+      src("S02", "target_match", "https://example.com/2"),
+      src("S03", "unrelated", "https://example.com/3"),
+      src("S04", "contextual", "https://example.com/4"),
+    ];
+    expect(resolveSafeSourceUrls(["S01", "S02", "S03", "S04"], registry)).toEqual([
+      "https://example.com/2",
+      "https://example.com/4",
+    ]);
+    // 入力順が違えば出力順も追従する(順序は source_ids 側が決める)。
+    expect(resolveSafeSourceUrls(["S04", "S02"], registry)).toEqual([
+      "https://example.com/4",
+      "https://example.com/2",
+    ]);
+  });
+
+  it("8'. duplicate / 未知 id の扱いは resolveSourceUrls と同一", () => {
+    const registry = [src("S01", "target_match", URL_SAFE)];
+    // dedupe しない(既存 resolveSourceUrls の挙動)。
+    expect(resolveSafeSourceUrls(["S01", "S01"], registry)).toEqual([URL_SAFE, URL_SAFE]);
+    // registry に存在しない id は無視する。
+    expect(resolveSafeSourceUrls(["S99"], registry)).toEqual([]);
+    expect(resolveSafeSourceUrls([], registry)).toEqual([]);
+  });
+
+  it("9. 全件除外されても元の source_ids へ fallback しない", () => {
+    const registry = [
+      src("S01", "uncertain", "https://example.com/1"),
+      src("S02", "unrelated", "https://example.com/2"),
+    ];
+    const result = resolveSafeSourceUrls(["S01", "S02"], registry);
+    expect(result).toEqual([]);
+    expect(result).toHaveLength(0);
+  });
+
+  it("resolved_url が無ければ grounding_redirect_url へ fallback する(選択順は不変)", () => {
+    const registry = [
+      makeSource({
+        id: "S01",
+        identity_status: "contextual",
+        discovery_provenance: "gemini_search_candidate",
+        resolved_url: null,
+        grounding_redirect_url:
+          "https://vertexaisearch.cloud.google.com/grounding-api-redirect/xyz",
+      }),
+    ];
+    expect(resolveSafeSourceUrls(["S01"], registry)).toEqual([
+      "https://vertexaisearch.cloud.google.com/grounding-api-redirect/xyz",
+    ]);
+  });
+});
+
+describe("buildAdoptedBasicInfoField の canonical source_urls (PR #180 F2)", () => {
+  const now = "2026-08-14T12:00:00.000Z";
+  const URL_SAFE = "https://example.com/safe";
+  const URL_UNSAFE = "https://example.com/unsafe";
+
+  const unsafe = (id: string) =>
+    makeSource({
+      id,
+      identity_status: "uncertain",
+      discovery_provenance: "gemini_search_candidate",
+      resolved_url: URL_UNSAFE,
+    });
+  const unrelated = (id: string) =>
+    makeSource({
+      id,
+      identity_status: "unrelated",
+      discovery_provenance: "gemini_search_candidate",
+      resolved_url: "https://example.com/other-store",
+    });
+  const safe = (id: string, identity_status: SourceRegistryEntry["identity_status"] = "contextual") =>
+    makeSource({
+      id,
+      identity_status,
+      discovery_provenance: "gemini_search_candidate",
+      resolved_url: URL_SAFE,
+    });
+
+  /* --- A: 通常 item ------------------------------------------------------- */
+
+  it("A. inferred item + uncertain source のみ → source_urls は空(tier B は変わらない)", () => {
+    const item = makeItem({
+      key: "competitor_stores",
+      research_policy: "ANALYSIS",
+      status: "inferred",
+      value: "鮨 ほそ川、鮨 山浦",
+      source_ids: ["S01"],
+    });
+    const field = buildAdoptedBasicInfoField(item, [unsafe("S01")], now);
+    expect(field.source_urls).toEqual([]);
+    expect(field.tier).toBe("B");
+    expect(field.value).toBe("鮨 ほそ川、鮨 山浦");
+  });
+
+  it("A'. unrelated source は canonical の出典へ入らない(誘導防止ガードの一貫性)", () => {
+    const item = makeItem({ status: "confirmed", source_ids: ["S01", "S02"] });
+    const field = buildAdoptedBasicInfoField(item, [unrelated("S01"), safe("S02")], now);
+    expect(field.source_urls).toEqual([URL_SAFE]);
+    expect(field.source_urls).not.toContain("https://example.com/other-store");
+  });
+
+  it("A''. contextual source は inferred でも出典として保持される", () => {
+    const item = makeItem({
+      key: "competitor_stores",
+      research_policy: "ANALYSIS",
+      status: "inferred",
+      source_ids: ["S01"],
+    });
+    const field = buildAdoptedBasicInfoField(item, [safe("S01", "contextual")], now);
+    expect(field.source_urls).toEqual([URL_SAFE]);
+  });
+
+  /* --- B: conflict candidate ---------------------------------------------- */
+
+  const conflictItem = (candidateSourceIds: string[]) =>
+    makeItem({
+      key: "phone",
+      status: "conflict",
+      value: null,
+      source_ids: [],
+      candidates: [
+        {
+          candidate_id: "a",
+          label: "候補A",
+          value: "04-2998-0000",
+          evidence: "公式サイトに記載",
+          source_ids: candidateSourceIds,
+        },
+      ],
+    });
+
+  it("10. conflict 候補選択: safe/unsafe 混在なら safe のみが source_urls になる", () => {
+    const field = buildAdoptedBasicInfoField(
+      conflictItem(["S01", "S02"]),
+      [unsafe("S01"), safe("S02", "target_match")],
+      now,
+      { selectedCandidateId: "a" },
+    );
+    expect(field.source_urls).toEqual([URL_SAFE]);
+    expect(field.source_urls).not.toContain(URL_UNSAFE);
+    expect(field.tier).toBe("A");
+    expect(field.value).toBe("04-2998-0000");
+  });
+
+  it("11. conflict 候補の source が全て unsafe なら source_urls は空", () => {
+    const field = buildAdoptedBasicInfoField(
+      conflictItem(["S01", "S02"]),
+      [unsafe("S01"), unrelated("S02")],
+      now,
+      { selectedCandidateId: "a" },
+    );
+    expect(field.source_urls).toEqual([]);
+    expect(field.tier).toBe("A");
+  });
+
+  /* --- C: 編集して採用 ---------------------------------------------------- */
+
+  it("12. editedValue が元と異なれば source_urls は undefined(既存 misattribution 対策を維持)", () => {
+    const item = makeItem({ status: "confirmed", source_ids: ["S01"] });
+    const field = buildAdoptedBasicInfoField(item, [safe("S01", "target_match")], now, {
+      editedValue: "人間が直した値",
+    });
+    expect(field.source_urls).toBeUndefined();
+    expect(field.confidence).toBeUndefined();
+    expect(field.source_quote).toBe("人間が編集した値です(直接の出典URLはありません)。");
+  });
+
+  it("13. editedValue が元と同一なら safe filter を適用した source_urls になる", () => {
+    const item = makeItem({ status: "confirmed", value: "17:00〜24:00", source_ids: ["S01", "S02"] });
+    const field = buildAdoptedBasicInfoField(item, [unsafe("S01"), safe("S02", "target_match")], now, {
+      editedValue: "17:00〜24:00",
+    });
+    expect(field.source_urls).toEqual([URL_SAFE]);
+    expect(field.source_quote).toBe(item.evidence);
+  });
+
+  /* --- 14 / 15 / 16: 他のフィールドと入力の不変性 -------------------------- */
+
+  it("14. tier 決定ルールは不変(confirmed=A / inferred=B / conflict選択=A)", () => {
+    const registry = [unsafe("S01")];
+    expect(
+      buildAdoptedBasicInfoField(makeItem({ status: "confirmed", source_ids: ["S01"] }), registry, now)
+        .tier,
+    ).toBe("A");
+    expect(
+      buildAdoptedBasicInfoField(
+        makeItem({ status: "inferred", research_policy: "ANALYSIS", source_ids: ["S01"] }),
+        registry,
+        now,
+      ).tier,
+    ).toBe("B");
+    expect(
+      buildAdoptedBasicInfoField(conflictItem(["S01"]), registry, now, {
+        selectedCandidateId: "a",
+      }).tier,
+    ).toBe("A");
+  });
+
+  it("15. value / confidence / source_quote / filled_by / updated_at は不変", () => {
+    const item = makeItem({ status: "confirmed", value: "17:00〜24:00", confidence: 88 });
+    const field = buildAdoptedBasicInfoField(item, [unsafe("S01")], now);
+    expect(field.value).toBe("17:00〜24:00");
+    expect(field.confidence).toBe(88);
+    expect(field.source_quote).toBe(item.evidence);
+    expect(field.filled_by).toBe("manual");
+    expect(field.updated_at).toBe(now);
+    // 変わるのは source_urls だけ。
+    expect(field.source_urls).toEqual([]);
+  });
+
+  it("16. ResearchItem.source_ids / sourceRegistry は変更されない(純関数)", () => {
+    const item = makeItem({ status: "confirmed", source_ids: ["S01", "S02"] });
+    const registry = [unsafe("S01"), safe("S02", "target_match")];
+    const itemSnapshot = JSON.stringify(item);
+    const registrySnapshot = JSON.stringify(registry);
+
+    buildAdoptedBasicInfoField(item, registry, now);
+
+    expect(JSON.stringify(item)).toBe(itemSnapshot);
+    expect(JSON.stringify(registry)).toBe(registrySnapshot);
+    expect(item.source_ids).toEqual(["S01", "S02"]);
   });
 });
