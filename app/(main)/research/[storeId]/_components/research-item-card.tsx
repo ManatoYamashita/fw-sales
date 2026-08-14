@@ -58,6 +58,16 @@ interface Props {
   decision: ReviewDecision | undefined;
   busy: boolean;
   onDecide: (input: DecideInput) => void;
+  /**
+   * このカードへ画面内ジャンプするための安定した DOM anchor
+   * (完了ブロッカーUX、`researchItemAnchorId(item.key)`)。
+   *
+   * 未指定なら anchor を付けない(既存の呼び出し互換)。指定時は
+   * `tabIndex={-1}` も併せて付与し、`scrollIntoView` 後に
+   * `focus()` できる = キーボード利用者もジャンプ先から操作を継続できる。
+   * `scroll-mt-24` は sticky なページヘッダにジャンプ先が隠れないための余白。
+   */
+  anchorId?: string;
 }
 
 function decisionLabel(decision: ReviewDecision | undefined): string | null {
@@ -67,14 +77,26 @@ function decisionLabel(decision: ReviewDecision | undefined): string | null {
   return "スキップ済み";
 }
 
-export function ResearchItemCard({ item, label, sourceRegistry, decision, busy, onDecide }: Props) {
+export function ResearchItemCard({
+  item,
+  label,
+  sourceRegistry,
+  decision,
+  busy,
+  onDecide,
+  anchorId,
+}: Props) {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(item.value ?? "");
 
   const decided = decisionLabel(decision);
 
   return (
-    <div className="border border-border rounded-lg p-4 space-y-2.5">
+    <div
+      id={anchorId}
+      tabIndex={anchorId === undefined ? undefined : -1}
+      className="border border-border rounded-lg p-4 space-y-2.5 scroll-mt-24 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    >
       <div className="flex items-center justify-between gap-2">
         <span className="text-sm font-medium text-foreground">{label}</span>
         <div className="flex items-center gap-2">
