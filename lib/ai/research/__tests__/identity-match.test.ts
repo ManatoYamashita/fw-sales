@@ -7,8 +7,14 @@ import { describe, it, expect, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-const { isNameMatch, isAddressMatch, normalizePhone, isTargetStoreMatch, deriveSearchIdentityName } =
-  await import("../identity-match");
+const {
+  isNameMatch,
+  isAddressMatch,
+  normalizePhone,
+  isTargetStoreMatch,
+  deriveSearchIdentityName,
+  normalizeJapaneseAddressForMatch,
+} = await import("../identity-match");
 
 const TARGET_STORE = {
   name: "東北メシ 炉端ジュン",
@@ -188,5 +194,49 @@ describe("isNameMatch / isAddressMatch / normalizePhone (re-export確認、fix/a
 
   it("deriveSearchIdentityNameは先頭の管理タグを除去する", () => {
     expect(deriveSearchIdentityName("（Rアポハマロスト）炉端ジュン")).toBe("炉端ジュン");
+  });
+});
+
+/**
+ * ローマ字表記の店舗レコードに対する現挙動の固定
+ * (PR #180 post-merge smoke、Finding A)。
+ *
+ * Place Details に言語指定が無かったため、エリア検索から登録された店舗の
+ * `stores.name` / `stores.address` がローマ字で保存されることがあった。
+ * この状態では `isNameMatch` と `isAddressMatch` が**同時に** false になる
+ * (独立に壊れるのではなく common-mode failure)。
+ *
+ * ここで固定するのは「一致しない」という**現在の正しい挙動**であって、
+ * 一致させるべきという主張ではない。ローマ字 ⇄ 日本語の同一性判定は
+ * 住所の意味的推測にあたり、`normalizeJapaneseAddressForMatch` の
+ * 方針(表記統一のみ)から外れる。根本対処は
+ * `lib/places/google.ts` の Place Details へ `languageCode=ja` を付けて
+ * そもそもローマ字を保存しないことであり、そちらを直した。
+ *
+ * この固定があることで、将来 match 側を緩めて「一致させる」方向へ倒す変更が
+ * 入った場合に、trust boundary を弱める判断だと気付ける。
+ */
+describe("ローマ字表記の登録情報 (Finding A の前提)", () => {
+  // 実データの形だけを再現した架空の店舗情報。
+  const ROMANIZED_ADDRESS = "Japan, 〒277-0852 Chiba, Kashiwa, Asahicho, 1-chōme-1-12";
+  const JAPANESE_ADDRESS = "千葉県柏市旭町1-1-12";
+
+  it("ローマ字店名と日本語店名は一致しない", () => {
+    expect(isNameMatch("サンプル酒場", "Sample Sakaba")).toBe(false);
+  });
+
+  it("ローマ字住所と日本語住所は一致しない", () => {
+    expect(isAddressMatch(JAPANESE_ADDRESS, ROMANIZED_ADDRESS)).toBe(false);
+  });
+
+  it("normalizeFormattedAddress は英語の 'Japan,' prefix を剥がさない(日本語の「日本、」のみ対象)", () => {
+    // 「〒」だけ剥がれて "Japan," が残る、という非対称が Finding A の一因。
+    expect(isAddressMatch(ROMANIZED_ADDRESS, ROMANIZED_ADDRESS)).toBe(true);
+    expect(normalizeJapaneseAddressForMatch(ROMANIZED_ADDRESS)).toContain("Japan");
+  });
+
+  it("店名・住所が同時に不一致になる(片方だけ壊れる前提が成立しない)", () => {
+    expect(isNameMatch("サンプル酒場", "Sample Sakaba")).toBe(false);
+    expect(isAddressMatch(JAPANESE_ADDRESS, ROMANIZED_ADDRESS)).toBe(false);
   });
 });

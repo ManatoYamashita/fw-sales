@@ -1413,7 +1413,9 @@ describe("Stage0 Places Identity Recovery wiring (PR #180 pre-merge fix)", () =>
 
   it("Stage1 / Stage2 still receive the unchanged StoreIdentity", () => {
     expect(source).toContain("await stage1Step(store)");
-    expect(source).toContain("stage2Step(store, resolvedRegistry");
+    // `stage2Step` の第1引数は診断ログ用の runId(PR #180 post-merge smoke、Finding B)。
+    // identity は従来どおり第2引数の `store`(StoreIdentity)のまま。
+    expect(source).toMatch(/stage2Step\(\s*runId,\s*store,\s*resolvedRegistry/);
   });
 
   /**
