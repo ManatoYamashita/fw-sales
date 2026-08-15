@@ -49,3 +49,13 @@ jobs:
         run: set -o pipefail; pnpm db:migrate 2>&1 | cat
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      # 適用直後に journal と __drizzle_migrations の来歴を突き合わせる。
+      # drizzle-kit は created_at の水位線でしか適用判定しないため、
+      # 「journal にあるのに永久に適用されない」migration を自力では検知できない
+      # (#152 の 0015 がこれで本番だけ壊れた)。既知の乖離は allowlist 済みで、
+      # 新規に発生したものだけがここで落ちる。
+      - name: Verify migration provenance
+        run: set -o pipefail; pnpm db:verify-hashes 2>&1 | cat
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
