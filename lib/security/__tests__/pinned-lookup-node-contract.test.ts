@@ -2,11 +2,18 @@
  * DNS pinning 用 lookup の **Node ランタイム契約** 検証
  * (PR #180 final smoke hardening、Issue A の root cause)。
  *
- * ## なぜ別ファイルなのか
+ * 元は `lib/ai/research/__tests__/source-url-resolver.pinned-lookup.test.ts` にあった。
+ * `createPinnedLookup` の実装が `lib/security/url-safety.ts` へ一本化されたのに伴い、
+ * テスト対象と同じ場所へ移設している(PR #199 で生まれた二重実装の解消)。
  *
- * `source-url-resolver.test.ts` は `node:https` と `node:dns` を丸ごと mock するため、
- * **custom `lookup` が Node の実 connect パスからどう呼ばれるか**を一切検証できない。
- * 実際、その盲点のせいで以下の不具合が本番まで到達した。
+ * ## なぜ `url-safety.test.ts` と別ファイルなのか
+ *
+ * `url-safety.test.ts` は `createPinnedLookup` を**直接呼んで**戻り値の形を検証する
+ * 単体テストで、`options.all` / `options.family` の分岐も既に網羅している。
+ * 本ファイルが担うのはそこではなく、**Node の実 connect パスから呼ばれたときに
+ * 実際に接続が成立するか**である。呼び出し規約を取り違えた実装は、単体テストの
+ * assert は通っても実接続だけが失敗しうる。実際、その盲点のせいで以下の不具合が
+ * 本番まで到達した。
  *
  * ## 再現した不具合(実機: 炉端ジュン、alias resolve 8件中0件成功)
  *
@@ -30,7 +37,7 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import net from "node:net";
 
-import { createPinnedLookup } from "../source-url-resolver";
+import { createPinnedLookup } from "../url-safety";
 
 type LookupCb = (
   err: NodeJS.ErrnoException | null,
@@ -40,7 +47,7 @@ type LookupCb = (
 
 describe("createPinnedLookup — Node の lookup 契約", () => {
   it("options.all === true では LookupAddress[] を返す(autoSelectFamily 対応)", () => {
-    const lookup = createPinnedLookup("93.184.216.34", 4);
+    const lookup = createPinnedLookup([{ address: "93.184.216.34", family: 4 }]);
     let received: unknown;
     lookup("example.test", { all: true } as never, ((_e: unknown, addr: unknown) => {
       received = addr;
@@ -51,7 +58,7 @@ describe("createPinnedLookup — Node の lookup 契約", () => {
   });
 
   it("options.all が false/未指定ならスカラー形式 (address, family) を返す", () => {
-    const lookup = createPinnedLookup("93.184.216.34", 4);
+    const lookup = createPinnedLookup([{ address: "93.184.216.34", family: 4 }]);
     const calls: unknown[][] = [];
     lookup("example.test", { all: false } as never, ((...args: unknown[]) => {
       calls.push(args);
@@ -65,7 +72,7 @@ describe("createPinnedLookup — Node の lookup 契約", () => {
   });
 
   it("options 省略形 (hostname, callback) でもスカラー形式で返す", () => {
-    const lookup = createPinnedLookup("::1", 6);
+    const lookup = createPinnedLookup([{ address: "::1", family: 6 }]);
     const calls: unknown[][] = [];
     (lookup as unknown as (h: string, cb: LookupCb) => void)("example.test", ((
       ...args: unknown[]
@@ -77,7 +84,7 @@ describe("createPinnedLookup — Node の lookup 契約", () => {
   });
 
   it("IPv6 を pin した場合も family=6 の配列を返す", () => {
-    const lookup = createPinnedLookup("2606:2800:220:1:248:1893:25c8:1946", 6);
+    const lookup = createPinnedLookup([{ address: "2606:2800:220:1:248:1893:25c8:1946", family: 6 }]);
     let received: unknown;
     lookup("example.test", { all: true } as never, ((_e: unknown, addr: unknown) => {
       received = addr;
@@ -115,7 +122,7 @@ describe("createPinnedLookup — 実 connect パスでの疎通(ローカルサ�
               path: "/x",
               // 実装と同じ形の pinned lookup。旧実装(常にスカラー)だと
               // ERR_INVALID_IP_ADDRESS で失敗する。
-              lookup: createPinnedLookup("127.0.0.1", 4),
+              lookup: createPinnedLookup([{ address: "127.0.0.1", family: 4 }]),
               timeout: 3000,
             },
             (res) => {

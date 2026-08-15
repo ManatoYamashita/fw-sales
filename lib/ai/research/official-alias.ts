@@ -98,6 +98,10 @@ const KNOWN_RESOLVE_FAILURE_REASONS: ReadonlySet<string> = new Set([
   "credentials_in_url",
   "dns_lookup_failed",
   "dns_no_records",
+  // SSRF 判定を lib/security/url-safety.ts へ一本化した際に増えた reason。
+  // 旧実装の dns.promises.lookup には timeout が無く、全体 timeout を超えて
+  // 待ち続けうる穴があった (その場合は timeout / request_error として現れていた)。
+  "dns_timeout",
   "disallowed_ip_range",
   "timeout",
   "invalid_redirect_location",

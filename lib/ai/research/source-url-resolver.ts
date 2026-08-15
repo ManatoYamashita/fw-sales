@@ -27,15 +27,39 @@
  * - リクエスト全体・hop 単位の timeout
  * - body は読まない(HEAD 相当、ヘッダ受信後に即座に破棄)
  *
- * 関連: Plan v3.2 §11「Stage 1.5: redirect URL resolver設計」
+ * ## IP レンジ判定と DNS pinning は `lib/security/url-safety.ts` に一本化している
+ *
+ * 本モジュールは当初 IP レンジ判定・pinned lookup を自前で持っていたが、PR #199 で
+ * URL インポート側にも同等の実装が入り、**同じ判定が2つ存在する状態**になっていた。
+ * 片方だけ直る事故を防ぐため、判定ロジックは `lib/security/url-safety.ts` へ寄せ、
+ * 本モジュールは「起点ホストの限定」「redirect 追跡」「timeout 予算配分」という
+ * このモジュール固有の責務だけを持つ。
+ *
+ * 統合によって以下が同時に改善している(いずれも url-safety 側が既に持っていたもの):
+ *
+ * - IPv6 をテキスト表記ではなく**数値展開**して判定するため、`::ffff:7f00:1` の
+ *   ような 16 進表記の IPv4-mapped loopback を取りこぼさない(旧実装は
+ *   `::ffff:d.d.d.d` の10進表記しか見ていなかった)
+ * - `::127.0.0.1` 等の IPv4-compatible IPv6、multicast(`ff00::/8`)も拒否する
+ * - 逆に IPv4 側は `192.0.0.0/16` を丸ごと拒否する**過剰拒否**を修正済み
+ *   (`192.0.0.0/24` と `192.0.2.0/24` のみ拒否。WordPress.com/Gravatar 等の
+ *   同レンジ内 global unicast を誤って弾かない)
+ * - `createPinnedLookup` が `options.family` も尊重する
+ * - DNS lookup 自体に timeout がかかる(旧実装は `dns.promises.lookup` に
+ *   timeout が無く、TOTAL_TIMEOUT_MS を超えて待ち続けうる穴があった)
+ *
+ * 関連: Plan v3.2 §11「Stage 1.5: redirect URL resolver設計」, PR #199
  */
 
 import "server-only";
 
 import * as https from "node:https";
-import * as dns from "node:dns";
 import type { LookupFunction } from "node:net";
-import { isIP } from "node:net";
+import {
+  createPinnedLookup,
+  validateExternalUrl,
+  type HostSafetyFailureReason,
+} from "@/lib/security/url-safety";
 
 /** 解決の起点として許可する host(完全一致)。 */
 const ALLOWED_START_HOSTS = ["vertexaisearch.cloud.google.com"] as const;
@@ -93,7 +117,13 @@ export async function resolveGroundingRedirectUrl(
   let current = parsed;
 
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-    const safety = await validateHopSafety(current);
+    // DNS lookup も全体 timeout の予算内に収める。残余がゼロなら検証へ入らない。
+    const remainingBeforeDns = deadline - Date.now();
+    if (remainingBeforeDns <= 0) {
+      return { status: "failed", reason: "timeout" };
+    }
+
+    const safety = await validateHopSafety(current, remainingBeforeDns);
     if (!safety.ok) {
       return { status: "failed", reason: safety.reason };
     }
@@ -145,154 +175,49 @@ interface HopSafetyNg {
 }
 
 /**
+ * `validateExternalUrl` の失敗理由を、本モジュールが従来返していた reason 文字列へ写す。
+ *
+ * `official-alias.ts` の `KNOWN_RESOLVE_FAILURE_REASONS` が allowlist として
+ * これらの token をそのまま持っており、過去 run のログとも突き合わせるため、
+ * **統合を理由に token を変えない**。https 限定という本モジュール固有の制約は
+ * `disallowed_scheme` ではなく従来どおり `non_https_scheme` と表現する。
+ */
+const HOP_FAILURE_REASON: Record<HostSafetyFailureReason, string> = {
+  disallowed_scheme: "non_https_scheme",
+  credentials_in_url: "credentials_in_url",
+  dns_lookup_failed: "dns_lookup_failed",
+  dns_no_records: "dns_no_records",
+  dns_timeout: "dns_timeout",
+  disallowed_ip_range: "disallowed_ip_range",
+};
+
+/**
  * 1 hop 分の安全性を検証する: スキーム・credentials・DNS解決結果のIPレンジ。
  * 検証に使った実IPを `pinnedLookup` として返し、実際の接続もこのIPへ固定する
  * (DNS rebinding対策)。
+ *
+ * 判定本体は `lib/security/url-safety.ts` に委譲する(モジュール先頭の JSDoc 参照)。
+ * ここが持つのは「https のみ許可」という本モジュール固有の制約と、
+ * 全体 timeout 予算から DNS 分を切り出す責務だけ。
+ *
+ * 検証済みアドレスは**全件**を pin する(先頭1件ではない)。全件が
+ * `validateExternalUrl` の拒否レンジ検査を通過しており、全件渡すことで
+ * Node の Happy Eyeballs がデュアルスタックホストで正しく機能する。
  */
-async function validateHopSafety(url: URL): Promise<HopSafetyOk | HopSafetyNg> {
-  if (url.protocol !== "https:") {
-    return { ok: false, reason: "non_https_scheme" };
-  }
-  if (url.username !== "" || url.password !== "") {
-    return { ok: false, reason: "credentials_in_url" };
-  }
+async function validateHopSafety(
+  url: URL,
+  dnsTimeoutMs: number,
+): Promise<HopSafetyOk | HopSafetyNg> {
+  const safety = await validateExternalUrl(url, {
+    allowedSchemes: ["https:"],
+    dnsTimeoutMs,
+  });
 
-  const hostname = url.hostname;
-
-  // hostname自体がリテラルIPの場合(例: https://169.254.169.254/)は直接検証する。
-  const literalIpVersion = isIP(hostname);
-  const candidateAddresses: { address: string; family: 4 | 6 }[] = [];
-
-  if (literalIpVersion !== 0) {
-    candidateAddresses.push({
-      address: hostname,
-      family: literalIpVersion as 4 | 6,
-    });
-  } else {
-    let lookupResult: dns.LookupAddress[];
-    try {
-      lookupResult = await dns.promises.lookup(hostname, { all: true, verbatim: true });
-    } catch {
-      return { ok: false, reason: "dns_lookup_failed" };
-    }
-    if (lookupResult.length === 0) {
-      return { ok: false, reason: "dns_no_records" };
-    }
-    for (const r of lookupResult) {
-      candidateAddresses.push({ address: r.address, family: r.family as 4 | 6 });
-    }
+  if (!safety.ok) {
+    return { ok: false, reason: HOP_FAILURE_REASON[safety.reason] };
   }
 
-  for (const { address } of candidateAddresses) {
-    if (isDisallowedAddress(address)) {
-      return { ok: false, reason: "disallowed_ip_range" };
-    }
-  }
-
-  // 検証済みの最初の実IPへ接続を固定する (dns rebinding対策)。
-  const pinned = candidateAddresses[0]!;
-  return { ok: true, pinnedLookup: createPinnedLookup(pinned.address, pinned.family) };
-}
-
-/**
- * 検証済みの単一 IP へ接続を固定する `lookup` を作る(DNS rebinding 対策)。
- *
- * ## `options.all` を必ず尊重すること(PR #180 final smoke hardening)
- *
- * Node 20 以降、`net` の `autoSelectFamily` が既定で **true** になった。この場合
- * `net.Socket.connect` は custom `lookup` を **`{ all: true }`** 付きで呼び出し、
- * コールバックへ **`LookupAddress[]`(配列)** が返ることを期待する。
- *
- * 旧実装は `options.all` を無視して常に `callback(null, address, family)` の
- * スカラー形式で返していたため、Node が `addresses[0].address` を読んで `undefined` を得、
- * **ネットワークに出る前に `ERR_INVALID_IP_ADDRESS` で必ず失敗**していた。
- * 実機(炉端ジュン)で alias resolve が 8 件中 0 件成功だった直接原因がこれである。
- *
- * `source-url-resolver.test.ts` は `node:https` / `node:dns` を丸ごと mock するため
- * この契約違反を検知できなかった。実 connect パスでの回帰テストは
- * `source-url-resolver.pinned-lookup.test.ts` が担う。
- *
- * **テスト用に export している**(SSRF 対策の中核ロジックと同じ扱い)。
- */
-export function createPinnedLookup(address: string, family: 4 | 6): LookupFunction {
-  return (_hostname, options, callback) => {
-    if (typeof options === "function") {
-      // options 省略形 `(hostname, callback)`。スカラー形式で返す。
-      (options as unknown as (
-        err: NodeJS.ErrnoException | null,
-        address: string,
-        family: number,
-      ) => void)(null, address, family);
-      return;
-    }
-    if (options?.all === true) {
-      callback(null, [{ address, family }]);
-      return;
-    }
-    callback(null, address, family);
-  };
-}
-
-/**
- * private / loopback / link-local(cloud metadata endpoint含む)/ reserved を拒否する。
- * 網羅的な IANA レジストリ全件ではなく、SSRF 対策として重要な既知レンジを対象とする。
- */
-/** テスト用に公開。SSRF対策の中核ロジックを直接検証するため。 */
-export function isDisallowedAddress(address: string): boolean {
-  const version = isIP(address);
-  if (version === 4) return isDisallowedIPv4(address);
-  if (version === 6) return isDisallowedIPv6(address);
-  return true; // 解釈できないアドレスは安全側で拒否
-}
-
-function isDisallowedIPv4(address: string): boolean {
-  const octets = address.split(".").map((s) => Number.parseInt(s, 10));
-  if (octets.length !== 4 || octets.some((n) => !Number.isFinite(n) || n < 0 || n > 255)) {
-    return true; // 解釈できない = 拒否
-  }
-  const [a, b] = octets as [number, number, number, number];
-
-  if (a === 0) return true; // 0.0.0.0/8
-  if (a === 10) return true; // 10.0.0.0/8 private
-  if (a === 127) return true; // 127.0.0.0/8 loopback
-  if (a === 169 && b === 254) return true; // 169.254.0.0/16 link-local (metadata endpoint含む)
-  if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12 private
-  if (a === 192 && b === 168) return true; // 192.168.0.0/16 private
-  if (a === 100 && b >= 64 && b <= 127) return true; // 100.64.0.0/10 CGNAT
-  if (a === 192 && b === 0) return true; // 192.0.0.0/24 IETF protocol assignments
-  if (a === 198 && (b === 18 || b === 19)) return true; // 198.18.0.0/15 benchmarking
-  if (a >= 224) return true; // 224.0.0.0/4 multicast, 240.0.0.0/4 reserved, 255.255.255.255 broadcast
-
-  return false;
-}
-
-function isDisallowedIPv6(address: string): boolean {
-  const normalized = address.toLowerCase();
-
-  if (normalized === "::1") return true; // loopback
-  if (normalized === "::") return true; // unspecified
-
-  // IPv4-mapped (::ffff:a.b.c.d) は内包するIPv4として再検証する。
-  const mappedMatch = normalized.match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
-  if (mappedMatch) {
-    return isDisallowedIPv4(mappedMatch[1]!);
-  }
-
-  if (normalized.startsWith("fe8") || normalized.startsWith("fe9") ||
-      normalized.startsWith("fea") || normalized.startsWith("feb")) {
-    return true; // fe80::/10 link-local
-  }
-  if (normalized.startsWith("fc") || normalized.startsWith("fd")) {
-    return true; // fc00::/7 unique local
-  }
-  if (normalized.startsWith("2001:db8")) {
-    return true; // documentation range
-  }
-  if (normalized.startsWith("64:ff9b::")) {
-    return true; // NAT64
-  }
-
-  return false;
+  return { ok: true, pinnedLookup: createPinnedLookup(safety.resolvedAddresses) };
 }
 
 type HopResult =

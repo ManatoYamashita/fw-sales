@@ -340,12 +340,28 @@ export const aiPromptTemplates = pgTable(
 /**
  * app_settings テーブル (store-flow-guidance / Issue #122)
  *
- * アプリ全体の設定をキー・バリュー形式で保持する汎用テーブル。現状の利用は
- * 調査用 Gem (Gemini GUI) へのリンク URL (`deep_research_gem_url`) のみ。
+ * アプリ全体の設定をキー・バリュー形式で保持する汎用テーブル。
  *
  * - `key` は設定キー (PK)。`value` は文字列値 (URL 等)。
  * - `updated_at` は既存規約に従い `YYYY-MM-DD` 形式 text。
  * - 全社共通の単一値を想定 (user 別ではない)。user/組織別が必要になればキー設計を拡張。
+ *
+ * ## 現在アプリから読み書きしているキーは無い
+ *
+ * 唯一の利用者だった調査用 Gem の URL (`deep_research_gem_url`) は、それを開く
+ * ワークベンチ STEP0 (`research-prompt-step.tsx`) が PR #180 で削除されたことにより
+ * 「設定できるが誰も読まない」孤児設定になっていたため、設定 UI ごと撤去した。
+ *
+ * **それでもテーブルと `appSettings` 定義は残す**:
+ *
+ * 1. `.github/workflows/supabase-keepalive.yml` が Supabase の自動停止を防ぐため
+ *    `select count(*) from app_settings` を実テーブルへ投げている
+ * 2. schema からこの定義を消すと `drizzle-kit` が **DROP TABLE の migration を
+ *    生成しようとする**。テーブルを残す以上、定義も残さなければならない
+ *
+ * `repos.appSettings` / `CACHE_TAGS.appSettings` も同じ理由で残置している
+ * (現在の呼び出し元は無いが、汎用 KV テーブルに対する薄いアクセサであり、
+ * 次に設定項目を足すときの接続点になる)。
  *
  * 関連: Issue #122, drizzle/0019_add_app_settings.sql
  */
