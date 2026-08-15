@@ -10,7 +10,7 @@
 - **Server Actions** によるミューテーション。`revalidateTag(tag, "max")` で stale-while-revalidate
 - **Supabase Postgres + Drizzle ORM** による永続化(`lib/db/*`)
 - **Repository インターフェース**(`lib/repositories/*-repository.ts`)で永続化層を抽象化
-- **Supabase Auth (Google OAuth)** によるサインイン + `middleware.ts` でセッション検証
+- **Supabase Auth (Google OAuth)** によるサインイン + `proxy.ts` でセッション検証
 - **AI 店舗分析** (`lib/ai/` + `@google/genai`): Google Gemini で URL/HTML から店舗情報・架電スクリプトを構造化出力 (`responseMimeType: "application/json"` + Zod 再検証 + rate limiter + 60s timeout)
 - **Google Places API 連携** (`lib/places/`): エリア名から飲食店候補を一括取得し、店舗一括登録を支援
 - **Composition Pattern**: Card / Modal / Tabs は Compound Components、RSC ↔ Client は children で橋渡し
@@ -62,7 +62,7 @@ lib/
 ├── domain/                    # STAGES, SERVICES, STAFF, channel 判定
 ├── repositories/              # 抽象 interface + repos composition root (transaction API)
 ├── db/                        # Drizzle ORM schema / client / *-repository.ts 実装 / seed-data
-├── supabase/                  # Supabase Auth client (browser / server / middleware)
+├── supabase/                  # Supabase Auth client (browser / server / proxy)
 ├── ai/                        # Gemini API client / prompt / schema / rate-limiter / validate
 ├── places/                    # Google Places API client (エリア検索)
 ├── queries/                   # 集計 / 取得関数 ('use cache' で包む)
@@ -74,7 +74,7 @@ lib/
 ├── env.ts                     # 環境変数バリデーション (fail-fast)
 └── cache.ts                   # CACHE_TAGS 定数
 
-middleware.ts                  # Supabase Auth セッション検証 (Edge runtime)
+proxy.ts                       # Supabase Auth セッション検証 (Node.js runtime)
 types/                         # Store / Research / Deal / Handoff / Stage
 ```
 

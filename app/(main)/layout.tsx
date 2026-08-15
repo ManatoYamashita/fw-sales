@@ -33,7 +33,7 @@ async function SidebarShell({
 /**
  * Topbar に currentProfile を注入する RSC ラッパ。
  *
- * middleware が `(main)` 配下を保護するため通常はここに到達しているなら
+ * proxy が `(main)` 配下を保護するため通常はここに到達しているなら
  * 認証済のはずだが、防御的に profile が null の場合は `/login` に redirect する
  * (auth-and-notifications spec §1.1, §1.5)。
  */

@@ -1,7 +1,7 @@
 /**
  * サインイン画面 (auth-and-notifications spec, Issue #16)
  *
- * 未認証ユーザーが middleware からリダイレクトされて到達する画面。
+ * 未認証ユーザーが proxy からリダイレクトされて到達する画面。
  * Google OAuth サインインボタンと、認証エラー時のメッセージ表示のみを担う。
  *
  * - `redirect` クエリ: サインイン後に復帰するパス。OAuth フロー完了後に

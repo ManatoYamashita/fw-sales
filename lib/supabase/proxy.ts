@@ -1,12 +1,13 @@
 /**
- * Supabase Middleware セッションヘルパ (auth-and-notifications spec, Issue #16)
+ * Supabase Proxy セッションヘルパ (auth-and-notifications spec, Issue #16)
  *
- * Next.js root middleware (`middleware.ts`) から呼ばれ、`@supabase/ssr` の
+ * Next.js root proxy (`proxy.ts`) から呼ばれ、`@supabase/ssr` の
  * cookies adapter で `request.cookies` / `response.cookies` を橋渡しし、
  * セッション cookie の refresh と認証状態の判定を 1 関数で完結させる。
  *
  * 制約:
- * - Edge Runtime で動作する (postgres 直接接続不可)
+ * - Node.js runtime で動作する (Next.js 16 の proxy は runtime 固定)。ただし
+ *   全リクエストの前段で走るため postgres 直接接続や重い依存は持ち込まない
  * - `import "server-only"` を必ず付ける
  * - 認証関連の環境変数未設定時は warn ログ + `isAuthenticated: false` を返却
  *
@@ -26,10 +27,17 @@ export interface UpdateSessionResult {
 /**
  * Supabase Auth API への fetch を強制中断する上限。
  *
- * Vercel Edge Middleware の総上限は 25,000ms。Supabase プロジェクトが pause /
- * DNS NXDOMAIN / 経路障害でハングした際に MIDDLEWARE_INVOCATION_TIMEOUT (504)
- * を返さず、`/login` リダイレクトに fall through するため 4 秒で AbortSignal を
- * 発火させる。通常応答は数百ms に収まるため誤発火しない想定。
+ * 2026-06-21 の本番障害 (Supabase Free Tier の 7 日 pause → DNS NXDOMAIN →
+ * `auth.getUser()` がハング → 504 GATEWAY_TIMEOUT) に対する fail-fast 防御
+ * (PR #146 / Issue #147)。Supabase プロジェクトが pause / DNS NXDOMAIN /
+ * 経路障害でハングした際にプラットフォームの実行上限まで待たず、`/login`
+ * リダイレクトに fall through するため 4 秒で AbortSignal を発火させる。
+ * 通常応答は数百ms に収まるため誤発火しない想定。
+ *
+ * 実行レイヤは Next.js 16 の proxy 化で Edge Middleware (総上限 25,000ms) から
+ * Node.js function に変わった。上限値は `vercel.json` に `maxDuration` を
+ * 指定していないため Vercel のデフォルトに依存するが、**外部 fetch がハングする
+ * 構造自体は変わらない**ので、この防御は runtime を問わず必要。
  */
 const AUTH_FETCH_TIMEOUT_MS = 4_000;
 
@@ -41,7 +49,7 @@ function readSupabaseEnv(): { url: string; anonKey: string } | null {
   if (!url || !anonKey) {
     if (!_missingEnvWarned) {
       console.warn(
-        "[auth] NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY is not set. Middleware will treat all requests as unauthenticated.",
+        "[auth] NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY is not set. Proxy will treat all requests as unauthenticated.",
       );
       _missingEnvWarned = true;
     }
@@ -51,11 +59,11 @@ function readSupabaseEnv(): { url: string; anonKey: string } | null {
 }
 
 /**
- * Edge Runtime 上で実行されるセッション更新ヘルパ。
+ * proxy (Node.js runtime) 上で実行されるセッション更新ヘルパ。
  *
  * - cookies の `getAll` / `setAll` で Supabase 側に refresh を任せ、
  *   `auth.getUser()` でセッション検証する
- * - 認証未設定 / 失敗時は `isAuthenticated: false` を返し、呼び出し側 (middleware.ts)
+ * - 認証未設定 / 失敗時は `isAuthenticated: false` を返し、呼び出し側 (proxy.ts)
  *   で `/login` リダイレクトを発火させる
  */
 export async function updateSession(
@@ -128,7 +136,7 @@ export async function updateSession(
   } catch (err) {
     // 防御コード (theoretical) — auth-js が error を return するため通常は到達しない。
     // 安全網として残置。
-    console.error("[auth] middleware updateSession failed:", err);
+    console.error("[auth] proxy updateSession failed:", err);
     return { response, isAuthenticated: false, userId: null };
   }
 }
