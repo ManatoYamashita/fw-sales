@@ -72,10 +72,18 @@ function driveNormalBody(chunks: string[]) {
   };
 }
 
+/**
+ * `safeFetchHtml` は失敗経路で構造化ログを1行出す (#208)。DENY / 境界値のケースが
+ * 多数あるためテスト出力が埋もれる。ファイル全体で抑制したうえで、ログ内容の
+ * 検証は「構造化ログ」describe でこのスパイ経由に行う。
+ */
+const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
 afterEach(() => {
   vi.mocked(https.request).mockReset();
   vi.mocked(http.request).mockReset();
   vi.mocked(dns.promises.lookup).mockReset();
+  consoleError.mockClear();
 });
 
 describe("safeFetchHtml: ALLOW", () => {
@@ -480,5 +488,75 @@ describe("safeFetchHtml: 境界値", () => {
   it("不正なURL文字列はinvalid_url", async () => {
     const result = await safeFetchHtml("not a url");
     expect(result).toEqual({ ok: false, reason: "invalid_url" });
+  });
+});
+
+/**
+ * 失敗理由をサーバログへ残す (#208)。UI へ返る `SafeFetchResult` は従来どおり
+ * `reason` のみで、解決先IP・Nodeの生エラー文言はログにしか出ないことを固定する。
+ */
+describe("safeFetchHtml: 構造化ログ", () => {
+  it("redirect先のdisallowed_ip_rangeは、拒否対象のhostとhop番号をログへ残す", async () => {
+    mockDnsResolvesTo("93.184.216.34");
+    mockRequestOnce(https, createMockRes(302, { location: "http://10.0.0.5/internal" }), () => {});
+
+    const result = await safeFetchHtml("https://example.com/redirector");
+
+    expect(result).toEqual({ ok: false, reason: "disallowed_ip_range" });
+    expect(consoleError).toHaveBeenCalledTimes(1);
+    expect(consoleError).toHaveBeenCalledWith(
+      "[safeFetchHtml] failed",
+      expect.objectContaining({
+        reason: "disallowed_ip_range",
+        scheme: "http:",
+        // 1hop目のexample.comではなく、実際に落ちたredirect先が記録される
+        host: "10.0.0.5",
+        path: "/internal",
+        hop: 1,
+        phase: "url_safety",
+      }),
+    );
+  });
+
+  it("network_errorはNodeの生エラー文言と解決先IPをログにのみ残し、クエリ文字列は落とす", async () => {
+    mockDnsResolvesTo("93.184.216.34");
+    const req = createMockReq();
+    vi.mocked(https.request).mockImplementationOnce(((() => {
+      queueMicrotask(() => req.emit("error", new Error("connect ECONNRESET 93.184.216.34:443")));
+      return req;
+    }) as unknown) as typeof https.request);
+
+    const result = await safeFetchHtml("https://example.com/shop?token=secret-value");
+
+    // 戻り値には従来どおりreasonのみ(生エラー文言・IPは含まない)
+    expect(result).toEqual({ ok: false, reason: "network_error" });
+    expect(consoleError).toHaveBeenCalledWith(
+      "[safeFetchHtml] failed",
+      expect.objectContaining({
+        reason: "network_error",
+        host: "example.com",
+        path: "/shop",
+        hop: 0,
+        phase: "hop",
+        resolvedAddresses: ["93.184.216.34"],
+        message: "connect ECONNRESET 93.184.216.34:443",
+      }),
+    );
+    // pathはpathnameのみ。クエリ文字列がログへ混入しないこと。
+    expect(JSON.stringify(consoleError.mock.calls)).not.toContain("secret-value");
+  });
+
+  it("成功時はログを出さない", async () => {
+    mockDnsResolvesTo("93.184.216.34");
+    mockRequestOnce(
+      https,
+      createMockRes(200, { "content-type": "text/html" }),
+      driveNormalBody(["<html></html>"]),
+    );
+
+    const result = await safeFetchHtml("https://example.com/");
+
+    expect(result.ok).toBe(true);
+    expect(consoleError).not.toHaveBeenCalled();
   });
 });

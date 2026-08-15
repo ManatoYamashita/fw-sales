@@ -18,9 +18,19 @@ vi.mock("@/lib/security/safe-http-fetch", () => ({
   safeFetchHtml: vi.fn(),
 }));
 
+/**
+ * `fetchOgp` は非2xx(error)および name 未抽出(warn)の際に構造化ログを1行出す (#208)。
+ * name を意図的に落とすケースが本ファイルに多数あるため既定では抑制し、
+ * ログ内容の検証は「構造化ログ」describe でこれらのスパイ経由に行う。
+ */
+const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
 describe("fetchOgp + extractFromHtml (P1 cheerio + JSON-LD)", () => {
   afterEach(() => {
     vi.mocked(safeFetchHtml).mockReset();
+    consoleError.mockClear();
+    consoleWarn.mockClear();
   });
 
   function mockFetch(html: string, status = 200) {
@@ -317,5 +327,111 @@ describe("fetchOgp + extractFromHtml (P1 cheerio + JSON-LD)", () => {
     expect(result.html).not.toMatch(/<circle/);
     // 当然 input より小さい
     expect(result.html!.length).toBeLessThan(inputHtml.length);
+  });
+});
+
+/**
+ * 取得失敗をサーバログへ残す (#208)。本番で「店舗名だけ空になる」症状の原因が
+ * 非2xxなのか、200を掴んだうえでの抽出失敗なのかをログのみで判別できるようにする。
+ * UI へ返る `OgpResult` の形と文言は従来どおり変えない。
+ */
+describe("fetchOgp: 構造化ログ", () => {
+  afterEach(() => {
+    vi.mocked(safeFetchHtml).mockReset();
+    consoleError.mockClear();
+    consoleWarn.mockClear();
+  });
+
+  const CHALLENGE_HTML =
+    '<!DOCTYPE html><html><head><title>Just a moment...</title></head><body>bot check</body></html>';
+
+  it("非2xxはstatusと本文先頭をログへ残し、UIへは HTTP <status> のみ返す", async () => {
+    vi.mocked(safeFetchHtml).mockResolvedValue({
+      ok: true,
+      status: 403,
+      finalUrl: "https://tabelog.com/tokyo/A1301/A130101/13001895/",
+      body: CHALLENGE_HTML,
+      contentType: "text/html; charset=UTF-8",
+    });
+
+    const result = await fetchOgp("https://tabelog.com/tokyo/A1301/A130101/13001895/");
+
+    expect(result).toEqual({ ok: false, error: "HTTP 403" });
+    expect(consoleError).toHaveBeenCalledWith(
+      "[fetchOgp] non-2xx",
+      expect.objectContaining({
+        status: 403,
+        finalUrl: "https://tabelog.com/tokyo/A1301/A130101/13001895/",
+        contentType: "text/html; charset=UTF-8",
+        bodyHead: expect.stringContaining("Just a moment..."),
+      }),
+    );
+  });
+
+  it("非2xxのbodyHeadは200文字までに切り詰める", async () => {
+    vi.mocked(safeFetchHtml).mockResolvedValue({
+      ok: true,
+      status: 503,
+      finalUrl: "https://example.com/x",
+      body: "a".repeat(5000),
+      contentType: "text/html",
+    });
+
+    await fetchOgp("https://example.com/x");
+
+    const logged = consoleError.mock.calls.find((c) => c[0] === "[fetchOgp] non-2xx");
+    expect((logged?.[1] as { bodyHead: string }).bodyHead).toHaveLength(200);
+  });
+
+  it("200でもnameが抽出できなければ、bytesと本文先頭をログへ残す", async () => {
+    vi.mocked(safeFetchHtml).mockResolvedValue({
+      ok: true,
+      status: 200,
+      finalUrl: "https://tabelog.com/tokyo/A1301/A130101/13001895/",
+      // title が無く name を抽出できないページ (challenge を200で返す場合を模す)
+      body: "<html><head></head><body>bot check</body></html>",
+      contentType: "text/html",
+    });
+
+    const result = await fetchOgp("https://tabelog.com/tokyo/A1301/A130101/13001895/");
+
+    // 戻り値は従来どおり ok:true のまま(挙動は変えない)
+    expect(result.ok).toBe(true);
+    expect(result.name).toBeUndefined();
+    expect(consoleWarn).toHaveBeenCalledWith(
+      "[fetchOgp] no name extracted",
+      expect.objectContaining({
+        status: 200,
+        finalUrl: "https://tabelog.com/tokyo/A1301/A130101/13001895/",
+        bytes: 48,
+        bodyHead: expect.stringContaining("bot check"),
+      }),
+    );
+  });
+
+  it("safeFetchHtmlの失敗はsafeFetchHtml側でログ済みのため、ここでは重ねて出さない", async () => {
+    vi.mocked(safeFetchHtml).mockResolvedValue({ ok: false, reason: "timeout" });
+
+    const result = await fetchOgp("https://example.com/slow");
+
+    expect(result).toEqual({ ok: false, error: "タイムアウトしました" });
+    expect(consoleError).not.toHaveBeenCalled();
+    expect(consoleWarn).not.toHaveBeenCalled();
+  });
+
+  it("name が取れた通常の成功時はログを出さない", async () => {
+    vi.mocked(safeFetchHtml).mockResolvedValue({
+      ok: true,
+      status: 200,
+      finalUrl: "https://example.com/shop",
+      body: "<html><head><title>導楽</title></head></html>",
+      contentType: "text/html",
+    });
+
+    const result = await fetchOgp("https://example.com/shop");
+
+    expect(result.name).toBe("導楽");
+    expect(consoleError).not.toHaveBeenCalled();
+    expect(consoleWarn).not.toHaveBeenCalled();
   });
 });

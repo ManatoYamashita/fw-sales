@@ -7,6 +7,8 @@ import { safeFetchHtml, type SafeFetchFailureReason } from "@/lib/security/safe-
 const FETCH_TIMEOUT_MS = 8000;
 /** 1リクエストで読み込む本文の最大バイト数(fix/url-import-ssrf-hardening)。 */
 const MAX_OGP_BODY_BYTES = 2_000_000;
+/** 取得失敗の診断ログに残す本文の先頭文字数(#208)。UI へは一切出さない。 */
+const BODY_LOG_HEAD_CHARS = 200;
 
 /**
  * `safeFetchHtml`の失敗理由を、内部情報(解決先IP・DNSエラー詳細等)を含まない
@@ -51,14 +53,39 @@ export async function fetchOgp(url: string): Promise<OgpResult> {
   });
 
   if (!result.ok) {
+    // 失敗理由の構造化ログは `safeFetchHtml` 側が host / path 付きで出しているため、
+    // ここで重ねては出さない (#208)。
     return { ok: false, error: toSanitizedOgpError(result.reason) };
   }
   if (result.status < 200 || result.status >= 300) {
+    // 非 2xx は `safeFetchHtml` から `ok: true` で返るため、ここが唯一の記録点になる。
+    // bot 対策 (Cloudflare challenge 等) による拒否か、対象サイト自身の 4xx かを
+    // ログだけで判別できるよう本文の先頭のみ残す。UI へは従来どおり `HTTP <status>` のみ。
+    console.error("[fetchOgp] non-2xx", {
+      status: result.status,
+      finalUrl: result.finalUrl,
+      contentType: result.contentType,
+      bodyHead: result.body.slice(0, BODY_LOG_HEAD_CHARS),
+    });
     return { ok: false, error: `HTTP ${result.status}` };
   }
 
   const finalUrl = result.finalUrl || url;
   const extracted = extractFromHtml(result.body, finalUrl);
+  if (!extracted.name) {
+    // 200 が返っていても bot challenge ページ ("Just a moment..." 等) を掴んでいると
+    // name が取れず、UI 上は「なぜか店舗名だけ空」という症状になる。上の 2 経路では
+    // 捕捉できない盲点のため、ここでも 1 行残す (#207 の切り分け用)。
+    // 戻り値は `ok: true` のままで失敗ではないため、規約に従い warn とする
+    // (`[places-fallback]` の「補完できなかった」ログと同じ位置づけ)。
+    console.warn("[fetchOgp] no name extracted", {
+      status: result.status,
+      finalUrl,
+      contentType: result.contentType,
+      bytes: result.body.length,
+      bodyHead: result.body.slice(0, BODY_LOG_HEAD_CHARS),
+    });
+  }
   // 短縮 URL のリダイレクト後 URL を後段の再パースで利用するため保持
   if (finalUrl && finalUrl !== url) {
     extracted.final_url = finalUrl;
