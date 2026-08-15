@@ -176,7 +176,14 @@ export function evaluateUrlImportPolicy(raw: string): UrlImportPolicyResult {
   // 短縮共有 URL。展開後の最終 URL は呼び出し側が **もう一度この policy へ通す**こと
   // (short link → 無関係なサイトへの redirect を店舗 URL として採用しないため)。
   if (host === SHORT_HOST_MAPS_APP) {
-    return { ok: true, kind: "google_maps_short", url: trimmed };
+    // 共有 ID(`/abc123`)を必ず要求する。hostname 一致だけで通すと
+    // `https://maps.app.goo.gl/` のような ID 無し URL でも policy を通過し、
+    // 店舗を特定できないと分かっているのに redirect 解決の外部 fetch が発生する。
+    const segs = pathSegments(parsed.pathname);
+    if ((segs[0] ?? "") !== "") {
+      return { ok: true, kind: "google_maps_short", url: trimmed };
+    }
+    return { ok: false, reason: "not_place_url" };
   }
   if (host === SHORT_HOST_GOO_GL) {
     // `goo.gl` は Google の汎用短縮ドメインで Maps 以外にも使われるため、

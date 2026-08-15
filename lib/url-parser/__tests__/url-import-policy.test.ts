@@ -99,6 +99,32 @@ describe("evaluateUrlImportPolicy — Google だが店舗ページでない", ()
       reason: "not_place_url",
     });
   });
+
+  /**
+   * `maps.app.goo.gl` を hostname 一致だけで通すと、共有 ID の無い URL でも
+   * policy を通過し、店舗を特定できないと分かっているのに redirect 解決の
+   * 外部 fetch が発生してしまう。共有 ID を必須にする。
+   */
+  it.each([
+    "https://maps.app.goo.gl/",
+    "https://maps.app.goo.gl",
+    "https://maps.app.goo.gl/?g_st=ipc",
+  ])("maps.app.goo.gl の共有 ID 無しは not_place_url: %s", (url) => {
+    expect(evaluateUrlImportPolicy(url)).toEqual({ ok: false, reason: "not_place_url" });
+  });
+
+  it("maps.app.goo.gl は共有 ID があれば受け付ける(クエリ付きも可)", () => {
+    expect(evaluateUrlImportPolicy("https://maps.app.goo.gl/abc123")).toEqual({
+      ok: true,
+      kind: "google_maps_short",
+      url: "https://maps.app.goo.gl/abc123",
+    });
+    expect(evaluateUrlImportPolicy("https://maps.app.goo.gl/abc123?g_st=ipc")).toEqual({
+      ok: true,
+      kind: "google_maps_short",
+      url: "https://maps.app.goo.gl/abc123?g_st=ipc",
+    });
+  });
 });
 
 describe("evaluateUrlImportPolicy — 部分文字列一致で通ってはいけない入力", () => {

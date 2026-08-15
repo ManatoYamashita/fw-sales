@@ -303,4 +303,13 @@ describe("importFromUrlAction — Google マップ短縮 URL", () => {
     if (result.status === "rejected") expect(result.reason).toBe("not_place_url");
     expect(mockedFetchOgp).not.toHaveBeenCalled();
   });
+
+  it("共有 ID 無しの maps.app.goo.gl は redirect 解決の fetch すら行わない", async () => {
+    const result = await importFromUrlAction("https://maps.app.goo.gl/");
+
+    expect(result.status).toBe("rejected");
+    if (result.status === "rejected") expect(result.reason).toBe("not_place_url");
+    expect(mockedFetchOgp).not.toHaveBeenCalled();
+    expect(mockedSearchPlaces).not.toHaveBeenCalled();
+  });
 });
