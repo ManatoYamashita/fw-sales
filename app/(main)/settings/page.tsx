@@ -8,7 +8,6 @@ import { DataActions } from "./_components/data-actions";
 import { ThemeToggleCard } from "./_components/theme-toggle-card";
 import { UserManagementCard } from "./_components/user-management-card";
 import { AiPromptTemplatesCard } from "./_components/ai-prompt-templates-card";
-import { GemUrlCard } from "./_components/gem-url-card";
 import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
 import {
@@ -99,9 +98,6 @@ export default function SettingsPage() {
       <Suspense fallback={null}>
         <AiPromptTemplatesCard />
       </Suspense>
-
-      {/* Gem URL 設定 (Issue #122)。getGemUrlCached は 'use cache' で cookies 非依存。 */}
-      <GemUrlCard />
 
       <Card>
         <Card.Header>

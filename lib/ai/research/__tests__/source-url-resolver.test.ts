@@ -25,8 +25,10 @@ vi.mock("node:dns", () => ({
 import {
   resolveGroundingRedirectUrl,
   isAllowedStartHost,
-  isDisallowedAddress,
 } from "../source-url-resolver";
+// IP レンジ判定は lib/security/url-safety.ts へ一本化された(PR #199 の二重実装解消)。
+// resolver 経由で同じ判定が効いていることを本ファイルでも引き続き固定する。
+import { isDisallowedAddress } from "@/lib/security/url-safety";
 
 describe("isAllowedStartHost", () => {
   it("vertexaisearch.cloud.google.com を許可する", () => {

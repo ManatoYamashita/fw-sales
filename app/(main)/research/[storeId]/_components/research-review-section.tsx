@@ -576,8 +576,11 @@ export function ReviewCompletionFooter({
 
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex flex-col gap-0.5 text-xs text-muted-foreground" aria-live="polite">
+          {/* 「採用済み」ではなく「判断済み」。この値は
+              `reviewableItems.length - undecided.length` であり、採用だけでなく
+              却下・スキップも含む。却下するほど増えるため「採用済み」は誤り。 */}
           <span>
-            採用済み {decidedCount} ・ 未対応 {summary.total}
+            判断済み {decidedCount} ・ 未対応 {summary.total}
             {blockedByConflict ? ` ・ 要選択 ${summary.conflict}` : ""}
           </span>
           {summary.adoptable > 0 && (
