@@ -7,7 +7,7 @@
 ## Core Technologies
 
 - **Language**: TypeScript 5+ (strict + `noUncheckedIndexedAccess`)
-- **Framework**: Next.js 16.2.4 (App Router, `cacheComponents: true`)
+- **Framework**: Next.js 16.3.1 (App Router, `cacheComponents: true`)
 - **UI Runtime**: React 19.2.4 (Server Components + Server Actions)
 - **Styling**: Tailwind CSS v4 (`@theme` トークン、cossUI 由来の neutral-first OKLCH パレット)
 - **Package Manager**: pnpm (workspace 構成)
