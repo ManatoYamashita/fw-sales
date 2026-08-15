@@ -23,7 +23,8 @@ export const metadata: Metadata = { title: "設定" };
 async function loadCounts() {
   "use cache";
   // 4テーブルを full list する最重クエリ。longBackstop だと build 時 prerender 充填が走り、
-  // データ増大時に将来 USE_CACHE_TIMEOUT を招き得る。dynamicHole(expire<DYNAMIC_EXPIRE=300s)
+  // データ増大時に将来 USE_CACHE_TIMEOUT を招き得る。
+  // dynamicHole(expire<MIN_PRERENDERABLE_EXPIRE=300s。16.2 までの名称は DYNAMIC_EXPIRE)
   // で build 充填を回避し、リクエスト時充填 + 短期 runtime cache + タグ無効化で運用する。
   cacheLife("dynamicHole");
   cacheTag(
