@@ -36,6 +36,28 @@ function toSanitizedOgpError(reason: SafeFetchFailureReason): string {
 }
 
 /**
+ * 診断ログへ載せる URL からクエリ文字列とフラグメントを除去する (#208 review)。
+ *
+ * `safeFetchHtml` の失敗ログは `path: current.pathname` としてクエリを落としている。
+ * 一方こちらは `safeFetchHtml` が返した `finalUrl` (= `URL.toString()`、クエリ込み) を
+ * そのまま出していたため、貼付 URL に混じったトークン・メールアドレス等がサーバログへ
+ * 残りえた。同一の粒度 (scheme + host + pathname) へ揃える。
+ *
+ * `finalUrl` は `URL` オブジェクト由来のため通常はパースできるが、パースできない
+ * 場合はホスト情報を安全に切り出せないため空文字を返し、ログには載せない。
+ */
+function toLoggableUrl(raw: string): string {
+  try {
+    const u = new URL(raw);
+    u.search = "";
+    u.hash = "";
+    return u.toString();
+  } catch {
+    return "";
+  }
+}
+
+/**
  * 食べログ等から OGP / JSON-LD / 構造化データを直接取得する Server-only 関数。
  * cheerio を用いた DOM パースで CSS セレクタ + JSON-LD `Restaurant` schema を読む。
  *
@@ -63,7 +85,7 @@ export async function fetchOgp(url: string): Promise<OgpResult> {
     // ログだけで判別できるよう本文の先頭のみ残す。UI へは従来どおり `HTTP <status>` のみ。
     console.error("[fetchOgp] non-2xx", {
       status: result.status,
-      finalUrl: result.finalUrl,
+      finalUrl: toLoggableUrl(result.finalUrl),
       contentType: result.contentType,
       bodyHead: result.body.slice(0, BODY_LOG_HEAD_CHARS),
     });
@@ -80,7 +102,9 @@ export async function fetchOgp(url: string): Promise<OgpResult> {
     // (`[places-fallback]` の「補完できなかった」ログと同じ位置づけ)。
     console.warn("[fetchOgp] no name extracted", {
       status: result.status,
-      finalUrl,
+      // ログ専用にクエリを落とす。後段の再パースへ渡す `extracted.final_url` は
+      // 短縮 URL の展開結果として使うため、下でクエリ込みの `finalUrl` を維持する。
+      finalUrl: toLoggableUrl(finalUrl),
       contentType: result.contentType,
       bytes: result.body.length,
       bodyHead: result.body.slice(0, BODY_LOG_HEAD_CHARS),

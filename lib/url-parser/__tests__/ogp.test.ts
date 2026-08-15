@@ -434,4 +434,65 @@ describe("fetchOgp: 構造化ログ", () => {
     expect(consoleError).not.toHaveBeenCalled();
     expect(consoleWarn).not.toHaveBeenCalled();
   });
+
+  // --- クエリ文字列の除去 (#208 review) ----------------------------------
+  // `safeFetchHtml` 側の `path: current.pathname` と粒度を揃え、貼付 URL の
+  // クエリ (トークン・メールアドレス等) をサーバログへ残さない。
+
+  it("非2xxのログはfinalUrlのクエリ文字列とフラグメントを落とす", async () => {
+    vi.mocked(safeFetchHtml).mockResolvedValue({
+      ok: true,
+      status: 403,
+      finalUrl: "https://tabelog.com/tokyo/13001895/?token=secret-value&email=a@example.com#frag",
+      body: CHALLENGE_HTML,
+      contentType: "text/html",
+    });
+
+    await fetchOgp("https://tabelog.com/tokyo/13001895/?token=secret-value&email=a@example.com");
+
+    expect(consoleError).toHaveBeenCalledWith(
+      "[fetchOgp] non-2xx",
+      expect.objectContaining({ finalUrl: "https://tabelog.com/tokyo/13001895/" }),
+    );
+    expect(JSON.stringify(consoleError.mock.calls)).not.toContain("secret-value");
+    expect(JSON.stringify(consoleError.mock.calls)).not.toContain("a@example.com");
+  });
+
+  it("name未抽出のログはfinalUrlのクエリ文字列を落としつつ、戻り値のfinal_urlはクエリを保持する", async () => {
+    const withQuery = "https://maps.app.goo.gl/x?token=secret-value";
+    vi.mocked(safeFetchHtml).mockResolvedValue({
+      ok: true,
+      status: 200,
+      finalUrl: withQuery,
+      body: "<html><head></head><body>bot check</body></html>",
+      contentType: "text/html",
+    });
+
+    const result = await fetchOgp("https://maps.app.goo.gl/x");
+
+    expect(consoleWarn).toHaveBeenCalledWith(
+      "[fetchOgp] no name extracted",
+      expect.objectContaining({ finalUrl: "https://maps.app.goo.gl/x" }),
+    );
+    expect(JSON.stringify(consoleWarn.mock.calls)).not.toContain("secret-value");
+    // 短縮 URL の再パースへ渡す final_url は従来どおりクエリ込みの完全な URL のまま
+    expect(result.final_url).toBe(withQuery);
+  });
+
+  it("finalUrlがパースできない場合はログへ載せない", async () => {
+    vi.mocked(safeFetchHtml).mockResolvedValue({
+      ok: true,
+      status: 502,
+      finalUrl: "not-a-url",
+      body: CHALLENGE_HTML,
+      contentType: "text/html",
+    });
+
+    await fetchOgp("not-a-url");
+
+    expect(consoleError).toHaveBeenCalledWith(
+      "[fetchOgp] non-2xx",
+      expect.objectContaining({ finalUrl: "" }),
+    );
+  });
 });
