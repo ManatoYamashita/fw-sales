@@ -36,6 +36,19 @@ function toSanitizedOgpError(reason: SafeFetchFailureReason): string {
 }
 
 /**
+ * `extractFromHtml` の抽出結果と、診断ログ用の補助情報 (#208 review)。
+ *
+ * `blacklistedTitle` は、`cleanName` 後に `TITLE_NAME_BLACKLIST` と完全一致したため
+ * `name` として採用しなかった文字列 (最初の1件)。`name` 欠落の警告ログで、
+ * 「サイト名しか無いページを掴んだ」既知の理由と「name 候補がそもそも存在しない」
+ * (bot challenge / 空ページ = #207 の切り分け対象) を区別するために使う。
+ */
+interface ExtractResult {
+  result: OgpResult;
+  blacklistedTitle?: string;
+}
+
+/**
  * 診断ログへ載せる URL からクエリ文字列とフラグメントを除去する (#208 review)。
  *
  * `safeFetchHtml` の失敗ログは `path: current.pathname` としてクエリを落としている。
@@ -93,7 +106,7 @@ export async function fetchOgp(url: string): Promise<OgpResult> {
   }
 
   const finalUrl = result.finalUrl || url;
-  const extracted = extractFromHtml(result.body, finalUrl);
+  const { result: extracted, blacklistedTitle } = extractFromHtml(result.body, finalUrl);
   if (!extracted.name) {
     // 200 が返っていても bot challenge ページ ("Just a moment..." 等) を掴んでいると
     // name が取れず、UI 上は「なぜか店舗名だけ空」という症状になる。上の 2 経路では
@@ -107,6 +120,12 @@ export async function fetchOgp(url: string): Promise<OgpResult> {
       finalUrl: toLoggableUrl(finalUrl),
       contentType: result.contentType,
       bytes: result.body.length,
+      // name が取れなかった理由を切り分ける (#208 review)。
+      // - 値あり ("Google マップ" 等): サイト名しか無いページ。Google マップ取込では
+      //   想定内で、短縮 URL 展開後の `final_url` 再パースで name が補われる。
+      // - null: title / og:title / JSON-LD name のいずれも存在しない。bot challenge や
+      //   空ページを掴んだ可能性が高く、#207 で追うべきはこちら。
+      blacklistedTitle: blacklistedTitle ?? null,
       bodyHead: result.body.slice(0, BODY_LOG_HEAD_CHARS),
     });
   }
@@ -232,22 +251,36 @@ function toFiniteNumber(v: unknown): number | undefined {
   return undefined;
 }
 
-function extractFromHtml(html: string, sourceUrl?: string): OgpResult {
+function extractFromHtml(html: string, sourceUrl?: string): ExtractResult {
   const result: OgpResult = { ok: true };
+  let blacklistedTitle: string | undefined;
   const $ = cheerio.load(html);
+
+  /**
+   * name 候補をクレンジングし、サイト名ブラックリストに一致しなければ `name` として採用する。
+   * 一致した場合は採用せず、診断ログ用に最初の1件だけ記録する (#208 review)。
+   * 判定ロジックは従来と同一で、記録が増えただけ。
+   */
+  const adoptName = (raw: string): void => {
+    const head = cleanName(raw);
+    if (!head) return;
+    if (isBlacklistedTitle(head)) {
+      blacklistedTitle ??= head;
+      return;
+    }
+    result.name = head;
+  };
 
   // ---- name ----
   const titleTag = $("title").first().text();
   if (titleTag) {
-    const head = cleanName(titleTag);
-    if (head && !isBlacklistedTitle(head)) result.name = head;
+    adoptName(titleTag);
     const g = guessGenre(titleTag);
     if (g) result.genre = g;
   }
   const ogTitle = $('meta[property="og:title"]').attr("content");
   if (ogTitle && !result.name) {
-    const head = cleanName(ogTitle);
-    if (head && !isBlacklistedTitle(head)) result.name = head;
+    adoptName(ogTitle);
   }
 
   // ---- description ----
@@ -266,8 +299,7 @@ function extractFromHtml(html: string, sourceUrl?: string): OgpResult {
   const jsonLd = parseJsonLd($);
   if (jsonLd) {
     if (!result.name && jsonLd.name) {
-      const head = cleanName(jsonLd.name);
-      if (head && !isBlacklistedTitle(head)) result.name = head;
+      adoptName(jsonLd.name);
     }
     if (!result.phone && jsonLd.telephone) {
       result.phone = jsonLd.telephone;
@@ -488,5 +520,5 @@ function extractFromHtml(html: string, sourceUrl?: string): OgpResult {
   $("script, style, svg, noscript").remove();
   result.html = $.html();
 
-  return result;
+  return { result, blacklistedTitle };
 }

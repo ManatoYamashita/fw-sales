@@ -105,6 +105,31 @@ const DEFAULT_HOP_TIMEOUT_MS = 5000;
 const DEFAULT_TOTAL_TIMEOUT_MS = 8000;
 const DEFAULT_MAX_BODY_BYTES = 2_000_000;
 
+/**
+ * 診断ログへ載せる文字列フィールドの最大長 (#208 review)。
+ *
+ * redirect先の`Location`ヘッダはサーバー由来の外部入力であり、そこから組み立てた
+ * `URL`の`pathname`/`hostname`には長さの上限がない。Nodeの`maxHeaderSize`(既定16KB)が
+ * 実質的な上限にはなるが、ログ1行のサイズが外部入力に比例して膨らむ状態は避ける。
+ */
+const LOG_FIELD_MAX_CHARS = 200;
+
+/**
+ * 診断ログへ載せる解決先IPの最大件数 (#208 review)。DNSが多数のAレコードを返した場合に
+ * ログ1行が膨らむのを防ぐ。件数自体は`resolvedCount`で別途記録するため情報は失われない。
+ */
+const LOG_MAX_RESOLVED_ADDRESSES = 8;
+
+/**
+ * 診断ログ用に文字列を`LOG_FIELD_MAX_CHARS`で切り詰める。切り詰めた場合は元の長さを
+ * 併記し、ログを読む側が「切り詰められた」ことと元のサイズを判別できるようにする。
+ */
+function clipForLog(s: string): string {
+  return s.length <= LOG_FIELD_MAX_CHARS
+    ? s
+    : `${s.slice(0, LOG_FIELD_MAX_CHARS)}…(${s.length})`;
+}
+
 /** redirectとして追跡するHTTPステータス。それ以外の3xx(300/304/305/306等)や
  *  Location欠落の3xxはredirectとして扱わずfinal responseとして処理する。 */
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
@@ -377,6 +402,10 @@ export async function safeFetchHtml(
    * URLはクエリ文字列を落として`pathname`のみ記録する(貼付URLに不要な情報が
    * 混じる可能性への保険)。`current`はredirectのたびに再代入されるが、この
    * クロージャは常に最新の値、すなわち実際に落ちたhopのURLを参照する。
+   *
+   * redirect後の`current`はサーバー由来の`Location`から組み立てられるため、
+   * `host`/`path`は外部が長さを制御できる。ログ1行が外部入力に比例して
+   * 膨らまないよう`clipForLog`で切り詰める (#208 review)。
    */
   const fail = (
     reason: SafeFetchFailureReason,
@@ -385,8 +414,8 @@ export async function safeFetchHtml(
     console.error("[safeFetchHtml] failed", {
       reason,
       scheme: current.protocol,
-      host: current.hostname,
-      path: current.pathname,
+      host: clipForLog(current.hostname),
+      path: clipForLog(current.pathname),
       elapsedMs: Date.now() - start,
       ...extra,
     });
@@ -410,11 +439,18 @@ export async function safeFetchHtml(
     }
 
     // 解決先IPはログにのみ出す。戻り値・UIへは従来どおり一切出さない。
-    const resolvedAddresses = safety.resolvedAddresses.map((a) => a.address);
+    // DNSは任意件数のレコードを返しうるため、ログへ載せる件数は上限を設け、
+    // 総数は`resolvedCount`で別に残す (#208 review)。
+    const resolvedForLog = {
+      resolvedAddresses: safety.resolvedAddresses
+        .slice(0, LOG_MAX_RESOLVED_ADDRESSES)
+        .map((a) => a.address),
+      resolvedCount: safety.resolvedAddresses.length,
+    };
 
     const remainingAfterDns = deadline - Date.now();
     if (remainingAfterDns <= 0) {
-      return fail("timeout", { hop, phase: "post_dns", resolvedAddresses });
+      return fail("timeout", { hop, phase: "post_dns", ...resolvedForLog });
     }
 
     const pinnedLookup = createPinnedLookup(safety.resolvedAddresses);
@@ -442,8 +478,8 @@ export async function safeFetchHtml(
       return fail(reason, {
         hop,
         phase: "hop",
-        resolvedAddresses,
-        message: err instanceof Error ? err.message : String(err),
+        ...resolvedForLog,
+        message: clipForLog(err instanceof Error ? err.message : String(err)),
       });
     } finally {
       clearTimeout(deadlineTimer);
@@ -457,7 +493,7 @@ export async function safeFetchHtml(
         // Locationはサーバー由来の外部入力のため、長さを切り詰めてログに残す。
         return fail("invalid_redirect_location", {
           hop,
-          location: hopResult.location.slice(0, 200),
+          location: clipForLog(hopResult.location),
         });
       }
       current = next;

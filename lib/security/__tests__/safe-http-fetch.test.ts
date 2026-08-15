@@ -546,6 +546,49 @@ describe("safeFetchHtml: 構造化ログ", () => {
     expect(JSON.stringify(consoleError.mock.calls)).not.toContain("secret-value");
   });
 
+  it("外部が長さを制御できるpathは200文字で切り詰め、元の長さを併記する", async () => {
+    mockDnsResolvesTo("93.184.216.34");
+    const req = createMockReq();
+    vi.mocked(https.request).mockImplementationOnce(((() => {
+      queueMicrotask(() => req.emit("error", new Error("connect ECONNRESET")));
+      return req;
+    }) as unknown) as typeof https.request);
+
+    // redirect先のLocationはサーバー由来の外部入力で、pathnameの長さに上限がない。
+    const longPath = `/${"a".repeat(5000)}`;
+    await safeFetchHtml(`https://example.com${longPath}`);
+
+    const logged = consoleError.mock.calls.find((c) => c[0] === "[safeFetchHtml] failed");
+    const path = (logged?.[1] as { path: string }).path;
+    expect(path.startsWith(`/${"a".repeat(199)}`)).toBe(true);
+    expect(path.endsWith("…(5001)")).toBe(true);
+    // ログ1行が外部入力に比例して膨らまないこと
+    expect(path.length).toBeLessThan(250);
+  });
+
+  it("解決先IPは8件までに抑え、総数をresolvedCountへ残す", async () => {
+    const addresses = Array.from({ length: 12 }, (_, i) => ({
+      address: `93.184.216.${i + 1}`,
+      family: 4 as const,
+    }));
+    vi.mocked(dns.promises.lookup).mockResolvedValueOnce(addresses as never);
+    const req = createMockReq();
+    vi.mocked(https.request).mockImplementationOnce(((() => {
+      queueMicrotask(() => req.emit("error", new Error("connect ECONNRESET")));
+      return req;
+    }) as unknown) as typeof https.request);
+
+    await safeFetchHtml("https://example.com/");
+
+    expect(consoleError).toHaveBeenCalledWith(
+      "[safeFetchHtml] failed",
+      expect.objectContaining({
+        resolvedAddresses: addresses.slice(0, 8).map((a) => a.address),
+        resolvedCount: 12,
+      }),
+    );
+  });
+
   it("成功時はログを出さない", async () => {
     mockDnsResolvesTo("93.184.216.34");
     mockRequestOnce(

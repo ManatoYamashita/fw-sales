@@ -479,6 +479,46 @@ describe("fetchOgp: 構造化ログ", () => {
     expect(result.final_url).toBe(withQuery);
   });
 
+  // --- name 欠落理由の切り分け (#208 review) ------------------------------
+  // Google マップ取込は title が "Google マップ" のため name が常に空になる。
+  // #207 で追いたい「title がそもそも無い challenge / 空ページ」と区別できるよう、
+  // 弾いたサイト名をログへ残す。
+
+  it("ブラックリストのサイト名で name を弾いた場合はblacklistedTitleへ残す", async () => {
+    vi.mocked(safeFetchHtml).mockResolvedValue({
+      ok: true,
+      status: 200,
+      finalUrl: "https://www.google.com/maps/place/x",
+      body: "<html><head><title>Google マップ</title></head></html>",
+      contentType: "text/html",
+    });
+
+    const result = await fetchOgp("https://www.google.com/maps/place/x");
+
+    expect(result.name).toBeUndefined();
+    expect(consoleWarn).toHaveBeenCalledWith(
+      "[fetchOgp] no name extracted",
+      expect.objectContaining({ blacklistedTitle: "Google マップ" }),
+    );
+  });
+
+  it("name候補がそもそも無い場合はblacklistedTitleがnullになる", async () => {
+    vi.mocked(safeFetchHtml).mockResolvedValue({
+      ok: true,
+      status: 200,
+      finalUrl: "https://tabelog.com/x",
+      body: "<html><head></head><body>bot check</body></html>",
+      contentType: "text/html",
+    });
+
+    await fetchOgp("https://tabelog.com/x");
+
+    expect(consoleWarn).toHaveBeenCalledWith(
+      "[fetchOgp] no name extracted",
+      expect.objectContaining({ blacklistedTitle: null }),
+    );
+  });
+
   it("finalUrlがパースできない場合はログへ載せない", async () => {
     vi.mocked(safeFetchHtml).mockResolvedValue({
       ok: true,
