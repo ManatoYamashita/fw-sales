@@ -42,7 +42,7 @@ export default async function NewStorePage({
           店舗を登録
         </h2>
         <p className="text-sm text-muted-foreground mt-1">
-          URL 貼付またはエリア検索で店舗を登録できます。タブで方法を切り替えてください。
+          GoogleマップURLまたはエリア検索で店舗を登録できます。タブで方法を切り替えてください。
         </p>
       </div>
       <StoreRegistrationTabs

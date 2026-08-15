@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PlaceResult } from "@/lib/places/types";
 
 import {
+  diagnosePickFailure,
   enrichWithPlacesFallback,
   mergePlaceIntoApply,
   pickBestPlace,
@@ -69,8 +70,16 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("pickBestPlace", () => {
-  it("完全一致 (name 完全一致) を最優先", () => {
+/**
+ * wrong-store prevention (Issue #207)。
+ *
+ * 変更前は「名前の完全一致が無ければ `userRatingsTotal` 最多の候補」を採用しており、
+ * 口コミ件数を identity evidence として使っていた。弱い検索語から複数候補が返ると
+ * 「その地域で最も有名な別の店」を自動登録する経路になるため廃止した。
+ * autofill 率より wrong-store prevention を優先する。
+ */
+describe("pickBestPlace — 一意な完全一致のみ採用する", () => {
+  it("正規化後の完全一致が 1 件だけならその候補を返す", () => {
     const places = [
       makePlace({ placeId: "A", name: "導楽 別店舗", userRatingsTotal: 100 }),
       makePlace({ placeId: "B", name: "導楽", userRatingsTotal: 10 }),
@@ -78,16 +87,76 @@ describe("pickBestPlace", () => {
     expect(pickBestPlace(places, "導楽")?.placeId).toBe("B");
   });
 
-  it("完全一致なしのとき userRatingsTotal 最多を選択", () => {
+  it("口コミ件数が桁違いに多くても、名前が一致しない候補は採用しない", () => {
+    const places = [
+      makePlace({ placeId: "FAMOUS", name: "全然ちがう有名店", userRatingsTotal: 10000 }),
+      makePlace({ placeId: "TARGET", name: "導楽", userRatingsTotal: 10 }),
+    ];
+    expect(pickBestPlace(places, "導楽")?.placeId).toBe("TARGET");
+  });
+
+  it("完全一致が 0 件なら null(口コミ最多へフォールバックしない)", () => {
     const places = [
       makePlace({ placeId: "A", name: "導楽 新丸子店", userRatingsTotal: 5 }),
       makePlace({ placeId: "B", name: "導楽 二号店", userRatingsTotal: 50 }),
     ];
-    expect(pickBestPlace(places, "導楽")?.placeId).toBe("B");
+    expect(pickBestPlace(places, "導楽")).toBeNull();
+  });
+
+  it("完全一致が 2 件以上なら ambiguous として null", () => {
+    const places = [
+      makePlace({ placeId: "A", name: "導楽", userRatingsTotal: 5 }),
+      makePlace({ placeId: "B", name: "導楽", userRatingsTotal: 500 }),
+    ];
+    expect(pickBestPlace(places, "導楽")).toBeNull();
+  });
+
+  it("targetName が空なら null(照合基準が無い)", () => {
+    expect(pickBestPlace([makePlace()], "")).toBeNull();
+    expect(pickBestPlace([makePlace()], "   ")).toBeNull();
   });
 
   it("空配列なら null", () => {
     expect(pickBestPlace([], "導楽")).toBeNull();
+  });
+
+  describe("name normalization は表記ゆれのみ吸収する", () => {
+    it("前後空白・連続空白・全角英数・英字 case を吸収する", () => {
+      expect(
+        pickBestPlace([makePlace({ name: "ＳＯＬＥ  Trattoria" })], " sole trattoria ")?.placeId,
+      ).toBe("ChIJtest");
+    });
+
+    it("支店表記は落とさない(別店舗の誤採用を防ぐ)", () => {
+      const places = [makePlace({ placeId: "HONTEN", name: "なむら 本店" })];
+      expect(pickBestPlace(places, "なむら 新宿店")).toBeNull();
+      expect(pickBestPlace(places, "なむら")).toBeNull();
+    });
+
+    it("部分一致では採用しない(fuzzy match を使わない)", () => {
+      expect(pickBestPlace([makePlace({ name: "居酒屋 導楽 新丸子" })], "導楽")).toBeNull();
+    });
+  });
+});
+
+describe("diagnosePickFailure", () => {
+  it("完全一致 0 件は places_not_found", () => {
+    expect(diagnosePickFailure([makePlace({ name: "別店舗" })], "導楽")).toBe(
+      "places_not_found",
+    );
+    expect(diagnosePickFailure([], "導楽")).toBe("places_not_found");
+  });
+
+  it("完全一致 2 件以上は ambiguous", () => {
+    const places = [
+      makePlace({ placeId: "A", name: "導楽" }),
+      makePlace({ placeId: "B", name: "導楽" }),
+    ];
+    expect(diagnosePickFailure(places, "導楽")).toBe("ambiguous");
+  });
+
+  it("targetName が空なら places_not_found", () => {
+    expect(diagnosePickFailure([makePlace()], "")).toBe("places_not_found");
   });
 });
 
@@ -184,10 +253,10 @@ describe("enrichWithPlacesFallback", () => {
     expect(result.info.reason).toBe("places_not_found");
   });
 
-  it("ヒット 1 件 → name 上書き + 信頼度 88 + matched_place_id 設定", async () => {
+  it("ヒット 1 件かつ名前が一致 → name 上書き + 信頼度 88 + matched_place_id 設定", async () => {
     mockedSearchPlaces.mockResolvedValueOnce([makePlace()]);
     const applied = makeApplied({
-      name: "ど",
+      name: "導楽",
       confidence: { name: 50 },
     });
     const result = await enrichWithPlacesFallback(TABELOG_PARSED, applied);
@@ -197,7 +266,21 @@ describe("enrichWithPlacesFallback", () => {
     expect(result.updated.confidence.name).toBe(88);
   });
 
-  it("複数候補 → 完全一致を優先選択", async () => {
+  it("ヒット 1 件でも名前が一致しなければ採用しない (Issue #207)", async () => {
+    // 変更前は「候補が 1 件しかないから」という理由だけで採用していた。
+    // 部分的な検索語 (「ど」) に対して別店舗を確定させうるため廃止した。
+    mockedSearchPlaces.mockResolvedValueOnce([makePlace()]);
+    const applied = makeApplied({
+      name: "ど",
+      confidence: { name: 50 },
+    });
+    const result = await enrichWithPlacesFallback(TABELOG_PARSED, applied);
+    expect(result.info.used).toBe(false);
+    expect(result.info.reason).toBe("places_not_found");
+    expect(result.updated.name).toBe("ど");
+  });
+
+  it("複数候補 → 完全一致が一意な候補のみ選択", async () => {
     mockedSearchPlaces.mockResolvedValueOnce([
       makePlace({ placeId: "A", name: "導楽 新丸子店", userRatingsTotal: 100 }),
       makePlace({ placeId: "B", name: "導楽", userRatingsTotal: 10 }),
@@ -210,7 +293,7 @@ describe("enrichWithPlacesFallback", () => {
     expect(result.info.matched_place_id).toBe("B");
   });
 
-  it("完全一致なし → userRatingsTotal 最多を選択", async () => {
+  it("完全一致なし → 口コミ最多へフォールバックせず places_not_found (Issue #207)", async () => {
     mockedSearchPlaces.mockResolvedValueOnce([
       makePlace({ placeId: "A", name: "導楽 新丸子店", userRatingsTotal: 5 }),
       makePlace({ placeId: "B", name: "導楽 二号店", userRatingsTotal: 50 }),
@@ -220,7 +303,24 @@ describe("enrichWithPlacesFallback", () => {
       confidence: { name: 50 },
     });
     const result = await enrichWithPlacesFallback(null, applied);
-    expect(result.info.matched_place_id).toBe("B");
+    expect(result.info.used).toBe(false);
+    expect(result.info.reason).toBe("places_not_found");
+    expect(result.info.matched_place_id).toBeUndefined();
+  });
+
+  it("同名候補が複数 → ambiguous として採用しない (Issue #207)", async () => {
+    mockedSearchPlaces.mockResolvedValueOnce([
+      makePlace({ placeId: "A", name: "導楽", userRatingsTotal: 5 }),
+      makePlace({ placeId: "B", name: "導楽", userRatingsTotal: 5000 }),
+    ]);
+    const applied = makeApplied({
+      name: "導楽",
+      confidence: { name: 50 },
+    });
+    const result = await enrichWithPlacesFallback(null, applied);
+    expect(result.info.used).toBe(false);
+    expect(result.info.reason).toBe("ambiguous");
+    expect(result.info.matched_place_id).toBeUndefined();
   });
 
   it("既存 phone (信頼度 90) は Places の値で上書きされない (統合)", async () => {

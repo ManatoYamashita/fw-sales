@@ -21,53 +21,58 @@ import type {
   AreaSearchPlaceViewModel,
   SearchCenter,
 } from "@/lib/places/types";
-import {
-  ManualFallbackModal,
-  type ManualFallbackReason,
-} from "./manual-fallback-modal";
+import type { UrlImportRejectReason } from "@/lib/url-parser/url-import-policy";
+import type { PlacesFallbackReason } from "@/lib/url-parser/places-fallback";
 
 /**
- * Places フォールバックが「補完できなかった」状態かどうか判定する。
- * none / no_api_key は失敗ではなく不発として扱い (モーダルは出さない)、
- * places_not_found / no_keyword / api_error は手入力モーダル誘導の対象。
+ * 受け付けなかった URL に対するユーザー向け文言 (Issue #207)。
+ *
+ * **技術用語 (OGP / HTTP 403 / Cloudflare / Vercel / bot challenge / sourceType) は出さない。**
+ * ユーザーが知りたいのは原因の内部詳細ではなく「次に何をすればよいか」なので、
+ * すべて次の行動を含む文にする。診断情報はサーバ側の構造化ログが担う。
  */
-function placesFallbackFailed(reason: string | undefined): boolean {
-  return (
-    reason === "places_not_found" ||
-    reason === "no_keyword" ||
-    reason === "api_error"
-  );
-}
+const REJECT_MESSAGE: Record<UrlImportRejectReason, string> = {
+  tabelog_unsupported:
+    "食べログURLからの自動入力には対応していません。Googleマップの店舗URLを貼り付けてください。",
+  unsupported_source: "Googleマップの店舗URLを貼り付けてください。",
+  not_place_url: "店舗ページのGoogleマップURLを貼り付けてください。",
+  invalid_url: "URLの形式を確認してください。",
+};
 
-/** Partial<ApplyResult> を完全な ApplyResult に補完する (モーダル確定値を親へ渡すため) */
-function ensureFullApplyResult(partial: Partial<ApplyResult>): ApplyResult {
-  return {
-    name: partial.name ?? "",
-    prefecture: partial.prefecture ?? "",
-    city: partial.city ?? "",
-    phone: partial.phone ?? "",
-    site_url: partial.site_url ?? "",
-    map_url: partial.map_url ?? "",
-    instagram_url: partial.instagram_url ?? "",
-    genre: partial.genre ?? "",
-    address: partial.address ?? "",
-    review_avg: partial.review_avg ?? null,
-    review_count: partial.review_count ?? null,
-    memo: partial.memo ?? "",
-    operator_type: partial.operator_type ?? "未設定",
-    operator_name: partial.operator_name ?? "",
-    confidence: partial.confidence ?? {},
-  };
-}
+/**
+ * Places 補完が実行されなかった / 失敗した理由ごとの警告文言 (Issue #207)。
+ *
+ * 変更前はこれらがすべて「Google Maps で店舗を特定できませんでした」に潰れていた。
+ * とくに `no_keyword` は **Places を一度も呼んでいない**状態であり、
+ * 「Google マップで見つからなかった」と表示するのは事実と異なる。
+ *
+ * いずれの場合も **URL から取得済みの値は保持したままフォームへ進む**
+ * (Places 補完の失敗を URL Import 全体の失敗にしない)。
+ *
+ * `Partial<Record<PlacesFallbackReason, string>>` にしているのは、reason を
+ * 増やしたときに文言の追随漏れを型で気付けるようにするため。
+ * 発火理由 (`missing_name` 等) と `none` は警告不要なので載せない。
+ */
+const PLACES_WARNING: Partial<Record<PlacesFallbackReason, string>> = {
+  no_keyword:
+    "店舗名を読み取れなかったため、Googleマップの情報照合は行いませんでした。内容を確認して不足項目を入力してください。",
+  places_not_found:
+    "Googleマップで一致する店舗が見つかりませんでした。内容を確認して不足項目を入力してください。",
+  ambiguous:
+    "同名の候補が複数あり、店舗を一意に特定できませんでした。内容を確認して不足項目を入力してください。",
+  api_error:
+    "Googleマップの情報照合に失敗しました。内容を確認して不足項目を入力してください。",
+  // API キー未設定は利用者の操作対象外だが、黙って成功扱いにすると
+  // 「なぜ住所が入らないのか」が分からない。原因には触れず次の行動だけ伝える。
+  no_api_key:
+    "一部の情報のみ取得しました。内容を確認して不足項目を入力してください。",
+};
 
 /** URL モードの読込結果(親に渡す payload) */
 export interface UrlLoadPayload {
   suggested: ApplyResult;
-  html: string | null;
   applied: readonly AppliedField[];
   sourceType: ParsedSource;
-  chained: boolean;
-  ogpError?: string;
 }
 
 // ---- Manual ----------------------------------------------------------------
@@ -97,7 +102,7 @@ export function ManualStartPanel({ onStart }: ManualStartPanelProps) {
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">
-        食べログ・Googleマップ URL もエリア検索も使わず、フォームに直接入力します。
+        GoogleマップURLやエリア検索を使わず、フォームに直接入力します。
         まず店舗名を入力し、Enter または「フォームを開く」で他の項目を入力できます。
       </p>
       <div className="flex flex-col sm:flex-row gap-2">
@@ -129,17 +134,16 @@ export interface UrlSearchPanelProps {
   onLoaded: (payload: UrlLoadPayload) => void;
 }
 
+/**
+ * Google マップの店舗 URL から店舗情報を読み込むパネル (Issue #207)。
+ *
+ * 対応するのは Google マップの店舗ページ URL と短縮共有 URL のみ。
+ * 判定は server 側 (`importFromUrlAction` → `evaluateUrlImportPolicy`) が
+ * source of truth で、ここは受け取った `reason` を文言へ写像するだけ。
+ */
 export function UrlSearchPanel({ onLoaded }: UrlSearchPanelProps) {
   const [url, setUrl] = useState("");
   const [pending, startTransition] = useTransition();
-  const [modalState, setModalState] = useState<
-    | { open: false }
-    | {
-        open: true;
-        reason: ManualFallbackReason;
-        partial?: Partial<ApplyResult>;
-      }
-  >({ open: false });
 
   const importNow = () => {
     if (!url.trim()) {
@@ -148,74 +152,48 @@ export function UrlSearchPanel({ onLoaded }: UrlSearchPanelProps) {
     }
     startTransition(async () => {
       try {
-        const result = await importFromUrlAction(url, {
-          fetchOgp: true,
-          recursive: true,
-        });
+        const result = await importFromUrlAction(url);
 
-        // URL パース完全失敗 → モーダル誘導 (取得済データ無し)
-        if (!result.parsed) {
-          setModalState({ open: true, reason: "parse_failed" });
+        // 受け付けない URL(食べログ / 一般ページ / 店舗ページでない Maps URL / 不正形式)。
+        // この場合サーバ側では外部への HTTP リクエストを一切行っていない。
+        if (result.status === "rejected") {
+          toast.warn(REJECT_MESSAGE[result.reason]);
           return;
         }
 
-        const html =
-          result.ogp && result.ogp.ok ? (result.ogp.html ?? null) : null;
+        // 店舗名が取れていない場合はフォームへ進めない。
+        // 空欄や誤った値を店舗名としてフォームへ渡さないため(Issue #207)。
+        if (!result.suggested.name) {
+          toast.warn(
+            "店舗名を読み取れませんでした。Googleマップの店舗ページURLを貼り直すか、エリア検索をご利用ください。",
+          );
+          return;
+        }
+
         const hits = result.applied.filter(
           (f) => f.value !== "" && typeof f.confidence === "number",
         );
         const summary = `${result.applied.length} 項目中 ${hits.length} 項目を取得`;
+        const placesReason = result.placesFallback?.reason;
 
-        // Places フォールバックの結果に応じた toast 出し分け
         if (result.placesFallback?.used) {
-          toast.info(
-            `Google Maps から不足項目を補完しました${
-              result.suggested.name ? ` (${result.suggested.name})` : ""
-            }`,
-          );
-        } else if (placesFallbackFailed(result.placesFallback?.reason)) {
-          // 取得済データを引き継いだままモーダル誘導 (places_not_found 等)
-          toast.warn(
-            "Google Maps で店舗を特定できませんでした。手入力で補ってください",
-          );
-          setModalState({
-            open: true,
-            reason: "places_not_found",
-            partial: result.suggested,
-          });
-          return;
+          toast.info(`Googleマップから不足項目を補完しました (${result.suggested.name})`);
+        } else if (placesReason !== undefined && PLACES_WARNING[placesReason]) {
+          // Places 補完できなかった場合も、URL から取得済みの値は保持したままフォームへ進む。
+          toast.warn(PLACES_WARNING[placesReason]);
         } else {
-          toast.success(
-            result.suggested.name
-              ? `「${result.suggested.name}」: ${summary}`
-              : summary,
-          );
+          toast.success(`「${result.suggested.name}」: ${summary}`);
         }
 
         onLoaded({
           suggested: result.suggested,
-          html,
           applied: result.applied,
           sourceType: result.parsed.type,
-          chained: result.chained,
-          ogpError:
-            result.ogp?.ok === false ? result.ogp.error : undefined,
         });
-      } catch (e) {
-        toast.error(e instanceof Error ? e.message : "URL の取得に失敗しました");
+      } catch {
+        // Node のエラー文言をそのまま UI へ出さない(内部情報の露出防止)。
+        toast.error("URL の読込に失敗しました。時間をおいて再度お試しください。");
       }
-    });
-  };
-
-  const handleFallbackConfirm = (partial: Partial<ApplyResult>) => {
-    const suggested = ensureFullApplyResult(partial);
-    // モーダル経由の確定は OGP / Places のソースが特定できないので unknown 扱い
-    onLoaded({
-      suggested,
-      html: null,
-      applied: [],
-      sourceType: "unknown",
-      chained: false,
     });
   };
 
@@ -229,17 +207,18 @@ export function UrlSearchPanel({ onLoaded }: UrlSearchPanelProps) {
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">
-        食べログ・Googleマップの店舗 URL を貼り付けて「読込」を押すと、
-        都道府県・市区・店名・住所・口コミ件数などが自動入力されます。
+        Googleマップの店舗ページURLを貼り付けて「読込」を押すと、
+        店舗名・住所・電話番号・口コミ情報などを自動入力します。
+        アプリの共有リンク (maps.app.goo.gl/…) も使えます。
       </p>
       <div className="flex flex-col sm:flex-row gap-2">
         <Input
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="https://tabelog.com/... または https://maps.google.com/..."
+          placeholder="https://www.google.com/maps/place/... または https://maps.app.goo.gl/..."
           className="flex-1"
-          aria-label="店舗URL"
+          aria-label="GoogleマップURL"
         />
         <Button
           variant="primary"
@@ -260,15 +239,6 @@ export function UrlSearchPanel({ onLoaded }: UrlSearchPanelProps) {
           )}
         </Button>
       </div>
-      <ManualFallbackModal
-        open={modalState.open}
-        onOpenChange={(next) => {
-          if (!next) setModalState({ open: false });
-        }}
-        reason={modalState.open ? modalState.reason : "parse_failed"}
-        partial={modalState.open ? modalState.partial : undefined}
-        onConfirm={handleFallbackConfirm}
-      />
     </div>
   );
 }

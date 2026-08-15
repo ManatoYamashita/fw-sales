@@ -13,10 +13,19 @@ import type { AppliedField, ParsedSource } from "@/lib/url-parser/types";
 export interface UrlImportSummaryProps {
   sourceType: ParsedSource;
   applied: readonly AppliedField[];
-  chained: boolean;
-  ogpError?: string;
   storeName?: string;
 }
+
+/**
+ * `ParsedSource`(内部識別子)をユーザー向け表記へ写像する (Issue #207)。
+ * 変更前は `google_maps` という内部値がそのままバッジに出ていた。
+ */
+const SOURCE_LABEL: Record<ParsedSource, string> = {
+  google_maps: "Googleマップ",
+  tabelog: "食べログ",
+  instagram: "Instagram",
+  unknown: "その他",
+};
 
 const TIER_ICON: Record<ConfidenceTier, "high" | "medium" | "low" | "missing"> = {
   high: "high",
@@ -48,8 +57,6 @@ function tierLabel(tier: ConfidenceTier): string {
 export function UrlImportSummary({
   sourceType,
   applied,
-  chained,
-  ogpError,
   storeName,
 }: UrlImportSummaryProps) {
   const hits = applied.filter(
@@ -69,15 +76,10 @@ export function UrlImportSummary({
       <Card.Body className="space-y-3">
         <details className="text-xs">
           <summary className="flex items-center gap-2 cursor-pointer flex-wrap">
-            <Badge tone={ogpError ? "amber" : "green"}>
-              {ogpError ? (
-                <AlertTriangle className="h-3 w-3" />
-              ) : (
-                <CheckCircle2 className="h-3 w-3" />
-              )}
-              {sourceType}
+            <Badge tone="green">
+              <CheckCircle2 className="h-3 w-3" />
+              {SOURCE_LABEL[sourceType]}
             </Badge>
-            {chained ? <Badge tone="blue">公式 HP からも補完</Badge> : null}
             {storeName ? (
               <span className="text-sm font-medium text-foreground">
                 {storeName}
@@ -88,9 +90,6 @@ export function UrlImportSummary({
               {tierCounts.high ?? 0} / 中:{tierCounts.medium ?? 0} / 低:
               {(tierCounts.low ?? 0) + (tierCounts.very_low ?? 0)})
             </span>
-            {ogpError ? (
-              <span className="text-amber-700">(OGP: {ogpError})</span>
-            ) : null}
             <span className="text-muted-foreground ml-auto">▾ 詳細</span>
           </summary>
           <ul className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-1.5">
