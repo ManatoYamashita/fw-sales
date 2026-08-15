@@ -83,6 +83,27 @@ describe("isDisallowedIPv4", () => {
     expect(isDisallowedIPv4(addr)).toBe(expected);
   });
 
+  describe("192.0.0.0系は第3オクテットまで判定する(PR #199 review Middle findingの修正)", () => {
+    // 以前は `a === 192 && b === 0` だけで判定しており、コメントの意図(192.0.0.0/24)に
+    // 反して 192.0.0.0/16 全体を拒否していた。その結果、同レンジ内の通常のglobal unicast
+    // でホストされた正規サイトのURLインポートが "disallowed_ip_range" で失敗していた。
+    it.each([
+      ["192.0.0.0", true], // 192.0.0.0/24 先頭
+      ["192.0.0.1", true], // IETF protocol assignments
+      ["192.0.0.255", true], // 192.0.0.0/24 末尾
+      ["192.0.2.0", true], // TEST-NET-1 先頭
+      ["192.0.2.255", true], // TEST-NET-1 末尾
+      ["192.0.1.1", false], // 192.0.0.0/24 の直後(許可されるべき)
+      ["192.0.3.1", false], // TEST-NET-1 の直後(許可されるべき)
+      ["192.0.78.9", false], // 実在の公開IP: WordPress.com (Automattic 192.0.78.0/24)
+      ["192.0.78.17", false], // 同上
+      ["192.0.80.239", false], // 実在の公開IP: Gravatar (Automattic 192.0.80.0/24)
+      ["192.1.0.1", false], // 第2オクテットが0でない(そもそも対象外)
+    ])("%s => disallowed=%s", (addr, expected) => {
+      expect(isDisallowedIPv4(addr)).toBe(expected);
+    });
+  });
+
   it("不正な形式は安全側で拒否", () => {
     expect(isDisallowedIPv4("not.an.ip.address")).toBe(true);
     expect(isDisallowedIPv4("1.2.3")).toBe(true);
@@ -241,6 +262,17 @@ describe("validateExternalUrl", () => {
       if (result.ok) {
         expect(result.resolvedAddresses).toEqual([{ address: "93.184.216.34", family: 4 }]);
       }
+    });
+
+    it("192.0.78.0/24(WordPress.com)へ解決されるホストは許可する(PR #199 review Middle findingの回帰テスト)", async () => {
+      // 修正前は 192.0.0.0/16 全体を拒否していたため、WordPress.comでホストされた
+      // 店舗公式サイトのURLインポートが "安全上アクセスできないURLです" で失敗していた。
+      vi.mocked(dns.promises.lookup).mockResolvedValue([
+        { address: "192.0.78.9", family: 4 },
+        { address: "192.0.78.17", family: 4 },
+      ] as never);
+      const result = await validateExternalUrl(new URL("https://wordpress.com/"));
+      expect(result.ok).toBe(true);
     });
 
     it("private IPへ解決される場合は拒否する", async () => {

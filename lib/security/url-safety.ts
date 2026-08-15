@@ -70,15 +70,21 @@ export function stripIPv6Brackets(hostname: string): string {
  *
  * 拒否レンジ: 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10(CGNAT), 127.0.0.0/8(loopback),
  * 169.254.0.0/16(link-local、cloud metadataエンドポイント169.254.169.254を含む),
- * 172.16.0.0/12, 192.0.0.0/24(IETF protocol assignments), 192.168.0.0/16,
+ * 172.16.0.0/12, 192.0.0.0/24(IETF protocol assignments),
+ * 192.0.2.0/24(TEST-NET-1、ドキュメント用), 192.168.0.0/16,
  * 198.18.0.0/15(benchmarking), 224.0.0.0/4以上(multicast/reserved/broadcast)。
+ *
+ * 192.0.0.0系は第3オクテットまで見て判定する。`a === 192 && b === 0` だけで
+ * 判定すると 192.0.0.0/16 全体を拒否してしまい、同レンジ内の通常のglobal unicast
+ * (例: Automattic の 192.0.78.0/24 = WordPress.com、192.0.80.0/24 = Gravatar)で
+ * ホストされた正規サイトのURLインポートまで失敗する。
  */
 export function isDisallowedIPv4(address: string): boolean {
   const octets = address.split(".").map((s) => Number.parseInt(s, 10));
   if (octets.length !== 4 || octets.some((n) => !Number.isFinite(n) || n < 0 || n > 255)) {
     return true; // 解釈できない = 安全側で拒否
   }
-  const [a, b] = octets as [number, number, number, number];
+  const [a, b, c] = octets as [number, number, number, number];
 
   if (a === 0) return true;
   if (a === 10) return true;
@@ -87,7 +93,9 @@ export function isDisallowedIPv4(address: string): boolean {
   if (a === 172 && b >= 16 && b <= 31) return true;
   if (a === 192 && b === 168) return true;
   if (a === 100 && b >= 64 && b <= 127) return true;
-  if (a === 192 && b === 0) return true;
+  // 192.0.0.0/24 (IETF protocol assignments) と 192.0.2.0/24 (TEST-NET-1) のみ。
+  // 192.0.0.0/16 全体を拒否しないこと(上記コメント参照)。
+  if (a === 192 && b === 0 && (c === 0 || c === 2)) return true;
   if (a === 198 && (b === 18 || b === 19)) return true;
   if (a >= 224) return true;
 
