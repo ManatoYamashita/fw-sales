@@ -13,11 +13,11 @@ const nextConfig: NextConfig = {
     // 短期 runtime cache で運用する。無効化は全 mutation の revalidateTag(タグ駆動)が担う。
     dynamicHole: { stale: 60, revalidate: 120, expire: 240 },
   },
-  // React の <ViewTransition> を `<Link>` ナビゲーションでも動かすためのフラグ。
-  // setState ベースの startTransition では不要だが、将来のページ遷移でも使えるように有効化。
-  experimental: {
-    viewTransition: true,
-  },
+  // React の <ViewTransition> は Next.js 16.3 以降、設定不要で動作する
+  // (App Router が vendored React canary を使うため)。16.2 まで必要だった
+  // `experimental.viewTransition` フラグは 16.3 で config から削除されたため、
+  // 指定すると型エラーになる。利用箇所は app/(main)/stores/new と app/globals.css。
+  //
   // 社内ツール: meta robots に加えて HTTP ヘッダレベルでもインデックスを完全拒否する
   // (画像 / JSON など HTML をパースしないクローラ経路への保険)。
   async headers() {
