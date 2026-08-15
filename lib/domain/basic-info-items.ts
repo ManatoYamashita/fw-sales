@@ -104,7 +104,7 @@ export const BASIC_INFO_ITEMS: readonly BasicInfoItemDef[] = [
   { key: "exposure_gap", label: "露出の過不足・伸びしろ", category: "category_4_customer", default_tier: "B", primary: "manual" },
 
   // category_5_marketing (6) — 認知の質・ブランドイメージ
-  { key: "media_coverage", label: "掲載媒体の網羅", category: "category_5_marketing", default_tier: "A", primary: "manual" },
+  { key: "media_coverage", label: "確認できた掲載媒体・メディア露出", category: "category_5_marketing", default_tier: "A", primary: "manual" }, // feat/ai-research-quality-refinement: 「網羅」という誤解を招く表現を修正
   { key: "strength_message_clarity", label: "特徴・強みの伝わりやすさ", category: "category_5_marketing", default_tier: "B", primary: "manual" },
   { key: "review_tendency", label: "口コミ傾向", category: "category_5_marketing", default_tier: "A", primary: "manual" },
   { key: "negative_reviews", label: "ネガティブ・ギャップのある口コミ", category: "category_5_marketing", default_tier: "A", primary: "manual" },

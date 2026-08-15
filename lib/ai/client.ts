@@ -18,16 +18,29 @@
  * それでも本ファイルが tools を使わないのは、能力の制約ではなく **責務の分離**による:
  * - 本クライアントは「店舗基本情報 + 貼付調査テキスト → 営業資産(`AiAnalysisResult`)」の
  *   生成専用であり、**Web 調査を行わない**。入力は既に手元にあるため tools が要らない。
- * - Google Search / URL Context を伴う Web 調査は **Issue #158 で別モジュール
- *   (`lib/ai/research/`)として実装**する。そちらは Interactions API を使う。
+ * - Google Search / URL Context を伴う Web 調査(AI 店舗調査再設計、Issue #158)は
+ *   別モジュール `lib/ai/research/` として実装する。
  *
- * ## 本ファイルを Interactions API へ移行しない理由
+ * ## Web 調査側も Interactions API へは移行しない(2026-08 訂正)
  *
- * Interactions API は GA で公式も推奨だが、本ファイルは `generateContent`(Legacy 表記だが
- * 現行サポート。`gemini-3.6-flash` + Structured Outputs の公式サンプルあり)を維持する。
- * Interactions API の利点(built-in tools / background 実行 / 構造化 citation)は **いずれも
- * Web 調査側が必要とするもので、営業資産生成には不要**。モデル停止対応と API 基盤変更を
- * 同時に行うと切り戻し単位が粗くなるため、本移行では API 経路を変えない。
+ * 本コメントは以前「Web 調査側は Interactions API を使う」としていたが、これは実機検証を
+ * 伴わない当初の想定に過ぎなかった。実際には以下の実機 Spike (AI 店舗調査再設計 Plan v3.2
+ * Spike 0 / Spike 0.1、`D:\tento\gemini-research-poc` 配下で実施)により、
+ * **`generateContent` + `tools`(googleSearch / urlContext)+ Structured Output の組合せが
+ * 正常動作することを実証済み**:
+ * - `tools:[{urlContext:{}}]` + Structured Output: `urlContextMetadata` / `urlRetrievalStatus`
+ *   / `usageMetadata` すべて正常に返る(Spike 0.1 Test A / Test C)。
+ * - `tools:[{googleSearch:{}}]` + Structured Output: ツール自体は実際に呼ばれるが
+ *   (`toolConfig.includeServerSideToolInvocations` で実証)、公式 `groundingMetadata` は
+ *   返らない。そのため Web 調査側の設計は Stage1(Google Search 単独、Structured Output
+ *   なし)と Stage2(URL Context 単独、Structured Output あり)に役割分離する
+ *   (Plan v3.2 §8)。
+ *
+ * この実証結果があるため、Web 調査側も `generateContent` を使う(Interactions API へは
+ * 移行しない)。Interactions API の利点(built-in tools / background 実行 / 構造化 citation)は
+ * 実機検証していない前提の話であり、既に `generateContent` で必要な機能が確認できている以上、
+ * 新しい API 基盤を追加導入する理由が無い(既存の営業資産生成 `generateContent` 経路も
+ * 理由なく移行しない、という判断と同じ考え方)。
  *
  * ## sampling parameter を設定しない理由
  *
@@ -76,6 +89,22 @@ export interface AnalysisInput {
  * SDK の生エラーメッセージには API キー値や request ID が混入することがあるため、
  * 必ず本型に変換してから上位に流すこと。
  */
+/**
+ * Gemini の `usageMetadata` から取り出した **数値のみ** の内訳
+ * (feat/ai-research-quality-ux-hardening、Theme 5B)。
+ *
+ * `lib/ai/research/client.ts:UsageMetadataLike` と同形だが、`lib/ai/client.ts` は
+ * research モジュールへ依存しないため独立して定義する(依存方向を逆転させない)。
+ * **数値以外のフィールドを増やさないこと。** DB とログの両方へ流れる。
+ */
+export interface AiTokenUsage {
+  promptTokenCount: number | null;
+  candidatesTokenCount: number | null;
+  toolUsePromptTokenCount: number | null;
+  thoughtsTokenCount: number | null;
+  totalTokenCount: number | null;
+}
+
 export type AiClientError =
   | { kind: "missing_api_key" }
   | { kind: "timeout" }
@@ -87,8 +116,14 @@ export type AiClientError =
    * 構造化フィールド (`candidates[0].finishReason`) から判定するため、SDK のエラー文面に
    * 依存しない。Gemini 3 系は thinking が既定で有効で思考トークンも出力枠を消費するため、
    * 本移行で現実的に起こりうる失敗として専用分類にしている。
+   *
+   * `usage` は **数値のみ** の sanitized な内訳(feat/ai-research-quality-ux-hardening、
+   * Theme 5B)。実機の MAX_TOKENS run では `token_usage = null` になり、
+   * thinking と candidates のどちらが伸びたのかを事後に判断できなかった。
+   * この失敗経路でのみ usage を運ぶことで、`markFailedStep` が DB へ保存し
+   * 対策の効果測定ができるようにする。**raw response / prompt は絶対に載せない。**
    */
-  | { kind: "max_tokens" }
+  | { kind: "max_tokens"; usage?: AiTokenUsage }
   | { kind: "api_error"; status: number }
   | { kind: "network_error" }
   | { kind: "unknown"; message: string };
@@ -273,6 +308,353 @@ function looksLikeInvalidApiKey(err: unknown): boolean {
 }
 
 /**
+ * Google API 標準の列挙値 (`error.status` / `google.rpc.ErrorInfo.reason`) を
+ * **JSON のキー位置に固定して**取り出す正規表現 (runtime reliability hardening、F4)。
+ *
+ * `[A-Z][A-Z0-9_]{2,63}` の shape guard により、抽出されうるのは UPPER_SNAKE_CASE の
+ * 列挙トークンのみになる:
+ * - API キー (`AIzaSy...`) は大小混在なので終端の `"` までマッチしない
+ * - request ID (UUID) はハイフン・小文字を含むのでマッチしない
+ * - `error.message` の自由文 (空白・日本語・記号を含む) はマッチしない
+ * - 64 文字を超える値はマッチしない
+ */
+const PROVIDER_STATUS_PATTERN = /"status"\s*:\s*"([A-Z][A-Z0-9_]{2,63})"/;
+const PROVIDER_REASON_PATTERN = /"reason"\s*:\s*"([A-Z][A-Z0-9_]{2,63})"/;
+
+/**
+ * `error.message`(自由文)を分類した結果を表す**閉じた語彙**
+ * (PR #180、Stage2 400 INVALID_ARGUMENT の原因切り分け)。
+ *
+ * ## なぜ必要か
+ *
+ * 監査で、Gemini が Stage2 の 400 に対し `error.details[]` を**返していない**ことが
+ * 確定した(`provider_field_violations` / `provider_detail_types` がどちらも空。
+ * `extractDetailTypes` の shape guard は `@type` 末尾トークンを拾うだけで極めて緩く、
+ * details があれば必ず1件は通る)。したがって原因を説明している情報は
+ * `error.message` の自由文だけであり、現行コードはそれを一度も読んでいない。
+ *
+ * ## なぜ自由文を出さずに分類するのか
+ *
+ * `error.message` には prompt 断片・店舗名・住所・URL・request ID が含まれうる。
+ * そこで**自由文は内部でのみ評価し、外へ出すのは本 union の値だけ**にする。
+ * 返り値はソースコードに書かれた固定文字列のいずれかに限られるため、
+ * provider 由来の文字が1文字も外へ出ない(構造的な保証)。
+ */
+export type ProviderMessageClass =
+  | "invalid_json_payload"
+  | "invalid_response_schema"
+  | "invalid_argument_generic"
+  | "url_context_error"
+  | "token_limit"
+  | "unsupported_combination"
+  | "unclassified";
+
+/**
+ * `error.message` の分類ルール。**上から順に評価し、最初に一致したものを採る。**
+ *
+ * ## 順序の根拠
+ *
+ * Google の INVALID_ARGUMENT は
+ * `Invalid JSON payload received. Unknown name "x" at 'generation_config.response_json_schema'`
+ * のように「汎用の外枠 + 具体的な対象」という形を取ることがある。この場合
+ * 知りたいのは**対象がどこか**(URL Context なのか schema なのか)なので、
+ * 具体的な対象を指す pattern を汎用の外枠(`invalid_json_payload` /
+ * `invalid_argument_generic`)より先に評価する。
+ *
+ * ## pattern の狭さ
+ *
+ * 単独の `/schema/i` のような広い pattern は使わない(店舗名や prompt 断片に
+ * たまたま含まれる語で誤分類しうるため)。API request error として意味を持つ
+ * phrase に限定し、`response` 等の前置語を必須にしている。
+ */
+const PROVIDER_MESSAGE_PATTERNS: readonly (readonly [ProviderMessageClass, RegExp])[] = [
+  ["url_context_error", /\burl[\s_-]?context\b/i],
+  ["invalid_response_schema", /\bresponse[\s_-]?(json[\s_-]?)?schema\b/i],
+  [
+    "token_limit",
+    /\btoken count\b|\bexceeds the maximum\b|\btoo many tokens\b|\binput is too long\b|\brequest payload size exceeds\b/i,
+  ],
+  [
+    "unsupported_combination",
+    /\bis not supported\b|\bare not supported\b|\bcannot be used (?:together|with)\b|\bnot supported (?:with|together|for)\b/i,
+  ],
+  ["invalid_json_payload", /\binvalid json payload received\b/i],
+  ["invalid_argument_generic", /\brequest contains an invalid argument\b/i],
+] as const;
+
+/**
+ * `ApiError.message` の JSON から `error.message`(自由文)だけを取り出し、
+ * **閉じた語彙へ分類した結果のみ**を返す(PR #180)。
+ *
+ * - `Error` でない → `undefined`
+ * - `message` が JSON として解釈できない → `undefined`
+ * - `error` が object でない → `undefined`
+ * - `error.message` が string でない → `undefined`
+ * - string だが既知 pattern のいずれにも一致しない → `"unclassified"`
+ *
+ * `undefined` は「分類を試みられなかった(provider の自由文に到達できなかった)」、
+ * `"unclassified"` は「自由文はあったが未知の文言だった」を意味する。この2つを
+ * 区別できないと、parser のバグと未知の provider 文言を切り分けられない。
+ *
+ * **raw message・その断片・長さ・一致位置のいずれも返さない。** 純関数。
+ */
+export function classifyProviderMessage(err: unknown): ProviderMessageClass | undefined {
+  if (!(err instanceof Error)) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(err.message);
+  } catch {
+    return undefined;
+  }
+  if (typeof parsed !== "object" || parsed === null) return undefined;
+  const error = (parsed as { error?: unknown }).error;
+  if (typeof error !== "object" || error === null) return undefined;
+  const message = (error as { message?: unknown }).message;
+  if (typeof message !== "string") return undefined;
+
+  for (const [messageClass, pattern] of PROVIDER_MESSAGE_PATTERNS) {
+    if (pattern.test(message)) return messageClass;
+  }
+  return "unclassified";
+}
+
+/**
+ * 構造化ログ専用の sanitized な provider 診断情報。
+ * **`AiClientError` には載せない**(DB `error_message` / UI へ流出させないため)。
+ */
+export interface ProviderDiagnostics {
+  /** SDK が公開する HTTP ステータス (`ApiError.status`)。 */
+  http_status?: number;
+  /** Google API の `error.status` 列挙値 (例 `RESOURCE_EXHAUSTED`)。 */
+  provider_status?: string;
+  /** `google.rpc.ErrorInfo.reason` 列挙値 (例 `RATE_LIMIT_EXCEEDED`)。 */
+  provider_reason?: string;
+  /**
+   * `google.rpc.BadRequest.fieldViolations[].field` のうち、**API のフィールドパス**
+   * として厳格に検証できたものだけ (PR #180、Stage2 400 observability)。
+   * 例: `generation_config.response_json_schema` / `contents[0].parts[0].text`。
+   *
+   * 400 INVALID_ARGUMENT が「request config(schema)側」か「動的 prompt(contents)側」か
+   * を切り分ける唯一の provider 由来 signal。値ではなく**フィールド名**なので安全。
+   * 同じ violation の `description` は自由文(prompt 断片・店舗名を含みうる)のため
+   * **絶対に載せない**。
+   */
+  provider_field_violations?: string[];
+  /**
+   * `error.details[]["@type"]` の**末尾トークンのみ** (例 `BadRequest` / `ErrorInfo`)。
+   * `type.googleapis.com/...` のような URL 形状は載せない。
+   */
+  provider_detail_types?: string[];
+  /**
+   * `error.message`(自由文)を**閉じた語彙へ分類した結果**(PR #180)。
+   * Gemini は Stage2 の 400 で `error.details[]` を返さないため、
+   * `provider_field_violations` / `provider_detail_types` は空になる。
+   * 原因を示す唯一の情報である自由文を、安全な固定トークンとして観測する。
+   *
+   * 値は必ず `ProviderMessageClass` のいずれか。provider 由来の文字は含まれない。
+   */
+  provider_message_class?: ProviderMessageClass;
+}
+
+/**
+ * `fieldViolations[].field` として採用してよい **API フィールドパス**の形。
+ *
+ * Google の field path は protobuf のフィールド名(lower_snake_case)とインデックスの
+ * 組み合わせに限られる。この shape guard により、抽出されうるのは
+ * `contents` / `contents[0].parts[0].text` / `generation_config.response_json_schema`
+ * のような**構造上のパス**だけになる:
+ * - 空白・引用符・コロン・スラッシュを含む自由文はマッチしない
+ * - URL (`https://...`) はスラッシュとコロンでマッチしない
+ * - 日本語・大文字を含む値(店舗名・prompt 断片・camelCase の自由文)はマッチしない
+ *
+ * **マッチしない値は加工せず完全に drop する。**
+ */
+const PROVIDER_FIELD_PATH_PATTERN = /^[a-z0-9_]+(?:\.[a-z0-9_]+|\[\d+\])*$/;
+const MAX_PROVIDER_FIELD_PATH_LENGTH = 160;
+/** `@type` の末尾トークン (`google.rpc.BadRequest` → `BadRequest`) として採用してよい形。 */
+const PROVIDER_DETAIL_TYPE_PATTERN = /^[A-Za-z][A-Za-z0-9]{1,63}$/;
+/** ログが肥大化しないための件数上限(どちらも dedupe 後に適用)。 */
+const MAX_PROVIDER_DETAIL_ENTRIES = 5;
+
+/**
+ * `ApiError.message` を **strict に JSON.parse** し、`error.details[]` 配列だけを返す。
+ *
+ * `@google/genai` 1.52.0 は非2xx応答で error body 全体を `JSON.stringify` して
+ * `ApiError.message` に入れる(`dist/index.mjs` の `!response.ok` 分岐)。したがって
+ * 構造として辿れる。**自由文から広い正規表現で field path を探索する設計は採らない**
+ * (自由文の一部を誤って field path として拾い、prompt 断片を露出させうるため)。
+ *
+ * parse 失敗・期待 shape でない場合は空配列を返して safe degrade する(throw しない)。
+ */
+function readProviderErrorDetails(err: unknown): unknown[] {
+  if (!(err instanceof Error)) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(err.message);
+  } catch {
+    return [];
+  }
+  if (typeof parsed !== "object" || parsed === null) return [];
+  const error = (parsed as { error?: unknown }).error;
+  if (typeof error !== "object" || error === null) return [];
+  const details = (error as { details?: unknown }).details;
+  return Array.isArray(details) ? details : [];
+}
+
+/** dedupe + 件数上限を適用した配列を返す(空なら `undefined`)。 */
+function cappedUnique(values: readonly string[]): string[] | undefined {
+  const unique = [...new Set(values)].slice(0, MAX_PROVIDER_DETAIL_ENTRIES);
+  return unique.length > 0 ? unique : undefined;
+}
+
+function extractFieldViolations(details: readonly unknown[]): string[] | undefined {
+  const fields: string[] = [];
+  for (const detail of details) {
+    if (typeof detail !== "object" || detail === null) continue;
+    const violations = (detail as { fieldViolations?: unknown }).fieldViolations;
+    if (!Array.isArray(violations)) continue;
+    for (const violation of violations) {
+      if (typeof violation !== "object" || violation === null) continue;
+      // `description` は自由文なので読まない。`field` のみ。
+      const field = (violation as { field?: unknown }).field;
+      if (typeof field !== "string") continue;
+      if (field.length === 0 || field.length > MAX_PROVIDER_FIELD_PATH_LENGTH) continue;
+      if (!PROVIDER_FIELD_PATH_PATTERN.test(field)) continue;
+      fields.push(field);
+    }
+  }
+  return cappedUnique(fields);
+}
+
+function extractDetailTypes(details: readonly unknown[]): string[] | undefined {
+  const types: string[] = [];
+  for (const detail of details) {
+    if (typeof detail !== "object" || detail === null) continue;
+    const raw = (detail as Record<string, unknown>)["@type"];
+    if (typeof raw !== "string") continue;
+    // `type.googleapis.com/google.rpc.BadRequest` → `BadRequest`
+    const suffix = raw.split(/[./]/).pop();
+    if (suffix === undefined || !PROVIDER_DETAIL_TYPE_PATTERN.test(suffix)) continue;
+    types.push(suffix);
+  }
+  return cappedUnique(types);
+}
+
+/**
+ * 文字列に **unpaired UTF-16 surrogate** が含まれるかを判定する
+ * (PR #180、Stage2 400 INVALID_ARGUMENT の候補B観測)。
+ *
+ * ## なぜ必要か
+ *
+ * Stage2 prompt には Stage1 モデル生成テキスト(`[SOURCE] title:` や Search Note の
+ * summary)がそのまま埋め込まれる。lone surrogate が混入すると `JSON.stringify` は
+ * `\udXXX` エスケープとして送出し、Google 側の JSON→proto 変換が invalid UTF-8 として
+ * `INVALID_ARGUMENT` を返しうる。これを boolean 1つで観測できるようにする。
+ *
+ * ## 診断専用
+ *
+ * **この関数の結果で prompt を書き換えたり sanitize したり run を失敗させたりしない。**
+ * 判定するだけで、provider へは従来どおり同じ文字列を送る。
+ *
+ * 純関数。入力を変更しない。
+ */
+export function hasUnpairedSurrogate(text: string): boolean {
+  for (let i = 0; i < text.length; i += 1) {
+    const code = text.charCodeAt(i);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      // high surrogate: 直後が low surrogate でなければ unpaired。
+      const next = i + 1 < text.length ? text.charCodeAt(i + 1) : NaN;
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return true;
+      i += 1; // 正常なペアなので low 側を読み飛ばす
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      // high surrogate に続かない low surrogate は常に unpaired。
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * 文字列に **JSON/proto 変換で問題になりうる制御文字**が含まれるかを判定する
+ * (PR #180、Stage2 400 INVALID_ARGUMENT の候補観測)。
+ *
+ * 対象:
+ * - C0 制御文字(`U+0000`–`U+001F`)。ただし `\t`(09) / `\n`(0A) / `\r`(0D) は
+ *   prompt の整形に正当に使われるため除外する
+ * - `U+2028` LINE SEPARATOR / `U+2029` PARAGRAPH SEPARATOR
+ *
+ * `hasUnpairedSurrogate` と同じく **diagnostic 専用**。
+ * 入力文字列を変更せず、sanitize もせず、provider へは従来どおり同じ文字列を送る。
+ * 判定結果で prompt を書き換えたり run を失敗させたりしない。
+ *
+ * 純関数。boolean のみを返し、位置・文字コード・周辺文字は返さない。
+ */
+export function hasControlChars(text: string): boolean {
+  for (let i = 0; i < text.length; i += 1) {
+    const code = text.charCodeAt(i);
+    // C0 制御文字。\t(0x09) / \n(0x0A) / \r(0x0D) は正当な整形文字なので除外する。
+    if (code <= 0x1f && code !== 0x09 && code !== 0x0a && code !== 0x0d) return true;
+    // U+2028 LINE SEPARATOR / U+2029 PARAGRAPH SEPARATOR
+    if (code === 0x2028 || code === 0x2029) return true;
+  }
+  return false;
+}
+
+/**
+ * SDK 生エラーから、**構造化ログへ出しても安全なスカラーだけ**を取り出す。
+ *
+ * ## なぜ必要か
+ *
+ * `@google/genai` 1.52.0 の `ApiError` は `{ message, status }` しか公開せず
+ * (`ApiErrorInfo` の型定義)、HTTP headers (`Retry-After` 等) は SDK 内部で破棄される。
+ * `error.details[]` / `error.status` は **`message` に `JSON.stringify` された文字列
+ * としてのみ**存在する。したがって構造化フィールドとしてのアクセスは不可能で、
+ * 文字列からの抽出しか採れない (既存 `looksLikeInvalidApiKey` と同じ制約)。
+ *
+ * 2026-08 の実障害では Gemini の billing / prepaid credit 枯渇が 429 として届き、
+ * `rate_limit` に分類されて 30 秒待って 1 retry した末に失敗していた。
+ * 一時的な rate limit と billing 枯渇を安全に区別できる signal が現時点では
+ * 確認できていないため、**分類は増やさず**、次回に切り分けられるよう provider 側の
+ * 列挙トークンだけをログへ残す。
+ *
+ * ## 制約 (必ず守ること)
+ *
+ * - 戻り値は shape guard を通した列挙トークンと HTTP status のみ。
+ * - この戻り値を `AiClientError` / DB / UI へ載せないこと。用途は構造化ログのみ。
+ * - 呼び出し側は `console.error(..., err)` のように**元 Error を渡さない**こと。
+ */
+export function extractProviderDiagnostics(err: unknown): ProviderDiagnostics {
+  const diagnostics: ProviderDiagnostics = {};
+
+  const status = readStructuredStatus(err);
+  if (status !== null) diagnostics.http_status = status;
+
+  if (err instanceof Error) {
+    const providerStatus = err.message.match(PROVIDER_STATUS_PATTERN)?.[1];
+    if (providerStatus !== undefined) diagnostics.provider_status = providerStatus;
+    const providerReason = err.message.match(PROVIDER_REASON_PATTERN)?.[1];
+    if (providerReason !== undefined) diagnostics.provider_reason = providerReason;
+  }
+
+  // PR #180: `error.details[]` を構造として辿り、厳格 shape guard を通った
+  // フィールドパス / detail type だけを追加する(通らなければ完全に drop)。
+  const details = readProviderErrorDetails(err);
+  if (details.length > 0) {
+    const fieldViolations = extractFieldViolations(details);
+    if (fieldViolations !== undefined) diagnostics.provider_field_violations = fieldViolations;
+    const detailTypes = extractDetailTypes(details);
+    if (detailTypes !== undefined) diagnostics.provider_detail_types = detailTypes;
+  }
+
+  // PR #180: details が無い場合(Stage2 400 の実機挙動)に残る唯一の signal。
+  // 自由文そのものではなく、閉じた語彙への分類結果だけを載せる。
+  const messageClass = classifyProviderMessage(err);
+  if (messageClass !== undefined) diagnostics.provider_message_class = messageClass;
+
+  return diagnostics;
+}
+
+/**
  * SDK 生エラーを `AiClientError` に正規化する。
  *
  * 重要: 生エラーメッセージには API キー先頭文字や internal request ID が混入することがある。
@@ -286,7 +668,12 @@ function looksLikeInvalidApiKey(err: unknown): boolean {
  *    示す場合に限り `auth_error` へ寄せる。それ以外の 400 は `api_error(400)` のまま。
  * 4. 無ければメッセージ文字列のヒューリスティック (旧 SDK / 想定外の形状向けフォールバック)
  */
-function normalizeSdkError(err: unknown): AiClientError {
+/**
+ * `lib/ai/research/` (AI 店舗調査、Issue #158) からも再利用する。同じ `@google/genai` SDK・
+ * 同じ Gemini API を呼ぶ以上、エラー分類ロジックを複製すると新 kind 追加時の更新漏れ
+ * (`isAiClientError` の JSDoc 参照)が2箇所で起きうるため、この関数を単一の真実とする。
+ */
+export function normalizeSdkError(err: unknown): AiClientError {
   // 既に正規化済の AiClientError(makeError 経由)はそのまま再 throw
   if (isAiClientError(err)) {
     return err;
@@ -358,7 +745,8 @@ function normalizeSdkError(err: unknown): AiClientError {
   };
 }
 
-function makeError(err: AiClientError): AiClientError {
+/** `lib/ai/research/` からも再利用する(上記 `normalizeSdkError` と同じ理由)。 */
+export function makeError(err: AiClientError): AiClientError {
   return err;
 }
 

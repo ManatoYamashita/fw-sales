@@ -1,11 +1,10 @@
 "use client";
 
 /**
- * Topbar Bell ドロップダウン (deep-research-pipeline spec #43, Task 5.5)
+ * Topbar Bell ドロップダウン (auth-and-notifications spec #16)
  *
  * - 未読件数バッジを表示し、クリックで最新通知 (default 10 件) を展開
- * - 通知の `kind` に応じてリンク先を決定 (deep_research_done/failed → 該当店舗、
- *   deep_research_budget_warning → KPI 画面)
+ * - 通知の `kind` に応じてリンク先を決定 (通常は `link_url` に店舗 URL が埋め込まれる)
  * - 外側クリック / Escape キーで閉じる
  *
  * 親 RSC が `getRecentNotifications(userId, limit=10)` の結果を props で渡す前提。
@@ -170,10 +169,6 @@ function resolveLink(n: Notification): string | null {
 
 function defaultLinkForKind(kind: NotificationKind): string | null {
   switch (kind) {
-    case "deep_research_budget_warning":
-      return "/kpi";
-    case "deep_research_done":
-    case "deep_research_failed":
     case "research_job_completed":
     case "research_job_failed":
       return null; // 通常は link_url に店舗 URL が埋め込まれている前提

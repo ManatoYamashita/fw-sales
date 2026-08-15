@@ -103,7 +103,6 @@ describe("deriveCurrentSalesState", () => {
   it.each([
     [{ appointment_acquired_date: "2026-07-01" }, "appointment"],
     [{ stage: "架電済み" }, "initial"],
-    [{ stage: "DeepResearch済み" }, "researched"],
     [{ stage: "調査済み" }, "researched"],
     [{ stage: "未調査" }, "unresearched"],
   ] as const)("DealなしのStoreから営業状態を導出する", (overrides, expected) => {
@@ -490,10 +489,10 @@ describe("applyProgressFilter", () => {
 
   it("営業状態・調査段階・チャネルを統合して絞り込む", () => {
     const rows = rowsOf(
-      { store: makeStore({ id: "a", stage: "DeepResearch済み", channel: "テレアポ推奨" }) },
+      { store: makeStore({ id: "a", stage: "架電済み", channel: "テレアポ推奨" }) },
       { store: makeStore({ id: "b", stage: "調査済み", channel: "DM推奨" }) },
     );
-    expect(idsOf(applyProgressFilter(rows, { state: "researched" }))).toEqual(["a", "b"]);
+    expect(idsOf(applyProgressFilter(rows, { state: "researched" }))).toEqual(["b"]);
     expect(idsOf(applyProgressFilter(rows, { stage: "調査済み" }))).toEqual(["b"]);
     expect(idsOf(applyProgressFilter(rows, { channel: "テレアポ推奨" }))).toEqual(["a"]);
   });
@@ -637,24 +636,22 @@ describe("applyProgressSort", () => {
 
   it("stage asc: STAGE_IDS の定義順 (辞書順に退行しない)", () => {
     const rows = rowsOf(
-      { store: makeStore({ id: "a", stage: "DeepResearch済み" }) },
       { store: makeStore({ id: "b", stage: "未調査" }) },
       { store: makeStore({ id: "c", stage: "架電済み" }) },
       { store: makeStore({ id: "d", stage: "調査済み" }) },
     );
-    // STAGE_IDS 定義順: 未調査 → 調査済み → DeepResearch済み → 架電済み
-    // (辞書順なら DeepResearch済み → 架電済み → 未調査 → 調査済み になってしまう)
-    expect(idsOf(applyProgressSort(rows, { key: "stage", dir: "asc" }))).toEqual(["b", "d", "a", "c"]);
+    // STAGE_IDS 定義順: 未調査 → 調査済み → 架電済み
+    // (辞書順なら 架電済み → 未調査 → 調査済み になってしまう)
+    expect(idsOf(applyProgressSort(rows, { key: "stage", dir: "asc" }))).toEqual(["b", "d", "c"]);
   });
 
   it("stage desc: 定義順の逆順", () => {
     const rows = rowsOf(
-      { store: makeStore({ id: "a", stage: "DeepResearch済み" }) },
       { store: makeStore({ id: "b", stage: "未調査" }) },
       { store: makeStore({ id: "c", stage: "架電済み" }) },
       { store: makeStore({ id: "d", stage: "調査済み" }) },
     );
-    expect(idsOf(applyProgressSort(rows, { key: "stage", dir: "desc" }))).toEqual(["c", "a", "d", "b"]);
+    expect(idsOf(applyProgressSort(rows, { key: "stage", dir: "desc" }))).toEqual(["c", "d", "b"]);
   });
 
   it("channel asc: CHANNELS の定義順 (辞書順に退行しない)", () => {
@@ -680,7 +677,6 @@ describe("applyProgressSort", () => {
 
   it("applyStoreSort と同じ順序規則になる (STAGE_IDS/CHANNELS を単一の真実として共有)", () => {
     const stores = [
-      makeStore({ id: "a", stage: "DeepResearch済み", channel: "未判定" }),
       makeStore({ id: "b", stage: "未調査", channel: "DM推奨" }),
       makeStore({ id: "c", stage: "架電済み", channel: "要確認" }),
       makeStore({ id: "d", stage: "調査済み", channel: "テレアポ推奨" }),

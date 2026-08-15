@@ -2,30 +2,27 @@ import "server-only";
 import { cacheLife, cacheTag } from "next/cache";
 import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
-import type { Store } from "@/types/store";
+import { classifyResearchQueue, type ResearchQueueBuckets } from "@/lib/domain/research-review";
 import type { Research } from "@/types/research";
 
-export interface ResearchQueue {
-  /** 調査待ち: 未調査の店舗。 */
-  waiting: Store[];
-  /** 調査済み: DeepResearch 済み / 架電済みの店舗。 */
-  done: Store[];
-}
+export type ResearchQueue = ResearchQueueBuckets;
 
+/**
+ * `/research` 一覧の3タブ分を取得する(AI 店舗調査再設計 Plan v3.2 §6, PR5)。
+ *
+ * `store_research_runs` の「要確認」判定(succeeded かつ review_completed_at
+ * IS NULL のrunが存在するか)は Vercel Workflow のstepから更新されるため、
+ * Server Action/Route Handler の外で完結する(`revalidateTag` が確実に効くとは
+ * 限らない、beta SDKのため未検証)。このため本クエリは `'use cache'` を使わず、
+ * 呼び出しの都度 DB から直接読む(近リアルタイム性を優先、Plan §6)。
+ */
 export async function getResearchQueue(): Promise<ResearchQueue> {
-  "use cache";
-  cacheLife("longBackstop");
-  // 手動貼付フローでは done は stage で判定する(旧 research テーブル非依存)。
-  // 店舗の stage が変われば CACHE_TAGS.stores の revalidate で本クエリも失効する。
-  cacheTag(CACHE_TAGS.stores);
-  const stores = await repos.store.list();
+  const [stores, needsReviewStoreIds] = await Promise.all([
+    repos.store.list(),
+    repos.researchRun.listStoreIdsNeedingReview(),
+  ]);
 
-  return {
-    waiting: stores.filter((s) => s.stage === "未調査"),
-    done: stores.filter(
-      (s) => s.stage === "DeepResearch済み" || s.stage === "架電済み",
-    ),
-  };
+  return classifyResearchQueue(stores, new Set(needsReviewStoreIds));
 }
 
 export async function getResearchByStore(

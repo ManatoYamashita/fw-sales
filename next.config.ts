@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { withWorkflow } from "workflow/next";
 
 const nextConfig: NextConfig = {
   cacheComponents: true,
@@ -45,4 +46,7 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+// AI 店舗調査(Issue #158, Plan v3.2 §16)の長時間実行基盤として Vercel Workflow を採用。
+// `withWorkflow` は "use workflow" / "use step" ディレクティブを含むファイルをコンパイルする。
+// 既存ルートへの影響はなく、当該ディレクティブを使わないコードには何も作用しない。
+export default withWorkflow(nextConfig);

@@ -1,0 +1,194 @@
+/**
+ * Stage0 Google Places 専用 identity 構築の単体検証
+ * (PR #180 pre-merge fix: Stage0 Places Identity Recovery)。
+ *
+ * 純関数のみを検証する(Places API・DB・Gemini のいずれにも依存しない)。
+ */
+
+import { describe, it, expect } from "vitest";
+
+// `places-search-identity.ts` は依存ゼロの純関数モジュール(`server-only` を import
+// しない)ため、`url-normalize.test.ts` と同じく静的 import で足りる。
+import { buildBestStoreAddress, buildPlacesSearchIdentity } from "../places-search-identity";
+
+/**
+ * `buildBestStoreAddress` は**住所を推測しない**。
+ * 既存文字列の安全な結合と重複回避だけを行う。
+ */
+describe("buildBestStoreAddress", () => {
+  it("residual address(エリア検索経路)は prefecture + city + address で結合する", () => {
+    // lib/places/to-store-input.ts:69-78 は formattedAddress を
+    // prefecture / city / 残差 の3つに分解して保存するため、address は番地以降のみ。
+    expect(
+      buildBestStoreAddress({
+        prefecture: "千葉県",
+        city: "柏市",
+        address: "旭町1-1-12",
+      }),
+    ).toBe("千葉県柏市旭町1-1-12");
+  });
+
+  it("address が既に full address(URLインポート経路)ならそのまま返す", () => {
+    // lib/url-parser/places-fallback.ts:80 は formattedAddress を丸ごと address へ入れる。
+    // 素朴に連結すると「千葉県柏市千葉県柏市旭町1-1-12」になる。
+    expect(
+      buildBestStoreAddress({
+        prefecture: "千葉県",
+        city: "柏市",
+        address: "千葉県柏市旭町1-1-12",
+      }),
+    ).toBe("千葉県柏市旭町1-1-12");
+  });
+
+  it("address が city から始まる場合は city を二重付与しない", () => {
+    expect(
+      buildBestStoreAddress({
+        prefecture: "千葉県",
+        city: "柏市",
+        address: "柏市旭町1-1-12",
+      }),
+    ).toBe("千葉県柏市旭町1-1-12");
+  });
+
+  it("city が既に prefecture を含む場合は prefecture を二重付与しない(address 空)", () => {
+    // 告膳の実機ケース。「埼玉県埼玉県所沢市...」を絶対に作らない。
+    expect(
+      buildBestStoreAddress({
+        prefecture: "埼玉県",
+        city: "埼玉県所沢市日吉町19-12",
+        address: "",
+      }),
+    ).toBe("埼玉県所沢市日吉町19-12");
+  });
+
+  it("city が既に prefecture を含み、address が残差の場合も二重付与しない", () => {
+    expect(
+      buildBestStoreAddress({
+        prefecture: "埼玉県",
+        city: "埼玉県所沢市",
+        address: "日吉町19-12",
+      }),
+    ).toBe("埼玉県所沢市日吉町19-12");
+  });
+
+  it("address が空なら prefecture + city を返す", () => {
+    expect(
+      buildBestStoreAddress({ prefecture: "埼玉県", city: "所沢市", address: "" }),
+    ).toBe("埼玉県所沢市");
+  });
+
+  it("市区町村までしか無い場合も合成はする(具体性の判定は isAddressMatch 側の責務)", () => {
+    // ここで空文字へ倒すと、Places の textQuery から市区町村が消えて候補の質が下がる。
+    // 番地が無いことによる strong match 不成立は `hasBanchiLevelSpecificity` が担保する。
+    const composed = buildBestStoreAddress({
+      prefecture: "埼玉県",
+      city: "所沢市",
+      address: "",
+    });
+    expect(composed).toBe("埼玉県所沢市");
+    expect(/\d+-\d+/.test(composed)).toBe(false);
+  });
+
+  it("すべて空なら空文字を返す", () => {
+    expect(buildBestStoreAddress({ prefecture: "", city: "", address: "" })).toBe("");
+  });
+
+  it("前後の空白は trim する", () => {
+    expect(
+      buildBestStoreAddress({
+        prefecture: " 千葉県 ",
+        city: " 柏市 ",
+        address: " 旭町1-1-12 ",
+      }),
+    ).toBe("千葉県柏市旭町1-1-12");
+  });
+
+  it("空白のみのフィールドは空として扱う", () => {
+    expect(
+      buildBestStoreAddress({ prefecture: "千葉県", city: "   ", address: "   " }),
+    ).toBe("千葉県");
+  });
+
+  it("prefecture が空でも city / address は失われない", () => {
+    expect(
+      buildBestStoreAddress({ prefecture: "", city: "柏市", address: "旭町1-1-12" }),
+    ).toBe("柏市旭町1-1-12");
+  });
+
+  it("prefecture / city が空で address だけある場合は address をそのまま返す", () => {
+    expect(
+      buildBestStoreAddress({ prefecture: "", city: "", address: "千葉県柏市旭町1-1-12" }),
+    ).toBe("千葉県柏市旭町1-1-12");
+  });
+
+  it("住所を推測・補完しない(郵便番号や番地を勝手に足さない)", () => {
+    const composed = buildBestStoreAddress({
+      prefecture: "埼玉県",
+      city: "所沢市",
+      address: "",
+    });
+    expect(composed).not.toMatch(/〒/);
+    expect(composed).toBe("埼玉県所沢市");
+  });
+});
+
+describe("buildPlacesSearchIdentity", () => {
+  const STORE = {
+    name: "告膳",
+    prefecture: "埼玉県",
+    city: "所沢市",
+    address: "日吉町19-12",
+    phone: "04-2998-6543",
+  };
+
+  it("name / phone はスカラー列をそのまま使い、address だけ合成する", () => {
+    expect(buildPlacesSearchIdentity(STORE)).toEqual({
+      name: "告膳",
+      address: "埼玉県所沢市日吉町19-12",
+      phone: "04-2998-6543",
+    });
+  });
+
+  it("store.address が空でも prefecture / city から住所を組み立てる(告膳の再現)", () => {
+    const identity = buildPlacesSearchIdentity({
+      ...STORE,
+      address: "",
+      phone: "",
+      city: "所沢市日吉町19-12",
+    });
+    expect(identity.address).toBe("埼玉県所沢市日吉町19-12");
+    expect(identity.phone).toBe("");
+  });
+
+  it("戻り値は name / address / phone の3キーのみ(genre を持たない)", () => {
+    // `StoreIdentity` は `genre` を必須とするため、`PlacesSearchIdentity` は
+    // 構造的に `StoreIdentity` へ代入できない。これが Stage1/Stage2 へ
+    // 誤って渡らないことのコンパイル時保証になる(F1 を悪化させない担保)。
+    expect(Object.keys(buildPlacesSearchIdentity(STORE)).sort()).toEqual([
+      "address",
+      "name",
+      "phone",
+    ]);
+  });
+
+  it("basic_info を一切参照しない(引数がスカラー5列のみ)", () => {
+    // 過去の AI 調査結果を人間が採用した値(filled_by:"manual")が identity source に
+    // なると、AI-derived identity → Places strong match → deterministic confirmed
+    // という弱い循環が生じるため、今回は basic_info を使わない。
+    const identity = buildPlacesSearchIdentity(STORE);
+    expect(identity.name).toBe(STORE.name);
+    expect(identity.phone).toBe(STORE.phone);
+  });
+
+  it("すべて空の店舗でも例外を投げず空文字を返す", () => {
+    expect(
+      buildPlacesSearchIdentity({
+        name: "",
+        prefecture: "",
+        city: "",
+        address: "",
+        phone: "",
+      }),
+    ).toEqual({ name: "", address: "", phone: "" });
+  });
+});

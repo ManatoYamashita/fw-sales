@@ -8,10 +8,15 @@
  * 制約:
  * - エラーメッセージにはキー名のみを含め、値そのものはログに出さない (機密保護)。
  * - `import "server-only"` を付けない: scripts/seed.ts など Node 単体スクリプト
- *   からも import される想定のため。純粋ヘルパ関数として副作用を持たない。
+ *   からも import される想定のため。
+ * - 例外として `getResearchRunExpiresMarginMinutes` のみ、設定値が安全下限を
+ *   下回るときに `console.warn` を出す (運用側が設定ミスに気づけるようにするため)。
+ *   それ以外のヘルパは純粋関数で副作用を持たない。
  *
  * 関連: design.md §「`lib/env.ts` (assertEnv)」, requirements.md §6.1, §6.3
  */
+
+import { MIN_SAFE_EXPIRES_MARGIN_MINUTES } from "@/lib/ai/research/run-timing";
 
 /**
  * 必須環境変数を取得する。値が未設定または空文字なら例外を throw する。
@@ -89,6 +94,97 @@ export function getGeminiModel(): string {
 }
 
 /**
+ * AI 店舗調査(`lib/ai/research/`, Issue #158, Plan v3.2)で使う Gemini モデル名。
+ * 既定値は `getGeminiModel()` と同じ `gemini-3.6-flash` だが、独立した
+ * `RESEARCH_GEMINI_MODEL` で上書きできる。営業資産生成(`GEMINI_MODEL`)と
+ * Web調査を意図的に別の切り戻し経路にしている: tools(Google Search/URL Context)を
+ * 使う調査フローは営業資産生成より挙動が変わりやすいため、片方だけを個別に
+ * ロールバックできるようにする。
+ */
+export function getResearchGeminiModel(): string {
+  return readEnv("RESEARCH_GEMINI_MODEL", getGeminiModel()) ?? getGeminiModel();
+}
+
+/**
+ * AI 店舗調査の1回の生成で許す出力トークン上限。
+ *
+ * 営業資産生成(`MAX_OUTPUT_TOKENS = 4096`, `lib/ai/client.ts`)より大きい既定値を設定する。
+ * Stage2はFACT(20)/FACT_OR_HEARING(4)/ANALYSIS(17)の**計41項目**を1回の
+ * Structured Output応答で返す(fix/ai-research-poc-like-retrieval でFACT/ANALYSIS
+ * 2call構成から単一callへ統合。deterministic に確定した項目は `excludeKeys` で
+ * さらに除外されるため実際はこれ以下になる)。
+ *
+ * ## 引き上げの経緯(いずれも実測ベース)
+ *
+ * - 8192 → 16384(2026-08-03 Preview smoke): Gemini 3系はthinkingが既定で有効で、
+ *   thinking tokenもこの出力枠を消費する。`thoughtsTokenCount + candidatesTokenCount`
+ *   が8192上限にほぼ到達し(8185/8192)、JSON出力が打ち切られ Stage2 全体が失敗した。
+ * - 16384 → 24576(2026-08-11 Preview、feat/ai-research-quality-ux-hardening):
+ *   **成功した run ですら既に上限の 81.7% を消費していた**
+ *   (`thoughts 7,213 + candidates 6,177 = 13,390 / 16,384`)。残ヘッドルーム 2,994 token は
+ *   URL Context で読むページ量の揺らぎで容易に飛び、実際に別店舗で
+ *   `fatal:max_tokens` が発生した。24576 なら同じ消費量で 56%、
+ *   thinking/candidates 比が 1.17 → 2.5 になっても耐える。
+ *
+ * ## なぜ 24576 か(上限ではない)
+ *
+ * `gemini-3.6-flash` の output token limit は **65,536**(公式ドキュメント)であり、
+ * 24576 はその 37.5%。さらに上げる余地はあるが、Stage2 の step timeout
+ * (`GEMINI_STAGE_TIMEOUT_MS = 240_000`)内に収める必要があるため、
+ * まず 24576 で実測してから判断する。
+ *
+ * **課金について**: 上限を上げるだけで固定量が課金されるわけではない(課金は実使用分)。
+ * ただし従来 MAX_TOKENS で打ち切られていた run は最後まで生成するため追加 token を
+ * 使用しうる。実測は `token_usage`(成功・失敗の両方で保存される)で行う。
+ *
+ * `RESEARCH_MAX_OUTPUT_TOKENS` で上書き可能。
+ */
+export function getResearchMaxOutputTokens(): number {
+  return readPositiveInt("RESEARCH_MAX_OUTPUT_TOKENS", 24576);
+}
+
+/**
+ * AI 店舗調査 run (`store_research_runs`) の `expires_at` マージン(分)。
+ *
+ * `started_at` からこの分数後を stuck run 検出の参考値とする(AI 店舗調査再設計
+ * Plan v3.2 §17)。
+ *
+ * ## 安全下限による clamp(fix: PR #180 review Finding 3)
+ *
+ * 旧実装は既定 10 分固定だったが、Stage1/Stage2 はそれぞれ最大 240 秒 × 2 attempt +
+ * retry 待機を要しうるため、Gemini 部分だけで最大 17 分に達する。10 分では
+ * **正常に処理中の run が `isRunStuck` で stuck 扱いされ failed へ倒され、
+ * 同一店舗の二重 run を招く**。
+ *
+ * そこで既定値・下限ともに `MIN_SAFE_EXPIRES_MARGIN_MINUTES`
+ * (`lib/ai/research/run-timing.ts` が Workflow の timeout / retry 構成から導出)を使う。
+ * 実効値は概念的に `max(env override, safe minimum)`:
+ *
+ * - この env は **安全側へ延長するための override** であり、短縮する用途では扱わない
+ *   (run lifecycle の不変条件「expires は正常実行に必要な時間より短くならない」を守る)。
+ * - 本番に旧値(例 `10`)が設定済みでも、コード側 default の変更だけでは不具合が
+ *   残ってしまうため、下限未満は clamp する。
+ *
+ * 旧 `DEEP_RESEARCH_*` 系(このファイル下部)とは無関係の新設定。撤去済み
+ * Deep Research パイプラインの再利用ではない。
+ */
+export function getResearchRunExpiresMarginMinutes(): number {
+  const configured = readPositiveInt(
+    "RESEARCH_RUN_EXPIRES_MARGIN_MINUTES",
+    MIN_SAFE_EXPIRES_MARGIN_MINUTES,
+  );
+  if (configured < MIN_SAFE_EXPIRES_MARGIN_MINUTES) {
+    // 値のみを記録する(secret は含まない)。運用側が設定ミスに気づけるようにする。
+    console.warn("[research.expiresMargin] configured value below safe minimum; clamped", {
+      configured,
+      safeMinimum: MIN_SAFE_EXPIRES_MARGIN_MINUTES,
+    });
+    return MIN_SAFE_EXPIRES_MARGIN_MINUTES;
+  }
+  return configured;
+}
+
+/**
  * Google Places API キーが設定済みかを返す (boolean のみ、値そのものは返さない)。
  *
  * 用途: Server Component から取得した結果を Client Component に props で渡し、
@@ -101,119 +197,8 @@ export function isPlacesApiKeyConfigured(): boolean {
   return readEnv("GOOGLE_PLACES_API_KEY") !== undefined;
 }
 
-// ---------------------------------------------------------------------------
-// deep-research-pipeline spec (Issue #43)
-// ---------------------------------------------------------------------------
-
-/**
- * Deep Research (Stage 1) で使用する Gemini モデル名を返す。
- * 未設定時のデフォルトは `deep-research-preview-04-2026`。
- *
- * Phase 0 PoC で実体のモデル ID 表記を確認後、必要なら本関数のデフォルト値か
- * 環境変数 `DEEP_RESEARCH_MODEL` を更新する。
- */
-export function getDeepResearchModel(): string {
-  return (
-    readEnv("DEEP_RESEARCH_MODEL", "deep-research-preview-04-2026") ??
-    "deep-research-preview-04-2026"
-  );
-}
-
-/**
- * Stage 2 構造化で使用する Gemini モデル名を返す。
- * 未設定時のデフォルトは `gemini-2.5-flash-lite`。
- */
-export function getStructurerModel(): string {
-  return (
-    readEnv("DEEP_RESEARCH_STRUCTURER_MODEL", "gemini-2.5-flash-lite") ??
-    "gemini-2.5-flash-lite"
-  );
-}
-
-/**
- * Stage 2 構造化 (Gemini) の `maxOutputTokens` 上限。
- * `full_markdown` を出力スキーマから除外したため通常は十分だが、tier=B の
- * `source_quote` 長文化などに備えた余裕として env で調整可能にする (再デプロイ不要)。
- * 未設定時のデフォルトは 16384。
- */
-export function getStructurerMaxOutputTokens(): number {
-  return readPositiveInt("DEEP_RESEARCH_STRUCTURER_MAX_TOKENS", 16384);
-}
-
-/**
- * GitHub Actions cron から `/api/cron/poll-research` を叩く際の共有シークレット。
- * 必須環境変数。未設定なら throw する (運用 misconfig を起動時に検出)。
- */
-export function assertCronSecret(): string {
-  return assertEnv("CRON_SECRET");
-}
-
-/**
- * 同時に in-flight (researching + structuring) に置けるジョブ数の上限。
- * 未設定時のデフォルトは 10。1 cron tick で新規 Stage 1 を起動するかどうかの判定に使う。
- */
-export function getInFlightCap(): number {
-  return readPositiveInt("DEEP_RESEARCH_MAX_IN_FLIGHT", 10);
-}
-
-/**
- * 1 cron tick あたりに polling で叩く `researching` ジョブの最大件数。
- * 未設定時のデフォルトは 5。
- */
-export function getPollPerTick(): number {
-  return readPositiveInt("DEEP_RESEARCH_POLL_PER_TICK", 5);
-}
-
-/**
- * 1 ユーザーあたり 1 暦日に登録可能なジョブ件数の上限。
- * 未設定時のデフォルトは 30。Action 層で `countByUserSinceDay` と比較する。
- */
-export function getDailyUserCap(): number {
-  return readPositiveInt("DEEP_RESEARCH_DAILY_USER_CAP", 30);
-}
-
-/**
- * 1 月あたりの総ジョブ実行件数の上限。コスト枯渇防止。
- * 未設定時のデフォルトは 1000。Action 層で `countByMonth` と比較する。
- */
-export function getMonthlyCap(): number {
-  return readPositiveInt("DEEP_RESEARCH_MONTHLY_CAP", 1000);
-}
-
-/**
- * Stage 1 進捗停滞 (stall) 検知のしきい値 (ミリ秒)。
- * `researching` のまま Google 側 `api_updated_at` がこの時間以上更新されなければ停滞とみなす。
- * env は分単位 (`DEEP_RESEARCH_STALL_THRESHOLD_MIN`)、未設定時のデフォルトは 90 分。
- * 誤検知が出た場合はこの値を大きくするだけで stall sweep を即時無効化できる (再デプロイ不要)。
- */
-export function getStallThresholdMs(): number {
-  return readPositiveInt("DEEP_RESEARCH_STALL_THRESHOLD_MIN", 90) * 60_000;
-}
-
-/**
- * Stage 1 進捗停滞検知の grace period (ミリ秒)。
- * `research_started_at` がこの時間以上前のジョブのみを stall 検知対象とし、
- * 起動直後 (初回ポーリング 45 分前) の誤検知を防ぐ。
- * env は分単位 (`DEEP_RESEARCH_STALL_GRACE_MIN`)、未設定時のデフォルトは 60 分。
- */
-export function getStallGraceMs(): number {
-  return readPositiveInt("DEEP_RESEARCH_STALL_GRACE_MIN", 60) * 60_000;
-}
-
-/**
- * 月次警告閾値 (上限の何 % を超えたら admin 通知を出すか)。
- * 未設定時のデフォルトは 80。0-100 の整数。
- */
-export function getMonthlyWarningPercent(): number {
-  const raw = readPositiveInt("DEEP_RESEARCH_MONTHLY_WARNING_PERCENT", 80);
-  if (raw > 100) return 100;
-  return raw;
-}
-
 /**
  * 正の整数を環境変数から読み出す。不正値 (非数値・負・0) はデフォルトにフォールバック。
- *
- * Deep Research の運用設定値は全て正の整数で表現できるため、専用ヘルパとして集約する。
  */
 function readPositiveInt(key: string, fallback: number): number {
   const raw = readEnv(key);

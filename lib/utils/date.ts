@@ -2,6 +2,11 @@ export function today(): string {
   return new Date().toISOString().split("T")[0]!;
 }
 
+/** 現在時刻を ISO 8601 文字列 (timestamptz 列用) で返す。 */
+export function nowIso(): string {
+  return new Date().toISOString();
+}
+
 /** 指定タイムゾーンにおける当日を `YYYY-MM-DD` で返す。 */
 export function todayInTimeZone(
   timeZone: string,
@@ -32,6 +37,19 @@ export function formatDate(input: string | null | undefined): string {
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
   return `${yyyy}/${mm}/${dd}`;
+}
+
+/** `formatDate` の日時版(時分まで表示)。AI調査runの実施日時表示等に使う。 */
+export function formatDateTime(input: string | null | undefined): string {
+  if (!input) return "—";
+  const d = new Date(input);
+  if (Number.isNaN(d.getTime())) return input;
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+  return `${yyyy}/${mm}/${dd} ${hh}:${mi}`;
 }
 
 /**

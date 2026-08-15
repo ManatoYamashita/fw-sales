@@ -293,7 +293,7 @@ async function populate(rows, nullRate) {
       case i % 6 when 0 then '居酒屋' when 1 then 'カフェ' when 2 then 'ラーメン'
                  when 3 then 'イタリアン' when 4 then '焼肉' else 'バー' end,
       case i % 3 when 0 then '高' when 1 then '中' else '低' end,
-      case i % 4 when 0 then '未調査' when 1 then '調査済み' when 2 then 'DeepResearch済み' else '架電済み' end,
+      case i % 3 when 0 then '未調査' when 1 then '調査済み' else '架電済み' end,
       case i % 4 when 0 then 'DM推奨' when 1 then 'テレアポ推奨' when 2 then '要確認' else '未判定' end,
       case i % 3 when 0 then '有' when 1 then '無' else '未確認' end,
       'https://maps.google.com/?cid=' || i,

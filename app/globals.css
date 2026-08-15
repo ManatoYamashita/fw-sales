@@ -271,18 +271,14 @@
 }
 
 /* ------------------------------------------------------------------ */
-/*  状態別配色 (5 states)                                               */
+/*  状態別配色 (3 states)                                               */
 /* ------------------------------------------------------------------ */
 [data-stage="未調査"]              { --stage: #f1f5f9; --stage-foreground: #64748b; }
 [data-stage="調査済み"]            { --stage: #ede9fe; --stage-foreground: #6d28d9; }
-[data-stage="DeepResearching..."]  { --stage: #fef3c7; --stage-foreground: #b45309; }
-[data-stage="DeepResearch済み"]    { --stage: #dbeafe; --stage-foreground: #1d4ed8; }
 [data-stage="架電済み"]            { --stage: #cffafe; --stage-foreground: #0e7490; }
 
 .dark [data-stage="未調査"]              { --stage: #1e293b; --stage-foreground: #94a3b8; }
 .dark [data-stage="調査済み"]            { --stage: #2e1065; --stage-foreground: #c4b5fd; }
-.dark [data-stage="DeepResearching..."]  { --stage: #451a03; --stage-foreground: #fcd34d; }
-.dark [data-stage="DeepResearch済み"]    { --stage: #1e3a5f; --stage-foreground: #93c5fd; }
 .dark [data-stage="架電済み"]            { --stage: #164e63; --stage-foreground: #67e8f9; }
 
 /* ------------------------------------------------------------------ */
