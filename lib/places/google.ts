@@ -307,10 +307,37 @@ export async function resolveSearchCenter(
  * Place Details の URL を組み立てる。
  * placeId が "places/xxx" 形式で渡ってきた場合は、二重に "places/" を付けないよう
  * プレフィックスを取り除いてから encodeURIComponent する。
+ *
+ * ## languageCode / regionCode を必ず付ける理由
+ *
+ * Text Search (`searchPlacesPage` / `resolveSearchCenter`) は body で
+ * `languageCode: "ja"` を渡しているが、Place Details は GET のため body を持たず、
+ * 以前は言語指定が**どこにも無かった**。その結果、同じ店舗でも
+ *
+ * - 一覧に表示される候補 (Text Search 由来) → 日本語
+ * - `addStoreFromPlaceAction` が保存する `stores` 行 (Place Details 由来) → 英語
+ *
+ * という食い違いが起きていた。`addStoreFromPlaceAction` /
+ * `bulkAddStoresFromPlacesAction` はクライアント送信値を信用せず placeId から
+ * `getPlaceById` で再取得して保存する設計のため、ローマ字の店名・住所がそのまま
+ * `stores.name` / `stores.address` に入る。こうなると `extractPrefecture` /
+ * `extractCity` (`to-store-input.ts`) が日本語地名を見つけられず
+ * `prefecture` / `city` が空になり、さらに AI 店舗調査の店舗同定
+ * (`lib/ai/research/pipeline.ts`) で店名・住所が**同時に**不一致となる。
+ * 実データで1店舗発生していた (2026-08-15 実測)。
+ *
+ * Places API (New) の `places.get` は `languageCode` / `regionCode` を
+ * クエリパラメータとして受け付ける。
+ * `regionCode: "JP"` は `resolveSearchCenter` と同じ意図で、同名の海外候補と
+ * 地域固有表記の揺れを避けるために付ける。日本国内住所では
+ * `formattedAddress` 先頭の `日本、` が省かれることがあるが、
+ * `normalizeFormattedAddress` (`to-store-input.ts`) の prefix 正規表現は
+ * `日本、` を optional として扱うため、どちらの形でも保存結果は変わらない。
  */
 function buildPlaceDetailsUrl(placeId: string): string {
   const id = placeId.startsWith("places/") ? placeId.slice("places/".length) : placeId;
-  return `${DETAILS_ENDPOINT}/${encodeURIComponent(id)}`;
+  const params = new URLSearchParams({ languageCode: "ja", regionCode: "JP" });
+  return `${DETAILS_ENDPOINT}/${encodeURIComponent(id)}?${params.toString()}`;
 }
 
 /**

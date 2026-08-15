@@ -43,6 +43,7 @@ import {
   type SourceVerification,
 } from "@/lib/ai/research-result-schema";
 import {
+  deriveSearchIdentityName,
   isAddressMatch,
   isNameMatch,
   isTargetStoreMatch,
@@ -137,6 +138,42 @@ export interface Stage2Outcome {
    * `applySourceIdentityVerification`でSource Registryの`identity_status`へ反映する。
    */
   sourceVerifications: SourceVerification[];
+  /**
+   * run 全体の `store_identification` 粗照合の結果。`mismatch` が true の場合、
+   * `workflows/store-research.ts` が warning として記録する(以前はここで
+   * run 全体を failed にしていた。理由は `runStage2` 内のコメント参照)。
+   */
+  identity: Stage2IdentityDiagnostic;
+}
+
+/**
+ * Stage2 の `store_identification` 粗照合の **sanitized な結果**
+ * (PR #180 post-merge smoke、Finding B)。
+ *
+ * ## なぜ boolean だけなのか
+ *
+ * 以前この照合は失敗時に `Stage2InvalidOutputError("identity")` を投げるだけで、
+ * **どこにも診断が残らなかった**。`runStructuredUrlContext` が成功した**後**に
+ * throw するため `logGeminiCallFailure` を通らず、`persistFailedRun` が書くのは
+ * `error_kind` のみ。Stage1 には `stage1_diagnostics`、Stage2 の 400 には
+ * `Stage2RequestShape` があるのに、identity だけ観測点が無く、実機で発生した際は
+ * 店舗レコードから因果を逆算する必要があった。
+ *
+ * 既存の `Stage1Diagnostics` / `Stage2RequestShape` と同じ規約に従い、**count と
+ * boolean のみ**を持つ。モデルが報告した店名・住所の文字列そのものは載せない
+ * (型として持てない)。
+ */
+export interface Stage2IdentityDiagnostic {
+  /** `matched_name` が非空で報告されたか。 */
+  name_reported: boolean;
+  /** `matched_address` が非空で報告されたか。 */
+  address_reported: boolean;
+  /** 報告された店名が対象店舗と一致したか(未報告なら false)。 */
+  name_matched: boolean;
+  /** 報告された住所が対象店舗と一致したか(未報告なら false)。 */
+  address_matched: boolean;
+  /** 店名・住所の**両方**が報告され、かつ両方とも不一致だったか。 */
+  mismatch: boolean;
 }
 
 /**
@@ -147,6 +184,12 @@ export interface Stage2Outcome {
  * とは無関係の固定値のみを取る(実機Preview検証、2026-08-07で発生した
  * `fatal:stage2_invalid_output`が具体的にどの検証で落ちたか、DBからは判別
  * できなかった事象への対応)。
+ *
+ * `"identity"` は **現在のコードからは生成されない**(PR #180 post-merge smoke で
+ * hard fail から warning へ変更した。理由は `runStage2` 内のコメント参照)。
+ * 過去 run の `error_kind = "fatal:stage2_invalid_output:identity"` を
+ * `workflows/store-research.ts` の `SANITIZED_KIND_PATTERN` が引き続き解釈できる
+ * よう、union と正規表現の両方に**意図的に残している**。
  */
 export type Stage2InvalidOutputKind = "json_parse" | "schema" | "coverage" | "identity";
 
@@ -315,28 +358,52 @@ export async function runStage2(
 
   // FIX12(fix/ai-research-source-identity-integrity): run全体のstore_identificationが
   // 対象店舗と名前・住所のいずれも明確に不一致な場合、Stage2全体が別店舗を調査して
-  // しまった疑いが強いため succeeded として保存しない。ただしこれはあくまで粗い
-  // safety netであり、個別sourceの`identity_status`判定(`applySourceIdentityVerification`)
-  // を代替しない。false positiveでrunを無駄に失敗させないよう、name/addressの**両方**が
-  // 明確に不一致の場合のみ発火する(片方が空・不明な場合は発火しない)。
+  // しまった疑いが強い。ただしこれはあくまで粗い safety netであり、個別sourceの
+  // `identity_status`判定(`applySourceIdentityVerification`)を代替しない。
+  //
+  // ## hard fail から warning へ変更した理由(PR #180 post-merge smoke、Finding A)
+  //
+  // 「name/addressの**両方**が不一致のときだけ発火」という false positive 対策は、
+  // 両者が**独立に**壊れることを前提にしている。しかし実機では、この前提が成立しない
+  // common-mode failure が見つかった:
+  //
+  //   `lib/places/google.ts` の Place Details 呼び出しに言語指定が無く、英語表記の
+  //   店名・住所が `stores` に保存される。すると `isNameMatch` と `isAddressMatch` が
+  //   **同時に** false になり、正しい店舗を調べていても必ず両方不一致になる。
+  //
+  // この状態の店舗は run が毎回 failed になり、ユーザーからは「理由不明の恒久失敗」に
+  // しか見えない(診断も残らなかった。`Stage2IdentityDiagnostic` の JSDoc 参照)。
+  // 粗い safety net が「別店舗を調査した」と「こちらの登録住所がローマ字」を区別
+  // できない以上、run 全体を失わせる trade は割に合わない。
+  //
+  // **二重防御は維持している。** 別店舗のデータが `confirmed` になる経路は、個別
+  // source の `identity_status`(`applySourceIdentityVerification` /
+  // `isVerifiedSourceForItem`)が従来どおり塞ぐ。ここは warning を出して人間が
+  // 出典を確認できるようにするだけに徹する。
+  //
+  // 判定には `deriveSearchIdentityName` を通した店名を使う(`isTargetStoreMatch` と
+  // 同じ基準)。生の `store.name` は「（確バツ）〇〇」のような営業管理タグを含みうるが、
+  // モデルが報告する `matched_name` は実店舗名であり、包含判定頼みで不安定だった。
   const identification = parsed.data.store_identification;
-  const nameLooksUnrelated =
-    identification.matched_name.trim() !== "" && !isNameMatch(identification.matched_name, store.name);
-  const addressLooksUnrelated =
-    identification.matched_address.trim() !== "" &&
-    !isAddressMatch(identification.matched_address, store.address);
-  if (nameLooksUnrelated && addressLooksUnrelated) {
-    throw new Stage2InvalidOutputError(
-      "店舗同定に失敗しました(store_identification_mismatch)",
-      "identity",
-    );
-  }
+  const identityName = deriveSearchIdentityName(store.name);
+  const nameReported = identification.matched_name.trim() !== "";
+  const addressReported = identification.matched_address.trim() !== "";
+  const nameMatched = nameReported && isNameMatch(identification.matched_name, identityName);
+  const addressMatched =
+    addressReported && isAddressMatch(identification.matched_address, store.address);
 
   return {
     items: resultItems,
     urlContextMetadata: result.urlContextMetadata,
     usageMetadata: result.usageMetadata,
     sourceVerifications: parsed.data.source_verifications as SourceVerification[],
+    identity: {
+      name_reported: nameReported,
+      address_reported: addressReported,
+      name_matched: nameMatched,
+      address_matched: addressMatched,
+      mismatch: nameReported && addressReported && !nameMatched && !addressMatched,
+    },
   };
 }
 

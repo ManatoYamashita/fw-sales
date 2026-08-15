@@ -7,8 +7,9 @@
 
 import { describe, it, expect } from "vitest";
 
-// `places-search-identity.ts` は依存ゼロの純関数モジュール(`server-only` を import
-// しない)ため、`url-normalize.test.ts` と同じく静的 import で足りる。
+// `places-search-identity.ts` は純関数モジュール(`server-only` を import しない。
+// 依存は `normalizeFormattedAddress` のみで、これも純関数)のため、
+// `url-normalize.test.ts` と同じく静的 import で足りる。
 import { buildBestStoreAddress, buildPlacesSearchIdentity } from "../places-search-identity";
 
 /**
@@ -129,6 +130,74 @@ describe("buildBestStoreAddress", () => {
     });
     expect(composed).not.toMatch(/〒/);
     expect(composed).toBe("埼玉県所沢市");
+  });
+
+  /**
+   * PR #180 post-merge smoke、Finding C。
+   *
+   * 本番実データの **8割強** の `address` が `〒NNNNNNN 都道府県 市区町村 …` の形
+   * (郵便番号 + スペース区切りのフル住所)で、さらに **3割強** の `city` に
+   * 行政区名ではなく営業テリトリー名が入っていた。当初の
+   * `address.startsWith(prefecture)` 判定は `〒` 始まりの住所で常に false になるため、
+   * これら全件で areaPrefix が無条件に前置されていた。
+   *
+   * 以下の fixture は実データの**形**だけを再現した架空の店舗情報で、
+   * このファイルの他のテストと同じ「千葉県柏市旭町」を題材に揃えている。
+   */
+  describe("〒 始まりのフル住所(手動登録・一括インポート経路)", () => {
+    it("prefecture を二重付与しない", () => {
+      expect(
+        buildBestStoreAddress({
+          prefecture: "千葉県",
+          city: "",
+          address: "〒2770852 千葉県 柏市 旭町1-1-12 サンプルビル 2F",
+        }),
+      ).toBe("〒2770852 千葉県 柏市 旭町1-1-12 サンプルビル 2F");
+    });
+
+    it("city が行政区名でない(営業テリトリー名)場合も前置しない", () => {
+      // `city` は担当エリアの「柏市・我孫子市」だが、実際の所在地は市川市。
+      // 前置すると Places の textQuery に無関係な市区名が2つ混入する。
+      const composed = buildBestStoreAddress({
+        prefecture: "千葉県",
+        city: "柏市・我孫子市",
+        address: "〒2720021 千葉県 市川市八幡1-2-3",
+      });
+      expect(composed).toBe("〒2720021 千葉県 市川市八幡1-2-3");
+      expect(composed).not.toMatch(/柏市/);
+    });
+
+    it("city が prefecture を含むテリトリー名でも前置しない", () => {
+      const composed = buildBestStoreAddress({
+        prefecture: "千葉県",
+        city: "千葉県柏市・我孫子市",
+        address: "〒2720021 千葉県 市川市八幡1-2-3",
+      });
+      expect(composed).toBe("〒2720021 千葉県 市川市八幡1-2-3");
+      expect(composed).not.toMatch(/我孫子市/);
+    });
+
+    it("郵便番号を除いた先頭が市区町村の場合は prefecture だけを前置する", () => {
+      expect(
+        buildBestStoreAddress({
+          prefecture: "千葉県",
+          city: "柏市",
+          address: "〒2770852 柏市旭町1-1-12",
+        }),
+      ).toBe("千葉県〒2770852 柏市旭町1-1-12");
+    });
+
+    it("〒 始まりでも都道府県・市区町村を含まない残差なら従来どおり結合する", () => {
+      // 郵便番号だけが付いた残差住所。`probe` は「旭町1-1-12」になり、
+      // prefecture も city も含まないため rule 6 へ落ちる。
+      expect(
+        buildBestStoreAddress({
+          prefecture: "千葉県",
+          city: "柏市",
+          address: "〒2770852 旭町1-1-12",
+        }),
+      ).toBe("千葉県柏市〒2770852 旭町1-1-12");
+    });
   });
 });
 

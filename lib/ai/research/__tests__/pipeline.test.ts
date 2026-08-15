@@ -604,48 +604,80 @@ describe("runStage2 store_identification coarse guard (fix/ai-research-source-id
       .filter((k) => k !== "business_hours_holidays"),
   );
 
-  it("matched_name/matched_addressの両方が対象店舗と明確に不一致ならStage2InvalidOutputErrorを投げる(run全体が別店舗を調査した疑いが強い場合の粗いsafety net)", async () => {
+  /** `store_identification` を差し替えて `runStage2` を1回走らせ、identity 診断を返す。 */
+  async function runWithIdentification(identification: {
+    matched_name: string;
+    matched_address: string;
+  }) {
     mockRunStructuredUrlContext.mockResolvedValue({
       rawText: JSON.stringify({
-        store_identification: {
-          matched_name: "カフェ&民泊 三喜遊",
-          matched_address: "香川県三豊市仁尾町仁尾丙795",
-          identification_note: "",
-        },
+        store_identification: { ...identification, identification_note: "" },
         source_verifications: [],
         items: fullItemsForAllowedKeys(ALL_EXCEPT_HOURS),
       }),
       urlContextMetadata: null,
       usageMetadata: null,
     });
+    return runStage2(
+      { store: STORE, sourceRegistry: REGISTRY, excludeKeys: ALL_EXCEPT_HOURS },
+      AbortSignal.timeout(1000),
+    );
+  }
 
-    await expect(
-      runStage2({ store: STORE, sourceRegistry: REGISTRY, excludeKeys: ALL_EXCEPT_HOURS }, AbortSignal.timeout(1000)),
-    ).rejects.toMatchObject({ name: "Stage2InvalidOutputError", kind: "identity" });
-  });
-
-  it("matched_nameのみ不一致(matched_addressが空)なら発火しない(片方だけの不一致でrunを無駄に失敗させない)", async () => {
-    mockRunStructuredUrlContext.mockResolvedValue({
-      rawText: JSON.stringify({
-        store_identification: { matched_name: "カフェ&民泊 三喜遊", matched_address: "", identification_note: "" },
-        source_verifications: [],
-        items: fullItemsForAllowedKeys(ALL_EXCEPT_HOURS),
-      }),
-      urlContextMetadata: null,
-      usageMetadata: null,
+  it("matched_name/matched_addressの両方が対象店舗と明確に不一致でも、throwせずidentity.mismatch=trueを返す(PR #180 post-merge smoke、Finding A)", async () => {
+    const result = await runWithIdentification({
+      matched_name: "カフェ&民泊 三喜遊",
+      matched_address: "香川県三豊市仁尾町仁尾丙795",
     });
 
-    await expect(
-      runStage2({ store: STORE, sourceRegistry: REGISTRY, excludeKeys: ALL_EXCEPT_HOURS }, AbortSignal.timeout(1000)),
-    ).resolves.toBeDefined();
+    expect(result.identity).toEqual({
+      name_reported: true,
+      address_reported: true,
+      name_matched: false,
+      address_matched: false,
+      mismatch: true,
+    });
+    // run 全体は失敗させない。53項目は保存され、警告として人間へ渡す。
+    expect(result.items.length).toBeGreaterThan(0);
   });
 
-  it("matched_name/matched_addressが対象店舗と一致すれば発火しない(正常系)", async () => {
+  it("matched_nameのみ不一致(matched_addressが空)ならmismatchにしない(片方だけの不一致でrunを疑わない)", async () => {
+    const result = await runWithIdentification({
+      matched_name: "カフェ&民泊 三喜遊",
+      matched_address: "",
+    });
+
+    expect(result.identity.address_reported).toBe(false);
+    expect(result.identity.name_matched).toBe(false);
+    expect(result.identity.mismatch).toBe(false);
+  });
+
+  it("matched_name/matched_addressが対象店舗と一致すればmismatchにならない(正常系)", async () => {
+    const result = await runWithIdentification({
+      matched_name: STORE.name,
+      matched_address: STORE.address,
+    });
+
+    expect(result.identity).toEqual({
+      name_reported: true,
+      address_reported: true,
+      name_matched: true,
+      address_matched: true,
+      mismatch: false,
+    });
+  });
+
+  /**
+   * 店名の照合は `deriveSearchIdentityName` を通す(`isTargetStoreMatch` と同じ基準)。
+   * 生の `store.name` を渡していた頃は、営業管理タグ付きの店舗で
+   * `isNameMatch` の包含判定頼みになっていた。
+   */
+  it("営業管理タグ付きの店舗名でも、モデルが報告した実店舗名と一致する", async () => {
     mockRunStructuredUrlContext.mockResolvedValue({
       rawText: JSON.stringify({
         store_identification: {
           matched_name: STORE.name,
-          matched_address: STORE.address,
+          matched_address: "別の住所1-2-3",
           identification_note: "",
         },
         source_verifications: [],
@@ -655,9 +687,59 @@ describe("runStage2 store_identification coarse guard (fix/ai-research-source-id
       usageMetadata: null,
     });
 
-    await expect(
-      runStage2({ store: STORE, sourceRegistry: REGISTRY, excludeKeys: ALL_EXCEPT_HOURS }, AbortSignal.timeout(1000)),
-    ).resolves.toBeDefined();
+    const result = await runStage2(
+      {
+        store: { ...STORE, name: `（Rアポ済）${STORE.name}` },
+        sourceRegistry: REGISTRY,
+        excludeKeys: ALL_EXCEPT_HOURS,
+      },
+      AbortSignal.timeout(1000),
+    );
+
+    expect(result.identity.name_matched).toBe(true);
+    expect(result.identity.mismatch).toBe(false);
+  });
+
+  /**
+   * Finding A の再現。Place Details に言語指定が無かったため
+   * `stores.name` / `stores.address` がローマ字で保存された店舗では、
+   * `isNameMatch` と `isAddressMatch` が**同時に**false になる。
+   * 以前はこれが hard fail だったため、その店舗の AI 調査は恒久的に失敗していた。
+   *
+   * fixture は実データの**形**だけを再現した架空の店舗情報。
+   */
+  it("登録情報がローマ字表記の店舗でも run は成功し、mismatch 警告だけが立つ", async () => {
+    mockRunStructuredUrlContext.mockResolvedValue({
+      rawText: JSON.stringify({
+        store_identification: {
+          matched_name: "サンプル酒場",
+          matched_address: "千葉県柏市旭町1-1-12 サンプルビル2F",
+          identification_note: "",
+        },
+        source_verifications: [],
+        items: fullItemsForAllowedKeys(ALL_EXCEPT_HOURS),
+      }),
+      urlContextMetadata: null,
+      usageMetadata: null,
+    });
+
+    const result = await runStage2(
+      {
+        store: {
+          ...STORE,
+          // Place Details が言語指定なしで返す形。国名も英語のため
+          // `normalizeFormattedAddress` の「日本、」除去が効かない。
+          name: "Sample Sakaba",
+          address: "Japan, 〒277-0852 Chiba, Kashiwa, Asahicho, 1-chōme-1-12 Sample Building 2F",
+        },
+        sourceRegistry: REGISTRY,
+        excludeKeys: ALL_EXCEPT_HOURS,
+      },
+      AbortSignal.timeout(1000),
+    );
+
+    expect(result.identity.mismatch).toBe(true);
+    expect(result.items.length).toBeGreaterThan(0);
   });
 
   it("source_verificationsがそのままStage2Outcomeへ返る", async () => {

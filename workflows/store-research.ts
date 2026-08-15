@@ -726,8 +726,15 @@ resolveAndPersistSourceRegistryStep.maxRetries = DB_STEP_MAX_RETRIES;
 /**
  * Stage2: AI対象項目(FACT + FACT_OR_HEARING + ANALYSIS)を1回のGemini呼出で生成する
  * (fix/ai-research-poc-like-retrieval、PoCと同様の単一call構成)。
+ *
+ * `runId` は診断ログのためだけに受け取る(PR #180 post-merge smoke、Finding B)。
+ * ログを **step の中**へ置くのは、Workflow 本体が replay のたびに再実行され、
+ * 本体に置いた `console.info` が同じ run で何度も出てしまうため
+ * (既存の `[research.stage0] resync` が実際にそうなっている)。step は journal から
+ * 結果が返るので再実行されない。`[research.alias]` と同じ形。
  */
 async function stage2Step(
+  runId: string,
   store: StoreIdentity,
   sourceRegistry: SourceRegistryEntry[],
   searchNotes: SearchNote[],
@@ -735,10 +742,14 @@ async function stage2Step(
 ) {
   "use step";
   try {
-    return await runStage2(
+    const outcome = await runStage2(
       { store, sourceRegistry, searchNotes, excludeKeys: new Set(excludeKeys) },
       AbortSignal.timeout(STAGE_TIMEOUT_MS),
     );
+    // boolean のみ。モデルが報告した店名・住所の文字列は `Stage2IdentityDiagnostic`
+    // が構造的に持たないため、ここから漏れることはない。
+    console.info("[research.stage2] identity", { runId, ...outcome.identity });
+    return outcome;
   } catch (err) {
     throw classifyForWorkflowRetry(err);
   }
@@ -983,7 +994,13 @@ export async function storeResearchWorkflow(
     await markStageStep(runId, "researching");
 
     // Stage2: URL Context + Structured Output(単一call)。Stage1のSearch Notesも渡す。
-    const stage2Result = await stage2Step(store, resolvedRegistry, stage1.searchNotes, deterministicKeys);
+    const stage2Result = await stage2Step(
+      runId,
+      store,
+      resolvedRegistry,
+      stage1.searchNotes,
+      deterministicKeys,
+    );
 
     const urlContextAppliedRegistry = applyUrlContextStatus(resolvedRegistry, [stage2Result.urlContextMetadata]);
     // fix/ai-research-source-identity-integrity: url_context成功=ページ取得成功であり
@@ -1063,6 +1080,17 @@ export async function storeResearchWorkflow(
 
     const warnings: string[] = [];
     if (stage0.warning) warnings.push(stage0.warning);
+    // 以前はここで run 全体を failed にしていた(PR #180 post-merge smoke、Finding A)。
+    // 登録住所がローマ字の店舗では店名・住所が同時に不一致になり、正しい店舗を
+    // 調べていても恒久的に失敗していたため、warning へ緩和した。詳細は
+    // `runStage2`(`lib/ai/research/pipeline.ts`)のコメント参照。
+    if (stage2Result.identity.mismatch) {
+      warnings.push(
+        "AIが調査対象として同定した店舗名・住所が、登録されている店舗情報と一致しませんでした。" +
+          "別店舗の情報が混ざっている可能性があります。採用する前に各項目の出典を確認してください" +
+          "(登録情報の店舗名・住所が古い、または英語表記になっている場合もこの警告が出ます)。",
+      );
+    }
     if (finalRegistry.length === 0) {
       warnings.push(
         "Web情報源候補が1件も取得できませんでした(Gemini検索候補・登録済みURLともに0件)。",
@@ -1086,6 +1114,10 @@ export async function storeResearchWorkflow(
         // ここで inline 構築すると成功パスだけフィールドが増減して drift しうる。
         stage1_diagnostics: stage1Diagnostics,
         stage2_combined: stage2Result.usageMetadata,
+        // 店舗同定の粗照合結果(boolean のみ、PR #180 post-merge smoke、Finding B)。
+        // 失敗パスには対応する値が無い(Stage2 が完了しないと得られない)ため、
+        // `extractFailureTokenUsage` 側には追加しない。
+        stage2_identity: stage2Result.identity,
       },
       warnings,
     });

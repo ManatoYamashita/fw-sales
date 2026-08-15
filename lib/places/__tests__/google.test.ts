@@ -10,6 +10,16 @@ import {
 const SEARCH_ENDPOINT = "https://places.googleapis.com/v1/places:searchText";
 const DETAILS_ENDPOINT = "https://places.googleapis.com/v1/places";
 
+/**
+ * Place Details の URL からクエリを除いた部分を取り出す。
+ * `buildPlaceDetailsUrl` は `languageCode` / `regionCode` をクエリで付けるため、
+ * エンドポイントと placeId の検証はクエリと分けて行う。
+ */
+function detailsEndpointOf(url: string): string {
+  const parsed = new URL(url);
+  return `${parsed.origin}${parsed.pathname}`;
+}
+
 function jsonResponse(body: unknown, ok = true, status = 200): Response {
   return {
     ok,
@@ -350,7 +360,7 @@ describe("getPlaceDetails", () => {
     await getPlaceDetails("ChIJfood");
 
     const [url, init] = getFetchCall(fetchMock);
-    expect(url).toBe(`${DETAILS_ENDPOINT}/ChIJfood`);
+    expect(detailsEndpointOf(url)).toBe(`${DETAILS_ENDPOINT}/ChIJfood`);
     expect(init.method).toBe("GET");
   });
 
@@ -361,7 +371,29 @@ describe("getPlaceDetails", () => {
     await getPlaceDetails("places/ChIJfood");
 
     const [url] = getFetchCall(fetchMock);
-    expect(url).toBe(`${DETAILS_ENDPOINT}/ChIJfood`);
+    expect(detailsEndpointOf(url)).toBe(`${DETAILS_ENDPOINT}/ChIJfood`);
+  });
+
+  /**
+   * Place Details は GET のため body を持てず、以前は言語指定がどこにも無かった。
+   * その結果、一覧に出る候補 (Text Search 由来、日本語) と `addStoreFromPlaceAction`
+   * が保存する `stores` 行 (Place Details 由来、英語) が食い違い、ローマ字の
+   * 店名・住所が DB に入っていた (2026-08-15 実測、1店舗)。
+   * ローマ字住所は `extractPrefecture` / `extractCity` を空にし、さらに AI 店舗調査の
+   * 店舗同定で店名・住所を**同時に**不一致にする common-mode failure を起こす。
+   */
+  it("languageCode=ja / regionCode=JP をクエリに付ける (ローマ字の店名・住所が保存されるのを防ぐ)", async () => {
+    fetchMock = vi.fn().mockResolvedValue(jsonResponse(DETAILS_PLACE));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getPlaceDetails("places/ChIJfood");
+
+    const [url] = getFetchCall(fetchMock);
+    const parsed = new URL(url);
+    expect(parsed.searchParams.get("languageCode")).toBe("ja");
+    expect(parsed.searchParams.get("regionCode")).toBe("JP");
+    // prefix 除去とクエリ付与が両立していること (id 側にクエリが埋もれない)。
+    expect(detailsEndpointOf(url)).toBe(`${DETAILS_ENDPOINT}/ChIJfood`);
   });
 
   it("X-Goog-FieldMask が正しい", async () => {
