@@ -1,5 +1,5 @@
 /**
- * lib/supabase/middleware.ts (updateSession) の単体テスト。
+ * lib/supabase/proxy.ts (updateSession) の単体テスト。
  *
  * 主な検証観点:
  * - env 未設定 → fetch を呼ばずに isAuthenticated:false (回帰防止)
@@ -83,7 +83,7 @@ describe("updateSession (env / fall through 経路)", () => {
     delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
     const fetchSpy = vi.spyOn(globalThis, "fetch");
 
-    const { updateSession } = await import("../middleware");
+    const { updateSession } = await import("../proxy");
     const result = await updateSession(buildRequest());
 
     expect(result.isAuthenticated).toBe(false);
@@ -95,7 +95,7 @@ describe("updateSession (env / fall through 経路)", () => {
 
 describe("updateSession (fetch wrapper の wiring)", () => {
   it("createServerClient に関数として global.fetch が注入される", async () => {
-    const { updateSession } = await import("../middleware");
+    const { updateSession } = await import("../proxy");
     await updateSession(buildRequest());
 
     expect(typeof getInjectedFetch()).toBe("function");
@@ -106,7 +106,7 @@ describe("updateSession (fetch wrapper の wiring)", () => {
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(new Response("ok"));
 
-    const { updateSession } = await import("../middleware");
+    const { updateSession } = await import("../proxy");
     await updateSession(buildRequest());
 
     const injected = getInjectedFetch();
@@ -132,7 +132,7 @@ describe("updateSession (fetch wrapper の wiring)", () => {
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(new Response("ok"));
 
-    const { updateSession } = await import("../middleware");
+    const { updateSession } = await import("../proxy");
     await updateSession(buildRequest());
 
     const injected = getInjectedFetch();
@@ -157,7 +157,7 @@ describe("updateSession (fetch wrapper の wiring)", () => {
       },
     );
 
-    const { updateSession } = await import("../middleware");
+    const { updateSession } = await import("../proxy");
     await updateSession(buildRequest());
 
     const callerCtrl = new AbortController();

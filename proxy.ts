@@ -1,45 +1,33 @@
 /**
- * Next.js Root Middleware (auth-and-notifications spec, Issue #16)
+ * Next.js Root Proxy (auth-and-notifications spec, Issue #16)
  *
  * `(main)` Route Group 配下の全リクエストでセッション検証を行い、未認証なら
  * `/login?redirect={pathname}` にリダイレクトする。
  *
  * 制約:
- * - Edge Runtime で動作する (`postgres` 直接接続は不可)
+ * - Node.js runtime で動作する。Next.js 16 で `middleware.ts` は `proxy.ts` に
+ *   改名され、runtime は `nodejs` 固定で設定できない (`runtime` を export すると
+ *   ビルドエラー)。ただし全リクエストの前段で走る経路であることは変わらないため、
+ *   `postgres` 直接接続や重い依存をこのファイルに持ち込んではいけない。
  * - matcher で `(main)` 配下のみ対象、`/login` / `/auth/*` / `/api/*` /
  *   `/_next/*` / 静的アセット / favicon は除外
- * - 認証検証本体は `lib/supabase/middleware.ts:updateSession()` に委譲し、
+ * - 認証検証本体は `lib/supabase/proxy.ts:updateSession()` に委譲し、
  *   本ファイルはマッチパターンとリダイレクト発火に責務を絞る
+ * - 関数名は `proxy` (または default export) でなければならない。`middleware` の
+ *   ままだとビルドは通り実行時に `ProxyMissingExportError` で落ちる。
+ *   `__tests__/proxy.test.ts` がこの契約を検証する。
  *
  * 関連: design.md §「middleware.ts」, requirements.md §1.1, §1.5
  */
 
 import { NextResponse, type NextRequest } from "next/server";
-import { updateSession } from "@/lib/supabase/middleware";
+import { updateSession } from "@/lib/supabase/proxy";
+import {
+  FALLBACK_ENABLED_ROUTE,
+  isDisabledPath,
+} from "@/lib/domain/nav-routes";
 
-/**
- * 一時的に利用不可にしているメニューの URL プレフィクス。
- * `lib/domain/nav.ts` の `NAV_ITEMS[].disabled` と整合させる単一の真実とし、
- * 解除する際は両者を同時に戻す。
- */
-const DISABLED_ROUTE_PREFIXES: readonly string[] = [
-  "/dashboard",
-  "/pipeline",
-  "/actions",
-  // "/deals" は customer-sales-progress-management で解除 (nav.ts と同時に戻した)。
-  "/handoffs",
-  "/kpi",
-];
-
-const FALLBACK_ENABLED_ROUTE = "/stores";
-
-function isDisabledPath(pathname: string): boolean {
-  return DISABLED_ROUTE_PREFIXES.some(
-    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
-  );
-}
-
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { response, isAuthenticated } = await updateSession(request);
 
   if (!isAuthenticated) {

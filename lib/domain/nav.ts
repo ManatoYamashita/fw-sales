@@ -19,7 +19,7 @@ export interface NavItem {
   /**
    * 一時的にメニューを利用不可とする。`true` の場合はサイドバーで
    * グレーアウト表示しリンクを発火させない。直接 URL アクセスは
-   * middleware 側で `/stores` にリダイレクトされる。
+   * proxy 側で `/stores` にリダイレクトされる。
    */
   disabled?: boolean;
 }
@@ -42,13 +42,15 @@ export const NAV_ITEMS: readonly NavItem[] = [
 ];
 
 /**
- * 直接 URL アクセスをブロックする disabled ルートのプレフィクス一覧。
- * `NAV_ITEMS` の `disabled` と整合させる単一の真実とする。
- * middleware が edge runtime で参照する。
+ * 直接 URL アクセスをブロックする disabled ルートの定義は
+ * `lib/domain/nav-routes.ts` を単一の真実とする。
+ *
+ * `proxy.ts` は lucide-react を巻き込まないために nav-routes.ts を直接参照するが、
+ * 従来この経路から import していた利用側のために、ここでも re-export しておく。
+ * `NAV_ITEMS[].disabled` との一致は `__tests__/nav-routes.test.ts` が保証する。
  */
-export const DISABLED_ROUTE_PREFIXES: readonly string[] = NAV_ITEMS.filter(
-  (item) => item.disabled,
-).map((item) => item.href);
-
-/** disabled ルートにアクセスした場合のリダイレクト先。 */
-export const FALLBACK_ENABLED_ROUTE = "/stores";
+export {
+  DISABLED_ROUTE_PREFIXES,
+  FALLBACK_ENABLED_ROUTE,
+  isDisabledPath,
+} from "./nav-routes";

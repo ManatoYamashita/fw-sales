@@ -20,7 +20,7 @@ export interface SidebarProps {
   counts?: Partial<NavBadgeCounts>;
   /**
    * 現在ログイン中の profile (Phase 7 で `CURRENT_USER` 定数を撤廃)。
-   * null は未認証想定だが middleware が拾うため通常は到達しない。
+   * null は未認証想定だが proxy が拾うため通常は到達しない。
    */
   currentProfile?: Profile | null;
   /**

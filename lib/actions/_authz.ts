@@ -27,7 +27,7 @@ export type AdminGuard =
 
 /**
  * 呼び出し元がログイン済みであることを要求する (非破壊 WRITE 用の最小ガード)。
- * `requireAdmin` と異なりロールは問わない。middleware による保護に加え、
+ * `requireAdmin` と異なりロールは問わない。proxy による保護に加え、
  * Server Action 単体でも認証チェックする多層防御として各 action の先頭で呼ぶ。
  */
 export async function requireSignedIn(): Promise<ActionResult<never> | null> {

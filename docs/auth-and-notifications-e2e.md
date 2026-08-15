@@ -25,7 +25,7 @@
 ### 1. 未ログイン保護リダイレクト
 - [ ] 未ログイン状態で `/dashboard` にアクセス → `/login?redirect=/dashboard` にリダイレクトされる
 - [ ] 未ログイン状態で `/stores` / `/deals` / `/pipeline` 等にアクセス → 同様に `/login?redirect=...` にリダイレクト
-- [ ] `/login` / `/auth/callback` / `/api/cron/*` は middleware を通り抜けて到達可能
+- [ ] `/login` / `/auth/callback` / `/api/cron/*` は proxy を通り抜けて到達可能
 
 ### 2. Google サインインフロー
 - [ ] `/login` で「Google でサインイン」ボタンを押下 → Google 同意画面に遷移
