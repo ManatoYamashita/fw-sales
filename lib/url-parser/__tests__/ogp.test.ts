@@ -6,29 +6,31 @@
  * ここでは ogp.ts の export を fetchOgp のみに限定して、本テストは public API + fixture HTML の
  * 統合テストとして fetchOgp を間接利用する。
  *
- * 軽量化のため、fetch を vi.fn() でモックして HTML 文字列を返却させる。
+ * 軽量化のため、`safeFetchHtml`(fix/url-import-ssrf-hardening でSSRF対策の実 fetch層として
+ * 導入)を vi.mock() でモックして HTML 文字列を返却させる。SSRF対策自体(safeFetchHtml内部の
+ * IPレンジ判定・redirect追跡等)は `lib/security/__tests__/safe-http-fetch.test.ts` 側で検証する。
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { fetchOgp } from "../ogp";
+import { safeFetchHtml } from "@/lib/security/safe-http-fetch";
+
+vi.mock("@/lib/security/safe-http-fetch", () => ({
+  safeFetchHtml: vi.fn(),
+}));
 
 describe("fetchOgp + extractFromHtml (P1 cheerio + JSON-LD)", () => {
-  let originalFetch: typeof globalThis.fetch;
-
-  beforeEach(() => {
-    originalFetch = globalThis.fetch;
-  });
-
   afterEach(() => {
-    globalThis.fetch = originalFetch;
-    vi.restoreAllMocks();
+    vi.mocked(safeFetchHtml).mockReset();
   });
 
   function mockFetch(html: string, status = 200) {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: status >= 200 && status < 300,
+    vi.mocked(safeFetchHtml).mockImplementation(async (url: string) => ({
+      ok: true,
       status,
-      text: async () => html,
-    } as Response) as unknown as typeof globalThis.fetch;
+      finalUrl: url,
+      body: html,
+      contentType: "text/html",
+    }));
   }
 
   it("title からの name 抽出: ブラックリスト 'Google マップ' は破棄", async () => {
