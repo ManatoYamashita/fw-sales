@@ -88,8 +88,13 @@ export interface SafeFetchOptions {
 /**
  * 失敗時は定型`reason`コードのみを返す(commit前review Finding #6の修正)。
  * 生のNodeエラーメッセージ(`connect ECONNREFUSED <ip>:<port>`等、接続先IPを含みうる)を
- * 戻り値として外部へ渡さない。詳細情報が必要な場合もログへは出さず、`reason`の
- * 種別のみで診断する方針を維持する(過剰なlogging追加はしない)。
+ * 戻り値として外部へ渡さない。
+ *
+ * ただし**サーバログには残す**(#208)。UIへはsanitize済みの`reason`のみ、診断情報
+ * (解決先IP・Nodeの生エラー文言・何hop目で落ちたか)は`console.error`へ、という
+ * 二系統設計はPR #144(`lib/db/postgres-error.ts` / `lib/actions/store-actions.ts`)
+ * 以来の本リポジトリの規約である。ログが無かったために本番のURLインポート障害
+ * (#207)を戻り値だけからは切り分けられなかった、という実障害を受けた変更。
  */
 export type SafeFetchResult =
   | { ok: true; status: number; finalUrl: string; body: string; contentType: string | undefined }
@@ -99,6 +104,31 @@ const DEFAULT_MAX_REDIRECTS = 5;
 const DEFAULT_HOP_TIMEOUT_MS = 5000;
 const DEFAULT_TOTAL_TIMEOUT_MS = 8000;
 const DEFAULT_MAX_BODY_BYTES = 2_000_000;
+
+/**
+ * 診断ログへ載せる文字列フィールドの最大長 (#208 review)。
+ *
+ * redirect先の`Location`ヘッダはサーバー由来の外部入力であり、そこから組み立てた
+ * `URL`の`pathname`/`hostname`には長さの上限がない。Nodeの`maxHeaderSize`(既定16KB)が
+ * 実質的な上限にはなるが、ログ1行のサイズが外部入力に比例して膨らむ状態は避ける。
+ */
+const LOG_FIELD_MAX_CHARS = 200;
+
+/**
+ * 診断ログへ載せる解決先IPの最大件数 (#208 review)。DNSが多数のAレコードを返した場合に
+ * ログ1行が膨らむのを防ぐ。件数自体は`resolvedCount`で別途記録するため情報は失われない。
+ */
+const LOG_MAX_RESOLVED_ADDRESSES = 8;
+
+/**
+ * 診断ログ用に文字列を`LOG_FIELD_MAX_CHARS`で切り詰める。切り詰めた場合は元の長さを
+ * 併記し、ログを読む側が「切り詰められた」ことと元のサイズを判別できるようにする。
+ */
+function clipForLog(s: string): string {
+  return s.length <= LOG_FIELD_MAX_CHARS
+    ? s
+    : `${s.slice(0, LOG_FIELD_MAX_CHARS)}…(${s.length})`;
+}
 
 /** redirectとして追跡するHTTPステータス。それ以外の3xx(300/304/305/306等)や
  *  Location欠落の3xxはredirectとして扱わずfinal responseとして処理する。 */
@@ -354,19 +384,50 @@ export async function safeFetchHtml(
     ...options?.headers,
   };
 
+  const start = Date.now();
+
   let current: URL;
   try {
     current = new URL(url);
   } catch {
+    // `current`が未代入のためfail()を使えない唯一の経路。URL文字列自体はパースに
+    // 失敗しており、ホスト名等を安全に切り出せないのでログにも載せない。
+    console.error("[safeFetchHtml] failed", { reason: "invalid_url" });
     return { ok: false, reason: "invalid_url" };
   }
 
-  const deadline = Date.now() + totalTimeoutMs;
+  /**
+   * 失敗を構造化ログへ1行残してから`{ ok: false, reason }`を返す。戻り値の形は
+   * 従来どおり`reason`のみで、ここで出す診断情報はサーバログ専用(UIへは渡らない)。
+   * URLはクエリ文字列を落として`pathname`のみ記録する(貼付URLに不要な情報が
+   * 混じる可能性への保険)。`current`はredirectのたびに再代入されるが、この
+   * クロージャは常に最新の値、すなわち実際に落ちたhopのURLを参照する。
+   *
+   * redirect後の`current`はサーバー由来の`Location`から組み立てられるため、
+   * `host`/`path`は外部が長さを制御できる。ログ1行が外部入力に比例して
+   * 膨らまないよう`clipForLog`で切り詰める (#208 review)。
+   */
+  const fail = (
+    reason: SafeFetchFailureReason,
+    extra?: Record<string, unknown>,
+  ): SafeFetchResult => {
+    console.error("[safeFetchHtml] failed", {
+      reason,
+      scheme: current.protocol,
+      host: clipForLog(current.hostname),
+      path: clipForLog(current.pathname),
+      elapsedMs: Date.now() - start,
+      ...extra,
+    });
+    return { ok: false, reason };
+  };
+
+  const deadline = start + totalTimeoutMs;
 
   for (let hop = 0; hop <= maxRedirects; hop++) {
     const remainingBeforeDns = deadline - Date.now();
     if (remainingBeforeDns <= 0) {
-      return { ok: false, reason: "timeout" };
+      return fail("timeout", { hop, phase: "pre_dns" });
     }
 
     const safety = await validateExternalUrl(current, {
@@ -374,12 +435,22 @@ export async function safeFetchHtml(
       dnsTimeoutMs: Math.min(remainingBeforeDns, hopTimeoutMs),
     });
     if (!safety.ok) {
-      return { ok: false, reason: safety.reason };
+      return fail(safety.reason, { hop, phase: "url_safety" });
     }
+
+    // 解決先IPはログにのみ出す。戻り値・UIへは従来どおり一切出さない。
+    // DNSは任意件数のレコードを返しうるため、ログへ載せる件数は上限を設け、
+    // 総数は`resolvedCount`で別に残す (#208 review)。
+    const resolvedForLog = {
+      resolvedAddresses: safety.resolvedAddresses
+        .slice(0, LOG_MAX_RESOLVED_ADDRESSES)
+        .map((a) => a.address),
+      resolvedCount: safety.resolvedAddresses.length,
+    };
 
     const remainingAfterDns = deadline - Date.now();
     if (remainingAfterDns <= 0) {
-      return { ok: false, reason: "timeout" };
+      return fail("timeout", { hop, phase: "post_dns", ...resolvedForLog });
     }
 
     const pinnedLookup = createPinnedLookup(safety.resolvedAddresses);
@@ -402,7 +473,14 @@ export async function safeFetchHtml(
       hopResult = await hopHandle.promise;
     } catch (err) {
       const reason = err instanceof HopError ? err.reason : "network_error";
-      return { ok: false, reason };
+      // `message`にはNodeの生エラー文言(`connect ECONNRESET <ip>:<port>`等)や
+      // `HopError`が付した補足("unexpected content-encoding")が入る。ログ専用。
+      return fail(reason, {
+        hop,
+        phase: "hop",
+        ...resolvedForLog,
+        message: clipForLog(err instanceof Error ? err.message : String(err)),
+      });
     } finally {
       clearTimeout(deadlineTimer);
     }
@@ -412,7 +490,11 @@ export async function safeFetchHtml(
       try {
         next = new URL(hopResult.location, current);
       } catch {
-        return { ok: false, reason: "invalid_redirect_location" };
+        // Locationはサーバー由来の外部入力のため、長さを切り詰めてログに残す。
+        return fail("invalid_redirect_location", {
+          hop,
+          location: clipForLog(hopResult.location),
+        });
       }
       current = next;
       continue;
@@ -427,5 +509,7 @@ export async function safeFetchHtml(
     };
   }
 
-  return { ok: false, reason: "too_many_redirects" };
+  // `hop`はループのブロックスコープ外のため参照できない。追跡回数は
+  // `maxRedirects + 1` 固定なので`maxRedirects`のみを残す。
+  return fail("too_many_redirects", { maxRedirects });
 }
