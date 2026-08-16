@@ -2352,6 +2352,105 @@ describe("buildSourceVerificationTarget — store scalar からの住所合成 (
 });
 
 /**
+ * URL インポート由来で `stores.prefecture` が汚染された店舗
+ * (PR #216 独立レビューの MEDIUM finding)。
+ *
+ * `lib/url-parser/places-fallback.ts` は Places `formattedAddress` を
+ * **正規化せずに** `extractPrefecture` へ渡していたため、
+ * `日本、〒162-0825 東京都` が `stores.prefecture` に入った行が本番に実在する
+ * (READ ONLY 調査で 1 行: アズーリ 神楽坂)。
+ *
+ * この形では `buildBestStoreAddress` の規則4
+ * (`probe.includes(prefecture)`) が **prefecture 側のノイズのせいで**成立せず、
+ * 規則6が汚染 prefecture を再前置して住所が二重化する。
+ * 二重化した anchor は `target ⊂ observed` 方向の包含を壊すため、
+ * PR #216 以前は `target_match` だったページが `uncertain` へ落ちる回帰になる。
+ */
+describe("buildSourceVerificationTarget — 汚染 prefecture の互換性 (PR #216 review MEDIUM)", () => {
+  /** 本番実測値 (store_msva9t7t_d47nuu アズーリ 神楽坂)。DB は変更しない。 */
+  const POLLUTED_STORE = {
+    name: "アズーリ 神楽坂",
+    prefecture: "日本、〒162-0825 東京都",
+    city: "新宿区",
+    address: "日本、〒162-0825 東京都新宿区神楽坂３丁目４ 2F",
+    phone: "050-5487-4438",
+  };
+
+  it("1. 汚染 prefecture / city を住所へ二重化しない", () => {
+    const target = buildSourceVerificationTarget(POLLUTED_STORE, null);
+    expect(target.address).toBe("日本、〒162-0825 東京都新宿区神楽坂３丁目４ 2F");
+    // 「東京都新宿区」が2回現れないこと(二重化の直接検出)。
+    expect(target.address.match(/東京都新宿区/g)).toHaveLength(1);
+  });
+
+  it("1'. city 側が汚染していても二重化しない", () => {
+    const target = buildSourceVerificationTarget(
+      { ...POLLUTED_STORE, city: "〒162-0825 新宿区" },
+      null,
+    );
+    expect(target.address).toBe("日本、〒162-0825 東京都新宿区神楽坂３丁目４ 2F");
+  });
+
+  /**
+   * 2. 回帰の本体。ページ側が店舗登録値より情報量が多い
+   * (`target ⊂ observed`)ときに、修正前 main で成立していた一致が
+   * PR #216 で壊れていた。
+   */
+  describe("2. identity 照合が PR #216 以前と同じ結果になる", () => {
+    const entry = () =>
+      ({
+        id: "S01",
+        title: "アズーリ 神楽坂",
+        grounding_redirect_url:
+          "https://vertexaisearch.cloud.google.com/grounding-api-redirect/S01",
+        resolved_url: null,
+        resolve_status: "not_attempted",
+        source_type: "gourmet_site",
+        discovery_provenance: "gemini_search_candidate",
+        url_context_status: "success",
+        identity_status: "not_checked",
+      }) as unknown as SourceRegistryEntry;
+
+    const run = (observedAddress: string | null) =>
+      applySourceIdentityVerification(
+        [entry()],
+        [
+          {
+            source_id: "S01",
+            relation: "target_store",
+            observed_title: "t",
+            observed_name: "アズーリ 神楽坂",
+            observed_address: observedAddress,
+            observed_phone: null,
+            note: "",
+          },
+        ] as unknown as Parameters<typeof applySourceIdentityVerification>[1],
+        buildSourceVerificationTarget(POLLUTED_STORE, null),
+      )[0]!.identity_status;
+
+    it("正規表記のフル住所と target_match", () => {
+      expect(run("東京都新宿区神楽坂3丁目4")).toBe("target_match");
+    });
+
+    it("ページが上位集合(建物名付き)でも target_match — これが壊れていた回帰", () => {
+      expect(run("東京都新宿区神楽坂3-4 2F アズーリ")).toBe("target_match");
+    });
+
+    it("ページが上位集合(郵便番号 + 別建物名)でも target_match", () => {
+      expect(run("〒162-0825 東京都新宿区神楽坂3丁目4 2F 神楽坂ビル")).toBe("target_match");
+    });
+
+    it("番地が違えば従来どおり target_match にしない(緩めていない)", () => {
+      expect(run("東京都新宿区神楽坂3丁目5")).toBe("uncertain");
+    });
+
+    it("町丁目までのページは番地レベルの具体性を満たさない(緩めていない)", () => {
+      expect(run("東京都新宿区神楽坂")).toBe("uncertain");
+    });
+  });
+});
+
+/**
  * Issue #215 の本体 — 残差住所で登録された店舗が、建物名を持たないフル住所の
  * ページと `target_match` になれること。あわせて **緩めていない**ことを固定する。
  */

@@ -6,6 +6,7 @@ import {
   extractCity,
   extractPrefecture,
   mapGenre,
+  normalizeFormattedAddress,
 } from "@/lib/places/to-store-input";
 
 import { needsPlacesFallback, PLACES_API_SCORE } from "./apply";
@@ -151,13 +152,26 @@ export function mergePlaceIntoApply(
     merged.confidence.address = PLACES_API_SCORE;
   }
 
-  const prefFromPlace = extractPrefecture(place.formattedAddress);
+  // prefecture / city は **正規化後**の住所から抽出する
+  // (`lib/places/to-store-input.ts:placeResultToStoreInput` と同じ手順)。
+  //
+  // Places の `formattedAddress` は `日本、〒162-0825 東京都新宿区…` の形で返る。
+  // raw のまま `extractPrefecture` へ渡すと `PREFECTURE_RE` の `.+?[都道府県]` が
+  // 最短一致でノイズごと拾い、`日本、〒162-0825 東京都` が `stores.prefecture` に
+  // 保存される(本番 DB に実在。PR #216 独立レビューの MEDIUM finding)。
+  // 汚染したスカラーは AI 店舗調査の住所合成で二重化を起こす。
+  //
+  // `address` 列はここでは触れない。URL インポートの既存 semantics
+  // (`formattedAddress` をそのまま入れる)を変えないため。
+  const normalizedAddress = normalizeFormattedAddress(place.formattedAddress);
+
+  const prefFromPlace = extractPrefecture(normalizedAddress);
   if (prefFromPlace && shouldOverwrite("prefecture")) {
     merged.prefecture = prefFromPlace;
     merged.confidence.prefecture = PLACES_API_SCORE;
   }
 
-  const cityFromPlace = extractCity(place.formattedAddress);
+  const cityFromPlace = extractCity(normalizedAddress);
   if (cityFromPlace && shouldOverwrite("city")) {
     merged.city = cityFromPlace;
     merged.confidence.city = PLACES_API_SCORE;

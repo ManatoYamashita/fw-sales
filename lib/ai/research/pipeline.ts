@@ -57,6 +57,7 @@ import {
 } from "./evidence-precedence";
 import { deriveFreshPlacesVerifiedKeys } from "./places-verified";
 import { buildBestStoreAddress, type StoreAddressParts } from "./places-search-identity";
+import { normalizeFormattedAddress } from "@/lib/places/to-store-input";
 import { normalizeUrlForMatch } from "./url-normalize";
 import {
   enforcePhoneNumbersBackedByEvidence,
@@ -792,6 +793,51 @@ function isSalesTerritoryCity(city: string): boolean {
 }
 
 /**
+ * `stores.prefecture` / `stores.city` に混入した Google Places `formattedAddress`
+ * の周辺ノイズ(`日本、` prefix / `〒162-0825 ` prefix / 末尾 ` 日本`)を落とす
+ * (PR #216 独立レビューの MEDIUM finding)。
+ *
+ * ## なぜ必要か
+ *
+ * URL インポート経路(`lib/url-parser/places-fallback.ts`)は
+ * `extractPrefecture(place.formattedAddress)` を **raw のまま**呼んでいた。
+ * `PREFECTURE_RE` の `.+?[都道府県]` が最短一致でノイズごと拾うため、
+ * `日本、〒162-0825 東京都新宿区…` から `日本、〒162-0825 東京都` が
+ * `stores.prefecture` へ入る。本番 DB に実在する形状(READ ONLY 調査で 1 行)。
+ *
+ * この状態で `buildBestStoreAddress` を通すと、規則4の
+ * `probe.includes(prefecture)` が **address 側ではなく prefecture 側のノイズ**で
+ * 不成立になり、規則6が汚染 prefecture を再前置して
+ * `日本、〒162-0825 東京都新宿区日本、〒162-0825 東京都新宿区神楽坂…` という
+ * 二重化した anchor を作る。`isAddressMatch` の双方向包含のうち
+ * `target ⊂ observed` の向きが壊れるため、**PR #216 以前は `target_match` だった
+ * ページが `uncertain` へ落ちる**。
+ *
+ * ## なぜここで直すか
+ *
+ * `buildBestStoreAddress` 側では直さない。あちらは Stage0 Places 検索の
+ * `textQuery` も作っており、変えると検索候補 → `verifiedIdentity` まで挙動が動く。
+ * Issue #215 / 本 finding の範囲を超えるため、既存の `isSalesTerritoryCity` と
+ * 同じく **source verification 側だけ**に置く
+ * (Stage0 側の同一症状は本 PR の回帰ではなく既存の課題。別 Issue 候補として報告)。
+ *
+ * ## なぜ `normalizeFormattedAddress` を使うか
+ *
+ * 落としたい prefix はまさに Places `formattedAddress` のノイズであり、
+ * `lib/places/to-store-input.ts` が既に同じ正規表現を持っている
+ * (`placeResultToStoreInput` / `identity-match.ts` と共有)。新しい規則を
+ * 増やさずに済む。都道府県名・市区町村名は `日本` で始まらず `日本` で終わらない
+ * ため、正常値に対しては **完全な no-op**(`東京都` → `東京都`)。
+ *
+ * `address` 列には触れない。PR #216 以前の anchor 文字列をそのまま再現するのが
+ * 目的であり、照合時の表記ゆれは `normalizeJapaneseAddressForMatch` が従来どおり
+ * 吸収する。
+ */
+function normalizeAddressScalar(raw: string): string {
+  return normalizeFormattedAddress(raw.trim());
+}
+
+/**
  * `SourceVerificationTarget` を組み立てる(PR #180、**missing-only enrichment**)。
  *
  * ## 不変条件: 既存の登録値を fresh Places で上書きしない
@@ -886,11 +932,18 @@ export function buildSourceVerificationTarget(
   store: SourceVerificationStoreInput,
   verifiedIdentity: VerifiedPlacesIdentity | null,
 ): SourceVerificationTarget {
+  // URL インポート由来の prefix ノイズを先に落とす(`normalizeAddressScalar` の
+  // JSDoc)。正常値には作用しないため、既存店舗の合成結果は変わらない。
+  const prefecture = normalizeAddressScalar(store.prefecture);
+  const city = normalizeAddressScalar(store.city);
+
   // テリトリー名の city は住所 identity へ持ち込まない(上記 JSDoc)。
   // 正しい市区町村は推測せず、単に city 無しとして合成する。
-  const addressParts: StoreAddressParts = isSalesTerritoryCity(store.city)
-    ? { prefecture: store.prefecture, city: "", address: store.address }
-    : store;
+  const addressParts: StoreAddressParts = {
+    prefecture,
+    city: isSalesTerritoryCity(city) ? "" : city,
+    address: store.address,
+  };
 
   return {
     name: store.name,
