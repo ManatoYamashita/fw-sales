@@ -30,13 +30,20 @@ import type { PlacesFallbackReason } from "@/lib/url-parser/places-fallback";
  * **技術用語 (OGP / HTTP 403 / Cloudflare / Vercel / bot challenge / sourceType) は出さない。**
  * ユーザーが知りたいのは原因の内部詳細ではなく「次に何をすればよいか」なので、
  * すべて次の行動を含む文にする。診断情報はサーバ側の構造化ログが担う。
+ *
+ * export しているのは文言の回帰テスト (`__tests__/url-import-ui-copy.test.tsx`) から
+ * 参照するため。UI からの利用は本ファイル内に閉じている。
  */
-const REJECT_MESSAGE: Record<UrlImportRejectReason, string> = {
+export const REJECT_MESSAGE: Record<UrlImportRejectReason, string> = {
   tabelog_unsupported:
     "食べログURLからの自動入力には対応していません。Googleマップの店舗URLを貼り付けてください。",
   unsupported_source: "Googleマップの店舗URLを貼り付けてください。",
   not_place_url: "店舗ページのGoogleマップURLを貼り付けてください。",
   invalid_url: "URLの形式を確認してください。",
+  // 一時的な取得失敗。URL 自体は正しい可能性があるため貼り直しを促さない
+  // (`not_place_url` と取り違えると、有効な共有 URL で貼り直しを繰り返させる)。
+  short_url_resolve_failed:
+    "Googleマップの共有URLを読み込めませんでした。時間をおいてもう一度お試しください。",
 };
 
 /**

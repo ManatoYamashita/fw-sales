@@ -22,7 +22,9 @@ vi.mock("@/lib/actions/area-search-actions", () => ({
   searchPlacesWithMatchesAction: vi.fn(),
 }));
 
-const { ManualStartPanel, UrlSearchPanel } = await import("../registration-mode-card");
+const { ManualStartPanel, REJECT_MESSAGE, UrlSearchPanel } = await import(
+  "../registration-mode-card"
+);
 const { UrlImportSummary } = await import("../url-import-summary");
 
 function markup(node: React.ReactElement): string {
@@ -53,6 +55,43 @@ describe("UrlSearchPanel の案内文 (Google マップ専用)", () => {
 
   it("入力欄の aria-label が GoogleマップURL になっている", () => {
     expect(html).toContain('aria-label="GoogleマップURL"');
+  });
+});
+
+describe("受付拒否の文言 (REJECT_MESSAGE)", () => {
+  /**
+   * 短縮 URL の「取得に失敗した」を「別種の URL を貼れ」と案内しないこと。
+   * 案内が取り違うと、有効な共有 URL を持つユーザーが貼り直しを繰り返す (PR #211 review)。
+   */
+  it("short_url_resolve_failed は再試行を促し、URL の貼り直しを求めない", () => {
+    const message = REJECT_MESSAGE.short_url_resolve_failed;
+    expect(message).toContain("読み込めませんでした");
+    expect(message).toContain("もう一度お試しください");
+    expect(message).not.toContain("貼り付けてください");
+  });
+
+  it("not_place_url の文言は変えない", () => {
+    expect(REJECT_MESSAGE.not_place_url).toBe(
+      "店舗ページのGoogleマップURLを貼り付けてください。",
+    );
+  });
+
+  it("いずれの文言にも内部技術用語を含めない", () => {
+    for (const message of Object.values(REJECT_MESSAGE)) {
+      for (const term of [
+        "OGP",
+        "HTTP",
+        "DNS",
+        "Cloudflare",
+        "Vercel",
+        "fetch",
+        "redirect",
+        "リダイレクト",
+        "タイムアウト",
+      ]) {
+        expect(message).not.toContain(term);
+      }
+    }
   });
 });
 

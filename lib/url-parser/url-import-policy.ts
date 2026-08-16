@@ -49,8 +49,11 @@ export type UrlImportKind =
   /** `maps.app.goo.gl` / `goo.gl/maps` の短縮共有 URL。redirect 解決が必要。 */
   | "google_maps_short";
 
-/** 受け付けなかった理由。UI 文言はこの値から呼び出し側が決める(本モジュールは文言を持たない)。 */
-export type UrlImportRejectReason =
+/**
+ * **この純関数だけで判定できる**拒否理由。URL 文字列を見れば決まるものに限る。
+ * UI 文言はこの値から呼び出し側が決める(本モジュールは文言を持たない)。
+ */
+export type UrlImportPolicyRejectReason =
   /** URL として parse できない / `https:` でない / 非標準ポート / credentials 付き。 */
   | "invalid_url"
   /** 食べログ。Cloudflare bot challenge により本番で取得できないため非対応。 */
@@ -60,9 +63,26 @@ export type UrlImportRejectReason =
   /** Google のドメインだが店舗ページではない(検索結果・経路案内・トップページ等)。 */
   | "not_place_url";
 
+/**
+ * URL Import 全体の拒否理由。policy 判定の結果に加え、
+ * **policy 通過後の実行時に初めて分かる失敗**を含む。
+ *
+ * `short_url_resolve_failed` を `not_place_url` に混ぜないこと。前者は
+ * 「もう一度試せば通るかもしれない」、後者は「別の URL を貼る必要がある」で
+ * ユーザーが取るべき行動が正反対になる (PR #211 review)。
+ */
+export type UrlImportRejectReason =
+  | UrlImportPolicyRejectReason
+  /**
+   * 短縮共有 URL の redirect 解決そのものに失敗した
+   * (timeout / DNS 解決失敗 / network error / 非 2xx 応答)。
+   * 転送先が店舗ページだったかどうかは**判定できていない**。
+   */
+  | "short_url_resolve_failed";
+
 export type UrlImportPolicyResult =
   | { ok: true; kind: UrlImportKind; url: string }
-  | { ok: false; reason: UrlImportRejectReason };
+  | { ok: false; reason: UrlImportPolicyRejectReason };
 
 /**
  * Google マップの店舗 URL を提供するホスト名の allowlist。

@@ -67,10 +67,15 @@ UrlSearchPanel (Client Component)
   └─ importFromUrlAction (Server Action)
        ├─ evaluateUrlImportPolicy : 受け付けてよい URL かの判定（純粋関数）
        ├─ fetchOgp                : 短縮 URL の redirect 解決のみ（server-only）
-       ├─ parseStoreUrl           : URL構造の文字列解析（純粋関数）
+       ├─ parseGoogleMapsUrl      : URL構造の文字列解析（純粋関数）
        ├─ applyParsedData         : フォーム値に整形（純粋関数）
        └─ enrichWithPlacesFallback: Google Places で不足項目を補完
 ```
+
+パーサは汎用ディスパッチャ `parseStoreUrl` ではなく `parseGoogleMapsUrl` を
+**直接**呼ぶ。理由は §3-4（`parseStoreUrl` を挟むと `google.co.jp/maps/place/…` が
+`unknown` へ落ち、policy が受理した URL をパーサ側が拒否する drift が起きる）。
+`parseStoreUrl` 自体は legacy / 汎用パーサとして残っている。
 
 | レイヤ | ファイル |
 |---|---|
@@ -156,6 +161,11 @@ Server Action は `reason`（機械可読）だけを返し、**文言は持た�
 | `unsupported_source` | Googleマップの店舗URLを貼り付けてください。 |
 | `not_place_url` | 店舗ページのGoogleマップURLを貼り付けてください。 |
 | `invalid_url` | URLの形式を確認してください。 |
+| `short_url_resolve_failed` | Googleマップの共有URLを読み込めませんでした。時間をおいてもう一度お試しください。 |
+
+`short_url_resolve_failed` だけは **policy が返す理由ではない**。
+型も分かれており、`evaluateUrlImportPolicy` は `UrlImportPolicyRejectReason`（4 種）を返し、
+Server Action は実行時失敗を足した `UrlImportRejectReason`（5 種）を返す。
 
 ### 3.2 短縮 URL の再検証
 
@@ -167,6 +177,18 @@ Server Action は `reason`（機械可読）だけを返し、**文言は持た�
 redirect 追跡そのものは `fetchOgp` → `safeFetchHtml` が担い、
 **SSRF 防御（DNS pinning / per-hop deadline / body cap / content-type allowlist）は
 一切変更していない**。
+
+失敗の切り分けは 3 段階で、**取得失敗と「転送先が店舗ページでない」を混ぜない**:
+
+| `fetchOgp` の結果 | 意味 | `reason` |
+|---|---|---|
+| `ok: false` | timeout / DNS 解決失敗 / network error / 非 2xx。**転送先が何だったか分かっていない** | `short_url_resolve_failed` |
+| `ok: true` / `final_url` 無し | 取得できたが転送されなかった。短縮 URL 単体では店舗を特定できない | `not_place_url` |
+| `ok: true` / `final_url` あり | 展開後 URL を policy へ再通過させた判定に従う | policy の `reason` |
+
+両者を `not_place_url` に潰すと、有効な共有 URL を貼ったユーザーへ
+「店舗ページの URL を貼り付けてください」と案内してしまい、貼り直しを繰り返させる。
+`ogp.error`（`"タイムアウトしました"` / `"HTTP 500"` 等）は UI へ運ばない。
 
 ### 3.3 full place URL で OGP を取得しない理由
 

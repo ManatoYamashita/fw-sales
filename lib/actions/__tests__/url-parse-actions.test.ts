@@ -264,20 +264,45 @@ describe("importFromUrlAction — Google マップ短縮 URL", () => {
     expect(mockedSearchPlaces).not.toHaveBeenCalled();
   });
 
-  it("redirect 先が Google マップだが店舗ページでないなら拒否する", async () => {
-    mockedFetchOgp.mockResolvedValueOnce({
-      ok: true,
-      final_url: "https://www.google.com/maps/search/居酒屋",
-    });
+  it.each([
+    "https://www.google.com/maps/search/居酒屋",
+    "https://www.google.com/search?q=%E5%B0%8E%E6%A5%BD",
+  ])("redirect 先が Google だが店舗ページでないなら拒否する: %s", async (finalUrl) => {
+    mockedFetchOgp.mockResolvedValueOnce({ ok: true, final_url: finalUrl });
 
     const result = await importFromUrlAction(SHORT_URL);
 
     expect(result.status).toBe("rejected");
     if (result.status === "rejected") expect(result.reason).toBe("not_place_url");
+    expect(mockedSearchPlaces).not.toHaveBeenCalled();
   });
 
-  it("redirect を辿れなかった場合は拒否する", async () => {
-    mockedFetchOgp.mockResolvedValueOnce({ ok: false, error: "HTTP 500" });
+  /**
+   * 「取得そのものに失敗した」と「転送先が店舗ページでない」は原因も次の行動も異なる。
+   * 前者で「別の URL を貼り直してください」と案内すると、有効な共有 URL を貼った
+   * ユーザーが無限に貼り直す羽目になるため、reason を分ける (PR #211 review)。
+   */
+  it.each([
+    ["タイムアウト", "タイムアウトしました"],
+    ["非 2xx", "HTTP 500"],
+    ["ネットワーク / DNS 失敗", "指定されたURLへ接続できませんでした"],
+  ])(
+    "短縮 URL の取得に失敗した場合 (%s) は short_url_resolve_failed として拒否する",
+    async (_label, error) => {
+      mockedFetchOgp.mockResolvedValueOnce({ ok: false, error });
+
+      const result = await importFromUrlAction(SHORT_URL);
+
+      expect(result.status).toBe("rejected");
+      if (result.status === "rejected") {
+        expect(result.reason).toBe("short_url_resolve_failed");
+      }
+      expect(mockedSearchPlaces).not.toHaveBeenCalled();
+    },
+  );
+
+  it("取得は成功したが redirect しなかった場合は not_place_url のままにする", async () => {
+    mockedFetchOgp.mockResolvedValueOnce({ ok: true });
 
     const result = await importFromUrlAction(SHORT_URL);
 

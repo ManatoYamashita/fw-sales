@@ -109,6 +109,19 @@ function buildAppliedFields(suggested: ApplyResult): AppliedField[] {
  * redirect 追跡そのものは `fetchOgp` → `safeFetchHtml` が行う。
  * SSRF 防御 (DNS pinning / per-hop deadline / body cap / content-type allowlist) は
  * 一切変更していない。
+ *
+ * ## 「取得失敗」と「転送先が店舗ページでない」を分ける理由
+ *
+ * `fetchOgp` は timeout / DNS 解決失敗 / network error / 非 2xx のいずれでも
+ * `{ ok: false }` を返す (`lib/url-parser/ogp.ts`)。これらは
+ * **転送先が何だったか分かっていない**状態であり、「Google マップの店舗ページでない」
+ * とは別事象。両方を `not_place_url` にすると、有効な共有 URL を貼ったユーザーへ
+ * 「店舗ページの URL を貼り付けてください」と案内してしまい、貼り直しを繰り返させる。
+ * そのため取得失敗は `short_url_resolve_failed` として分離する (PR #211 review)。
+ *
+ * `ogp.error` (`"タイムアウトしました"` / `"HTTP 500"` 等) は reason へ載せない。
+ * サニタイズ済みとはいえ HTTP status を UI へ運ぶ必要が無く、文言は
+ * 呼び出し側が `reason` から決める設計を崩さないため。
  */
 async function resolveShortUrl(
   url: string,
@@ -117,10 +130,14 @@ async function resolveShortUrl(
   | { ok: false; reason: UrlImportRejectReason }
 > {
   const ogp = await fetchOgp(url);
+  if (!ogp.ok) {
+    // 取得・展開そのものに失敗した。転送先が何だったかは判定できていない。
+    return { ok: false, reason: "short_url_resolve_failed" };
+  }
+
   const finalUrl = ogp.final_url;
   if (!finalUrl) {
-    // redirect を辿れなかった(取得失敗 / 転送が無かった)。
-    // 短縮 URL 単体からは店舗を特定できないため受け付けない。
+    // 取得はできたが転送が無かった。短縮 URL 単体からは店舗を特定できないため受け付けない。
     return { ok: false, reason: "not_place_url" };
   }
 
