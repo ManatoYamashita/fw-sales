@@ -1429,10 +1429,45 @@ describe("Stage0 Places Identity Recovery wiring (PR #180 pre-merge fix)", () =>
     );
   });
 
-  it("verification target is built only from StoreIdentity + Stage0 verifiedIdentity", () => {
-    expect(source).toContain(
+  /**
+   * Issue #215: 照合 anchor の第1引数は `store`(StoreIdentity、残差住所)ではなく
+   * `sourceVerificationInput`(prefecture / city を含むスカラー3列)。
+   */
+  it("verification target is built from sourceVerificationInput + Stage0 verifiedIdentity", () => {
+    expect(source).toMatch(
+      /buildSourceVerificationTarget\(\s*sourceVerificationInput,\s*stage0\.verifiedIdentity,\s*\)/,
+    );
+    expect(source).not.toContain(
       "buildSourceVerificationTarget(store, stage0.verifiedIdentity)",
     );
+  });
+
+  it("loadStoreStep carries prefecture / city into the verification input", () => {
+    expect(source).toMatch(
+      /sourceVerificationInput: \{\s*name: store\.name,\s*prefecture: store\.prefecture,\s*city: store\.city,\s*address: store\.address,\s*phone: store\.phone,\s*\}/,
+    );
+  });
+
+  /**
+   * Issue #215 の最重要境界: 照合のために足した `prefecture` / `city` が
+   * Stage1 / Stage2 の prompt payload へ入っていないこと。
+   * (型でも `SourceVerificationStoreInput` は `genre` を持たず `StoreIdentity` へ
+   *  代入できないが、prompt 側の identity ブロックが増えていないことも固定する。)
+   */
+  it("prefecture / city never reach the Stage1 / Stage2 prompt identity", () => {
+    expect(source).not.toMatch(/stage1Step\([^)]*sourceVerificationInput/);
+    expect(source).not.toMatch(/stage2Step\([\s\S]{0,120}?sourceVerificationInput/);
+    expect(source).not.toMatch(/(?:runStage1|runStage2)\([^)]*sourceVerificationInput/);
+    // `StoreIdentity` の生成は従来どおり name / address / phone / genre の4列のみ。
+    const promptSource = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), "../../lib/ai/research/prompts.ts"),
+      "utf-8",
+    );
+    expect(promptSource).toMatch(
+      /interface StoreIdentity \{\s*name: string;\s*address: string;\s*phone: string;\s*genre: string;\s*\}/,
+    );
+    expect(promptSource).not.toContain("prefecture");
+    expect(promptSource).not.toContain("store.city");
   });
 
   it("fresh Places identity never reaches Stage1 / Stage2 inputs", () => {

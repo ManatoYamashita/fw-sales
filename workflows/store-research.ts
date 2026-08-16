@@ -62,6 +62,7 @@ import {
   appendConfirmedMediaContext,
   finalizeResearchItems,
   Stage2InvalidOutputError,
+  type SourceVerificationStoreInput,
 } from "@/lib/ai/research/pipeline";
 import {
   buildKnownStoreDataEntries,
@@ -614,6 +615,13 @@ interface LoadedStore {
    * 構造的に代入できず、Stage1 / Stage2 へ誤って渡すとコンパイルエラーになる。
    */
   placesSearchIdentity: PlacesSearchIdentity;
+  /**
+   * **post-Stage2 の per-source identity 照合専用**の入力(Issue #215)。
+   * `stores.prefecture` / `stores.city` を含むため Gemini へは絶対に渡さない。
+   * `genre` を持たないので `StoreIdentity` を要求する `stage1Step` / `stage2Step` へは
+   * 構造的に代入できず、取り違えはコンパイルエラーになる。
+   */
+  sourceVerificationInput: SourceVerificationStoreInput;
   basicInfo: BasicInfo;
   googlePlaceId: string | null;
   knownStoreDataUrls: ReturnType<typeof buildKnownStoreDataUrls>;
@@ -633,6 +641,15 @@ async function loadStoreStep(storeId: string): Promise<LoadedStore> {
       genre: store.genre,
     },
     placesSearchIdentity: buildPlacesSearchIdentity(store),
+    // Issue #215: 照合 anchor は `prefecture` / `city` を含むスカラー3列から
+    // 合成する。`store` (StoreIdentity) は残差住所のままなので使わない。
+    sourceVerificationInput: {
+      name: store.name,
+      prefecture: store.prefecture,
+      city: store.city,
+      address: store.address,
+      phone: store.phone,
+    },
     basicInfo: store.basic_info,
     googlePlaceId: store.google_place_id,
     knownStoreDataUrls: buildKnownStoreDataUrls(store),
@@ -926,8 +943,14 @@ export async function storeResearchWorkflow(
   let stage1Diagnostics: Stage1Diagnostics | null = null;
 
   try {
-    const { store, placesSearchIdentity, basicInfo, googlePlaceId, knownStoreDataUrls } =
-      await loadStoreStep(storeId);
+    const {
+      store,
+      placesSearchIdentity,
+      sourceVerificationInput,
+      basicInfo,
+      googlePlaceId,
+      knownStoreDataUrls,
+    } = await loadStoreStep(storeId);
 
     await markStageStep(runId, "discovering");
 
@@ -1019,7 +1042,17 @@ export async function storeResearchWorkflow(
     // (Gemini が見ていない値と post-hoc に照合することが目的であり、prompt へ入れると
     // F1 を悪化させる)。`SourceVerificationTarget` は `genre` を持たないため
     // `StoreIdentity` を要求する関数へは構造的に渡せない。
-    const verificationTarget = buildSourceVerificationTarget(store, stage0.verifiedIdentity);
+    //
+    // ★ Issue #215: 第1引数は `store`(StoreIdentity)ではなく
+    // `sourceVerificationInput`。`stores.address` はエリア検索経由の登録だと
+    // 都道府県・市区町村を除いた残差なので、そのままでは Web ページのフル住所と
+    // どちらの向きの包含も成立せず、正しいページでも `uncertain` へ倒れていた。
+    // `prefecture` / `city` は **この照合専用**で、Stage1 / Stage2 の prompt には
+    // 一切載せない(載せると F1 が悪化する)。
+    const verificationTarget = buildSourceVerificationTarget(
+      sourceVerificationInput,
+      stage0.verifiedIdentity,
+    );
     const finalRegistry = applySourceIdentityVerification(
       urlContextAppliedRegistry,
       stage2Result.sourceVerifications,

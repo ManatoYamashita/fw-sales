@@ -7,6 +7,11 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { SourceRegistryEntry } from "@/types/research-run";
+import type { StoreIdentity } from "../prompts";
+import type {
+  SourceVerificationStoreInput,
+  SourceVerificationTarget,
+} from "../pipeline";
 
 vi.mock("server-only", () => ({}));
 
@@ -2119,12 +2124,13 @@ describe("buildStage2RequestShape", () => {
  * 従来値を使い、欠落しているフィールドだけを Stage0 の strong match 結果で補完する。
  */
 describe("buildSourceVerificationTarget (missing-only enrichment)", () => {
-  const STORE_SPARSE = { name: "告膳", address: "", phone: "", genre: "和食" };
+  const STORE_SPARSE = { name: "告膳", prefecture: "", city: "", address: "", phone: "" };
   const STORE_FULL = {
     name: "炉端ジュン",
+    prefecture: "千葉県",
+    city: "柏市",
     address: "千葉県柏市旭町1-1-12",
     phone: "04-7199-7985",
-    genre: "居酒屋",
   };
   const FRESH = { address: "埼玉県所沢市日吉町19-12", phone: "04-2998-6543" };
 
@@ -2163,7 +2169,7 @@ describe("buildSourceVerificationTarget (missing-only enrichment)", () => {
     expect(target.address).toBe(FRESH.address);
   });
 
-  it("F. verifiedIdentity が null なら StoreIdentity の値だけを使う", () => {
+  it("F. verifiedIdentity が null なら store scalar の値だけを使う", () => {
     expect(buildSourceVerificationTarget(STORE_FULL, null)).toEqual({
       name: "炉端ジュン",
       address: "千葉県柏市旭町1-1-12",
@@ -2176,7 +2182,7 @@ describe("buildSourceVerificationTarget (missing-only enrichment)", () => {
     });
   });
 
-  it("name は常に StoreIdentity の値(Places の displayName を使わない)", () => {
+  it("name は常に store scalar の値(Places の displayName を使わない)", () => {
     expect(buildSourceVerificationTarget(STORE_SPARSE, FRESH).name).toBe("告膳");
   });
 
@@ -2200,11 +2206,300 @@ describe("buildSourceVerificationTarget (missing-only enrichment)", () => {
 });
 
 /**
+ * `buildSourceVerificationTarget` の住所合成(Issue #215)。
+ *
+ * エリア検索経由で登録された店舗の `stores.address` は
+ * `placeResultToStoreInput` が**都道府県・市区町村を除いた残差**として保存する。
+ * この残差をそのまま照合 anchor にすると、フル住所で書かれた Web ページとの
+ * 双方向包含がどちらの向きも成立せず、正しいページでも `uncertain` に倒れていた。
+ *
+ * ここで固定するのは **`isTargetStoreMatch` へ渡す入力の完全性**であって、
+ * 判定規則そのものではない(判定規則は `identity-match.ts` で無改変)。
+ */
+describe("buildSourceVerificationTarget — store scalar からの住所合成 (Issue #215)", () => {
+  const base = { name: "テスト店", phone: "" };
+  const build = (parts: { prefecture: string; city: string; address: string }) =>
+    buildSourceVerificationTarget({ ...base, ...parts }, null).address;
+
+  it("残差住所 + 建物名に prefecture / city を戻す", () => {
+    expect(
+      build({ prefecture: "東京都", city: "渋谷区", address: "神南1-2-3 ABCビル4F" }),
+    ).toBe("東京都渋谷区神南1-2-3 ABCビル4F");
+  });
+
+  it("E. 既にフル住所なら prefecture / city を二重化しない", () => {
+    expect(
+      build({ prefecture: "東京都", city: "渋谷区", address: "東京都渋谷区神南1-2-3" }),
+    ).toBe("東京都渋谷区神南1-2-3");
+  });
+
+  it("F. 〒 始まりのフル住所にも prefecture / city を前置しない", () => {
+    expect(
+      build({
+        prefecture: "東京都",
+        city: "渋谷区",
+        address: "〒1500000 東京都 渋谷区 神南1-2-3",
+      }),
+    ).toBe("〒1500000 東京都 渋谷区 神南1-2-3");
+  });
+
+  /**
+   * G. `stores.city` には行政区名ではなく営業テリトリー名(担当範囲)が入りうる。
+   * これを住所 identity へ混入させない。市区町村を推測して補う実装は入れない
+   * (誤った市区町村を合成するより false negative 側へ倒す)。
+   */
+  it("G. 営業テリトリー名の city を住所へ混入させない", () => {
+    const address = build({
+      prefecture: "千葉県",
+      city: "柏市・我孫子市",
+      address: "〒2770852 千葉県 柏市 旭町1-1-12",
+    });
+    expect(address).toBe("〒2770852 千葉県 柏市 旭町1-1-12");
+    expect(address).not.toContain("我孫子市");
+    expect(address).not.toContain("柏市・");
+  });
+
+  /**
+   * G2. テリトリー city + **残差**住所。フル住所と違い `address` 側に市区町村が
+   * 無いため、テリトリー名をそのまま前置すると「実在しない合成住所」になる。
+   * city を捨てて `prefecture` + `address` に留める(正しい市区町村は推測しない)。
+   */
+  it("G2. 営業テリトリー city + 残差住所でもテリトリー名を混入させない", () => {
+    const address = build({
+      prefecture: "千葉県",
+      city: "柏市・我孫子市",
+      address: "旭町1-1-12 ABCビル2F",
+    });
+    expect(address).not.toContain("柏市・我孫子市");
+    expect(address).not.toContain("我孫子市");
+    // 正しい市区町村(柏市)を推測して補っていないこと。
+    expect(address).not.toContain("柏市");
+    expect(address).toBe("千葉県旭町1-1-12 ABCビル2F");
+  });
+
+  it("G2'. prefecture を含むテリトリー名 + 残差住所でも混入させない", () => {
+    const address = build({
+      prefecture: "千葉県",
+      city: "千葉県柏市・我孫子市",
+      address: "旭町1-1-12 ABCビル2F",
+    });
+    expect(address).not.toContain("我孫子市");
+    expect(address).not.toContain("柏市");
+    expect(address).toBe("千葉県旭町1-1-12 ABCビル2F");
+  });
+
+  it("`・` を含まない通常の city は従来どおり合成へ使う", () => {
+    expect(
+      build({ prefecture: "千葉県", city: "柏市", address: "旭町1-1-12 ABCビル2F" }),
+    ).toBe("千葉県柏市旭町1-1-12 ABCビル2F");
+  });
+
+  it("city が prefecture を含んでいても都道府県を二重化しない", () => {
+    expect(
+      build({ prefecture: "東京都", city: "東京都渋谷区", address: "神南1-2-3" }),
+    ).toBe("東京都渋谷区神南1-2-3");
+  });
+
+  it("H. address が空なら合成せず、従来どおり verifiedIdentity を使う", () => {
+    const target = buildSourceVerificationTarget(
+      { name: "告膳", prefecture: "埼玉県", city: "所沢市", address: "", phone: "" },
+      { address: "埼玉県所沢市日吉町19-12", phone: "04-2998-6543" },
+    );
+    expect(target.address).toBe("埼玉県所沢市日吉町19-12");
+  });
+
+  it("address が空で verifiedIdentity も無いなら空のまま(prefecture + city で捏造しない)", () => {
+    const target = buildSourceVerificationTarget(
+      { name: "告膳", prefecture: "埼玉県", city: "所沢市", address: "", phone: "" },
+      null,
+    );
+    expect(target.address).toBe("");
+  });
+
+  it("prefecture / city が空でも残差住所をそのまま使う(退行しない)", () => {
+    expect(build({ prefecture: "", city: "", address: "神南1-2-3" })).toBe("神南1-2-3");
+  });
+
+  /**
+   * I. 型境界 — prompt input (`StoreIdentity`) と source verification の入出力は
+   * **どちらの向きにも代入できない**。これが「照合用に足した prefecture / city が
+   * Gemini prompt へ流入しない」ことのコンパイル時保証(F1 を悪化させない)。
+   */
+  it("I. StoreIdentity と source verification の型が相互に代入できない", () => {
+    // 代入可能になった時点で `never` になり、`= true` がコンパイルエラーになる。
+    type NotAssignable<From, To> = From extends To ? never : true;
+
+    // `SourceVerificationTarget` に genre が足されると Stage1/Stage2 へ渡せてしまう。
+    const targetNotPromptInput: NotAssignable<SourceVerificationTarget, StoreIdentity> = true;
+    // `SourceVerificationStoreInput` に genre が足されると同上。
+    const inputNotPromptInput: NotAssignable<SourceVerificationStoreInput, StoreIdentity> = true;
+    // `StoreIdentity` に prefecture / city が足されると prompt へ住所が増える。
+    const promptInputNotInput: NotAssignable<StoreIdentity, SourceVerificationStoreInput> = true;
+
+    expect([targetNotPromptInput, inputNotPromptInput, promptInputNotInput]).toEqual([
+      true,
+      true,
+      true,
+    ]);
+
+    // 型境界の固定だけが目的なので実行はしない(実行すると prefecture が
+    // undefined のまま `buildBestStoreAddress` へ渡り TypeError になる)。
+    const rejectsPromptInput = () =>
+      // @ts-expect-error StoreIdentity(prompt input)は prefecture / city を持たないため渡せない
+      buildSourceVerificationTarget({ name: "x", address: "y", phone: "z", genre: "g" }, null);
+    expect(typeof rejectsPromptInput).toBe("function");
+  });
+});
+
+/**
+ * Issue #215 の本体 — 残差住所で登録された店舗が、建物名を持たないフル住所の
+ * ページと `target_match` になれること。あわせて **緩めていない**ことを固定する。
+ */
+describe("applySourceIdentityVerification — 残差住所店舗の identity 照合 (Issue #215)", () => {
+  /** エリア検索経由の登録形状: address は残差 + 建物名。 */
+  const RESIDUAL_STORE = {
+    name: "居酒屋 導楽",
+    prefecture: "東京都",
+    city: "渋谷区",
+    address: "神南1-2-3 ABCビル4F",
+    phone: "03-1234-5678",
+  };
+
+  const entry = () =>
+    ({
+      id: "S01",
+      title: "居酒屋 導楽",
+      grounding_redirect_url:
+        "https://vertexaisearch.cloud.google.com/grounding-api-redirect/S01",
+      resolved_url: null,
+      resolve_status: "not_attempted",
+      source_type: "gourmet_site",
+      discovery_provenance: "gemini_search_candidate",
+      url_context_status: "success",
+      identity_status: "not_checked",
+    }) as unknown as SourceRegistryEntry;
+
+  const run = (observed: {
+    name: string | null;
+    address: string | null;
+    phone: string | null;
+  }) =>
+    applySourceIdentityVerification(
+      [entry()],
+      [
+        {
+          source_id: "S01",
+          relation: "target_store",
+          observed_title: "t",
+          observed_name: observed.name,
+          observed_address: observed.address,
+          observed_phone: observed.phone,
+          note: "",
+        },
+      ] as unknown as Parameters<typeof applySourceIdentityVerification>[1],
+      buildSourceVerificationTarget(RESIDUAL_STORE, null),
+    )[0]!.identity_status;
+
+  it("A. 建物名なしフル住所のページと同名なら target_match", () => {
+    expect(
+      run({ name: "居酒屋 導楽", address: "東京都渋谷区神南1-2-3", phone: null }),
+    ).toBe("target_match");
+  });
+
+  it("B. 同一街区でも番地が違えば target_match にしない", () => {
+    expect(
+      run({ name: "居酒屋 導楽", address: "東京都渋谷区神南1-2-4", phone: null }),
+    ).toBe("uncertain");
+  });
+
+  it("B'. 同一建物の別区画(号違い)も target_match にしない", () => {
+    expect(
+      run({ name: "居酒屋 導楽", address: "東京都渋谷区神南1-2-30", phone: null }),
+    ).toBe("uncertain");
+  });
+
+  it("C. 住所が完全一致でも店舗名が別なら target_match にしない", () => {
+    expect(
+      run({ name: "焼肉 別店舗", address: "東京都渋谷区神南1-2-3 ABCビル4F", phone: null }),
+    ).toBe("uncertain");
+  });
+
+  it("D. 電話一致の経路は退行していない(住所が無くても target_match)", () => {
+    expect(run({ name: "居酒屋 導楽", address: null, phone: "03-1234-5678" })).toBe(
+      "target_match",
+    );
+  });
+
+  it("D'. 電話が別番号なら住所も無い場合は target_match にしない", () => {
+    expect(run({ name: "居酒屋 導楽", address: null, phone: "03-9999-0000" })).toBe(
+      "uncertain",
+    );
+  });
+
+  it("町丁目までしか無いページは番地レベルの具体性を満たさず target_match にしない", () => {
+    expect(run({ name: "居酒屋 導楽", address: "東京都渋谷区神南", phone: null })).toBe(
+      "uncertain",
+    );
+  });
+
+  /**
+   * G2 の identity 経路。テリトリー city を落とした結果 anchor が
+   * `千葉県 + 残差` になるため、住所だけでは一致を保証できない。
+   * **無理に target_match させないこと**がこの修正の意図であり、
+   * 電話一致の経路は従来どおり使える。
+   */
+  describe("営業テリトリー city + 残差住所の店舗", () => {
+    const TERRITORY_STORE = {
+      name: "対象店舗",
+      prefecture: "千葉県",
+      city: "柏市・我孫子市",
+      address: "旭町1-1-12 ABCビル2F",
+      phone: "",
+    };
+
+    const runTerritory = (
+      observed: { name: string | null; address: string | null; phone: string | null },
+      store: typeof TERRITORY_STORE = TERRITORY_STORE,
+    ) =>
+      applySourceIdentityVerification(
+        [entry()],
+        [
+          {
+            source_id: "S01",
+            relation: "target_store",
+            observed_title: "t",
+            observed_name: observed.name,
+            observed_address: observed.address,
+            observed_phone: observed.phone,
+            note: "",
+          },
+        ] as unknown as Parameters<typeof applySourceIdentityVerification>[1],
+        buildSourceVerificationTarget(store, null),
+      )[0]!.identity_status;
+
+    it("同名 + 正しい市区町村のページでも、住所だけでは uncertain のまま", () => {
+      expect(
+        runTerritory({ name: "対象店舗", address: "千葉県柏市旭町1-1-12", phone: null }),
+      ).toBe("uncertain");
+    });
+
+    it("電話が一致すれば従来どおり target_match(name match AND phone match)", () => {
+      expect(
+        runTerritory(
+          { name: "対象店舗", address: null, phone: "04-7199-7985" },
+          { ...TERRITORY_STORE, phone: "04-7199-7985" },
+        ),
+      ).toBe("target_match");
+    });
+  });
+});
+
+/**
  * sparse store の false negative 救済(PR #180)。
  * fresh Places anchor があっても「名前一致 AND (住所一致 OR 電話一致)」は不変。
  */
 describe("applySourceIdentityVerification with fresh Places anchor", () => {
-  const SPARSE_STORE = { name: "告膳", address: "", phone: "", genre: "和食" };
+  const SPARSE_STORE = { name: "告膳", prefecture: "", city: "", address: "", phone: "" };
   const FRESH = { address: "日本、〒359-1123 埼玉県所沢市日吉町１９−１２", phone: "04-2998-6543" };
 
   const entry = (id: string) =>
