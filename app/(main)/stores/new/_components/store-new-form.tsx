@@ -83,7 +83,6 @@ type ConfidenceKey = keyof ApplyConfidence;
  */
 export interface StoreNewFormInitialImport {
   suggested: ApplyResult;
-  html: string | null;
 }
 
 export interface StoreNewFormProps {

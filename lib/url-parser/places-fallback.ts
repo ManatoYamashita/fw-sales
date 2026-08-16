@@ -9,7 +9,29 @@ import {
 } from "@/lib/places/to-store-input";
 
 import { needsPlacesFallback, PLACES_API_SCORE } from "./apply";
+import type { PlacesFallbackTrigger } from "./apply";
 import type { ApplyResult, ParsedUrl } from "./types";
+
+/**
+ * Places 補完の発火理由 / 不発理由の閉じた集合。
+ *
+ * UI 側の文言テーブルをこの union で型付けすることで、
+ * **reason の追加・改名と文言の追随漏れを compile time で検出**できる
+ * (Issue #207 以前は `string` で、全 reason が同じ文言に潰れていた原因のひとつ)。
+ */
+export type PlacesFallbackReason =
+  /** 発火理由(`used: true` のとき) */
+  | PlacesFallbackTrigger["reason"]
+  /** 検索語が無く **Places を呼んでいない** */
+  | "no_keyword"
+  /** `GOOGLE_PLACES_API_KEY` 未設定で呼べなかった */
+  | "no_api_key"
+  /** Places API の呼び出しが失敗した */
+  | "api_error"
+  /** 候補 0 件、または名前一致 0 件 */
+  | "places_not_found"
+  /** 同名候補が複数あり一意に絞れない */
+  | "ambiguous";
 
 /**
  * Places API フォールバックの実行結果サマリ。UI 側で toast 文言の出し分けに使う。
@@ -17,8 +39,11 @@ import type { ApplyResult, ParsedUrl } from "./types";
 export interface PlacesFallbackInfo {
   /** 実際に Places API のレスポンスでフィールドをマージしたか */
   used: boolean;
-  /** 発火理由 / 不発理由 (none / missing_name / low_name / no_address / low_region / places_not_found / no_api_key / api_error / no_keyword) */
-  reason: string;
+  /**
+   * 発火理由 / 不発理由。`no_keyword` と `places_not_found` を UI で同じ文言に
+   * 潰さないこと(Issue #207)。詳細は {@link PlacesFallbackReason}。
+   */
+  reason: PlacesFallbackReason;
   /** マッチした Place の placeId (UI デバッグ表示や Place ID DB 紐付けに利用) */
   matched_place_id?: string;
 }
@@ -26,28 +51,73 @@ export interface PlacesFallbackInfo {
 const NO_OP: PlacesFallbackInfo = { used: false, reason: "none" };
 
 /**
- * 複数候補の中から「最も入力意図に近い 1 件」を選ぶ。
- * 完全一致 (name 完全一致) を最優先、次点で口コミ件数が多い順。
+ * 店舗名の比較用正規化 (Issue #207)。
+ *
+ * **表記ゆれの吸収だけ**を行い、意味的な変形はしない:
+ * - `NFKC`(全角英数・全角記号を半角へ畳む)
+ * - 前後 trim + 連続空白の 1 個への集約
+ * - 英字の case normalization
+ *
+ * 「本店」「新宿店」「○○店」等の**支店表記は絶対に落とさない**。
+ * 落とすと「鮨処 なむら 本店」と「鮨処 なむら 横浜店」が同一視され、
+ * まさに防ぎたい別店舗採用が起きる。
+ */
+function normalizeStoreName(raw: string): string {
+  return raw.normalize("NFKC").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+/**
+ * 候補の中から、対象店舗と**一意に**同定できる 1 件だけを返す (Issue #207)。
+ *
+ * ## 以前の挙動と、変更した理由
+ *
+ * 変更前は「名前の完全一致が無ければ `userRatingsTotal` 最多の候補」を採用していた。
+ * これは **口コミ件数を identity evidence として使う**ことに等しく、
+ * 弱い検索語から複数候補が返ったとき「その地域で最も有名な別の店」を
+ * 自動的に登録してしまう経路になっていた。
+ *
+ * 口コミ件数は「その店が有名か」を表すだけで、「貼られた URL の店か」の根拠にはならない。
+ * **autofill 率より wrong-store prevention を優先する**という #207 の方針に従い、
+ * この経路を廃止する。
+ *
+ * ## 現在の判定
+ *
+ * | 状況 | 戻り値 |
+ * | --- | --- |
+ * | `targetName` が空 | `null`(照合基準が無い) |
+ * | 正規化後の完全一致が 0 件 | `null` |
+ * | 正規化後の完全一致が 1 件 | その候補 |
+ * | 正規化後の完全一致が 2 件以上 | `null`(ambiguous。人間の判断へ委ねる) |
+ *
+ * fuzzy match(部分一致・編集距離)も口コミ件数も自動採用条件にしない。
  */
 export function pickBestPlace(
   candidates: readonly PlaceResult[],
   targetName: string,
 ): PlaceResult | null {
-  if (candidates.length === 0) return null;
+  const normalizedTarget = normalizeStoreName(targetName);
+  if (normalizedTarget === "") return null;
 
-  const normalized = targetName.trim();
-  if (normalized) {
-    const exact = candidates.find((p) => p.name.trim() === normalized);
-    if (exact) return exact;
-  }
+  const exactMatches = candidates.filter(
+    (p) => normalizeStoreName(p.name) === normalizedTarget,
+  );
+  return exactMatches.length === 1 ? exactMatches[0]! : null;
+}
 
-  // userRatingsTotal が多い順 (null は最下位)
-  const sorted = [...candidates].sort((a, b) => {
-    const ra = a.userRatingsTotal ?? -1;
-    const rb = b.userRatingsTotal ?? -1;
-    return rb - ra;
-  });
-  return sorted[0] ?? null;
+/**
+ * `pickBestPlace` が `null` を返した理由を、UI 文言を出し分けられる粒度で分類する。
+ * 候補の店舗名等は一切含めず、種別のみを返す。
+ */
+export function diagnosePickFailure(
+  candidates: readonly PlaceResult[],
+  targetName: string,
+): "places_not_found" | "ambiguous" {
+  const normalizedTarget = normalizeStoreName(targetName);
+  if (normalizedTarget === "") return "places_not_found";
+  const exactMatches = candidates.filter(
+    (p) => normalizeStoreName(p.name) === normalizedTarget,
+  );
+  return exactMatches.length > 1 ? "ambiguous" : "places_not_found";
 }
 
 /**
@@ -161,9 +231,11 @@ export async function enrichWithPlacesFallback(
 
   const best = pickBestPlace(candidates, keyword);
   if (!best) {
+    // 「候補が無かった」と「候補が複数あって一意に絞れなかった」を UI で区別する
+    // (Issue #207: 失敗理由を同じ文言に潰さない)。
     return {
       updated: suggested,
-      info: { used: false, reason: "places_not_found" },
+      info: { used: false, reason: diagnosePickFailure(candidates, keyword) },
     };
   }
 

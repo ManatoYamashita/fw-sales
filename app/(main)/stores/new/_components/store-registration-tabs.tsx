@@ -46,7 +46,7 @@ function normalizeMode(raw: string | null | undefined): RegistrationMode {
 }
 
 /**
- * `/stores/new` 配下で 手動 / URL貼付 / エリア検索 を切り替えるタブラッパー。
+ * `/stores/new` 配下で 手動 / GoogleマップURL / エリア検索 を切り替えるタブラッパー。
  *
  * 状態管理:
  * - タブ選択は `searchParams (?mode=)` を **唯一のソースオブトゥルース** として導出する。
@@ -169,7 +169,9 @@ export function StoreRegistrationTabs({
               <TabsList>
                 <TabsTrigger value="manual">手動</TabsTrigger>
                 <TabsTrigger value="area">エリア検索</TabsTrigger>
-                <TabsTrigger value="url">URL 貼付</TabsTrigger>
+                {/* `value="url"` は `?mode=url` と対になる内部識別子。
+                    既存リンク・ブラウザ履歴との互換のため変更しない(表示名のみ変更)。 */}
+                <TabsTrigger value="url">GoogleマップURL</TabsTrigger>
               </TabsList>
               {isPending && (
                 <Spinner
@@ -230,17 +232,12 @@ export function StoreRegistrationTabs({
                 <UrlImportSummary
                   sourceType={urlImport.sourceType}
                   applied={urlImport.applied}
-                  chained={urlImport.chained}
-                  ogpError={urlImport.ogpError}
                   storeName={urlImport.suggested.name}
                 />
                 <StoreNewForm
                   profiles={profiles}
                   currentProfileId={currentProfileId}
-                  initialImport={{
-                    suggested: urlImport.suggested,
-                    html: urlImport.html,
-                  }}
+                  initialImport={{ suggested: urlImport.suggested }}
                 />
               </>
             )}

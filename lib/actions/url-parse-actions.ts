@@ -1,12 +1,16 @@
 "use server";
 
-import { parseStoreUrl } from "@/lib/url-parser";
+import { parseGoogleMapsUrl } from "@/lib/url-parser/google-maps";
 import { fetchOgp } from "@/lib/url-parser/ogp";
 import { applyParsedData } from "@/lib/url-parser/apply";
 import {
   enrichWithPlacesFallback,
   type PlacesFallbackInfo,
 } from "@/lib/url-parser/places-fallback";
+import {
+  evaluateUrlImportPolicy,
+  type UrlImportRejectReason,
+} from "@/lib/url-parser/url-import-policy";
 import type {
   AppliedField,
   ApplyResult,
@@ -18,23 +22,34 @@ import type {
 // `"use server"` ファイルから型を re-export すると Next.js 16 + Turbopack が
 // 値参照として解釈し、本番ランタイムで ReferenceError を投げる (#11 hotfix)。
 
-export interface UrlImportResult {
-  parsed: ParsedUrl | null;
+/**
+ * URL Import の成功結果。`status` による discriminated union にして、
+ * 「受け付けなかった」を例外文字列ではなく機械可読な `reason` で返す (Issue #207)。
+ */
+export interface UrlImportSuccess {
+  status: "success";
+  /** policy を通過しているため必ず `type: "google_maps"`。 */
+  parsed: ParsedUrl;
+  /** 短縮 URL の redirect 解決で取得した場合のみ非 null。full place URL では常に null。 */
   ogp: OgpResult | null;
   suggested: ApplyResult;
   /** UI のサマリ表示用 — フィールド別の取得状況 */
   applied: AppliedField[];
-  /** 連鎖補完で 2 段目 fetch が走ったかどうか */
-  chained: boolean;
-  /** Places API フォールバックの実行結果 (未呼出時は undefined、呼び出したが補完できなかった場合も info あり) */
+  /** Places API フォールバックの実行結果 (呼び出したが補完できなかった場合も info あり) */
   placesFallback?: PlacesFallbackInfo;
 }
 
-interface ImportOptions {
-  fetchOgp?: boolean;
-  /** 食べログ等で site_url が取れたら、その URL の OGP も追加で取得して補完するか(デフォ true) */
-  recursive?: boolean;
+/**
+ * URL Import が URL を受け付けなかった場合。
+ * **UI 文言は返さない** — 呼び出し側 (Client Component) が `reason` から文言を決める。
+ * Node のエラー文言・HTTP status・raw fetch error は一切載せない。
+ */
+export interface UrlImportRejected {
+  status: "rejected";
+  reason: UrlImportRejectReason;
 }
+
+export type UrlImportResult = UrlImportSuccess | UrlImportRejected;
 
 // operator_type は URL 解析では法人/個人判別ができないため、表示対象から除外。
 // `AppliedField.key` の型と `FIELD_LABELS` のキー集合が同期する。
@@ -81,134 +96,120 @@ function buildAppliedFields(suggested: ApplyResult): AppliedField[] {
 }
 
 /**
- * 連鎖補完: 食べログ等で取れた site_url に対し、追加で OGP fetch を行い、
- * 食べログで取れなかったフィールド(address / phone / description 等)を埋める。
+ * 短縮共有 URL (`maps.app.goo.gl` / `goo.gl/maps`) を展開し、
+ * 展開後の URL を **もう一度 policy へ通してから** パースする。
  *
- * 注意:
- * - 1 段のみ(無限再帰しない)
- * - 同一ホスト名はスキップ(食べログ内部リンクの誤誘導を防ぐ)
- * - 取得値の confidence は元の信頼度の 0.85 倍に減衰
+ * ## なぜ再検証するのか
+ *
+ * 短縮 URL は貼り付け時点では転送先が分からない。
+ * `short link → redirect → evil.example` のような経路を店舗 URL として採用しないため、
+ * `final_url` は必ず `evaluateUrlImportPolicy` を再通過させ、
+ * かつ `google_maps_place`(= 店舗ページ)であることを要求する。
+ *
+ * redirect 追跡そのものは `fetchOgp` → `safeFetchHtml` が行う。
+ * SSRF 防御 (DNS pinning / per-hop deadline / body cap / content-type allowlist) は
+ * 一切変更していない。
+ *
+ * ## 「取得失敗」と「転送先が店舗ページでない」を分ける理由
+ *
+ * `fetchOgp` は timeout / DNS 解決失敗 / network error / 非 2xx のいずれでも
+ * `{ ok: false }` を返す (`lib/url-parser/ogp.ts`)。これらは
+ * **転送先が何だったか分かっていない**状態であり、「Google マップの店舗ページでない」
+ * とは別事象。両方を `not_place_url` にすると、有効な共有 URL を貼ったユーザーへ
+ * 「店舗ページの URL を貼り付けてください」と案内してしまい、貼り直しを繰り返させる。
+ * そのため取得失敗は `short_url_resolve_failed` として分離する (PR #211 review)。
+ *
+ * `ogp.error` (`"タイムアウトしました"` / `"HTTP 500"` 等) は reason へ載せない。
+ * サニタイズ済みとはいえ HTTP status を UI へ運ぶ必要が無く、文言は
+ * 呼び出し側が `reason` から決める設計を崩さないため。
  */
-async function enrichWithChainedOgp(
-  baseUrl: string,
-  suggested: ApplyResult,
-): Promise<{ updated: ApplyResult; chained: boolean }> {
-  const siteUrl = suggested.site_url;
-  if (!siteUrl) return { updated: suggested, chained: false };
-
-  let baseHost: string | null = null;
-  let chainHost: string | null = null;
-  try {
-    baseHost = new URL(baseUrl).hostname;
-    chainHost = new URL(siteUrl).hostname;
-  } catch {
-    return { updated: suggested, chained: false };
-  }
-  if (!chainHost || !baseHost || chainHost === baseHost) {
-    return { updated: suggested, chained: false };
+async function resolveShortUrl(
+  url: string,
+): Promise<
+  | { ok: true; parsed: ParsedUrl; ogp: OgpResult }
+  | { ok: false; reason: UrlImportRejectReason }
+> {
+  const ogp = await fetchOgp(url);
+  if (!ogp.ok) {
+    // 取得・展開そのものに失敗した。転送先が何だったかは判定できていない。
+    return { ok: false, reason: "short_url_resolve_failed" };
   }
 
-  const chainOgp = await fetchOgp(siteUrl);
-  if (!chainOgp.ok) return { updated: suggested, chained: false };
-
-  const updated: ApplyResult = { ...suggested, confidence: { ...suggested.confidence } };
-  const decay = (n: number | undefined): number | undefined =>
-    typeof n === "number" ? Math.round(n * 0.85) : undefined;
-
-  // address: 元が空 or 信頼度低のときだけ上書き
-  const addrThreshold = (suggested.confidence.address ?? 0) < 80;
-  if (addrThreshold && chainOgp.address) {
-    updated.address = chainOgp.address;
-    updated.confidence.address = decay(90); // chained JSON-LD = 90 * 0.85
+  const finalUrl = ogp.final_url;
+  if (!finalUrl) {
+    // 取得はできたが転送が無かった。短縮 URL 単体からは店舗を特定できないため受け付けない。
+    return { ok: false, reason: "not_place_url" };
   }
 
-  // phone: 元が空のときだけ
-  if (!suggested.phone && chainOgp.phone) {
-    updated.phone = chainOgp.phone;
-    updated.confidence.phone = decay(85);
+  const policy = evaluateUrlImportPolicy(finalUrl);
+  // 短縮 URL の連鎖(short → short)は追わない。最終地点が店舗ページであることを要求する。
+  if (!policy.ok || policy.kind !== "google_maps_place") {
+    return { ok: false, reason: policy.ok ? "not_place_url" : policy.reason };
   }
 
-  // memo: 公式サイトの description を追記(取得済みでも付加情報として有用)
-  if (chainOgp.description) {
-    const tail = `公式サイト概要: ${chainOgp.description.slice(0, 100)}`;
-    updated.memo = updated.memo ? `${updated.memo}\n${tail}` : tail;
-    if (typeof updated.confidence.memo !== "number") {
-      updated.confidence.memo = decay(60);
-    }
-  }
-
-  return { updated, chained: true };
+  // ソース情報(ユーザーが実際に貼った URL)は保持しつつ、詳細は展開後 URL 由来にする。
+  // `map_url` は展開後の URL を採用 — 後で開いたときに直接 Google マップへ行ける。
+  return { ok: true, parsed: { ...parseGoogleMapsUrl(finalUrl), source_url: url }, ogp };
 }
 
 /**
- * Google Maps 短縮 URL かどうかを判定。
- * - https://maps.app.goo.gl/<id>
- * - https://goo.gl/maps/<id>
+ * `/stores/new` の URL Import 本体 (Issue #207 で Google マップ店舗 URL 専用へ変更)。
  *
- * 短縮 URL は `parseGoogleMapsUrl` で name を抽出できないため、
- * `fetchOgp` のリダイレクト追跡後の `final_url` から再パースする必要がある。
+ * ## server 側での boundary 強制
+ *
+ * UI 側のバリデーションだけに頼らず、**この関数の冒頭でも policy を検証する**。
+ * 受け付けない URL に対しては `fetchOgp` / Places API を**一切呼ばない**ため、
+ * 食べログ URL を送っても Vercel → `tabelog.com` のリクエスト自体が発生しない。
+ *
+ * これにより Issue #207 の 2 つの経路が構造的に消える:
+ * - `tabelog.com` への取得 → Cloudflare 403 → 店舗名が空のまま登録画面へ
+ * - `google.com/search` の `<title>Google Search</title>` が店舗名として採用される
+ *
+ * ## full place URL で OGP を取得しない理由
+ *
+ * Google マップのページは SPA で、`<title>` は「Google マップ」固定のため
+ * 店舗情報ソースとして価値が無い(`pickName` も google_maps では URL 由来 name を
+ * 優先しており、OGP 由来 name は元々採用されない)。
+ * `OgpResult.html` の消費者だった `analyzeStoreAction` も既に撤去済みで、
+ * 現在 `html` を読むコードは存在しない。
+ * したがって full place URL では HTTP リクエストを 0 回にする。
+ * 短縮 URL のみ、redirect 解決のために `fetchOgp` を 1 回呼ぶ。
+ *
+ * ## パーサに `parseStoreUrl` を使わない理由
+ *
+ * `parseStoreUrl` は `url.includes("google.com/maps")` 等の**部分文字列**でソースを
+ * 分類する汎用ディスパッチャで、`google.co.jp/maps/place/…` を `unknown` に落とす。
+ * policy(hostname/pathname)と分類基準が異なるため、両者を直列に使うと
+ * 「policy は受理したのにパーサが別種別を返して拒否される」という drift が生じる。
+ * 受付可否は policy が唯一の source of truth なので、通過後は
+ * `parseGoogleMapsUrl` を直接呼ぶ。
  */
-function isGoogleMapsShortUrl(url: string): boolean {
-  return /(?:^https?:\/\/)?(?:maps\.app\.goo\.gl|goo\.gl\/maps)/i.test(url);
-}
-
-export async function importFromUrlAction(
-  url: string,
-  options: ImportOptions = { fetchOgp: true, recursive: true },
-): Promise<UrlImportResult> {
-  const fetchOgpFlag = options.fetchOgp !== false;
-  const recursiveFlag = options.recursive !== false;
-
-  let parsed = parseStoreUrl(url);
-  let ogp: OgpResult | null = null;
-
-  // OGP の取得は食べログ等の判定可能なソースに限定する
-  if (
-    fetchOgpFlag &&
-    parsed &&
-    (parsed.type === "tabelog" || parsed.type === "google_maps" || parsed.type === "unknown")
-  ) {
-    ogp = await fetchOgp(url);
+export async function importFromUrlAction(url: string): Promise<UrlImportResult> {
+  const policy = evaluateUrlImportPolicy(url);
+  if (!policy.ok) {
+    return { status: "rejected", reason: policy.reason };
   }
 
-  // 短縮 URL リダイレクト後の最終 URL から再パース。
-  // - parsed.type が google_maps だが name が取れていない、かつ短縮 URL 形式
-  // - ogp.final_url が元 URL と異なる(リダイレクトが起きた)
-  if (
-    parsed &&
-    parsed.type === "google_maps" &&
-    !parsed.name &&
-    isGoogleMapsShortUrl(url) &&
-    ogp?.final_url &&
-    ogp.final_url !== url
-  ) {
-    const reparsed = parseStoreUrl(ogp.final_url);
-    if (reparsed && reparsed.name) {
-      // 元 parsed のソース情報 (source_url, type) は保持しつつ、
-      // 詳細フィールドは reparsed の値で上書き。
-      // map_url は最終 URL を採用 — 後で開いた時に直接 Google Maps に行ける。
-      parsed = {
-        ...reparsed,
-        source_url: url,
-      };
-    }
+  let parsed: ParsedUrl;
+  let ogp: OgpResult | null = null;
+
+  if (policy.kind === "google_maps_short") {
+    const resolved = await resolveShortUrl(policy.url);
+    if (!resolved.ok) return { status: "rejected", reason: resolved.reason };
+    parsed = resolved.parsed;
+    ogp = resolved.ogp;
+  } else {
+    parsed = parseGoogleMapsUrl(policy.url);
   }
 
   let suggested = applyParsedData(parsed, ogp);
-  let chained = false;
-
-  if (recursiveFlag && parsed?.type === "tabelog" && suggested.site_url) {
-    const enriched = await enrichWithChainedOgp(url, suggested);
-    suggested = enriched.updated;
-    chained = enriched.chained;
-  }
 
   // Places API フォールバック: 低信頼度フィールドが残っている場合に Text Search 1 回で補完。
-  // API キー未設定 / ネットワーク例外時は silently skip し、UI には toast を出さない。
+  // API キー未設定 / ネットワーク例外時は silently skip する。
   const placesResult = await enrichWithPlacesFallback(parsed, suggested);
   suggested = placesResult.updated;
   const placesFallback = placesResult.info;
 
   const applied = buildAppliedFields(suggested);
-  return { parsed, ogp, suggested, applied, chained, placesFallback };
+  return { status: "success", parsed, ogp, suggested, applied, placesFallback };
 }
