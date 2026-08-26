@@ -56,6 +56,8 @@ import {
   isCanonicalFallbackAllowed,
 } from "./evidence-precedence";
 import { deriveFreshPlacesVerifiedKeys } from "./places-verified";
+import { buildBestStoreAddress, type StoreAddressParts } from "./places-search-identity";
+import { normalizeFormattedAddress } from "@/lib/places/to-store-input";
 import { normalizeUrlForMatch } from "./url-normalize";
 import {
   enforcePhoneNumbersBackedByEvidence,
@@ -742,14 +744,148 @@ export function applyUrlContextStatus(
  */
 export interface SourceVerificationTarget {
   name: string;
+  /**
+   * 合成済みの比較 anchor(`prefecture` + `city` + `address`、Issue #215)。
+   * 残差住所で登録された店舗を、フル住所で書かれたページと突合するために使う。
+   */
   address: string;
+  /**
+   * `stores.address` の**生値**(PR #216 独立レビュー M1)。
+   *
+   * ## なぜ 2 本目の anchor が要るか
+   *
+   * Issue #215 の合成 anchor は「登録側に建物名があり、ページ側に都道府県がある」
+   * 向きの false negative を解消する。しかし合成 anchor は登録値より**長くなる**ため、
+   * 逆向き、すなわち
+   *
+   * ```
+   * store   : 千葉県 / 柏市 / 旭町1-1-12      → 合成 anchor: 千葉県柏市旭町1-1-12
+   * observed: 柏市旭町1-1-12 ABCビル1F        (ページが都道府県を省略し建物名を持つ)
+   * ```
+   *
+   * では `isAddressMatch` の双方向包含がどちらの向きも成立しなくなる。この形は
+   * **Issue #215 以前 (`main`) では `target_match` だった**(anchor が `旭町1-1-12`
+   * で observed に包含されていた)。合成 anchor だけにすると、#215 が救う集合と
+   * 引き換えに `main` が拾えていた集合を落とす。
+   *
+   * そこで `main` の anchor(= `stores.address` 生値)を捨てずに保持し、
+   * `deriveIdentityStatusFromVerification` が**同じ `isTargetStoreMatch` を
+   * 2 つの DB 由来 anchor に対して適用**する。成立集合は
+   * 「`main` semantics ∪ Issue #215 semantics」の**和集合**になり、
+   * どちらの semantics でも不成立だったものが新たに成立することはない
+   * (判定規則そのものは 1 文字も緩めていない。`identity-match.ts` は diff 0)。
+   *
+   * ## 空になる条件
+   *
+   * - `stores.address` が空(空白のみ含む)— `main` もこの場合は
+   *   `verifiedIdentity` へ落ちており、生値 anchor は存在しない
+   * - 合成結果が生値と**同一文字列**— 2 本目を評価しても結果が変わらないため
+   *
+   * 空文字のときは 2 本目の判定を行わない。
+   *
+   * ## trust boundary
+   *
+   * `address` と同じく **`stores` 列由来の値のみ**が入る。モデルの `observed_*` は
+   * 絶対に入らない。Stage1 / Stage2 の prompt へも載せない(`StoreIdentity` は
+   * 本フィールドを持たない)。
+   */
+  legacyAddress: string;
   phone: string;
+}
+
+/**
+ * `buildSourceVerificationTarget` が受け取る `stores` のスカラー列(Issue #215)。
+ *
+ * ## なぜ `StoreIdentity` を受け取らないのか
+ *
+ * 照合には `prefecture` / `city` が必要だが、`StoreIdentity` は Stage1 / Stage2 の
+ * prompt にもそのまま渡る。そちらへ列を足すと、F1(Stage2 が prompt 上の target
+ * identity を `observed_*` へコピーして自己申告で `target_match` を得られる)の
+ * 検出力が下がる。**prompt input と source verification input を型として分ける**
+ * ことでこれを構造的に防ぐ。
+ *
+ * 本型は `genre` を持たないため `StoreIdentity` へ代入できず、逆に `StoreIdentity` は
+ * `prefecture` / `city` を持たないため本型へ代入できない。どちらの向きの取り違えも
+ * コンパイルエラーになる。
+ */
+export interface SourceVerificationStoreInput extends StoreAddressParts {
+  name: string;
+  phone: string;
+}
+
+/**
+ * 営業テリトリー名の `city` を検出する区切り文字(Issue #215)。
+ *
+ * 実データ調査(PR #213、`places-search-identity.ts` の JSDoc)で確認できている
+ * テリトリー形式は `柏市・我孫子市` / `千葉県柏市・我孫子市` のように
+ * **複数の市区を `・` で並べた担当範囲**だけ。日本の行政区名に `・` は現れないため、
+ * この1文字が「行政区名ではない」ことの決定的な signal になる。
+ *
+ * 未確認の区切り文字を推測で足さない。取りこぼしたケースは合成住所が実在住所と
+ * ずれて包含が成立せず false negative になるだけで、誤った市区町村を anchor に
+ * することはない。
+ */
+const TERRITORY_CITY_SEPARATOR = "・";
+
+/**
+ * `stores.city` が営業テリトリー名(担当範囲)かを判定する(Issue #215)。
+ *
+ * **source verification 専用**。Stage0 Places 検索も使う `buildBestStoreAddress`
+ * 側へは入れない(検索クエリの挙動を変えると Issue #215 の範囲を超える)。
+ */
+function isSalesTerritoryCity(city: string): boolean {
+  return city.includes(TERRITORY_CITY_SEPARATOR);
+}
+
+/**
+ * `stores.prefecture` / `stores.city` に混入した Google Places `formattedAddress`
+ * の周辺ノイズ(`日本、` prefix / `〒162-0825 ` prefix / 末尾 ` 日本`)を落とす
+ * (PR #216 独立レビューの MEDIUM finding)。
+ *
+ * ## なぜ必要か
+ *
+ * URL インポート経路(`lib/url-parser/places-fallback.ts`)は
+ * `extractPrefecture(place.formattedAddress)` を **raw のまま**呼んでいた。
+ * `PREFECTURE_RE` の `.+?[都道府県]` が最短一致でノイズごと拾うため、
+ * `日本、〒162-0825 東京都新宿区…` から `日本、〒162-0825 東京都` が
+ * `stores.prefecture` へ入る。本番 DB に実在する形状(READ ONLY 調査で 1 行)。
+ *
+ * この状態で `buildBestStoreAddress` を通すと、規則4の
+ * `probe.includes(prefecture)` が **address 側ではなく prefecture 側のノイズ**で
+ * 不成立になり、規則6が汚染 prefecture を再前置して
+ * `日本、〒162-0825 東京都新宿区日本、〒162-0825 東京都新宿区神楽坂…` という
+ * 二重化した anchor を作る。`isAddressMatch` の双方向包含のうち
+ * `target ⊂ observed` の向きが壊れるため、**PR #216 以前は `target_match` だった
+ * ページが `uncertain` へ落ちる**。
+ *
+ * ## なぜここで直すか
+ *
+ * `buildBestStoreAddress` 側では直さない。あちらは Stage0 Places 検索の
+ * `textQuery` も作っており、変えると検索候補 → `verifiedIdentity` まで挙動が動く。
+ * Issue #215 / 本 finding の範囲を超えるため、既存の `isSalesTerritoryCity` と
+ * 同じく **source verification 側だけ**に置く
+ * (Stage0 側の同一症状は本 PR の回帰ではなく既存の課題。別 Issue 候補として報告)。
+ *
+ * ## なぜ `normalizeFormattedAddress` を使うか
+ *
+ * 落としたい prefix はまさに Places `formattedAddress` のノイズであり、
+ * `lib/places/to-store-input.ts` が既に同じ正規表現を持っている
+ * (`placeResultToStoreInput` / `identity-match.ts` と共有)。新しい規則を
+ * 増やさずに済む。都道府県名・市区町村名は `日本` で始まらず `日本` で終わらない
+ * ため、正常値に対しては **完全な no-op**(`東京都` → `東京都`)。
+ *
+ * `address` 列には触れない。PR #216 以前の anchor 文字列をそのまま再現するのが
+ * 目的であり、照合時の表記ゆれは `normalizeJapaneseAddressForMatch` が従来どおり
+ * 吸収する。
+ */
+function normalizeAddressScalar(raw: string): string {
+  return normalizeFormattedAddress(raw.trim());
 }
 
 /**
  * `SourceVerificationTarget` を組み立てる(PR #180、**missing-only enrichment**)。
  *
- * ## 不変条件: 既存 `StoreIdentity` を fresh Places で上書きしない
+ * ## 不変条件: 既存の登録値を fresh Places で上書きしない
  *
  * `stores.address` / `stores.phone` に有効値がある店舗では、**必ず従来値を使う**。
  * fresh Places 値を優先すると、
@@ -758,7 +894,76 @@ export interface SourceVerificationTarget {
  * - Stage0 が誤った Place に strong match した場合、その誤りが
  *   「既存の正しい住所」を押しのけて Web source 全体の判定基準になる
  *
- * ため、本 PR の対象を **「identity 欠落店舗の false negative 救済」だけ**に限定する。
+ * ため、fresh Places の役割を **「identity 欠落店舗の false negative 救済」だけ**に
+ * 限定する。
+ *
+ * ## address — スカラー3列から合成する(Issue #215)
+ *
+ * `stores.address` は登録経路によって意味論が割れている。エリア検索経由
+ * (`lib/places/to-store-input.ts`)では**都道府県・市区町村を除いた残差**で、
+ * さらに建物名・階数を含む。この残差をそのまま照合 anchor にすると、
+ *
+ * ```
+ * target(残差 + 建物名)      : 神南1-2-3 ABCビル4F
+ * page  (フル住所・建物名なし): 東京都渋谷区神南1-2-3
+ * ```
+ *
+ * となり、登録側にだけ建物名が、ページ側にだけ都道府県・市区町村がある
+ * **互いに部分集合でない**関係になる。`isAddressMatch` の双方向包含はどちらの向きも
+ * 成立せず、正しいページでも必ず `uncertain` へ倒れていた(Issue #215 実測: 14 件中
+ * 名前一致 7 件に対し `target_match` は 1 件)。
+ *
+ * そこで `buildBestStoreAddress`(Stage0 Places 検索と同じ合成規則)を通し、
+ * **DB に元々あった都道府県・市区町村を比較対象へ戻す**。判定を緩めるのではなく、
+ * 規則が本来比較すべき完全な住所を渡していなかった入力側の欠落を埋める変更である。
+ * `isTargetStoreMatch` / `isAddressMatch` / `hasBanchiLevelSpecificity` /
+ * `normalizeJapaneseAddressForMatch` はいずれも無改変で、
+ *
+ * - 名前一致は引き続き必須
+ * - `hasBanchiLevelSpecificity` の番地レベル要求も引き続き有効
+ *
+ * のため、同一街区の別番地は従来どおり一致しない。
+ *
+ * `buildBestStoreAddress` を再利用するのは、`〒` 始まりフル住所を既に扱えるため
+ * (PR #213)。市区町村を推測して補うことはしない。
+ *
+ * ## 営業テリトリー名の `city` は住所へ混入させない
+ *
+ * `stores.city` には行政区名ではなく `柏市・我孫子市` のような**担当範囲**が
+ * 入っていることがある(実データの3割強。`places-search-identity.ts` の JSDoc)。
+ *
+ * `address` がフル住所なら `buildBestStoreAddress` の規則4がそのまま `address` を
+ * 返すため混入しないが、`address` が**残差**の場合は規則6で前置され
+ * `千葉県柏市・我孫子市旭町1-1-12` という**実在しない合成住所**ができてしまう。
+ * そこで source verification では、テリトリーと判定できる `city` を
+ * **空として扱ってから** `buildBestStoreAddress` へ渡す(`isSalesTerritoryCity`)。
+ * 結果は `千葉県` + 残差 に留まり、
+ *
+ * - テリトリー文字列は anchor に入らない
+ * - 正しい市区町村(`柏市`)を**推測して補うこともしない**
+ *
+ * 住所だけでは一致を保証できないため、この形状の店舗は住所経路では
+ * `uncertain` のままでよい(電話一致の経路は従来どおり使える)。
+ * **false negative 側へ倒す**方針であり、誤った市区町村で false positive を
+ * 生むより安全。
+ *
+ * この判定は source verification 側だけに置く。`buildBestStoreAddress` を変えると
+ * Stage0 Places の検索クエリまで変わり、Issue #215 の範囲を超えるため。
+ *
+ * ## 合成するのは `address` が非空のときだけ
+ *
+ * `stores.address` が空の場合は従来どおり `verifiedIdentity?.address` へ落とす。
+ * `prefecture` + `city` だけで anchor を作ると番地が無く、
+ * `hasBanchiLevelSpecificity` により住所一致には使えないうえ、市区町村レベルの
+ * 文字列が anchor として残ることになる。現行の fallback 挙動を変えない。
+ *
+ * ## 合成 anchor は生の `stores.address` を**置き換えない**(PR #216 M1)
+ *
+ * 合成 anchor は登録値より長くなるため、それ**だけ**にすると
+ * 「ページが都道府県を省略し、かつ建物名を持つ」形で `main` が拾えていた一致を落とす。
+ * 生値を `legacyAddress` として併せて返し、判定側が同じ `isTargetStoreMatch` を
+ * 2 本の anchor に適用することで、成立集合を「`main` ∪ Issue #215」の和集合にする。
+ * 詳細は `SourceVerificationTarget.legacyAddress` の JSDoc。
  *
  * ## 有効値の判定
  *
@@ -770,20 +975,42 @@ export interface SourceVerificationTarget {
  *
  * ## name
  *
- * 常に `StoreIdentity.name` を使う。Places の `displayName` は登録名と異なりうるうえ、
+ * 常に `stores.name` を使う。Places の `displayName` は登録名と異なりうるうえ、
  * `deriveSearchIdentityName` による営業管理タグ除去と `isNameMatch` の包含判定という
  * 既存セマンティクスを変えないため。
  *
  * 純関数。入力を変更しない。
  */
 export function buildSourceVerificationTarget(
-  store: StoreIdentity,
+  store: SourceVerificationStoreInput,
   verifiedIdentity: VerifiedPlacesIdentity | null,
 ): SourceVerificationTarget {
+  // URL インポート由来の prefix ノイズを先に落とす(`normalizeAddressScalar` の
+  // JSDoc)。正常値には作用しないため、既存店舗の合成結果は変わらない。
+  const prefecture = normalizeAddressScalar(store.prefecture);
+  const city = normalizeAddressScalar(store.city);
+
+  // テリトリー名の city は住所 identity へ持ち込まない(上記 JSDoc)。
+  // 正しい市区町村は推測せず、単に city 無しとして合成する。
+  const addressParts: StoreAddressParts = {
+    prefecture,
+    city: isSalesTerritoryCity(city) ? "" : city,
+    address: store.address,
+  };
+
+  const hasRegisteredAddress = store.address.trim() !== "";
+  const address = hasRegisteredAddress
+    ? buildBestStoreAddress(addressParts)
+    : (verifiedIdentity?.address ?? "");
+
   return {
     name: store.name,
-    address:
-      store.address.trim() !== "" ? store.address : (verifiedIdentity?.address ?? ""),
+    address,
+    // PR #216 M1: `main` の anchor(生の `stores.address`)を 2 本目として残す。
+    // 合成で文字列が変わらなかった場合と、そもそも登録住所が無い場合は保持しない
+    // (2 本目を評価しても結果が変わらない / `main` にも生値 anchor が無い)。
+    // 詳細は `SourceVerificationTarget.legacyAddress` の JSDoc。
+    legacyAddress: hasRegisteredAddress && address !== store.address ? store.address : "",
     phone:
       normalizePhone(store.phone) !== "" ? store.phone : (verifiedIdentity?.phone ?? ""),
   };
@@ -803,6 +1030,11 @@ const MAX_IDENTITY_NOTE_LENGTH = 200;
  * (false positiveよりfalse negativeを優先。今回の実機smoke事故=誤ったHotPepper URLが
  * 「target_store」と自己申告されても、observed_name/addressが対象店舗と一致しなければ
  * ここで弾かれる)。
+ *
+ * `target_store` の住所照合は、**DB 由来の 2 つの anchor**(Issue #215 の合成住所と、
+ * `main` semantics である生の `stores.address`)に対して**同じ `isTargetStoreMatch`**
+ * を適用し、どちらかが成立すれば `target_match` とする(PR #216 M1)。判定規則自体は
+ * 無改変で、成立集合は両 semantics の和集合にとどまる。
  *
  * `competitor`/`contextual`/`unrelated`/`uncertain`はモデル自己申告をそのまま
  * `identity_status`へ反映する(競合店舗の正解データを持たないため、target_matchと
@@ -841,17 +1073,34 @@ function deriveIdentityStatusFromVerification(
   target: SourceVerificationTarget,
 ): IdentityStatus {
   switch (verification.relation) {
-    case "target_store":
-      return isTargetStoreMatch(
-        {
-          name: verification.observed_name,
-          address: verification.observed_address,
-          phone: verification.observed_phone,
-        },
-        target,
-      )
-        ? "target_match"
-        : "uncertain";
+    case "target_store": {
+      const observed = {
+        name: verification.observed_name,
+        address: verification.observed_address,
+        phone: verification.observed_phone,
+      };
+
+      // 判定規則は `isTargetStoreMatch` のまま(緩めない)。同じ関数を
+      // **DB 由来の 2 つの anchor** に対して順に適用する:
+      //
+      // 1. 合成 anchor(`prefecture` + `city` + `address`、Issue #215)
+      // 2. 生の `stores.address`(PR #216 M1、`main` semantics の保存)
+      //
+      // 2 本目は 1 本目が不成立で、かつ生値 anchor を持つときだけ評価する。
+      // 成立集合は「`main` ∪ Issue #215」の和集合になる
+      // (`SourceVerificationTarget.legacyAddress` の JSDoc)。
+      // `isTargetStoreMatch` 側へ「代替住所」の概念は持ち込まない。
+      const matched =
+        isTargetStoreMatch(observed, target) ||
+        (target.legacyAddress !== "" &&
+          isTargetStoreMatch(observed, {
+            name: target.name,
+            address: target.legacyAddress,
+            phone: target.phone,
+          }));
+
+      return matched ? "target_match" : "uncertain";
+    }
     case "competitor":
       return "competitor_match";
     case "contextual":

@@ -193,6 +193,42 @@ describe("mergePlaceIntoApply", () => {
     expect(merged.city).toBe("川崎市");
     expect(merged.confidence.address).toBe(88);
   });
+
+  /**
+   * Google Places の `formattedAddress` は
+   * `日本、〒162-0825 東京都新宿区…` の形で返る。
+   *
+   * `lib/places/to-store-input.ts:placeResultToStoreInput` は
+   * `normalizeFormattedAddress` を通してから `extractPrefecture` / `extractCity`
+   * を呼ぶが、URL インポート経路だけ raw の `formattedAddress` へ直接使っていた。
+   * その結果 `stores.prefecture` に `日本、〒162-0825 東京都` が入る行が本番に
+   * 実在する(PR #216 独立レビューの MEDIUM finding)。
+   *
+   * `address` の保存形式は URL インポートの既存 semantics を変えないため
+   * `formattedAddress` のまま。ここで直すのは prefecture / city の抽出だけ。
+   */
+  it("9. 日本 / 〒 prefix 付き formattedAddress から prefecture / city を正しく抽出する", () => {
+    const merged = mergePlaceIntoApply(
+      makeApplied(),
+      makePlace({
+        name: "アズーリ 神楽坂",
+        formattedAddress: "日本、〒162-0825 東京都新宿区神楽坂３丁目４ 2F",
+      }),
+    );
+    expect(merged.prefecture).toBe("東京都");
+    expect(merged.city).toBe("新宿区");
+    // address 列は既存の URL インポート semantics を変えない。
+    expect(merged.address).toBe("日本、〒162-0825 東京都新宿区神楽坂３丁目４ 2F");
+  });
+
+  it("9'. 旧形式の末尾 ` 日本` suffix でも prefecture / city を正しく抽出する", () => {
+    const merged = mergePlaceIntoApply(
+      makeApplied(),
+      makePlace({ formattedAddress: "〒2110063 神奈川県川崎市中原区新丸子東1-983 日本" }),
+    );
+    expect(merged.prefecture).toBe("神奈川県");
+    expect(merged.city).toBe("川崎市");
+  });
 });
 
 describe("enrichWithPlacesFallback", () => {

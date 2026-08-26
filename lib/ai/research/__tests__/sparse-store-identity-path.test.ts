@@ -218,7 +218,15 @@ describe("sparse store identity recovery (end-to-end, no live API)", () => {
 
   it("既存 address を持つ店舗では anchor が使われず、従来の判定が維持される", async () => {
     mockSearchPlaces.mockResolvedValue([MATCHED_PLACE]);
-    const storeWithAddress = { ...SPARSE_STORE, address: "千葉県柏市旭町1-1-12" };
+    // Issue #215 で anchor は prefecture / city / address の3列から合成するように
+    // なったため、3列が整合した実在しうる形状で固定する(元は address だけを
+    // 別県の住所へ差し替えており、県と住所が矛盾する非現実的な形状だった)。
+    const storeWithAddress = {
+      ...SPARSE_STORE,
+      prefecture: "千葉県",
+      city: "柏市",
+      address: "千葉県柏市旭町1-1-12",
+    };
     const { target, entry } = await runIdentityPath(
       storeWithAddress,
       verification({ observed_address: "埼玉県所沢市日吉町19-12" }),
