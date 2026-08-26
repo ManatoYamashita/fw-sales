@@ -744,7 +744,52 @@ export function applyUrlContextStatus(
  */
 export interface SourceVerificationTarget {
   name: string;
+  /**
+   * 合成済みの比較 anchor(`prefecture` + `city` + `address`、Issue #215)。
+   * 残差住所で登録された店舗を、フル住所で書かれたページと突合するために使う。
+   */
   address: string;
+  /**
+   * `stores.address` の**生値**(PR #216 独立レビュー M1)。
+   *
+   * ## なぜ 2 本目の anchor が要るか
+   *
+   * Issue #215 の合成 anchor は「登録側に建物名があり、ページ側に都道府県がある」
+   * 向きの false negative を解消する。しかし合成 anchor は登録値より**長くなる**ため、
+   * 逆向き、すなわち
+   *
+   * ```
+   * store   : 千葉県 / 柏市 / 旭町1-1-12      → 合成 anchor: 千葉県柏市旭町1-1-12
+   * observed: 柏市旭町1-1-12 ABCビル1F        (ページが都道府県を省略し建物名を持つ)
+   * ```
+   *
+   * では `isAddressMatch` の双方向包含がどちらの向きも成立しなくなる。この形は
+   * **Issue #215 以前 (`main`) では `target_match` だった**(anchor が `旭町1-1-12`
+   * で observed に包含されていた)。合成 anchor だけにすると、#215 が救う集合と
+   * 引き換えに `main` が拾えていた集合を落とす。
+   *
+   * そこで `main` の anchor(= `stores.address` 生値)を捨てずに保持し、
+   * `deriveIdentityStatusFromVerification` が**同じ `isTargetStoreMatch` を
+   * 2 つの DB 由来 anchor に対して適用**する。成立集合は
+   * 「`main` semantics ∪ Issue #215 semantics」の**和集合**になり、
+   * どちらの semantics でも不成立だったものが新たに成立することはない
+   * (判定規則そのものは 1 文字も緩めていない。`identity-match.ts` は diff 0)。
+   *
+   * ## 空になる条件
+   *
+   * - `stores.address` が空(空白のみ含む)— `main` もこの場合は
+   *   `verifiedIdentity` へ落ちており、生値 anchor は存在しない
+   * - 合成結果が生値と**同一文字列**— 2 本目を評価しても結果が変わらないため
+   *
+   * 空文字のときは 2 本目の判定を行わない。
+   *
+   * ## trust boundary
+   *
+   * `address` と同じく **`stores` 列由来の値のみ**が入る。モデルの `observed_*` は
+   * 絶対に入らない。Stage1 / Stage2 の prompt へも載せない(`StoreIdentity` は
+   * 本フィールドを持たない)。
+   */
+  legacyAddress: string;
   phone: string;
 }
 
@@ -912,6 +957,14 @@ function normalizeAddressScalar(raw: string): string {
  * `hasBanchiLevelSpecificity` により住所一致には使えないうえ、市区町村レベルの
  * 文字列が anchor として残ることになる。現行の fallback 挙動を変えない。
  *
+ * ## 合成 anchor は生の `stores.address` を**置き換えない**(PR #216 M1)
+ *
+ * 合成 anchor は登録値より長くなるため、それ**だけ**にすると
+ * 「ページが都道府県を省略し、かつ建物名を持つ」形で `main` が拾えていた一致を落とす。
+ * 生値を `legacyAddress` として併せて返し、判定側が同じ `isTargetStoreMatch` を
+ * 2 本の anchor に適用することで、成立集合を「`main` ∪ Issue #215」の和集合にする。
+ * 詳細は `SourceVerificationTarget.legacyAddress` の JSDoc。
+ *
  * ## 有効値の判定
  *
  * - `address`: `trim()` 後に非空か(`isAddressMatch` が空文字を弾く条件と同じ)
@@ -945,12 +998,19 @@ export function buildSourceVerificationTarget(
     address: store.address,
   };
 
+  const hasRegisteredAddress = store.address.trim() !== "";
+  const address = hasRegisteredAddress
+    ? buildBestStoreAddress(addressParts)
+    : (verifiedIdentity?.address ?? "");
+
   return {
     name: store.name,
-    address:
-      store.address.trim() !== ""
-        ? buildBestStoreAddress(addressParts)
-        : (verifiedIdentity?.address ?? ""),
+    address,
+    // PR #216 M1: `main` の anchor(生の `stores.address`)を 2 本目として残す。
+    // 合成で文字列が変わらなかった場合と、そもそも登録住所が無い場合は保持しない
+    // (2 本目を評価しても結果が変わらない / `main` にも生値 anchor が無い)。
+    // 詳細は `SourceVerificationTarget.legacyAddress` の JSDoc。
+    legacyAddress: hasRegisteredAddress && address !== store.address ? store.address : "",
     phone:
       normalizePhone(store.phone) !== "" ? store.phone : (verifiedIdentity?.phone ?? ""),
   };
@@ -970,6 +1030,11 @@ const MAX_IDENTITY_NOTE_LENGTH = 200;
  * (false positiveよりfalse negativeを優先。今回の実機smoke事故=誤ったHotPepper URLが
  * 「target_store」と自己申告されても、observed_name/addressが対象店舗と一致しなければ
  * ここで弾かれる)。
+ *
+ * `target_store` の住所照合は、**DB 由来の 2 つの anchor**(Issue #215 の合成住所と、
+ * `main` semantics である生の `stores.address`)に対して**同じ `isTargetStoreMatch`**
+ * を適用し、どちらかが成立すれば `target_match` とする(PR #216 M1)。判定規則自体は
+ * 無改変で、成立集合は両 semantics の和集合にとどまる。
  *
  * `competitor`/`contextual`/`unrelated`/`uncertain`はモデル自己申告をそのまま
  * `identity_status`へ反映する(競合店舗の正解データを持たないため、target_matchと
@@ -1008,17 +1073,34 @@ function deriveIdentityStatusFromVerification(
   target: SourceVerificationTarget,
 ): IdentityStatus {
   switch (verification.relation) {
-    case "target_store":
-      return isTargetStoreMatch(
-        {
-          name: verification.observed_name,
-          address: verification.observed_address,
-          phone: verification.observed_phone,
-        },
-        target,
-      )
-        ? "target_match"
-        : "uncertain";
+    case "target_store": {
+      const observed = {
+        name: verification.observed_name,
+        address: verification.observed_address,
+        phone: verification.observed_phone,
+      };
+
+      // 判定規則は `isTargetStoreMatch` のまま(緩めない)。同じ関数を
+      // **DB 由来の 2 つの anchor** に対して順に適用する:
+      //
+      // 1. 合成 anchor(`prefecture` + `city` + `address`、Issue #215)
+      // 2. 生の `stores.address`(PR #216 M1、`main` semantics の保存)
+      //
+      // 2 本目は 1 本目が不成立で、かつ生値 anchor を持つときだけ評価する。
+      // 成立集合は「`main` ∪ Issue #215」の和集合になる
+      // (`SourceVerificationTarget.legacyAddress` の JSDoc)。
+      // `isTargetStoreMatch` 側へ「代替住所」の概念は持ち込まない。
+      const matched =
+        isTargetStoreMatch(observed, target) ||
+        (target.legacyAddress !== "" &&
+          isTargetStoreMatch(observed, {
+            name: target.name,
+            address: target.legacyAddress,
+            phone: target.phone,
+          }));
+
+      return matched ? "target_match" : "uncertain";
+    }
     case "competitor":
       return "competitor_match";
     case "contextual":

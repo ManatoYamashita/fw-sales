@@ -45,6 +45,9 @@ const {
   buildSourceVerificationTarget,
 } = await import("../pipeline");
 const { selectAiResearchItems } = await import("../prompts");
+// PR #216 M1 の property check 用。判定規則を再実装せず、**無改変の**判定関数を
+// main / #215 それぞれの anchor へ適用して成立集合を比較する。
+const { isTargetStoreMatch, normalizePhone } = await import("../identity-match");
 const { RESEARCH_POLICY_ITEMS } = await import("@/lib/domain/research-policy");
 
 const STORE = { name: "YELLOW PIZZA", address: "神奈川県横浜市港北区菊名1-7-2", phone: "045-642-7213", genre: "イタリアン" };
@@ -849,7 +852,9 @@ describe("applyUrlContextStatus", () => {
 });
 
 describe("applySourceIdentityVerification (fix/ai-research-source-identity-integrity)", () => {
-  const targetStore = { name: "東北メシ 炉端ジュン", address: "千葉県柏市旭町1-1-12", phone: "04-7199-7985", genre: "居酒屋" };
+  // `legacyAddress: ""` = 合成 anchor と生値が同一で 2 本目を持たない状態
+  // (PR #216 M1。この describe は 1 本目の anchor だけの挙動を固定する)。
+  const targetStore = { name: "東北メシ 炉端ジュン", address: "千葉県柏市旭町1-1-12", legacyAddress: "", phone: "04-7199-7985", genre: "居酒屋" };
   const baseEntry = {
     id: "S04",
     title: "東北メシ 炉端ジュン(柏/居酒屋)＜ネット予約可＞ | ホットペッパーグルメ",
@@ -2173,11 +2178,14 @@ describe("buildSourceVerificationTarget (missing-only enrichment)", () => {
     expect(buildSourceVerificationTarget(STORE_FULL, null)).toEqual({
       name: "炉端ジュン",
       address: "千葉県柏市旭町1-1-12",
+      // 合成結果が生値と同一なので 2 本目の anchor は持たない(PR #216 M1)。
+      legacyAddress: "",
       phone: "04-7199-7985",
     });
     expect(buildSourceVerificationTarget(STORE_SPARSE, null)).toEqual({
       name: "告膳",
       address: "",
+      legacyAddress: "",
       phone: "",
     });
   });
@@ -2186,11 +2194,13 @@ describe("buildSourceVerificationTarget (missing-only enrichment)", () => {
     expect(buildSourceVerificationTarget(STORE_SPARSE, FRESH).name).toBe("告膳");
   });
 
-  it("戻り値は name / address / phone の3キーのみ(genre を持たない)", () => {
+  it("戻り値は name / address / legacyAddress / phone の4キーのみ(genre を持たない)", () => {
     // `StoreIdentity` は `genre` 必須のため、`SourceVerificationTarget` は
     // 構造的に `StoreIdentity` へ代入できない = Stage1/Stage2 へ渡すとコンパイルエラー。
+    // `legacyAddress`(PR #216 M1)も `stores` 列由来であり、prompt へは載らない。
     expect(Object.keys(buildSourceVerificationTarget(STORE_FULL, FRESH)).sort()).toEqual([
       "address",
+      "legacyAddress",
       "name",
       "phone",
     ]);
@@ -2589,6 +2599,514 @@ describe("applySourceIdentityVerification — 残差住所店舗の identity 照
           { ...TERRITORY_STORE, phone: "04-7199-7985" },
         ),
       ).toBe("target_match");
+    });
+  });
+});
+
+/**
+ * PR #216 独立レビュー **M1** — 合成 anchor だけにすると `main` で成立していた
+ * `target_match` を落とす、という逆方向の false negative。
+ *
+ * ```
+ * store   : 千葉県 / 柏市 / 旭町1-1-12      → 合成 anchor: 千葉県柏市旭町1-1-12
+ * observed: 柏市旭町1-1-12 ABCビル1F        (ページが都道府県を省略し建物名を持つ)
+ *
+ * main       : anchor = 旭町1-1-12          → observed ⊇ anchor → target_match
+ * PR #216 初版: anchor = 千葉県柏市旭町1-1-12 → 双方向包含が不成立 → uncertain
+ * ```
+ *
+ * 修正は判定規則を緩めず、**同じ `isTargetStoreMatch` を DB 由来の 2 つの anchor**
+ * (合成 / 生値)へ適用する。この describe は成立集合が
+ * 「`main` semantics ∪ Issue #215 semantics」の**厳密な和集合**であることを固定する。
+ */
+describe("applySourceIdentityVerification — main semantics の保存 (PR #216 M1)", () => {
+  const entry = () =>
+    ({
+      id: "S01",
+      title: "t",
+      grounding_redirect_url:
+        "https://vertexaisearch.cloud.google.com/grounding-api-redirect/S01",
+      resolved_url: null,
+      resolve_status: "not_attempted",
+      source_type: "gourmet_site",
+      discovery_provenance: "gemini_search_candidate",
+      url_context_status: "success",
+      identity_status: "not_checked",
+    }) as unknown as SourceRegistryEntry;
+
+  interface StoreScalars {
+    name: string;
+    prefecture: string;
+    city: string;
+    address: string;
+    phone: string;
+  }
+
+  interface Observed {
+    name: string | null;
+    address: string | null;
+    phone: string | null;
+  }
+
+  /** 実際の production path(`buildSourceVerificationTarget` → verification)を通す。 */
+  const run = (
+    store: StoreScalars,
+    observed: Observed,
+    verifiedIdentity: { address: string; phone: string } | null = null,
+  ) =>
+    applySourceIdentityVerification(
+      [entry()],
+      [
+        {
+          source_id: "S01",
+          relation: "target_store",
+          observed_title: "t",
+          observed_name: observed.name,
+          observed_address: observed.address,
+          observed_phone: observed.phone,
+          note: "",
+        },
+      ] as unknown as Parameters<typeof applySourceIdentityVerification>[1],
+      buildSourceVerificationTarget(store, verifiedIdentity),
+    )[0]!.identity_status;
+
+  const RESIDUAL_CHIBA: StoreScalars = {
+    name: "東北メシ 炉端ジュン",
+    prefecture: "千葉県",
+    city: "柏市",
+    address: "旭町1-1-12",
+    phone: "04-7199-7985",
+  };
+
+  const RESIDUAL_SHIBUYA: StoreScalars = {
+    name: "居酒屋 導楽",
+    prefecture: "東京都",
+    city: "渋谷区",
+    address: "神南1-2-3 ABCビル4F",
+    phone: "03-1234-5678",
+  };
+
+  it("A. M1 本体 — ページが都道府県を省略し建物名を持っても target_match(main semantics)", () => {
+    expect(
+      run(RESIDUAL_CHIBA, {
+        name: "東北メシ 炉端ジュン",
+        address: "柏市旭町1-1-12 ABCビル1F",
+        phone: null,
+      }),
+    ).toBe("target_match");
+  });
+
+  it("A'. 都道府県も市区も省略したページ + 建物名でも target_match(main semantics)", () => {
+    expect(
+      run(RESIDUAL_CHIBA, {
+        name: "東北メシ 炉端ジュン",
+        address: "旭町1-1-12 ABCビル1F",
+        phone: null,
+      }),
+    ).toBe("target_match");
+  });
+
+  it("B. Issue #215 本来ケース — 残差 + 建物名 vs フル住所は合成 anchor で救われる", () => {
+    expect(
+      run(RESIDUAL_SHIBUYA, {
+        name: "居酒屋 導楽",
+        address: "東京都渋谷区神南1-2-3",
+        phone: null,
+      }),
+    ).toBe("target_match");
+  });
+
+  it("C. 番地違いは合成 anchor / 生値 anchor のどちらでも target_match にしない", () => {
+    expect(
+      run(RESIDUAL_SHIBUYA, {
+        name: "居酒屋 導楽",
+        address: "東京都渋谷区神南1-2-4",
+        phone: null,
+      }),
+    ).toBe("uncertain");
+  });
+
+  it("D. M1 形状 + 番地違いも target_match にしない", () => {
+    expect(
+      run(RESIDUAL_CHIBA, {
+        name: "東北メシ 炉端ジュン",
+        address: "柏市旭町1-1-13 ABCビル1F",
+        phone: null,
+      }),
+    ).toBe("uncertain");
+  });
+
+  it("E. 住所が一致しても名前が違えば uncertain(名前必須条件は不変)", () => {
+    expect(
+      run(RESIDUAL_CHIBA, {
+        name: "全く別の店舗",
+        address: "柏市旭町1-1-12 ABCビル1F",
+        phone: null,
+      }),
+    ).toBe("uncertain");
+  });
+
+  it("F. 住所不一致でも電話が一致すれば target_match", () => {
+    expect(
+      run(RESIDUAL_CHIBA, {
+        name: "東北メシ 炉端ジュン",
+        address: "香川県三豊市仁尾町仁尾丙795",
+        phone: "04-7199-7985",
+      }),
+    ).toBe("target_match");
+  });
+
+  it("F'. 住所も電話も一致しなければ uncertain", () => {
+    expect(
+      run(RESIDUAL_CHIBA, {
+        name: "東北メシ 炉端ジュン",
+        address: "香川県三豊市仁尾町仁尾丙795",
+        phone: "087-000-0000",
+      }),
+    ).toBe("uncertain");
+  });
+
+  describe("G. 営業テリトリー名の city", () => {
+    const TERRITORY: StoreScalars = { ...RESIDUAL_CHIBA, city: "柏市・我孫子市" };
+
+    it("合成 anchor にテリトリー名を入れず、正しい市区町村も推測補完しない", () => {
+      const target = buildSourceVerificationTarget(TERRITORY, null);
+      expect(target.address).toBe("千葉県旭町1-1-12");
+      expect(target.address).not.toContain("我孫子市");
+      expect(target.address).not.toContain("柏市");
+      // 生値 anchor は `stores.address` そのもの(main semantics)。
+      expect(target.legacyAddress).toBe("旭町1-1-12");
+    });
+
+    it("生値 anchor により main と同じくフル住所ページと target_match", () => {
+      expect(
+        run(TERRITORY, {
+          name: "東北メシ 炉端ジュン",
+          address: "千葉県柏市旭町1-1-12",
+          phone: null,
+        }),
+      ).toBe("target_match");
+    });
+
+    it("テリトリー店舗でも別番地は絶対に一致しない", () => {
+      expect(
+        run(TERRITORY, {
+          name: "東北メシ 炉端ジュン",
+          address: "千葉県柏市旭町1-1-13",
+          phone: null,
+        }),
+      ).toBe("uncertain");
+    });
+  });
+
+  describe("H. 既に完全な住所で登録されている店舗は挙動不変", () => {
+    const FULL: StoreScalars = { ...RESIDUAL_CHIBA, address: "千葉県柏市旭町1-1-12" };
+    const POSTAL: StoreScalars = {
+      ...RESIDUAL_CHIBA,
+      address: "〒2770852 千葉県 柏市 旭町1-1-12",
+    };
+
+    it("フル住所は合成されず、生値 anchor も持たない(同一文字列のため)", () => {
+      const target = buildSourceVerificationTarget(FULL, null);
+      expect(target.address).toBe("千葉県柏市旭町1-1-12");
+      expect(target.legacyAddress).toBe("");
+    });
+
+    it("〒 付きフル住所も同様", () => {
+      const target = buildSourceVerificationTarget(POSTAL, null);
+      expect(target.address).toBe("〒2770852 千葉県 柏市 旭町1-1-12");
+      expect(target.legacyAddress).toBe("");
+    });
+
+    it.each([FULL, POSTAL])("フル住所ページと target_match", (store) => {
+      expect(
+        run(store, {
+          name: "東北メシ 炉端ジュン",
+          address: "千葉県柏市旭町1-1-12",
+          phone: null,
+        }),
+      ).toBe("target_match");
+    });
+
+    it.each([FULL, POSTAL])("別番地は uncertain", (store) => {
+      expect(
+        run(store, {
+          name: "東北メシ 炉端ジュン",
+          address: "千葉県柏市旭町1-1-13",
+          phone: null,
+        }),
+      ).toBe("uncertain");
+    });
+  });
+
+  it("I. store.address が空なら生値 anchor を作らず verifiedIdentity fallback のまま", () => {
+    const sparse: StoreScalars = {
+      name: "告膳",
+      prefecture: "",
+      city: "",
+      address: "   ",
+      phone: "",
+    };
+    const target = buildSourceVerificationTarget(sparse, {
+      address: "埼玉県所沢市日吉町19-12",
+      phone: "04-2998-6543",
+    });
+    expect(target.address).toBe("埼玉県所沢市日吉町19-12");
+    expect(target.legacyAddress).toBe("");
+    expect(
+      run(
+        sparse,
+        { name: "告膳", address: "埼玉県所沢市日吉町19-12", phone: null },
+        { address: "埼玉県所沢市日吉町19-12", phone: "04-2998-6543" },
+      ),
+    ).toBe("target_match");
+  });
+
+  it("J. 汚染 prefecture の二重化防止(前回 MEDIUM 修正)を維持する", () => {
+    const polluted: StoreScalars = {
+      name: "アズーリ 神楽坂",
+      prefecture: "日本、〒162-0825 東京都",
+      city: "新宿区",
+      address: "日本、〒162-0825 東京都新宿区神楽坂３丁目４ 2F",
+      phone: "050-5487-4438",
+    };
+    const target = buildSourceVerificationTarget(polluted, null);
+    expect(target.address).toBe("日本、〒162-0825 東京都新宿区神楽坂３丁目４ 2F");
+    expect(target.address.match(/東京都新宿区/g)).toHaveLength(1);
+    // 合成結果が生値と同一なので 2 本目の anchor は持たない。
+    expect(target.legacyAddress).toBe("");
+    expect(
+      run(polluted, {
+        name: "アズーリ 神楽坂",
+        address: "東京都新宿区神楽坂3-4 2F アズーリ",
+        phone: null,
+      }),
+    ).toBe("target_match");
+    expect(
+      run(polluted, {
+        name: "アズーリ 神楽坂",
+        address: "東京都新宿区神楽坂3丁目5",
+        phone: null,
+      }),
+    ).toBe("uncertain");
+  });
+
+  /**
+   * 本修正の中心的な証拠 — 成立集合が
+   * 「`main` semantics ∪ Issue #215 semantics」の**厳密な和集合**であること。
+   *
+   * `mainMatch` / `composedMatch` は、いずれも**無改変の `isTargetStoreMatch`** を
+   * それぞれの anchor へ適用して求める(判定規則を再実装しない)。
+   *
+   * - `mainMatch`   : Issue #215 以前の anchor = 生の `stores.address`
+   *   (空なら `verifiedIdentity`。`main` の `buildSourceVerificationTarget` と同じ)
+   * - `composedMatch`: PR #216 初版の anchor = 合成住所のみ
+   * - `fixedMatch`  : 現在の production path
+   */
+  describe("main vs PR property check", () => {
+    const mainAnchor = (
+      store: StoreScalars,
+      verified: { address: string; phone: string } | null,
+    ) => (store.address.trim() !== "" ? store.address : (verified?.address ?? ""));
+
+    const phoneAnchor = (
+      store: StoreScalars,
+      verified: { address: string; phone: string } | null,
+    ) => (normalizePhone(store.phone) !== "" ? store.phone : (verified?.phone ?? ""));
+
+    interface Fixture {
+      label: string;
+      store: StoreScalars;
+      observed: Observed;
+      verified?: { address: string; phone: string } | null;
+      /** Issue #215 が新規に救うケース(main では不成立)であることを主張する。 */
+      rescuedBy215?: true;
+    }
+
+    const FIXTURES: Fixture[] = [
+      {
+        label: "M1: 都道府県省略 + 建物名(main で成立)",
+        store: RESIDUAL_CHIBA,
+        observed: {
+          name: "東北メシ 炉端ジュン",
+          address: "柏市旭町1-1-12 ABCビル1F",
+          phone: null,
+        },
+      },
+      {
+        label: "M1: 都道府県・市区省略 + 建物名(main で成立)",
+        store: RESIDUAL_CHIBA,
+        observed: {
+          name: "東北メシ 炉端ジュン",
+          address: "旭町1-1-12 ABCビル1F",
+          phone: null,
+        },
+      },
+      {
+        label: "#215: 残差 + 建物名 vs フル住所(main では不成立)",
+        store: RESIDUAL_SHIBUYA,
+        observed: { name: "居酒屋 導楽", address: "東京都渋谷区神南1-2-3", phone: null },
+        rescuedBy215: true,
+      },
+      {
+        label: "#215: テリトリー city + 残差 vs フル住所(main で成立)",
+        store: { ...RESIDUAL_CHIBA, city: "柏市・我孫子市" },
+        observed: {
+          name: "東北メシ 炉端ジュン",
+          address: "千葉県柏市旭町1-1-12",
+          phone: null,
+        },
+      },
+      {
+        label: "フル住所店舗 vs フル住所ページ",
+        store: { ...RESIDUAL_CHIBA, address: "千葉県柏市旭町1-1-12" },
+        observed: {
+          name: "東北メシ 炉端ジュン",
+          address: "千葉県柏市旭町1-1-12",
+          phone: null,
+        },
+      },
+      {
+        label: "〒 付きフル住所店舗 vs 全角フル住所ページ",
+        store: { ...RESIDUAL_CHIBA, address: "〒2770852 千葉県 柏市 旭町1-1-12" },
+        observed: {
+          name: "東北メシ 炉端ジュン",
+          address: "日本、〒277-0852 千葉県柏市旭町１丁目１−１２",
+          phone: null,
+        },
+      },
+      {
+        label: "汚染 prefecture(アズーリ神楽坂)vs 上位集合ページ",
+        store: {
+          name: "アズーリ 神楽坂",
+          prefecture: "日本、〒162-0825 東京都",
+          city: "新宿区",
+          address: "日本、〒162-0825 東京都新宿区神楽坂３丁目４ 2F",
+          phone: "050-5487-4438",
+        },
+        observed: {
+          name: "アズーリ 神楽坂",
+          address: "東京都新宿区神楽坂3-4 2F アズーリ",
+          phone: null,
+        },
+      },
+      {
+        label: "番地違い(どちらの semantics でも不成立)",
+        store: RESIDUAL_SHIBUYA,
+        observed: { name: "居酒屋 導楽", address: "東京都渋谷区神南1-2-4", phone: null },
+      },
+      {
+        label: "M1 形状 + 番地違い(どちらの semantics でも不成立)",
+        store: RESIDUAL_CHIBA,
+        observed: {
+          name: "東北メシ 炉端ジュン",
+          address: "柏市旭町1-1-13 ABCビル1F",
+          phone: null,
+        },
+      },
+      {
+        label: "町丁目まで(番地レベルの具体性なし)",
+        store: RESIDUAL_CHIBA,
+        observed: { name: "東北メシ 炉端ジュン", address: "千葉県柏市旭町", phone: null },
+      },
+      {
+        label: "名前不一致(住所は一致)",
+        store: RESIDUAL_CHIBA,
+        observed: { name: "全く別の店舗", address: "柏市旭町1-1-12 ABCビル1F", phone: null },
+      },
+      {
+        label: "別店舗ページ(実機 smoke 事故の形状)",
+        store: RESIDUAL_CHIBA,
+        observed: {
+          name: "カフェ&民泊 三喜遊",
+          address: "香川県三豊市仁尾町仁尾丙795",
+          phone: null,
+        },
+      },
+      {
+        label: "住所不一致 + 電話一致",
+        store: RESIDUAL_CHIBA,
+        observed: {
+          name: "東北メシ 炉端ジュン",
+          address: "香川県三豊市仁尾町仁尾丙795",
+          phone: "04-7199-7985",
+        },
+      },
+      {
+        label: "住所不一致 + 電話不一致",
+        store: RESIDUAL_CHIBA,
+        observed: {
+          name: "東北メシ 炉端ジュン",
+          address: "香川県三豊市仁尾町仁尾丙795",
+          phone: "087-000-0000",
+        },
+      },
+      {
+        label: "sparse store + fresh Places anchor",
+        store: { name: "告膳", prefecture: "", city: "", address: "", phone: "" },
+        observed: { name: "告膳", address: "埼玉県所沢市日吉町19-12", phone: null },
+        verified: { address: "日本、〒359-1123 埼玉県所沢市日吉町１９−１２", phone: "04-2998-6543" },
+      },
+      {
+        label: "sparse store + fresh anchor だが別住所ページ",
+        store: { name: "告膳", prefecture: "", city: "", address: "", phone: "" },
+        observed: { name: "告膳", address: "千葉県柏市旭町1-1-12", phone: null },
+        verified: { address: "日本、〒359-1123 埼玉県所沢市日吉町１９−１２", phone: "04-2998-6543" },
+      },
+    ];
+
+    const verdicts = FIXTURES.map((f) => {
+      const verified = f.verified ?? null;
+      const target = buildSourceVerificationTarget(f.store, verified);
+      const phone = phoneAnchor(f.store, verified);
+      return {
+        label: f.label,
+        rescuedBy215: f.rescuedBy215 === true,
+        mainMatch: isTargetStoreMatch(f.observed, {
+          name: f.store.name,
+          address: mainAnchor(f.store, verified),
+          phone,
+        }),
+        composedMatch: isTargetStoreMatch(f.observed, {
+          name: f.store.name,
+          address: target.address,
+          phone,
+        }),
+        fixedMatch: run(f.store, f.observed, verified) === "target_match",
+      };
+    });
+
+    it.each(verdicts)("main で成立していれば修正後も成立する — $label", (v) => {
+      if (v.mainMatch) expect(v.fixedMatch).toBe(true);
+    });
+
+    it.each(verdicts)(
+      "修正後の成立 = main ∪ #215(新規の成立を増やさない) — $label",
+      (v) => {
+        expect(v.fixedMatch).toBe(v.mainMatch || v.composedMatch);
+      },
+    );
+
+    it("main が uncertain だった #215 ケースを新たに救えている", () => {
+      const rescued = verdicts.filter((v) => v.rescuedBy215);
+      expect(rescued.length).toBeGreaterThan(0);
+      for (const v of rescued) {
+        expect(v.mainMatch).toBe(false);
+        expect(v.composedMatch).toBe(true);
+        expect(v.fixedMatch).toBe(true);
+      }
+    });
+
+    it("PR #216 初版が main から落としていたケースが実在し、修正で復帰している", () => {
+      const regressed = verdicts.filter((v) => v.mainMatch && !v.composedMatch);
+      expect(regressed.length).toBeGreaterThan(0);
+      for (const v of regressed) expect(v.fixedMatch).toBe(true);
+    });
+
+    it("どちらの semantics でも不成立だったものは uncertain のまま", () => {
+      const neither = verdicts.filter((v) => !v.mainMatch && !v.composedMatch);
+      expect(neither.length).toBeGreaterThan(0);
+      for (const v of neither) expect(v.fixedMatch).toBe(false);
     });
   });
 });
