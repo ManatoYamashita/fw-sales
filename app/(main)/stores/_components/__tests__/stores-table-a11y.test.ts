@@ -99,6 +99,19 @@ describe("B: 破壊的操作 UI はサーバ判定の props で出し分ける",
   });
 });
 
+describe("D: 0 件時の案内", () => {
+  it("一覧ビューは isFiltered で案内を切り替える", () => {
+    expect(viewCode).toContain("emptyState={buildEmptyState(isFiltered)}");
+  });
+
+  it("絞り込みの有無はサーバで判定して渡す", () => {
+    expect(tableCode).toContain("hasAnyProgressFilter");
+    expect(tableCode).toContain("isFiltered={hasAnyProgressFilter(filter)}");
+    // 解決後の filter を使うとキーの有無は同じだが、意図を素の filter に固定しておく
+    expect(tableCode).not.toContain("hasAnyProgressFilter(resolvedFilter)");
+  });
+});
+
 describe("C: sales=me の解決", () => {
   it("セッションが無い場合に 'none' (未担当) へフォールバックしない", () => {
     expect(tableCode).toMatch(/filter\.sales === "me"/);

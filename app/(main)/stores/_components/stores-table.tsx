@@ -1,6 +1,10 @@
 import { listSalesProgressRows } from "@/lib/queries/sales-progress";
 import { getCurrentProfile } from "@/lib/supabase/server";
-import type { ProgressSort, SalesProgressFilter } from "@/lib/domain/sales-progress";
+import {
+  hasAnyProgressFilter,
+  type ProgressSort,
+  type SalesProgressFilter,
+} from "@/lib/domain/sales-progress";
 import { StoresTableView } from "./stores-table-view";
 
 /**
@@ -67,5 +71,13 @@ export async function StoresTable({
       : filter;
 
   const rows = await listSalesProgressRows(resolvedFilter, sort);
-  return <StoresTableView rows={rows} canDelete={isAdmin} />;
+  return (
+    <StoresTableView
+      rows={rows}
+      canDelete={isAdmin}
+      // 0 件だったときに「条件に一致しない」と「店舗がまだ無い」を言い分けるため。
+      // 解決前の filter を見る (`sales=me` は解決の前後でキーの有無が変わらない)。
+      isFiltered={hasAnyProgressFilter(filter)}
+    />
+  );
 }

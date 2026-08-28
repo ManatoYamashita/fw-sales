@@ -224,6 +224,19 @@ export interface SalesProgressFilter {
   channel?: Channel;
 }
 
+/**
+ * 絞り込み条件が 1 つでも指定されているか。
+ *
+ * 「条件に一致しなかった 0 件」と「そもそも店舗が 0 件」を一覧側で言い分けるために使う
+ * (前者で新規登録を案内すると的外れになる)。`parseFilter` が値の無いキーを
+ * そもそも立てないため、キーの有無で判定できる。空文字も念のため未指定として扱う。
+ */
+export function hasAnyProgressFilter(filter: SalesProgressFilter): boolean {
+  return Object.values(filter).some(
+    (value) => value !== undefined && value !== "",
+  );
+}
+
 export function applyProgressFilter(
   rows: readonly SalesProgressRow[],
   filter: SalesProgressFilter,

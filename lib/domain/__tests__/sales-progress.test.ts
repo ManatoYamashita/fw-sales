@@ -7,6 +7,7 @@ import {
   deriveCurrentNextAction,
   deriveCurrentSalesState,
   getNextActionUrgency,
+  hasAnyProgressFilter,
   pickLatestDeal,
   type SalesProgressRow,
 } from "@/lib/domain/sales-progress";
@@ -726,5 +727,34 @@ describe("applyProgressSort", () => {
     const storeChannelOrder = applyStoreSort(stores, { key: "channel", dir: "asc" }).map((s) => s.id);
     const progressChannelOrder = idsOf(applyProgressSort(rows, { key: "channel", dir: "asc" }));
     expect(progressChannelOrder).toEqual(storeChannelOrder);
+  });
+});
+
+describe("hasAnyProgressFilter", () => {
+  it("条件なしは false (店舗自体が 0 件かを判定するため)", () => {
+    expect(hasAnyProgressFilter({})).toBe(false);
+  });
+
+  it.each([
+    ["検索語", { q: "渋谷" }],
+    ["担当 (UUID)", { sales: "uuid-1" }],
+    ["担当 (未担当)", { sales: "none" }],
+    ["担当 (自分・未解決)", { sales: "me" }],
+    ["次回アクション", { next: "overdue" as const }],
+    ["営業状態", { state: "following" as const }],
+    ["調査段階", { stage: "調査済み" as const }],
+    ["チャネル", { channel: "DM推奨" as const }],
+    ["アポ", { appt: "acquired" as const }],
+    ["営業記録", { deal: "none" as const }],
+  ])("%s が指定されていれば true", (_label, filter) => {
+    expect(hasAnyProgressFilter(filter)).toBe(true);
+  });
+
+  it("空文字は未指定として扱う", () => {
+    expect(hasAnyProgressFilter({ q: "", sales: "" })).toBe(false);
+  });
+
+  it("複数条件でも true", () => {
+    expect(hasAnyProgressFilter({ sales: "me", next: "today" })).toBe(true);
   });
 });

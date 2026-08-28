@@ -1,11 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
+  ASSIGNEE_SCOPE_LABELS,
+  AXIS_LABELS,
+  TIMING_SCOPE_LABELS,
   buildAssigneeHref,
   buildTimingHref,
+  isQuickTimingValue,
+  isSalesSentinel,
   readQuickFilterState,
   type AssigneeScope,
   type TimingScope,
 } from "../store-quick-filter-params";
+import { quickFilterChipClassName } from "../store-quick-filters";
 
 /** クエリ文字列から `URLSearchParams` を作る小さなヘルパ。 */
 function params(qs: string): URLSearchParams {
@@ -171,4 +177,97 @@ describe("クイックフィルタが所有しない param の保持", () => {
     buildTimingHref(source, "overdue");
     expect(source.toString()).toBe("sales=me&next=today");
   });
+});
+
+describe("文言", () => {
+  it("軸の見出しが「何を絞り込むか」を名詞で示す", () => {
+    expect(AXIS_LABELS.assignee).toBe("担当店舗");
+    expect(AXIS_LABELS.timing).toBe("次回アクション");
+  });
+
+  it("me は主語を立てて本人の担当だと分かる", () => {
+    // 「自分の担当」だと見出し『担当店舗』と並んだとき何の担当か曖昧になる。
+    expect(ASSIGNEE_SCOPE_LABELS.me).toBe("自分が担当");
+    expect(ASSIGNEE_SCOPE_LABELS.none).toBe("未担当");
+    expect(ASSIGNEE_SCOPE_LABELS.all).toBe("すべて");
+  });
+
+  it("対応タイミングのラベルは短い日常語", () => {
+    expect(TIMING_SCOPE_LABELS.overdue).toBe("期限超過");
+    expect(TIMING_SCOPE_LABELS.today).toBe("今日");
+  });
+
+  it("すべてのラベルが空でない", () => {
+    for (const label of [
+      ...Object.values(ASSIGNEE_SCOPE_LABELS),
+      ...Object.values(TIMING_SCOPE_LABELS),
+      ...Object.values(AXIS_LABELS),
+    ]) {
+      expect(label.trim()).not.toBe("");
+    }
+  });
+});
+
+describe("クイックフィルタが表現できる値の判定", () => {
+  it.each(["me", "none"])("sales=%s は sentinel", (value) => {
+    expect(isSalesSentinel(value)).toBe(true);
+  });
+
+  it.each(["", "uuid-1", "mine", "all"])("sales=%s は sentinel ではない", (value) => {
+    expect(isSalesSentinel(value)).toBe(false);
+  });
+
+  it.each(["overdue", "today"])("next=%s はクイックフィルタで表現できる", (value) => {
+    expect(isQuickTimingValue(value)).toBe(true);
+  });
+
+  it.each(["upcoming", "unset", "", "bogus"])(
+    "next=%s はクイックフィルタで表現できない",
+    (value) => {
+      expect(isQuickTimingValue(value)).toBe(false);
+    },
+  );
+});
+
+describe("quickFilterChipClassName (視覚的優先度)", () => {
+  const base = (className: string) =>
+    className.split(/\s+/).filter((c) => c && !c.includes(":"));
+
+  it("active は主要 CTA (bg-primary / bg-foreground の塗り) を使わない", () => {
+    const active = quickFilterChipClassName(true);
+    // 「店舗を登録」より一段弱く見せる。以前は bg-foreground のほぼ黒塗りだった。
+    expect(base(active)).not.toContain("bg-foreground");
+    expect(base(active)).not.toContain("bg-primary");
+    expect(base(active)).toContain("bg-accent");
+    expect(base(active)).toContain("text-accent-foreground");
+  });
+
+  it("active は背景・枠線・太さの 3 点で inactive と区別できる", () => {
+    const active = base(quickFilterChipClassName(true));
+    const inactive = base(quickFilterChipClassName(false));
+    expect(active).toContain("border-foreground/35");
+    expect(active).toContain("font-semibold");
+    expect(inactive).toContain("border-border");
+    expect(inactive).toContain("font-medium");
+    expect(inactive).toContain("bg-card");
+  });
+
+  it("フォーカスリングは状態によらず維持する", () => {
+    for (const active of [true, false]) {
+      expect(quickFilterChipClassName(active)).toContain(
+        "focus-visible:ring-2",
+      );
+    }
+  });
+
+  it.each([true, false])(
+    "active=%s で基底の色ユーティリティが重ならない (後勝ちで消えない)",
+    (active) => {
+      const utilities = base(quickFilterChipClassName(active));
+      const colors = ["text-foreground/80", "text-accent-foreground"];
+      expect(utilities.filter((c) => colors.includes(c))).toHaveLength(1);
+      const backgrounds = ["bg-card", "bg-accent", "bg-foreground"];
+      expect(utilities.filter((c) => backgrounds.includes(c))).toHaveLength(1);
+    },
+  );
 });

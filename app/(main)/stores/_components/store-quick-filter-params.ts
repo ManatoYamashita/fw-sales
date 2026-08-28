@@ -51,7 +51,9 @@ export const TIMING_SCOPES: readonly TimingScope[] = ["overdue", "today"];
 
 export const ASSIGNEE_SCOPE_LABELS: Record<AssigneeScope, string> = {
   all: "すべて",
-  me: "自分の担当",
+  // 「自分の担当」だと『担当:』という見出しと合わせて何の担当か曖昧なので、
+  // 主語を立てて「ログイン中の本人が担当している店舗」だと初見で分かる形にする。
+  me: "自分が担当",
   none: "未担当",
 };
 
@@ -59,6 +61,17 @@ export const TIMING_SCOPE_LABELS: Record<TimingScope, string> = {
   overdue: "期限超過",
   today: "今日",
 };
+
+/** 各軸の見出し。UI の視覚ラベルと `<nav aria-label>` の両方の元にする。 */
+export const AXIS_LABELS = {
+  assignee: "担当店舗",
+  timing: "次回アクション",
+} as const;
+
+/** 対応タイミング軸がその値を表現できるか。 */
+export function isQuickTimingValue(value: string): value is TimingScope {
+  return (TIMING_SCOPES as readonly string[]).includes(value);
+}
 
 /** クイックフィルタが所有する param。片方の軸の操作で他方を消さないための単一の真実。 */
 const ASSIGNEE_PARAM = "sales";
@@ -88,7 +101,7 @@ export function readQuickFilterState(
   const next = params.get(TIMING_PARAM);
   return {
     assignee: !sales ? "all" : isSalesSentinel(sales) ? sales : null,
-    timing: next === "overdue" || next === "today" ? next : null,
+    timing: next && isQuickTimingValue(next) ? next : null,
   };
 }
 

@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Inbox, Trash2 } from "lucide-react";
+import { Inbox, SearchX, Trash2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { DataTable, type ColumnDef } from "@/components/ui/data-table";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -35,7 +35,35 @@ export interface StoresTableViewProps {
    * `bulkDeleteStoresAction` 側の `requireAdmin` ガード。
    */
   canDelete: boolean;
+  /**
+   * 絞り込み条件が 1 つ以上有効か (`hasAnyProgressFilter` の結果)。
+   *
+   * 0 件のときの案内を「条件に一致しない」と「店舗がまだ無い」で言い分けるために使う。
+   * クイックフィルタで「今日」を選んで 0 件のときに新規登録を勧めるのは的外れなので、
+   * 条件が効いている場合は条件の変更・解除を案内する。
+   */
+  isFiltered: boolean;
   // task 4.2 (PR3a): activeDrStoreIds props 撤去 (#121 / #110 連動)。
+}
+
+/**
+ * 一覧が 0 件のときの案内。`isFiltered` で文面を切り替える。
+ * 表示ロジックを純関数に切り出し、テストから直接検証できるようにしている。
+ */
+export function buildEmptyState(isFiltered: boolean) {
+  return isFiltered ? (
+    <EmptyState
+      icon={<SearchX />}
+      title="現在の条件に一致する店舗はありません"
+      description="条件を変更または解除してください。"
+    />
+  ) : (
+    <EmptyState
+      icon={<Inbox />}
+      title="該当する店舗がありません"
+      description="検索条件を変更するか、店舗を新しく登録してください。"
+    />
+  );
 }
 
 const URGENCY_TONE: Record<Exclude<NextActionUrgency, "unset">, "destructive" | "warning" | "info"> = { overdue: "destructive", today: "warning", upcoming: "info" };
@@ -139,6 +167,7 @@ function buildColumns(canDelete: boolean): ColumnDef<SalesProgressRow>[] {
 export function StoresTableView({
   rows,
   canDelete,
+  isFiltered,
 }: StoresTableViewProps) {
   const router = useRouter();
   const columns = buildColumns(canDelete);
@@ -204,13 +233,7 @@ export function StoresTableView({
                 }
               : undefined
           }
-          emptyState={
-            <EmptyState
-              icon={<Inbox />}
-              title="該当する店舗がありません"
-              description="検索条件を変更するか、店舗を新しく登録してください。"
-            />
-          }
+          emptyState={buildEmptyState(isFiltered)}
         />
       </Card>
 

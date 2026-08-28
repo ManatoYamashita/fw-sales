@@ -34,6 +34,8 @@ import {
 } from "@/lib/domain/sales-progress";
 import {
   SALES_SENTINEL_VALUES,
+  isQuickTimingValue,
+  isSalesSentinel,
   type SalesSentinel,
 } from "../../_components/store-quick-filter-params";
 
@@ -270,7 +272,27 @@ export function ProgressFilterBar({ profileEntries }: ProgressFilterBarProps) {
   const filterAnchor = useRef<HTMLDivElement>(null);
   const [openFilter, setOpenFilter] = useState(false);
 
-  const hasAnyFilter = filterCount > 0 || q.length > 0;
+  /*
+    「適用中」チップは **クイックフィルタでは見えない条件だけ**を表示する。
+    すぐ上のクイックフィルタが `sales=me` / `sales=none` / `next=overdue` /
+    `next=today` を選択状態として既に示しているため、同じ条件をチップにも出すと
+    同一画面で二重に見える (例: 上「次回アクション: 今日」/ 下「次回 本日 ×」)。
+
+    一方、クイックフィルタが表現できない条件
+    (特定担当者 `sales=<UUID>` / `next=upcoming` / `next=unset` /
+     q・state・deal・stage・channel・appt) は、ここでしか可視化されないので必ず残す。
+
+    行ごと隠すのはチップが 1 つも無いときだけ。「すべて解除」の意味は変えていない
+    (clearAll は従来どおり `ALL_FILTER_KEYS` + sort/dir を消すので、
+     クイックフィルタ由来の sales / next も一緒に解除される)。
+  */
+  const showSalesChip = Boolean(sales) && !isSalesSentinel(sales);
+  const showNextChip = Boolean(next) && !isQuickTimingValue(next);
+  const visibleChipCount =
+    [q, state, appt, deal, stage, channel].filter(Boolean).length +
+    (showSalesChip ? 1 : 0) +
+    (showNextChip ? 1 : 0);
+  const hasAnyFilter = visibleChipCount > 0;
 
   const labelOf = (options: ReadonlyArray<{ value: string; label: string }>, value: string) =>
     options.find((o) => o.value === value)?.label ?? value;
@@ -371,12 +393,12 @@ export function ProgressFilterBar({ profileEntries }: ProgressFilterBarProps) {
               {labelOf(DEAL_OPTIONS, deal)}
             </Chip>
           ) : null}
-          {next ? (
+          {showNextChip ? (
             <Chip onClear={() => setKey("next", "")} label="次回">
               {labelOf(NEXT_OPTIONS, next)}
             </Chip>
           ) : null}
-          {sales ? (
+          {showSalesChip ? (
             <Chip onClear={() => setKey("sales", "")} label="担当">
               {labelOf(salesOptions, sales)}
             </Chip>
@@ -416,6 +438,32 @@ interface TriggerButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
   badge?: number;
 }
 
+/**
+ * 絞り込みトリガーの class。テストから直接検証できるよう純関数にしている。
+ *
+ * ## 以前の不具合 (Preview で「黒い長方形」になっていた原因)
+ * 旧実装は基底の `text-foreground/80` を常に付けたうえで、active のとき
+ * `text-background` を**追記**していた。`cn` は素の clsx (tailwind-merge なし) なので
+ * 両方が class 属性に残り、詳細度が同じため生成 CSS の記述順で勝敗が決まる。
+ * 実際のビルド成果物では `.text-background` より `.text-foreground\/80` が後ろにあり、
+ * 後者が勝つ。結果 `bg-foreground` (ほぼ黒) の上に `text-foreground/80` (ほぼ黒) が
+ * 乗り、ラベルとアイコンが不可視になっていた
+ * (badge だけは別要素で `bg-background` を持つため件数だけ見えていた)。
+ *
+ * 対策として active / inactive を**排他の三項**にし、基底の色を重ね書きしない。
+ * `hover:` 付きは擬似クラス分だけ詳細度が高いので基底と併記してよい。
+ */
+export function triggerButtonClassName(active: boolean): string {
+  return cn(
+    "inline-flex h-11 items-center gap-1.5 rounded-lg px-3 text-sm font-medium",
+    "border transition-[background-color,border-color,box-shadow]",
+    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+    active
+      ? "bg-foreground text-background border-foreground hover:bg-foreground/90"
+      : "bg-transparent text-foreground/80 border-transparent hover:bg-accent hover:text-foreground",
+  );
+}
+
 function TriggerButton({
   active,
   icon,
@@ -427,15 +475,7 @@ function TriggerButton({
   return (
     <button
       type="button"
-      className={cn(
-        "inline-flex h-11 items-center gap-1.5 rounded-lg px-3 text-sm font-medium",
-        "border border-transparent transition-[background-color,border-color,box-shadow]",
-        "hover:bg-accent text-foreground/80 hover:text-foreground",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        active &&
-          "bg-foreground text-background border-foreground hover:bg-foreground/90 hover:text-background",
-        className,
-      )}
+      className={cn(triggerButtonClassName(Boolean(active)), className)}
       {...props}
     >
       {icon}

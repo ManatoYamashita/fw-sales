@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils/cn";
 import {
   ASSIGNEE_SCOPES,
   ASSIGNEE_SCOPE_LABELS,
+  AXIS_LABELS,
   TIMING_SCOPES,
   TIMING_SCOPE_LABELS,
   buildAssigneeHref,
@@ -17,9 +18,9 @@ import {
 /**
  * 店舗一覧のクイックフィルタ (2 軸)。
  *
- * 「担当範囲」と「対応タイミング」は別の軸なので、独立した 2 つの `<nav>` として
+ * 「担当店舗」と「次回アクション」は別の軸なので、独立した 2 つの `<nav>` として
  * 表現する。片方を押しても他方の param は保持され、`?sales=me&next=overdue`
- * (自分の担当かつ期限超過) が 2 クリックで作れる。URL 構築規則は
+ * (自分が担当かつ期限超過) が 2 クリックで作れる。URL 構築規則は
  * `store-quick-filters.ts` (純粋関数) が単一の真実。
  *
  * ## a11y
@@ -45,10 +46,10 @@ export function StoreQuickFilters() {
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
       <nav
-        aria-label="担当範囲で絞り込み"
+        aria-label={`${AXIS_LABELS.assignee}で絞り込み`}
         className="flex items-center gap-1.5 flex-wrap"
       >
-        <GroupLabel>担当</GroupLabel>
+        <GroupLabel>{AXIS_LABELS.assignee}</GroupLabel>
         {ASSIGNEE_SCOPES.map((scope) => (
           <QuickFilterChip
             key={scope}
@@ -66,10 +67,10 @@ export function StoreQuickFilters() {
       />
 
       <nav
-        aria-label="対応タイミングで絞り込み"
+        aria-label={`${AXIS_LABELS.timing}で絞り込み`}
         className="flex items-center gap-1.5 flex-wrap"
       >
-        <GroupLabel>対応</GroupLabel>
+        <GroupLabel>{AXIS_LABELS.timing}</GroupLabel>
         {TIMING_SCOPES.map((scope) => {
           const active = timing === scope;
           return (
@@ -101,6 +102,37 @@ function GroupLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
+/**
+ * クイックフィルタチップの class。テストから直接検証できるよう純関数にしている。
+ *
+ * ## 視覚的優先度
+ * クイックフィルタは主要 CTA ではない。以前は active を `bg-foreground`
+ * (ほぼ黒の塗り) にしていたため、「店舗を登録」(主要 CTA) と同じ強さに見えていた。
+ * active は `bg-accent` の淡い面 + 強めのボーダー + 太字で表し、
+ * 主要 CTA より一段弱く見せる。
+ *
+ * ## 色だけに依存しない
+ * active は Check アイコンと `aria-current` でも判別できる (呼び出し側)。
+ * コントラストは light `#0f172a` on `#e2e8f0`、dark `#f1f5f9` on `#334155` で
+ * いずれも WCAG AA を大きく上回る。
+ *
+ * ## 基底ユーティリティを重ねない
+ * `cn` は素の clsx (tailwind-merge なし) なので、同じプロパティの基底
+ * ユーティリティを 2 つ並べると CSS の記述順で勝敗が決まり、意図と逆になりうる
+ * (`progress-filter-bar.tsx` の絞り込みボタンで実際に文字が消えた)。
+ * active / inactive は必ず**排他の三項**で書き、色を重ね書きしない。
+ */
+export function quickFilterChipClassName(active: boolean): string {
+  return cn(
+    "inline-flex items-center gap-1 h-9 px-3 rounded-full text-sm",
+    "border transition-[background-color,color,border-color]",
+    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+    active
+      ? "bg-accent text-accent-foreground border-foreground/35 font-semibold"
+      : "bg-card text-foreground/80 border-border font-medium hover:bg-accent/60 hover:text-foreground",
+  );
+}
+
 function QuickFilterChip({
   href,
   active,
@@ -120,14 +152,7 @@ function QuickFilterChip({
       prefetch={false}
       aria-current={active ? "true" : undefined}
       title={title}
-      className={cn(
-        "inline-flex items-center gap-1 h-9 px-3 rounded-full text-sm font-medium",
-        "border transition-[background-color,color,border-color]",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        active
-          ? "bg-foreground text-background border-foreground"
-          : "border-border bg-background text-foreground/80 hover:bg-accent hover:text-foreground",
-      )}
+      className={quickFilterChipClassName(active)}
     >
       {active ? <Check className="h-3.5 w-3.5 shrink-0" aria-hidden /> : null}
       {children}
@@ -146,9 +171,9 @@ function QuickFilterChip({
 export function StoreQuickFiltersFallback() {
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2" aria-hidden>
-      <div className="h-9 w-[280px] max-w-full rounded-full bg-muted/40" />
+      <div className="h-9 w-[330px] max-w-full rounded-full bg-muted/40" />
       <span className="hidden sm:block h-5 w-px self-center bg-border" />
-      <div className="h-9 w-[180px] max-w-full rounded-full bg-muted/40" />
+      <div className="h-9 w-[250px] max-w-full rounded-full bg-muted/40" />
     </div>
   );
 }

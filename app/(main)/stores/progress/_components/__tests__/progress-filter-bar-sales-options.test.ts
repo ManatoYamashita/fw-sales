@@ -13,7 +13,10 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { buildSalesOptions } from "../progress-filter-bar";
+import {
+  buildSalesOptions,
+  triggerButtonClassName,
+} from "../progress-filter-bar";
 import {
   SALES_SENTINEL_VALUES,
   isSalesSentinel,
@@ -112,4 +115,117 @@ describe("Select / チップへの配線", () => {
     // 単一の真実は store-quick-filter-params.ts の SALES_SENTINEL_VALUES。
     expect(code).toContain("SALES_SENTINEL_VALUES");
   });
+
+  it("クイックフィルタで表現できる条件は「適用中」チップに重複表示しない", () => {
+    expect(code).toContain("const showSalesChip = Boolean(sales) && !isSalesSentinel(sales)");
+    expect(code).toContain("const showNextChip = Boolean(next) && !isQuickTimingValue(next)");
+    expect(code).toContain("{showNextChip ? (");
+    expect(code).toContain("{showSalesChip ? (");
+    // 無条件描画の旧実装へ戻っていないこと
+    expect(code).not.toContain("{next ? (");
+    expect(code).not.toContain("{sales ? (");
+  });
+
+  it("「適用中」行は表示できるチップが 1 つ以上あるときだけ出す", () => {
+    expect(code).toContain("const hasAnyFilter = visibleChipCount > 0");
+    // クイックフィルタで表現できない条件は必ず数に入れる
+    expect(code).toContain("[q, state, appt, deal, stage, channel].filter(Boolean).length");
+  });
+
+  it("「すべて解除」は従来どおり全フィルタを消す (意味を変えない)", () => {
+    expect(code).toContain("ALL_FILTER_KEYS.forEach((k) => nextParams.delete(k))");
+    expect(code).toContain('nextParams.delete("sort")');
+    expect(code).toContain('nextParams.delete("dir")');
+    // sales / next も ALL_FILTER_KEYS に含まれ続けること
+    // `[^\]]*` は改行も含むので dotAll フラグは不要。
+    expect(code).toMatch(/ALL_FILTER_KEYS = \[[^\]]*"sales"[^\]]*\]/);
+    expect(code).toMatch(/ALL_FILTER_KEYS = \[[^\]]*"next"[^\]]*\]/);
+  });
 });
+
+/**
+ * `cn` は素の clsx (tailwind-merge なし) なので、同じプロパティの**基底**
+ * ユーティリティを 2 つ並べると class 属性に両方が残り、詳細度が同じため
+ * 生成 CSS の記述順で勝敗が決まる。実際のビルド成果物では
+ * `.text-foreground\/80` が `.text-background` より後ろにあり後者を打ち消すため、
+ * 絞り込みボタンが active のとき「黒背景 + ほぼ黒の文字」= 文字とアイコンが
+ * 見えない黒い長方形になっていた (Preview で報告された状態)。
+ */
+const COLOR_UTILITIES = [
+  "text-foreground",
+  "text-foreground/80",
+  "text-background",
+  "text-accent-foreground",
+  "text-muted-foreground",
+  "bg-foreground",
+  "bg-background",
+  "bg-accent",
+  "bg-card",
+  "bg-transparent",
+];
+
+/** 変種 (`hover:` 等) を除いた基底ユーティリティだけを返す。 */
+function baseUtilities(className: string): string[] {
+  return className
+    .split(/\s+/)
+    .filter(Boolean)
+    .filter((c) => !c.includes(":"));
+}
+
+/** 同じ CSS プロパティを争う基底ユーティリティを列挙する。 */
+function conflictingBaseColors(className: string, prefix: "text-" | "bg-") {
+  return baseUtilities(className).filter(
+    (c) => c.startsWith(prefix) && COLOR_UTILITIES.includes(c),
+  );
+}
+
+describe("triggerButtonClassName (絞り込みボタン)", () => {
+  it("active で文字色が背景色に打ち消されない (Preview の黒塗り回帰)", () => {
+    const active = triggerButtonClassName(true);
+    expect(active).toContain("bg-foreground");
+    expect(active).toContain("text-background");
+    // 基底の text-foreground/80 が残っていると後勝ちして文字が消える
+    expect(baseUtilities(active)).not.toContain("text-foreground/80");
+  });
+
+  it("inactive は通常の文字色を持つ", () => {
+    const inactive = triggerButtonClassName(false);
+    expect(baseUtilities(inactive)).toContain("text-foreground/80");
+    expect(baseUtilities(inactive)).not.toContain("text-background");
+    expect(baseUtilities(inactive)).not.toContain("bg-foreground");
+  });
+
+  it.each([true, false])(
+    "active=%s で基底の色ユーティリティが各プロパティ 1 つだけ",
+    (active) => {
+      const className = triggerButtonClassName(active);
+      expect(conflictingBaseColors(className, "text-")).toHaveLength(1);
+      expect(conflictingBaseColors(className, "bg-")).toHaveLength(1);
+    },
+  );
+
+  it("検出ロジック自体が旧実装の class を不正と判定する", () => {
+    // 修正前の TriggerButton が生成していた class 列。基底の text 色が 2 つ並び、
+    // 生成 CSS の後勝ちで text-background が打ち消されていた。
+    const legacy =
+      "inline-flex h-11 items-center gap-1.5 rounded-lg px-3 text-sm font-medium " +
+      "border border-transparent hover:bg-accent text-foreground/80 hover:text-foreground " +
+      "bg-foreground text-background border-foreground hover:bg-foreground/90";
+    expect(conflictingBaseColors(legacy, "text-")).toEqual([
+      "text-foreground/80",
+      "text-background",
+    ]);
+    // 現行実装は同じ検出で 1 つに収まる
+    expect(conflictingBaseColors(triggerButtonClassName(true), "text-")).toHaveLength(1);
+  });
+
+  it("フォーカスリングと枠線は状態によらず維持する", () => {
+    for (const active of [true, false]) {
+      const className = triggerButtonClassName(active);
+      expect(className).toContain("focus-visible:ring-2");
+      expect(className).toContain("border");
+    }
+  });
+});
+
+export { baseUtilities, conflictingBaseColors, COLOR_UTILITIES };
