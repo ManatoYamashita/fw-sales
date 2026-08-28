@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Inbox, Trash2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
@@ -20,16 +21,33 @@ import { StoreRowActions } from "./store-row-actions";
 import { StoreDeleteConfirmDialog } from "./store-delete-confirm-dialog";
 import { buildStoreLocationColumn } from "./store-location-column";
 import { bulkDeleteStoresAction } from "@/lib/actions/store-actions";
-import { useIsAdmin } from "@/components/layout/current-user-provider";
 
 export interface StoresTableViewProps {
   rows: readonly SalesProgressRow[];
+  /**
+   * 削除系 UI (行の削除ボタン / チェックボックス列 / 一括削除バー) を出すか。
+   *
+   * #155 の方針どおり破壊的操作は admin 限定。判定は `stores-table.tsx` が
+   * **サーバで**確定させて渡す。client の `useIsAdmin().loaded` を待つ方式だと
+   * 初期描画後にチェックボックス列が出現してテーブルが横にずれるため。
+   *
+   * **これは認可境界ではない。** 真の防御は `deleteStoreAction` /
+   * `bulkDeleteStoresAction` 側の `requireAdmin` ガード。
+   */
+  canDelete: boolean;
   // task 4.2 (PR3a): activeDrStoreIds props 撤去 (#121 / #110 連動)。
 }
 
 const URGENCY_TONE: Record<Exclude<NextActionUrgency, "unset">, "destructive" | "warning" | "info"> = { overdue: "destructive", today: "warning", upcoming: "info" };
 
-function buildColumns(): ColumnDef<SalesProgressRow>[] {
+/**
+ * 行クリック (`rowHref`) と店舗名リンクの遷移先。
+ * 両者がずれると「行のどこを押したかで飛び先が変わる」ため 1 箇所に集約する。
+ */
+const storeDetailHref = (row: SalesProgressRow) =>
+  `/stores/${row.store.id}?tab=progress`;
+
+function buildColumns(canDelete: boolean): ColumnDef<SalesProgressRow>[] {
 
   return [
     {
@@ -42,7 +60,20 @@ function buildColumns(): ColumnDef<SalesProgressRow>[] {
       title: (r) => r.store.name,
       cell: (r) => (
         <span className="inline-flex items-center gap-2 min-w-0 max-w-full align-middle">
-          <span className="font-semibold text-foreground truncate">{r.store.name}</span>
+          {/*
+            店舗名は正式な <Link>。行全体の `rowHref` はマウス操作の便宜でしかなく、
+            `<tr>` は tabIndex を持たないためキーボードからは到達できない。
+            実 <a> を 1 つ置くことで Tab フォーカス / Enter / Cmd・Ctrl+click /
+            middle click / 新規タブ / リンクのコピーが成立する。
+            `DataTableRow.shouldSkipNavigation` が `target.closest("a")` を見て行側の
+            ナビゲーションを抑止するため、クリックが二重発火することはない。
+          */}
+          <Link
+            href={storeDetailHref(r)}
+            className="font-semibold text-foreground truncate rounded-sm hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {r.store.name}
+          </Link>
           <span className="flex-shrink-0">
             <IndividualStoreBadge operatorType={r.store.operator_type} />
           </span>
@@ -100,19 +131,17 @@ function buildColumns(): ColumnDef<SalesProgressRow>[] {
       align: "right",
       width: "92px",
       preventRowClick: true,
-      cell: (r) => <StoreRowActions storeId={r.store.id} storeName={r.store.name} />,
+      cell: (r) => <StoreRowActions storeId={r.store.id} storeName={r.store.name} canDelete={canDelete} />,
     },
   ];
 }
 
 export function StoresTableView({
   rows,
+  canDelete,
 }: StoresTableViewProps) {
   const router = useRouter();
-  const columns = buildColumns();
-  // #155: 一括削除は admin 限定 (真の防御はサーバ側 requireAdmin)。
-  const { isAdmin, loaded } = useIsAdmin();
-  const denyDelete = loaded && !isAdmin;
+  const columns = buildColumns(canDelete);
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkOpen, setBulkOpen] = useState(false);
@@ -159,13 +188,22 @@ export function StoresTableView({
           columns={columns}
           rows={[...rows]}
           rowKey={(r) => r.store.id}
-          rowHref={(r) => `/stores/${r.store.id}?tab=progress`}
-          rowSelection={{
-            selectedRowKeys: selectedVisibleIds,
-            onChange: setSelectedIds,
-            allRowsLabel: "表示中の店舗をすべて選択",
-            rowLabel: (r) => `${r.store.name} を選択`,
-          }}
+          rowHref={storeDetailHref}
+          /*
+            一般営業担当が使える一括操作は存在しない (bulk は削除のみ)。
+            選ぶだけ選べて何もできないチェックボックス列は認知負荷でしかないので、
+            admin 以外には列ごと出さない。
+          */
+          rowSelection={
+            canDelete
+              ? {
+                  selectedRowKeys: selectedVisibleIds,
+                  onChange: setSelectedIds,
+                  allRowsLabel: "表示中の店舗をすべて選択",
+                  rowLabel: (r) => `${r.store.name} を選択`,
+                }
+              : undefined
+          }
           emptyState={
             <EmptyState
               icon={<Inbox />}
@@ -177,8 +215,9 @@ export function StoresTableView({
       </Card>
 
       {/* 下部固定バー: 1 件以上選択時のみ表示。sticky でメインコンテンツ幅に追従し、
-          サイドバー折りたたみ (#106) でも左端がズレない (エリア検索の一括バーと同じ仕組み)。 */}
-      {selectedVisibleIds.length > 0 && (
+          サイドバー折りたたみ (#106) でも左端がズレない (エリア検索の一括バーと同じ仕組み)。
+          非 admin ではそもそも選択できないが、条件を明示して意図を残す。 */}
+      {canDelete && selectedVisibleIds.length > 0 && (
         <div
           role="region"
           aria-label="選択した店舗の一括操作"
@@ -194,8 +233,7 @@ export function StoresTableView({
             variant="destructive"
             size="sm"
             onClick={() => setBulkOpen(true)}
-            disabled={isDeleting || denyDelete}
-            title={denyDelete ? "管理者のみ実行できます" : undefined}
+            disabled={isDeleting}
             className="ml-auto gap-1.5"
           >
             {isDeleting ? <Spinner /> : <Trash2 className="h-3.5 w-3.5" />}

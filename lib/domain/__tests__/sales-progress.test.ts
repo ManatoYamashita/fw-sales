@@ -458,6 +458,42 @@ describe("applyProgressFilter", () => {
     expect(idsOf(applyProgressFilter(rows, { sales: "uuid-1" }))).toEqual(["a"]);
   });
 
+  it("sales: 'none' で未担当の店舗のみに絞り込める", () => {
+    const rows = rowsOf(
+      { store: makeStore({ id: "a", assigned_sales_user_id: "uuid-1" }) },
+      { store: makeStore({ id: "b" }) },
+      { store: makeStore({ id: "c" }) },
+    );
+    expect(idsOf(applyProgressFilter(rows, { sales: "none" }))).toEqual(["b", "c"]);
+  });
+
+  it("sales: 'me' は未解決のまま届いてもどの店舗にも一致しない", () => {
+    // 「自分の担当」の UUID 解決は stores-table.tsx の責務。解決漏れが起きたとき、
+    // 黙って「未担当一覧」や「全件」に化けず空になることを固定する。
+    const rows = rowsOf(
+      { store: makeStore({ id: "a", assigned_sales_user_id: "uuid-1" }) },
+      { store: makeStore({ id: "b" }) },
+    );
+    expect(idsOf(applyProgressFilter(rows, { sales: "me" }))).toEqual([]);
+  });
+
+  it("sales: 'none' と next は AND で組み合わせられる (クイックフィルタの 2 軸)", () => {
+    const rows = rowsOf(
+      { store: makeStore({ id: "a", next_action_date: "2026-07-01" }) },
+      {
+        store: makeStore({
+          id: "b",
+          next_action_date: "2026-07-01",
+          assigned_sales_user_id: "uuid-1",
+        }),
+      },
+      { store: makeStore({ id: "c", next_action_date: "2026-08-01" }) },
+    );
+    expect(
+      idsOf(applyProgressFilter(rows, { sales: "none", next: "overdue" })),
+    ).toEqual(["a"]);
+  });
+
   it("next: 緊急度で絞り込める (商談ゼロの店舗にも効く)", () => {
     const rows = rowsOf(
       { store: makeStore({ id: "a", next_action_date: "2026-07-01" }) },

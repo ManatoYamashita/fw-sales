@@ -5,21 +5,30 @@ import { useState, useTransition } from "react";
 import { Pencil, Trash2 } from "lucide-react";
 import { deleteStoreAction } from "@/lib/actions/store-actions";
 import { toast } from "@/components/ui/toast";
-import { useIsAdmin } from "@/components/layout/current-user-provider";
 import { StoreDeleteConfirmDialog } from "./store-delete-confirm-dialog";
 
+/**
+ * 一覧 1 行の操作 (編集 / 削除)。
+ *
+ * `canDelete` は `stores-table.tsx` が**サーバで**判定して渡す (#155 の admin 限定方針)。
+ * 以前は client の `useIsAdmin()` で「見えているが disabled」にしていたが、
+ * 一般営業担当にとっては押せない削除ボタンが並ぶだけで意味がないため、
+ * false のときは要素ごと描画しない。
+ *
+ * **UI の出し分けは認可境界ではない。** 真の防御は `deleteStoreAction` の
+ * `requireAdmin` ガードであり、そちらは変更していない。
+ */
 export function StoreRowActions({
   storeId,
   storeName,
+  canDelete,
 }: {
   storeId: string;
   storeName: string;
+  canDelete: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
-  // #155: 破壊的操作は admin 限定 (真の防御はサーバ側 requireAdmin)。
-  const { isAdmin, loaded } = useIsAdmin();
-  const denyDelete = loaded && !isAdmin;
 
   const remove = () => {
     startTransition(async () => {
@@ -41,25 +50,28 @@ export function StoreRowActions({
       >
         <Pencil className="h-3.5 w-3.5" />
       </Link>
-      <button
-        type="button"
-        aria-label={`${storeName} を削除`}
-        title={denyDelete ? "管理者のみ実行できます" : "削除"}
-        onClick={() => setOpen(true)}
-        disabled={denyDelete}
-        className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive-soft hover:text-destructive transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40 disabled:pointer-events-none"
-      >
-        <Trash2 className="h-3.5 w-3.5" />
-      </button>
-      {/* 影響表示つき共有確認ダイアログ (store-cascade-delete / Issue #152)。
-          削除 action の実行と失敗 toast は本コンポーネントの責務のまま。 */}
-      <StoreDeleteConfirmDialog
-        open={open}
-        onOpenChange={setOpen}
-        target={{ kind: "single", storeId, storeName }}
-        onConfirm={remove}
-        pending={pending}
-      />
+      {canDelete ? (
+        <>
+          <button
+            type="button"
+            aria-label={`${storeName} を削除`}
+            title="削除"
+            onClick={() => setOpen(true)}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive-soft hover:text-destructive transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+          {/* 影響表示つき共有確認ダイアログ (store-cascade-delete / Issue #152)。
+              削除 action の実行と失敗 toast は本コンポーネントの責務のまま。 */}
+          <StoreDeleteConfirmDialog
+            open={open}
+            onOpenChange={setOpen}
+            target={{ kind: "single", storeId, storeName }}
+            onConfirm={remove}
+            pending={pending}
+          />
+        </>
+      ) : null}
     </div>
   );
 }

@@ -62,6 +62,24 @@ describe("A: StoresPage の Suspense 構造", () => {
     expect(keyedBlock.slice(0, keyedBlock.indexOf("</Suspense>"))).toContain("<StoresTable");
   });
 
+  it("クイックフィルタは key 付き Suspense の外に置く", () => {
+    // key 付き境界の内側に入れると、フィルタ変更のたびに再マウントされてチップが
+    // 一瞬消える (ProgressFilterBar と同じ理由)。
+    const keyedStart = pageSource.indexOf("<Suspense key=");
+    const keyedBlock = pageSource.slice(keyedStart);
+    expect(keyedBlock.slice(0, keyedBlock.indexOf("</Suspense>"))).not.toContain(
+      "StoreQuickFilters",
+    );
+  });
+
+  it("クイックフィルタは Suspense 配下でマウントする (useSearchParams の要件)", () => {
+    // useSearchParams を使う Client Component は本番ビルドで Suspense 境界が必須。
+    expect(pageSource).toContain(
+      "<Suspense fallback={<StoreQuickFiltersFallback />}>",
+    );
+    expect(pageSource).toContain("<StoreQuickFilters />");
+  });
+
   it("ページ本体で getAllProfiles を await しない (シェルのブロック防止)", () => {
     // await は Suspense 境界の内側 (ProgressFilterBarSlot) にのみ存在する
     const body = pageSource.slice(pageSource.indexOf("export default async function StoresPage"));

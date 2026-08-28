@@ -205,7 +205,17 @@ export interface SalesProgressFilter {
   appt?: "acquired" | "none";
   /** 最新商談ステータス。"none" = 商談なし。 */
   deal?: DealStatus | "none";
-  /** 営業担当 (profile.id 完全一致)。`StoreFilter.sales` と同規約。 */
+  /**
+   * 営業担当。既定は `profile.id` 完全一致 (`StoreFilter.sales` と同規約)。
+   *
+   * sentinel:
+   * - `"none"` … 未担当 (`assigned_sales_user_id === null`)。`deal: "none"` と同型。
+   * - `"me"`  … **本モジュールには到達させない**。ログイン中ユーザーの UUID へ
+   *   解決するのは呼び出し側 (`app/(main)/stores/_components/stores-table.tsx`) の責務。
+   *   万一未解決のまま届いた場合はどの UUID にも一致せず空になる (安全側に倒す)。
+   *   「自分の担当」が黙って「未担当」に化けるのを防ぐため、`"me"` を `"none"` と
+   *   同一視してはいけない。
+   */
   sales?: string;
   /** 次回アクションの緊急度。 */
   next?: NextActionUrgency;
@@ -228,7 +238,11 @@ export function applyProgressFilter(
     } else if (filter.deal) {
       if (row.latestDeal?.status !== filter.deal) return false;
     }
-    if (filter.sales && s.assigned_sales_user_id !== filter.sales) return false;
+    if (filter.sales === "none") {
+      if (s.assigned_sales_user_id !== null) return false;
+    } else if (filter.sales) {
+      if (s.assigned_sales_user_id !== filter.sales) return false;
+    }
     if (filter.next && row.urgency !== filter.next) return false;
     if (filter.state && row.currentSalesState !== filter.state) return false;
     if (filter.stage && s.stage !== filter.stage) return false;

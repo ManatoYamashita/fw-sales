@@ -112,6 +112,18 @@ const NEXT_OPTIONS = NEXT_ACTION_URGENCIES.map((u) => ({
   label: NEXT_ACTION_URGENCY_LABELS[u],
 }));
 
+/**
+ * `sales` の sentinel (`SalesProgressFilter.sales` 参照) の表示名。
+ *
+ * クイックフィルタ (`store-quick-filters.tsx`) が `?sales=me` / `?sales=none` を書くため、
+ * profile 名の解決に失敗した生の値がそのまま「me」と表示されるのを防ぐ。
+ * `me` の UUID 解決はサーバ (`stores-table.tsx`) の責務なので、ここでは表示名だけ持つ。
+ */
+const SALES_SENTINEL_LABELS: Record<string, string> = {
+  me: "自分",
+  none: "未割当",
+};
+
 export interface ProgressFilterBarProps {
   /** `Profile.id → display_name` の tuple 配列 (RSC 境界用)。 */
   profileEntries: ReadonlyArray<readonly [string, string]>;
@@ -337,7 +349,7 @@ export function ProgressFilterBar({ profileEntries }: ProgressFilterBarProps) {
           ) : null}
           {sales ? (
             <Chip onClear={() => setKey("sales", "")} label="担当">
-              {profileMap.get(sales) ?? sales}
+              {SALES_SENTINEL_LABELS[sales] ?? profileMap.get(sales) ?? sales}
             </Chip>
           ) : null}
           {stage ? <Chip onClear={() => setKey("stage", "")} label="調査段階">{stage}</Chip> : null}

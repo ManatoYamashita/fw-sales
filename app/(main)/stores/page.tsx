@@ -4,6 +4,10 @@ import Link from "next/link";
 import { Plus } from "lucide-react";
 import { ProgressFilterBar } from "./progress/_components/progress-filter-bar";
 import { StoresTable } from "./_components/stores-table";
+import {
+  StoreQuickFilters,
+  StoreQuickFiltersFallback,
+} from "./_components/store-quick-filters";
 import { Spinner } from "@/components/ui/spinner";
 import { getAllProfiles } from "@/lib/queries/profiles";
 import { DEAL_STATUSES, type DealStatus } from "@/types/deal";
@@ -54,6 +58,17 @@ export default async function StoresPage({ searchParams }: { searchParams: Promi
       <div><h2 className="text-xl md:text-2xl font-bold text-foreground">店舗・営業一覧</h2><p className="text-sm text-muted-foreground">現在の営業状態と次に行うことを店舗単位で確認できます。</p></div>
       <Link href="/stores/new" className="inline-flex items-center gap-1.5 h-10 px-4 rounded-lg border border-transparent bg-primary text-primary-foreground text-sm font-medium hover:bg-background hover:text-foreground hover:border-foreground"><Plus className="h-4 w-4" />店舗を登録</Link>
     </div>
+    {/*
+      クイックフィルタ (担当範囲 / 対応タイミング) は情報階層の最上段に置く。
+      `useSearchParams` を読む Client Component は本番ビルドで Suspense 境界が必須
+      なので独自の境界を張るが、**key は持たせない**。理由はフィルタバーと同じで、
+      key 付きにするとフィルタ変更のたびに境界ごと作り直されてチップが一瞬消える。
+      サーバデータには一切依存しないため、この境界はデータ取得を待たない。
+    */}
+    <Suspense fallback={<StoreQuickFiltersFallback />}>
+      <StoreQuickFilters />
+    </Suspense>
+
     {/*
       フィルタバーは **key を持たない** Suspense に置く。
       filter/sort ごとに key が変わる境界の内側に入れると、検索の debounce が URL を
