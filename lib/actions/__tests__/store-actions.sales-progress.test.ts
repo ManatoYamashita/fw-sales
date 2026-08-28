@@ -20,16 +20,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-const { mockUpdate, mockRevalidateTag, mockRedirect, mockGetCurrentProfile } = vi.hoisted(() => ({
+const { mockUpdate, mockRevalidateTag, mockRedirect, mockGetCurrentProfile, mockFindProfileById } = vi.hoisted(() => ({
   mockUpdate: vi.fn(),
   mockRevalidateTag: vi.fn(),
   mockRedirect: vi.fn(),
   mockGetCurrentProfile: vi.fn(),
+  mockFindProfileById: vi.fn(),
 }));
 
+// repos に deal を生やさない。本 Action が deals へ触れたら TypeError で落ちるため、
+// 「Deal.assigned_sales_user_id を変更しない」ことの機械的な担保にもなる。
 vi.mock("@/lib/repositories", () => ({
   repos: {
     store: { update: mockUpdate },
+    profile: { findById: mockFindProfileById },
   },
 }));
 
@@ -60,6 +64,8 @@ describe("updateSalesProgressAction", () => {
     mockRevalidateTag.mockReset();
     mockGetCurrentProfile.mockReset();
     mockGetCurrentProfile.mockResolvedValue(profile);
+    mockFindProfileById.mockReset();
+    mockFindProfileById.mockResolvedValue(profile);
   });
 
   it("未ログイン時は更新を拒否し、repository を呼ばない (Low A: deal-actions と同じ認証方針)", async () => {
@@ -215,5 +221,156 @@ describe("updateSalesProgressAction", () => {
 
     expect(result).toEqual({ ok: false, error: "店舗が見つかりませんでした" });
     expect(mockRevalidateTag).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * 営業担当 (`Store.assigned_sales_user_id`) の更新。
+ *
+ * 店舗詳細「現在の営業状況」カードから直接変更できるようにしたぶんの検証。
+ * `Deal.assigned_sales_user_id` (その活動を誰が行ったか) とは別概念であり、
+ * 本 Action は deals に一切書き込まない。
+ */
+describe("updateSalesProgressAction: 営業担当", () => {
+  beforeEach(() => {
+    mockUpdate.mockReset();
+    mockRevalidateTag.mockReset();
+    mockGetCurrentProfile.mockReset();
+    mockGetCurrentProfile.mockResolvedValue(profile);
+    mockFindProfileById.mockReset();
+    mockFindProfileById.mockResolvedValue(profile);
+  });
+
+  it("存在する profile なら patch に入る", async () => {
+    mockUpdate.mockResolvedValueOnce({ id: "store_1" });
+
+    const result = await updateSalesProgressAction(
+      "store_1",
+      makeFormData({ assigned_sales_user_id: "user-1" }),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(mockFindProfileById).toHaveBeenCalledWith("user-1");
+    expect(mockUpdate).toHaveBeenCalledWith("store_1", {
+      assigned_sales_user_id: "user-1",
+    });
+  });
+
+  it("空文字は null (未割当) に正規化される", async () => {
+    mockUpdate.mockResolvedValueOnce({ id: "store_1" });
+
+    const result = await updateSalesProgressAction(
+      "store_1",
+      makeFormData({ assigned_sales_user_id: "" }),
+    );
+
+    expect(result.ok).toBe(true);
+    // 未割当への変更で profile 検索は走らない
+    expect(mockFindProfileById).not.toHaveBeenCalled();
+    expect(mockUpdate).toHaveBeenCalledWith("store_1", {
+      assigned_sales_user_id: null,
+    });
+  });
+
+  it("存在しない profile id は拒否し、repository を呼ばない", async () => {
+    mockFindProfileById.mockResolvedValueOnce(null);
+
+    const result = await updateSalesProgressAction(
+      "store_1",
+      makeFormData({ assigned_sales_user_id: "00000000-0000-0000-0000-000000000000" }),
+    );
+
+    expect(result).toEqual({ ok: false, error: "営業担当が見つかりませんでした" });
+    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(mockRevalidateTag).not.toHaveBeenCalled();
+  });
+
+  it("任意文字列を渡されても profile 検証を通らなければ保存しない", async () => {
+    mockFindProfileById.mockResolvedValueOnce(null);
+
+    const result = await updateSalesProgressAction(
+      "store_1",
+      makeFormData({ assigned_sales_user_id: "not-a-uuid" }),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it("FormData に含まれなければ patch に現れない (部分パッチの維持)", async () => {
+    mockUpdate.mockResolvedValueOnce({ id: "store_1" });
+
+    const result = await updateSalesProgressAction(
+      "store_1",
+      makeFormData({ memo: "メモだけ更新" }),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(mockUpdate).toHaveBeenCalledWith("store_1", { memo: "メモだけ更新" });
+    expect(mockFindProfileById).not.toHaveBeenCalled();
+  });
+
+  it("3 項目を同時に保存できる (カードの一括保存)", async () => {
+    mockUpdate.mockResolvedValueOnce({ id: "store_1" });
+
+    const result = await updateSalesProgressAction(
+      "store_1",
+      makeFormData({
+        assigned_sales_user_id: "user-1",
+        appointment_acquired_date: "2026-07-10",
+        memo: "平日15時以降",
+      }),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(mockUpdate).toHaveBeenCalledWith("store_1", {
+      assigned_sales_user_id: "user-1",
+      appointment_acquired_date: "2026-07-10",
+      memo: "平日15時以降",
+    });
+  });
+
+  it("「未取得に戻す」で送られる空のアポ取得日と担当変更を同時に扱える", async () => {
+    mockUpdate.mockResolvedValueOnce({ id: "store_1" });
+
+    const result = await updateSalesProgressAction(
+      "store_1",
+      makeFormData({
+        assigned_sales_user_id: "user-1",
+        appointment_acquired_date: "",
+        memo: "メモ",
+      }),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(mockUpdate).toHaveBeenCalledWith("store_1", {
+      assigned_sales_user_id: "user-1",
+      appointment_acquired_date: null,
+      memo: "メモ",
+    });
+  });
+
+  it("patch は Store の 3 フィールドしか含まない (Deal 側へ波及しない)", async () => {
+    mockUpdate.mockResolvedValueOnce({ id: "store_1" });
+
+    await updateSalesProgressAction(
+      "store_1",
+      makeFormData({
+        assigned_sales_user_id: "user-1",
+        appointment_acquired_date: "2026-07-10",
+        memo: "メモ",
+        // カードが送らない値。混入しないことを確認する。
+        status: "受注",
+        next_action_type: "電話",
+        stage: "架電済み",
+      }),
+    );
+
+    const patch = mockUpdate.mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(Object.keys(patch).sort()).toEqual([
+      "appointment_acquired_date",
+      "assigned_sales_user_id",
+      "memo",
+    ]);
   });
 });

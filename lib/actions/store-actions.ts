@@ -289,6 +289,10 @@ const SALES_MEMO_MAX_LENGTH = 5000;
  * Store 側の値は `deriveCurrentNextAction` が最新 Deal に次回アクションが
  * 無い場合にのみ参照する read-only な legacy fallback として残す
  * (削除自体は別 issue でスケジュールする。#161 follow-up)。
+ *
+ * `assigned_sales_user_id` (店舗の営業担当) も本 Action の対象。
+ * **`Deal.assigned_sales_user_id` (その活動を誰が行ったか) とは別概念**であり、
+ * 本 Action は deals に一切書き込まない。担当者の履歴は営業記録側が持つ。
  */
 export async function updateSalesProgressAction(
   id: string,
@@ -303,6 +307,7 @@ export async function updateSalesProgressAction(
   const patch: StorePatch = {};
   const hasAppointmentDate = formData.has("appointment_acquired_date");
   const hasMemo = formData.has("memo");
+  const hasAssignedSales = formData.has("assigned_sales_user_id");
   const appointment_acquired_date = hasAppointmentDate
     ? readNullableString(formData, "appointment_acquired_date")
     : undefined;
@@ -318,6 +323,16 @@ export async function updateSalesProgressAction(
   }
   if (hasMemo && memo !== null && memo !== undefined && memo.length > SALES_MEMO_MAX_LENGTH) {
     return failure(`営業メモは${SALES_MEMO_MAX_LENGTH}文字以内で入力してください`);
+  }
+
+  if (hasAssignedSales) {
+    const assigned = readNullableString(formData, "assigned_sales_user_id");
+    // 存在しない profile を FK 違反より手前で弾く。クライアントから任意 UUID を
+    // 渡されても保存させない (updateDealAction の営業担当検証と同じ形)。
+    if (assigned && !(await repos.profile.findById(assigned))) {
+      return failure("営業担当が見つかりませんでした");
+    }
+    patch.assigned_sales_user_id = assigned;
   }
 
   if (hasAppointmentDate) patch.appointment_acquired_date = appointment_acquired_date;
