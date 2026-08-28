@@ -1,7 +1,8 @@
 "use server";
 
-import { revalidateTag } from "next/cache";
+import { revalidateTag, updateTag } from "next/cache";
 import { redirect } from "next/navigation";
+import { z } from "zod";
 import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
 import { decideChannel } from "@/lib/domain/channel";
@@ -154,13 +155,44 @@ async function validateAssignedUserIds(
   return null;
 }
 
-function invalidateAllStoreScopes(id?: string) {
-  revalidateTag(CACHE_TAGS.stores, "max");
+/**
+ * 集計系ダッシュボード (stats / pipeline / kpi / actionQueue) の失効。
+ *
+ * これらは保存直後に必ず開く画面ではないため、stale-while-revalidate
+ * (`revalidateTag(_, "max")`) で背景更新に任せる。
+ * `invalidateDealScopes` (deal-actions.ts) と同じ切り分け。
+ */
+function revalidateStoreAggregateScopes() {
   revalidateTag(CACHE_TAGS.stats, "max");
   revalidateTag(CACHE_TAGS.pipeline, "max");
   revalidateTag(CACHE_TAGS.kpi, "max");
   revalidateTag(CACHE_TAGS.actionQueue, "max");
+}
+
+function invalidateAllStoreScopes(id?: string) {
+  revalidateTag(CACHE_TAGS.stores, "max");
+  revalidateStoreAggregateScopes();
   if (id) revalidateTag(CACHE_TAGS.store(id), "max");
+}
+
+/**
+ * 「保存した値をその場で画面で確認する」経路向けの失効 (#172 と同じ考え方)。
+ *
+ * `revalidateTag(_, "max")` は stale-while-revalidate なので、Server Action 直後の
+ * `router.refresh()` が失効前のキャッシュを返し「保存したのに古い内容が表示される」
+ * read-your-own-writes 違反が起きうる。`updateTag` は Server Action 専用 API で、
+ * 同一リクエスト内から失効が保証される。
+ *
+ * 保存直後に必ず読まれる 2 つ (`store:{id}` = 店舗詳細 / `stores` = 店舗一覧) だけを
+ * 即時失効し、集計系は従来どおり背景更新に任せる。
+ *
+ * `invalidateAllStoreScopes` は create/update/delete/stage が使う既存の失効なので、
+ * そちらの意味は変えずに本関数を別途用意している。
+ */
+function invalidateStoreScopesImmediate(id: string) {
+  updateTag(CACHE_TAGS.store(id));
+  updateTag(CACHE_TAGS.stores);
+  revalidateStoreAggregateScopes();
 }
 
 /**
@@ -277,6 +309,15 @@ export async function updateStorePatchAction(
 const SALES_MEMO_MAX_LENGTH = 5000;
 
 /**
+ * `profiles.id` の形式検証 (`prompt-template-actions.ts` の templateIdSchema と同じ形)。
+ *
+ * `profiles.id` / `stores.assigned_sales_user_id` はいずれも Postgres の uuid 列
+ * (`lib/db/schema.ts`)。形式不正な文字列のまま `findById` すると
+ * 22P02 (invalid input syntax for type uuid) で例外になるため、DB へ行く前に弾く。
+ */
+const profileIdSchema = z.string().uuid();
+
+/**
  * 営業進捗 (アポ取得日 / 顧客共有メモ) の更新用 Server Action
  * (customer-sales-progress-management)。
  *
@@ -327,10 +368,15 @@ export async function updateSalesProgressAction(
 
   if (hasAssignedSales) {
     const assigned = readNullableString(formData, "assigned_sales_user_id");
-    // 存在しない profile を FK 違反より手前で弾く。クライアントから任意 UUID を
-    // 渡されても保存させない (updateDealAction の営業担当検証と同じ形)。
-    if (assigned && !(await repos.profile.findById(assigned))) {
-      return failure("営業担当が見つかりませんでした");
+    if (assigned) {
+      // 形式 → 存在の順に検証する。クライアントから任意の文字列 / UUID を渡されても
+      // 保存させない (updateDealAction の営業担当検証と同じ形 + uuid 形式チェック)。
+      // 「形式不正」と「存在しない」を UI 文言で区別しないのは、内部スキーマの
+      // 情報を返さない既存方針に合わせるため。
+      const wellFormed = profileIdSchema.safeParse(assigned).success;
+      if (!wellFormed || !(await repos.profile.findById(assigned))) {
+        return failure("営業担当が見つかりませんでした");
+      }
     }
     patch.assigned_sales_user_id = assigned;
   }
@@ -352,7 +398,9 @@ export async function updateSalesProgressAction(
     return failure("営業進捗の更新に失敗しました");
   }
   if (!updated) return failure("店舗が見つかりませんでした");
-  invalidateAllStoreScopes(id);
+  // 営業担当 / アポ取得日 / 顧客共有メモはいずれも保存直後にこの画面と店舗一覧で
+  // 目視される値なので、該当タグだけ即時失効する。
+  invalidateStoreScopesImmediate(id);
   return success(undefined, "営業進捗を更新しました");
 }
 
