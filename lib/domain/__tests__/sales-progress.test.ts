@@ -7,6 +7,7 @@ import {
   deriveCurrentNextAction,
   deriveCurrentSalesState,
   getNextActionUrgency,
+  hasAnyProgressFilter,
   pickLatestDeal,
   type SalesProgressRow,
 } from "@/lib/domain/sales-progress";
@@ -458,6 +459,42 @@ describe("applyProgressFilter", () => {
     expect(idsOf(applyProgressFilter(rows, { sales: "uuid-1" }))).toEqual(["a"]);
   });
 
+  it("sales: 'none' で未担当の店舗のみに絞り込める", () => {
+    const rows = rowsOf(
+      { store: makeStore({ id: "a", assigned_sales_user_id: "uuid-1" }) },
+      { store: makeStore({ id: "b" }) },
+      { store: makeStore({ id: "c" }) },
+    );
+    expect(idsOf(applyProgressFilter(rows, { sales: "none" }))).toEqual(["b", "c"]);
+  });
+
+  it("sales: 'me' は未解決のまま届いてもどの店舗にも一致しない", () => {
+    // 「自分の担当」の UUID 解決は stores-table.tsx の責務。解決漏れが起きたとき、
+    // 黙って「未担当一覧」や「全件」に化けず空になることを固定する。
+    const rows = rowsOf(
+      { store: makeStore({ id: "a", assigned_sales_user_id: "uuid-1" }) },
+      { store: makeStore({ id: "b" }) },
+    );
+    expect(idsOf(applyProgressFilter(rows, { sales: "me" }))).toEqual([]);
+  });
+
+  it("sales: 'none' と next は AND で組み合わせられる (クイックフィルタの 2 軸)", () => {
+    const rows = rowsOf(
+      { store: makeStore({ id: "a", next_action_date: "2026-07-01" }) },
+      {
+        store: makeStore({
+          id: "b",
+          next_action_date: "2026-07-01",
+          assigned_sales_user_id: "uuid-1",
+        }),
+      },
+      { store: makeStore({ id: "c", next_action_date: "2026-08-01" }) },
+    );
+    expect(
+      idsOf(applyProgressFilter(rows, { sales: "none", next: "overdue" })),
+    ).toEqual(["a"]);
+  });
+
   it("next: 緊急度で絞り込める (商談ゼロの店舗にも効く)", () => {
     const rows = rowsOf(
       { store: makeStore({ id: "a", next_action_date: "2026-07-01" }) },
@@ -690,5 +727,34 @@ describe("applyProgressSort", () => {
     const storeChannelOrder = applyStoreSort(stores, { key: "channel", dir: "asc" }).map((s) => s.id);
     const progressChannelOrder = idsOf(applyProgressSort(rows, { key: "channel", dir: "asc" }));
     expect(progressChannelOrder).toEqual(storeChannelOrder);
+  });
+});
+
+describe("hasAnyProgressFilter", () => {
+  it("条件なしは false (店舗自体が 0 件かを判定するため)", () => {
+    expect(hasAnyProgressFilter({})).toBe(false);
+  });
+
+  it.each([
+    ["検索語", { q: "渋谷" }],
+    ["担当 (UUID)", { sales: "uuid-1" }],
+    ["担当 (未担当)", { sales: "none" }],
+    ["担当 (自分・未解決)", { sales: "me" }],
+    ["次回アクション", { next: "overdue" as const }],
+    ["営業状態", { state: "following" as const }],
+    ["調査段階", { stage: "調査済み" as const }],
+    ["チャネル", { channel: "DM推奨" as const }],
+    ["アポ", { appt: "acquired" as const }],
+    ["営業記録", { deal: "none" as const }],
+  ])("%s が指定されていれば true", (_label, filter) => {
+    expect(hasAnyProgressFilter(filter)).toBe(true);
+  });
+
+  it("空文字は未指定として扱う", () => {
+    expect(hasAnyProgressFilter({ q: "", sales: "" })).toBe(false);
+  });
+
+  it("複数条件でも true", () => {
+    expect(hasAnyProgressFilter({ sales: "me", next: "today" })).toBe(true);
   });
 });
