@@ -22,13 +22,31 @@
  * 既存の `SalesProgressFilter` の semantics の shortcut として実装する。
  */
 
+/**
+ * `sales` param が取りうる sentinel 値 (`SalesProgressFilter.sales` 参照)。
+ *
+ * クイックフィルタと詳細フィルタ (`ProgressFilterBar` の営業担当 Select) の
+ * **単一の真実**。両者が別々に文字列リテラルを持つと、片方だけ変更したときに
+ * 「クイックフィルタでは自分の担当なのに、詳細フィルタを開くと何も選ばれていない」
+ * という不整合が型エラーなしで発生する。
+ */
+export const SALES_SENTINEL_VALUES = ["me", "none"] as const;
+export type SalesSentinel = (typeof SALES_SENTINEL_VALUES)[number];
+
+export function isSalesSentinel(value: string): value is SalesSentinel {
+  return (SALES_SENTINEL_VALUES as readonly string[]).includes(value);
+}
+
 /** 担当範囲の軸。`sales` param のみを所有する。 */
-export type AssigneeScope = "all" | "me" | "none";
+export type AssigneeScope = "all" | SalesSentinel;
 
 /** 対応タイミングの軸。`next` param のみを所有する。 */
 export type TimingScope = "overdue" | "today";
 
-export const ASSIGNEE_SCOPES: readonly AssigneeScope[] = ["all", "me", "none"];
+export const ASSIGNEE_SCOPES: readonly AssigneeScope[] = [
+  "all",
+  ...SALES_SENTINEL_VALUES,
+];
 export const TIMING_SCOPES: readonly TimingScope[] = ["overdue", "today"];
 
 export const ASSIGNEE_SCOPE_LABELS: Record<AssigneeScope, string> = {
@@ -69,11 +87,7 @@ export function readQuickFilterState(
   const sales = params.get(ASSIGNEE_PARAM);
   const next = params.get(TIMING_PARAM);
   return {
-    assignee: !sales
-      ? "all"
-      : sales === "me" || sales === "none"
-        ? sales
-        : null,
+    assignee: !sales ? "all" : isSalesSentinel(sales) ? sales : null,
     timing: next === "overdue" || next === "today" ? next : null,
   };
 }

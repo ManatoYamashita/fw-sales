@@ -32,6 +32,10 @@ import {
   NEXT_ACTION_URGENCIES,
   NEXT_ACTION_URGENCY_LABELS,
 } from "@/lib/domain/sales-progress";
+import {
+  SALES_SENTINEL_VALUES,
+  type SalesSentinel,
+} from "../../_components/store-quick-filter-params";
 
 /* ------------------------------------------------------------------ */
 /*  小さなポップオーバー (stores-filter-bar.tsx と同じ依存ゼロ実装)      */
@@ -113,16 +117,38 @@ const NEXT_OPTIONS = NEXT_ACTION_URGENCIES.map((u) => ({
 }));
 
 /**
- * `sales` の sentinel (`SalesProgressFilter.sales` 参照) の表示名。
+ * `sales` sentinel の詳細フィルタ上の表示名。
  *
- * クイックフィルタ (`store-quick-filters.tsx`) が `?sales=me` / `?sales=none` を書くため、
- * profile 名の解決に失敗した生の値がそのまま「me」と表示されるのを防ぐ。
- * `me` の UUID 解決はサーバ (`stores-table.tsx`) の責務なので、ここでは表示名だけ持つ。
+ * 値そのものは `store-quick-filter-params.ts` が単一の真実で、ここは表示名だけを持つ。
+ * `Record<SalesSentinel, string>` なので sentinel を増やすとラベル漏れが型エラーになる。
+ * クイックフィルタ側の「自分の担当 / 未担当」より短いのは、この Select が
+ * 「営業担当」という文脈の中に置かれるため (営業担当: 自分)。
  */
-const SALES_SENTINEL_LABELS: Record<string, string> = {
+const SALES_SENTINEL_LABELS: Record<SalesSentinel, string> = {
   me: "自分",
   none: "未割当",
 };
+
+/**
+ * 営業担当 Select の選択肢を組み立てる。
+ *
+ * 「すべての担当」→ sentinel (自分 / 未割当) → 実担当者 の順。
+ * **適用中チップの表示にも同じ配列を使う**ことで、Select に一致する option が無いのに
+ * チップだけ何かを表示している、という食い違いを構造的に起こせなくする。
+ * `me` の UUID 解決はサーバ (`stores-table.tsx`) の責務なので、ここでは表示名だけ扱う。
+ */
+export function buildSalesOptions(
+  profileEntries: ReadonlyArray<readonly [string, string]>,
+): ReadonlyArray<{ value: string; label: string }> {
+  return [
+    { value: "", label: "すべての担当" },
+    ...SALES_SENTINEL_VALUES.map((value) => ({
+      value,
+      label: SALES_SENTINEL_LABELS[value],
+    })),
+    ...profileEntries.map(([id, name]) => ({ value: id, label: name })),
+  ];
+}
 
 export interface ProgressFilterBarProps {
   /** `Profile.id → display_name` の tuple 配列 (RSC 境界用)。 */
@@ -144,7 +170,10 @@ export function ProgressFilterBar({ profileEntries }: ProgressFilterBarProps) {
   const stage = params.get("stage") ?? "";
   const channel = params.get("channel") ?? "";
 
-  const profileMap = useMemo(() => new Map(profileEntries), [profileEntries]);
+  const salesOptions = useMemo(
+    () => buildSalesOptions(profileEntries),
+    [profileEntries],
+  );
 
   const filterCount = useMemo(
     () => [state, appt, deal, next, sales, stage, channel].filter(Boolean).length,
@@ -306,7 +335,7 @@ export function ProgressFilterBar({ profileEntries }: ProgressFilterBarProps) {
               sales={sales}
               stage={stage}
               channel={channel}
-              profileEntries={profileEntries}
+              salesOptions={salesOptions}
               onChange={setKey}
               onClear={clearFilters}
               activeCount={filterCount}
@@ -349,7 +378,7 @@ export function ProgressFilterBar({ profileEntries }: ProgressFilterBarProps) {
           ) : null}
           {sales ? (
             <Chip onClear={() => setKey("sales", "")} label="担当">
-              {SALES_SENTINEL_LABELS[sales] ?? profileMap.get(sales) ?? sales}
+              {labelOf(salesOptions, sales)}
             </Chip>
           ) : null}
           {stage ? <Chip onClear={() => setKey("stage", "")} label="調査段階">{stage}</Chip> : null}
@@ -467,7 +496,8 @@ interface FilterPanelProps {
   sales: string;
   stage: string;
   channel: string;
-  profileEntries: ReadonlyArray<readonly [string, string]>;
+  /** `buildSalesOptions` の結果。適用中チップと同じ配列を共有する。 */
+  salesOptions: ReadonlyArray<{ value: string; label: string }>;
   onChange: (key: FilterKey, value: string) => void;
   onClear: () => void;
   activeCount: number;
@@ -481,7 +511,7 @@ function FilterPanel({
   sales,
   stage,
   channel,
-  profileEntries,
+  salesOptions,
   onChange,
   onClear,
   activeCount,
@@ -538,10 +568,9 @@ function FilterPanel({
             onChange={(e) => onChange("sales", e.target.value)}
             aria-label="営業担当で絞り込み"
           >
-            <option value="">すべての担当</option>
-            {profileEntries.map(([id, name]) => (
-              <option key={id} value={id}>
-                {name}
+            {salesOptions.map(({ value, label }) => (
+              <option key={value} value={value}>
+                {label}
               </option>
             ))}
           </Select>
