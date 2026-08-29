@@ -1,14 +1,14 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Pencil, Plus, Save, Trash2, X } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { FormField } from "@/components/ui/form-field";
 import { Modal, ModalContent, ModalFooter } from "@/components/ui/modal";
 import { toast } from "@/components/ui/toast";
 import { DealStatusBadge } from "@/components/feature/deal-status-badge";
@@ -22,13 +22,21 @@ import type { Deal } from "@/types/deal";
 import type { Profile } from "@/types/profile";
 import type { Store } from "@/types/store";
 import { SalesActivityForm } from "./sales-activity-form";
+import { getSalesProgressChangedFields, toSalesProgressDraft, type SalesProgressDraft } from "./sales-progress-draft";
 
 export function SalesProgressCard({ store, deals, profiles }: { store: Store; deals: readonly Deal[]; profiles: readonly Profile[] }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [editingCurrent, setEditingCurrent] = useState(false);
   const [appointmentDate, setAppointmentDate] = useState(store.appointment_acquired_date ?? "");
+  const [assignedSales, setAssignedSales] = useState(store.assigned_sales_user_id ?? "");
   const [memo, setMemo] = useState(store.memo);
+  // 編集開始時の値 (immutable baseline)。保存時の差分判定はこれとだけ比較する。
+  // 現在レンダーの store props と比較すると、編集中に props だけ更新された場合に
+  // 「ユーザーは触っていないのに差分あり」と誤判定し、古い draft で相手の更新を
+  // 巻き戻してしまう。state ではなく ref なのは、baseline の更新で再描画を
+  // 起こす必要がなく、また描画途中の値と混ざらないようにするため。
+  const editBaselineRef = useRef<SalesProgressDraft>(toSalesProgressDraft(store));
   const [pending, startTransition] = useTransition();
   const [formTarget, setFormTarget] = useState<string | "new" | null>(() => searchParams.get("action") === "new" ? "new" : searchParams.get("activity"));
   const [deleteTarget, setDeleteTarget] = useState<Deal | null>(null);
@@ -39,6 +47,8 @@ export function SalesProgressCard({ store, deals, profiles }: { store: Store; de
   const currentNext = deriveCurrentNextAction(store, latest);
   const urgency = getNextActionUrgency(currentNext.date, todayInTimeZone("Asia/Tokyo"));
   const profileMap = new Map(profiles.map((p) => [p.id, p.display_name]));
+  // 現在の担当者が profiles に含まれない (削除済み / 取得漏れ) 場合の Select 受け皿。
+  const unknownSalesId = store.assigned_sales_user_id && !profileMap.has(store.assigned_sales_user_id) ? store.assigned_sales_user_id : null;
   // deep link (?activity= / ?action=new) で開いた場合だけ URL を戻す。クエリがなければ
   // replace を発行しない (保存成功時の router.refresh と replace を無駄に重ねない)
   const clearFormQuery = () => { if (searchParams.get("activity") || searchParams.get("action")) router.replace(`/stores/${store.id}?tab=progress`); };
@@ -62,31 +72,141 @@ export function SalesProgressCard({ store, deals, profiles }: { store: Store; de
   // 破棄した入力が残らない、(2) 保存成功後に届いた新しい props が draft へ正しく
   // 反映される、の両方を satisfy する。編集中は props が変わっても draft を
   // 上書きしない (入力中の値を消さない)。
-  const resetDraftFromStore = () => {
-    setAppointmentDate(store.appointment_acquired_date ?? "");
-    setMemo(store.memo);
+  // baseline と draft 初期値は **同一 snapshot** から作る。別々に props を読むと
+  // 開始時点でずれた差分が出うる。
+  const resetDraftFromStore = (): SalesProgressDraft => {
+    const snapshot = toSalesProgressDraft(store);
+    setAppointmentDate(snapshot.appointmentDate);
+    setAssignedSales(snapshot.assignedSales);
+    setMemo(snapshot.memo);
+    return snapshot;
   };
-  const beginEditCurrent = () => { resetDraftFromStore(); setEditingCurrent(true); };
+  // 編集開始のたびに baseline を取り直す。前回編集の baseline は流用しない。
+  const beginEditCurrent = () => { editBaselineRef.current = resetDraftFromStore(); setEditingCurrent(true); };
+  // キャンセルは現在の props から draft を戻すだけ。baseline は次の
+  // beginEditCurrent で必ず再取得されるので、ここで触る必要はない。
   const cancelEditCurrent = () => { resetDraftFromStore(); setEditingCurrent(false); };
-  const saveCurrent = () => startTransition(async () => {
-    const data = new FormData(); data.set("appointment_acquired_date", appointmentDate); data.set("memo", memo);
-    const result = await updateSalesProgressAction(store.id, data);
-    if (!result.ok) return toast.error(result.error);
-    toast.success("現在の営業状況を更新しました"); setEditingCurrent(false); router.refresh();
-  });
+  const saveCurrent = () => {
+    // 今回の編集で実際に変えたフィールドだけ送る。触っていないフィールドは
+    // FormData に載せず、Server Action 側の formData.has() による partial patch に
+    // 委ねる (送らない = 更新しない)。これにより、別 UI や別タブで更新された値を
+    // 古い draft で巻き戻さない。
+    // 更新するのは Store の 3 項目のみ。Deal 側の担当 (その活動を誰が行ったか) や
+    // next_action は営業記録フォームの責務で、ここからは絶対に触らない。
+    const changed = getSalesProgressChangedFields(editBaselineRef.current, { appointmentDate, assignedSales, memo });
+    if (changed.length === 0) {
+      // 空 FormData で呼ぶと Server Action は空 patch のまま repos.store.update へ
+      // 進む (read-merge-write の無駄な往復 + キャッシュ失効)。client 側で止める。
+      setEditingCurrent(false);
+      return;
+    }
+    startTransition(async () => {
+      const data = new FormData();
+      for (const [name, value] of changed) data.set(name, value);
+      const result = await updateSalesProgressAction(store.id, data);
+      if (!result.ok) return toast.error(result.error);
+      toast.success("現在の営業状況を更新しました"); setEditingCurrent(false); router.refresh();
+    });
+  };
   return <div className="space-y-4">
     <Card>
       <Card.Header><Card.Title>現在の営業状況</Card.Title>{editingCurrent ? <div className="flex gap-2"><Button variant="ghost" size="sm" onClick={cancelEditCurrent}><X className="h-4 w-4" />キャンセル</Button><Button size="sm" onClick={saveCurrent} disabled={pending}><Save className="h-4 w-4" />保存</Button></div> : <Button variant="ghost" size="sm" onClick={beginEditCurrent}><Pencil className="h-4 w-4" />編集</Button>}</Card.Header>
+      {/*
+        表示モードと編集モードで **同じ 7 行を同じ順序で** 描画する (partial edit)。
+        以前は編集モードが 2 フィールドのグリッドへ丸ごと差し替わり、derived 項目が
+        画面から消えていた。「編集を押したら情報が減る」体験をやめ、
+        直接値 (営業担当 / アポ取得日 / 顧客共有メモ) だけが入力欄に変わる形にする。
+
+        1 つの <dl> を両モードで共有することで、行の増減・順序ずれが構造的に起きない。
+        編集可能な行は <dt> 側を <label htmlFor> にして入力要素と関連付ける。
+      */}
       <Card.Body className="space-y-4">
-        {editingCurrent ? <div className="grid grid-cols-1 sm:grid-cols-2 gap-4"><FormField label="アポ取得日" htmlFor="appointment-date"><Input id="appointment-date" type="date" value={appointmentDate} onChange={(e) => setAppointmentDate(e.target.value)} /></FormField><FormField label="顧客共有メモ" htmlFor="customer-memo" hint={`${memo.length}/5000文字。日付によらず継続して共有する顧客情報です。`} className="sm:col-span-2"><Textarea id="customer-memo" rows={6} maxLength={5000} value={memo} onChange={(e) => setMemo(e.target.value)} /></FormField></div> : <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-          <Info label="現在の営業状態"><SalesStateBadge state={deriveCurrentSalesState(store, latest)} /></Info>
-          <Info label="調査・架電段階"><span>{store.stage}</span></Info>
-          <Info label="アポ取得日"><span>{store.appointment_acquired_date ? formatDate(store.appointment_acquired_date) : "未取得"}</span></Info>
-          <Info label="営業担当"><span>{store.assigned_sales_user_id ? profileMap.get(store.assigned_sales_user_id) ?? "不明" : "未割当"}</span></Info>
-          <Info label="現在の次回アクション"><div className="space-y-1"><Badge tone={urgency === "overdue" ? "destructive" : urgency === "today" ? "warning" : urgency === "upcoming" ? "info" : "outline"}>{NEXT_ACTION_URGENCY_LABELS[urgency]}</Badge><p>{[currentNext.date ? formatDate(currentNext.date) : null, currentNext.type, currentNext.note].filter(Boolean).join(" / ") || "未設定"}</p>{currentNext.source === "legacy-store" ? <p className="text-xs text-muted-foreground">旧Store値を表示中。次の営業記録から履歴として保存されます。</p> : null}</div></Info>
-          <Info label="最終営業日"><span>{latest ? formatDate(latest.date) : "営業記録なし"}</span></Info>
-          <Info label="顧客共有メモ" wide><p className="whitespace-pre-wrap break-words">{store.memo || "未設定"}</p><p className="text-xs text-muted-foreground mt-1">連絡しやすい時間帯や注意事項など、継続して共有する情報です。</p></Info>
-        </dl>}
+        <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+          <Info label="現在の営業状態" note={editingCurrent ? "営業記録から自動" : undefined}>
+            <SalesStateBadge state={deriveCurrentSalesState(store, latest)} />
+          </Info>
+
+          <Info label="調査・架電段階" note={editingCurrent ? "画面上部で変更" : undefined}>
+            <span>{store.stage}</span>
+          </Info>
+
+          <Info label="アポ取得日" htmlFor={editingCurrent ? "appointment-date" : undefined}>
+            {editingCurrent ? (
+              <div className="space-y-1.5">
+                <Input id="appointment-date" type="date" value={appointmentDate} onChange={(e) => setAppointmentDate(e.target.value)} />
+                {/*
+                  日付が入っているときだけ出す。「クリア」だと入力欄を空にするだけの
+                  操作に読めるが、実際は保存で appointment_acquired_date が null =
+                  アポ未取得の状態に戻る (現在の営業状態の判定からも外れる) ため、
+                  結果を語る文言にする。押した時点では draft を空にするだけで保存しない。
+                */}
+                {appointmentDate ? (
+                  <button type="button" onClick={() => setAppointmentDate("")} className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    未取得に戻す
+                  </button>
+                ) : null}
+              </div>
+            ) : (
+              <span>{store.appointment_acquired_date ? formatDate(store.appointment_acquired_date) : "未取得"}</span>
+            )}
+          </Info>
+
+          <Info label="営業担当" htmlFor={editingCurrent ? "assigned-sales" : undefined}>
+            {editingCurrent ? (
+              <Select id="assigned-sales" value={assignedSales} onChange={(e) => setAssignedSales(e.target.value)} className="text-foreground">
+                <option value="">未割当</option>
+                {profiles.map((p) => <option key={p.id} value={p.id}>{p.display_name}</option>)}
+                {/*
+                  現在の担当者が profiles に無い (削除済み等) 場合の受け皿。
+                  一致する option が無いと <select> は先頭 (未割当) を表示し、
+                  ユーザーが触っていないのに保存で担当が消える。
+                */}
+                {unknownSalesId ? <option value={unknownSalesId}>不明な担当者</option> : null}
+              </Select>
+            ) : (
+              <span>{store.assigned_sales_user_id ? profileMap.get(store.assigned_sales_user_id) ?? "不明な担当者" : "未割当"}</span>
+            )}
+          </Info>
+
+          <Info label="現在の次回アクション" note={editingCurrent ? "営業記録で設定" : undefined}>
+            <div className="space-y-1">
+              <Badge tone={urgency === "overdue" ? "destructive" : urgency === "today" ? "warning" : urgency === "upcoming" ? "info" : "outline"}>{NEXT_ACTION_URGENCY_LABELS[urgency]}</Badge>
+              <p>{[currentNext.date ? formatDate(currentNext.date) : null, currentNext.type, currentNext.note].filter(Boolean).join(" / ") || "未設定"}</p>
+              {currentNext.source === "legacy-store" ? <p className="text-xs text-muted-foreground">旧Store値を表示中。次の営業記録から履歴として保存されます。</p> : null}
+              {/*
+                次回アクションの単一の書き込み先は Deal。Store 側へ直接書く経路は
+                作らず、既存の営業記録フォーム (formTarget / ?action=new / ?activity=<id>)
+                へ誘導する。
+
+                出すのは **未設定のときだけ**。値が入っている場合はすぐ下の
+                「最新の営業記録」カードに編集導線があり、ここにも置くと同じ画面に
+                3 つ目の導線ができて表示モードがうるさくなる。
+                「未設定」とだけ表示されて手詰まりになる状態だけを解消する。
+              */}
+              {currentNext.source === "unset" ? (
+                <NextActionCta onClick={() => setFormTarget("new")} label="次回アクションを設定" />
+              ) : null}
+            </div>
+          </Info>
+
+          <Info label="最終営業日">
+            <span>{latest ? formatDate(latest.date) : "営業記録なし"}</span>
+          </Info>
+
+          <Info label="顧客共有メモ" wide htmlFor={editingCurrent ? "customer-memo" : undefined}>
+            {editingCurrent ? (
+              <>
+                <Textarea id="customer-memo" rows={6} maxLength={5000} value={memo} onChange={(e) => setMemo(e.target.value)} />
+                <p className="text-xs text-muted-foreground mt-1">{memo.length}/5000文字。日付によらず継続して共有する顧客情報です。</p>
+              </>
+            ) : (
+              <>
+                <p className="whitespace-pre-wrap break-words">{store.memo || "未設定"}</p>
+                <p className="text-xs text-muted-foreground mt-1">連絡しやすい時間帯や注意事項など、継続して共有する情報です。</p>
+              </>
+            )}
+          </Info>
+        </dl>
       </Card.Body>
     </Card>
 
@@ -142,5 +262,28 @@ function ActivityRowActions({ deal, onEdit, onDelete }: { deal: Deal; onEdit: ()
   </div>;
 }
 
-function Info({ label, wide, children }: { label: string; wide?: boolean; children: React.ReactNode }) { return <div className={wide ? "sm:col-span-2" : ""}><dt className="text-xs font-semibold text-muted-foreground mb-1">{label}</dt><dd>{children}</dd></div>; }
+/**
+ * カード 1 行 (label + value)。表示モードと編集モードで共有する。
+ *
+ * @param htmlFor 編集モードで入力要素と関連付ける id。指定時は <dt> が <label> になる。
+ * @param note derived 項目に付ける補助文。**編集モードでのみ渡す**。
+ *   「編集を押したのに入力欄にならない理由」を説明するためのもので、
+ *   通常表示にも出すと読むものが増えて一覧性が落ちる。
+ */
+function Info({ label, htmlFor, note, wide, children }: { label: string; htmlFor?: string; note?: string; wide?: boolean; children: React.ReactNode }) {
+  return <div className={wide ? "sm:col-span-2" : ""}>
+    <dt className="text-xs font-semibold text-muted-foreground mb-1">{htmlFor ? <label htmlFor={htmlFor}>{label}</label> : label}</dt>
+    <dd>{children}{note ? <p className="text-xs text-muted-foreground mt-1">{note}</p> : null}</dd>
+  </div>;
+}
+
+/**
+ * 次回アクションの導線。Deal が単一の書き込み先なので、Store へ直接書かず
+ * 既存の営業記録フォームを開くだけ (`formTarget`)。
+ */
+function NextActionCta({ label, onClick }: { label: string; onClick: () => void }) {
+  return <Button type="button" variant="outline" size="sm" onClick={onClick} className="mt-1">
+    <Plus className="h-3.5 w-3.5" />{label}
+  </Button>;
+}
 function ActivityDetails({ deal, profileName }: { deal: Deal; profileName?: string }) { const items: Array<[string, React.ReactNode]> = [["営業担当", profileName ?? "未割当"], ["営業メモ", deal.activity_memo], ["提案内容", deal.proposal], ["ヒアリング内容", deal.discussion], ["見積金額", deal.estimate_amount ? formatYen(deal.estimate_amount) : null], ["受注金額", deal.order_amount !== null ? formatYen(deal.order_amount) : null], ["失注理由", deal.lost_reason], ["当時設定した次回アクション", [deal.next_action_date ? formatDate(deal.next_action_date) : null, deal.next_action_type, deal.next_action_note].filter(Boolean).join(" / ") || null]]; return <dl className="space-y-3 text-sm">{items.filter(([, value]) => value).map(([label, value]) => <div key={label}><dt className="text-xs font-semibold text-muted-foreground">{label}</dt><dd className="whitespace-pre-wrap break-words leading-6">{value}</dd></div>)}</dl>; }
