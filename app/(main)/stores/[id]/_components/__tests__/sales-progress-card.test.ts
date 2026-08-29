@@ -149,8 +149,18 @@ describe("アポ取得日の「未取得に戻す」", () => {
 
   it("押しても保存せず draft を空にするだけ", () => {
     // その場で Server Action を呼ぶと「保存」「キャンセル」の意味が壊れる。
-    expect(code).toContain('onClick={() => setAppointmentDate("")}');
+    expect(code).toContain('setAppointmentDate("")');
     expect(code).not.toMatch(/未取得に戻す[\s\S]{0,200}updateSalesProgressAction/);
+  });
+
+  it("押した直後の焦点を日付入力へ移す", () => {
+    // 押すと {appointmentDate ? ... : null} が false 側へ倒れてボタン自身が
+    // unmount され、焦点が body へ落ちる。キーボード操作では現在位置を失い、
+    // 文書先頭から辿り直しになる。
+    expect(code).toContain(
+      'onClick={() => { setAppointmentDate(""); appointmentInputRef.current?.focus(); }}',
+    );
+    expect(code).toContain("ref={appointmentInputRef}");
   });
 
   it("キャンセルで保存済みの日付へ戻せる (resetDraftFromStore と整合)", () => {

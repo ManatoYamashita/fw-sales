@@ -37,6 +37,12 @@ export function SalesProgressCard({ store, deals, profiles }: { store: Store; de
   // 巻き戻してしまう。state ではなく ref なのは、baseline の更新で再描画を
   // 起こす必要がなく、また描画途中の値と混ざらないようにするため。
   const editBaselineRef = useRef<SalesProgressDraft>(toSalesProgressDraft(store));
+  /**
+   * 「未取得に戻す」の焦点移動先。押すと当該ボタン自身が unmount されるため、
+   * 何もしないと焦点が body へ落ち、キーボード操作では現在位置を失って
+   * 文書先頭から辿り直しになる。
+   */
+  const appointmentInputRef = useRef<HTMLInputElement>(null);
   const [pending, startTransition] = useTransition();
   const [formTarget, setFormTarget] = useState<string | "new" | null>(() => searchParams.get("action") === "new" ? "new" : searchParams.get("activity"));
   const [deleteTarget, setDeleteTarget] = useState<Deal | null>(null);
@@ -133,7 +139,7 @@ export function SalesProgressCard({ store, deals, profiles }: { store: Store; de
           <Info label="アポ取得日" htmlFor={editingCurrent ? "appointment-date" : undefined}>
             {editingCurrent ? (
               <div className="space-y-1.5">
-                <Input id="appointment-date" type="date" value={appointmentDate} onChange={(e) => setAppointmentDate(e.target.value)} />
+                <Input id="appointment-date" type="date" ref={appointmentInputRef} value={appointmentDate} onChange={(e) => setAppointmentDate(e.target.value)} />
                 {/*
                   日付が入っているときだけ出す。「クリア」だと入力欄を空にするだけの
                   操作に読めるが、実際は保存で appointment_acquired_date が null =
@@ -141,7 +147,7 @@ export function SalesProgressCard({ store, deals, profiles }: { store: Store; de
                   結果を語る文言にする。押した時点では draft を空にするだけで保存しない。
                 */}
                 {appointmentDate ? (
-                  <button type="button" onClick={() => setAppointmentDate("")} className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                  <button type="button" onClick={() => { setAppointmentDate(""); appointmentInputRef.current?.focus(); }} className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                     未取得に戻す
                   </button>
                 ) : null}
