@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Pencil, Plus, Save, Trash2, X } from "lucide-react";
 import { Card } from "@/components/ui/card";
@@ -22,6 +22,7 @@ import type { Deal } from "@/types/deal";
 import type { Profile } from "@/types/profile";
 import type { Store } from "@/types/store";
 import { SalesActivityForm } from "./sales-activity-form";
+import { getSalesProgressChangedFields, toSalesProgressDraft, type SalesProgressDraft } from "./sales-progress-draft";
 
 export function SalesProgressCard({ store, deals, profiles }: { store: Store; deals: readonly Deal[]; profiles: readonly Profile[] }) {
   const router = useRouter();
@@ -30,6 +31,12 @@ export function SalesProgressCard({ store, deals, profiles }: { store: Store; de
   const [appointmentDate, setAppointmentDate] = useState(store.appointment_acquired_date ?? "");
   const [assignedSales, setAssignedSales] = useState(store.assigned_sales_user_id ?? "");
   const [memo, setMemo] = useState(store.memo);
+  // 編集開始時の値 (immutable baseline)。保存時の差分判定はこれとだけ比較する。
+  // 現在レンダーの store props と比較すると、編集中に props だけ更新された場合に
+  // 「ユーザーは触っていないのに差分あり」と誤判定し、古い draft で相手の更新を
+  // 巻き戻してしまう。state ではなく ref なのは、baseline の更新で再描画を
+  // 起こす必要がなく、また描画途中の値と混ざらないようにするため。
+  const editBaselineRef = useRef<SalesProgressDraft>(toSalesProgressDraft(store));
   const [pending, startTransition] = useTransition();
   const [formTarget, setFormTarget] = useState<string | "new" | null>(() => searchParams.get("action") === "new" ? "new" : searchParams.get("activity"));
   const [deleteTarget, setDeleteTarget] = useState<Deal | null>(null);
@@ -65,32 +72,42 @@ export function SalesProgressCard({ store, deals, profiles }: { store: Store; de
   // 破棄した入力が残らない、(2) 保存成功後に届いた新しい props が draft へ正しく
   // 反映される、の両方を satisfy する。編集中は props が変わっても draft を
   // 上書きしない (入力中の値を消さない)。
-  const resetDraftFromStore = () => {
-    setAppointmentDate(store.appointment_acquired_date ?? "");
-    setAssignedSales(store.assigned_sales_user_id ?? "");
-    setMemo(store.memo);
+  // baseline と draft 初期値は **同一 snapshot** から作る。別々に props を読むと
+  // 開始時点でずれた差分が出うる。
+  const resetDraftFromStore = (): SalesProgressDraft => {
+    const snapshot = toSalesProgressDraft(store);
+    setAppointmentDate(snapshot.appointmentDate);
+    setAssignedSales(snapshot.assignedSales);
+    setMemo(snapshot.memo);
+    return snapshot;
   };
-  const beginEditCurrent = () => { resetDraftFromStore(); setEditingCurrent(true); };
+  // 編集開始のたびに baseline を取り直す。前回編集の baseline は流用しない。
+  const beginEditCurrent = () => { editBaselineRef.current = resetDraftFromStore(); setEditingCurrent(true); };
+  // キャンセルは現在の props から draft を戻すだけ。baseline は次の
+  // beginEditCurrent で必ず再取得されるので、ここで触る必要はない。
   const cancelEditCurrent = () => { resetDraftFromStore(); setEditingCurrent(false); };
-  const saveCurrent = () => startTransition(async () => {
-    const data = new FormData();
-    data.set("appointment_acquired_date", appointmentDate);
-    // 営業担当は draft が保存済みの値と異なるときだけ送る。基本情報カードなど
-    // 別の UI で担当が更新されても store props は stale なことがあり
-    // (updateStorePatchAction は revalidateTag(..., "max") = stale-while-revalidate)、
-    // 無条件に送ると「メモだけ保存したつもりが担当も古い値へ巻き戻る」が起きる。
-    // Server Action 側は formData.has() による partial patch なので、送らなければ
-    // assigned_sales_user_id は更新されない。
-    // 更新するのは Store.assigned_sales_user_id のみ。Deal 側の担当 (その活動を
-    // 誰が行ったか) は営業記録フォームの責務で、ここからは絶対に触らない。
-    if (assignedSales !== (store.assigned_sales_user_id ?? "")) {
-      data.set("assigned_sales_user_id", assignedSales);
+  const saveCurrent = () => {
+    // 今回の編集で実際に変えたフィールドだけ送る。触っていないフィールドは
+    // FormData に載せず、Server Action 側の formData.has() による partial patch に
+    // 委ねる (送らない = 更新しない)。これにより、別 UI や別タブで更新された値を
+    // 古い draft で巻き戻さない。
+    // 更新するのは Store の 3 項目のみ。Deal 側の担当 (その活動を誰が行ったか) や
+    // next_action は営業記録フォームの責務で、ここからは絶対に触らない。
+    const changed = getSalesProgressChangedFields(editBaselineRef.current, { appointmentDate, assignedSales, memo });
+    if (changed.length === 0) {
+      // 空 FormData で呼ぶと Server Action は空 patch のまま repos.store.update へ
+      // 進む (read-merge-write の無駄な往復 + キャッシュ失効)。client 側で止める。
+      setEditingCurrent(false);
+      return;
     }
-    data.set("memo", memo);
-    const result = await updateSalesProgressAction(store.id, data);
-    if (!result.ok) return toast.error(result.error);
-    toast.success("現在の営業状況を更新しました"); setEditingCurrent(false); router.refresh();
-  });
+    startTransition(async () => {
+      const data = new FormData();
+      for (const [name, value] of changed) data.set(name, value);
+      const result = await updateSalesProgressAction(store.id, data);
+      if (!result.ok) return toast.error(result.error);
+      toast.success("現在の営業状況を更新しました"); setEditingCurrent(false); router.refresh();
+    });
+  };
   return <div className="space-y-4">
     <Card>
       <Card.Header><Card.Title>現在の営業状況</Card.Title>{editingCurrent ? <div className="flex gap-2"><Button variant="ghost" size="sm" onClick={cancelEditCurrent}><X className="h-4 w-4" />キャンセル</Button><Button size="sm" onClick={saveCurrent} disabled={pending}><Save className="h-4 w-4" />保存</Button></div> : <Button variant="ghost" size="sm" onClick={beginEditCurrent}><Pencil className="h-4 w-4" />編集</Button>}</Card.Header>

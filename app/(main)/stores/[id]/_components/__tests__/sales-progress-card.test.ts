@@ -154,8 +154,9 @@ describe("アポ取得日の「未取得に戻す」", () => {
   });
 
   it("キャンセルで保存済みの日付へ戻せる (resetDraftFromStore と整合)", () => {
+    expect(code).toContain("setAppointmentDate(snapshot.appointmentDate)");
     expect(code).toContain(
-      'setAppointmentDate(store.appointment_acquired_date ?? "")',
+      "const cancelEditCurrent = () => { resetDraftFromStore(); setEditingCurrent(false); };",
     );
   });
 });
@@ -177,45 +178,55 @@ describe("営業担当 Select", () => {
   });
 
   it("draft は resetDraftFromStore で初期化・復元される", () => {
-    expect(code).toContain('setAssignedSales(store.assigned_sales_user_id ?? "")');
+    expect(code).toContain("setAssignedSales(snapshot.assignedSales)");
   });
 
-  it("メモだけ保存したときに stale な props で営業担当を巻き戻さない", () => {
-    // 基本情報カードでも営業担当は編集でき、そちらは updateStorePatchAction =
-    // revalidateTag(..., "max") (stale-while-revalidate) なので、このカードが
-    // 受け取る store props は担当変更直後に古いままのことがある。
-    // 無条件に送っていると、メモだけ保存したつもりで担当がエラーなく元へ戻る。
-    // draft が保存済みの値と一致する限り FormData に載せないことで防ぐ。
+  it("保存は編集開始時の baseline とだけ比較する (現在 props と比較しない)", () => {
+    // 現在レンダーの store props と比較すると、編集中に props だけ更新された場合に
+    // 「ユーザーは触っていないのに差分あり」と誤判定し、古い draft で相手の更新を
+    // 巻き戻す。比較対象は編集開始時に固定した baseline だけにする。
     expect(saveCurrentBody).toContain(
-      'if (assignedSales !== (store.assigned_sales_user_id ?? "")) {',
+      "getSalesProgressChangedFields(editBaselineRef.current, { appointmentDate, assignedSales, memo })",
     );
-    // 差分ガードの外に無条件の set が残っていないこと (1 箇所だけ)。
+    expect(saveCurrentBody).not.toContain("store.assigned_sales_user_id");
+    expect(saveCurrentBody).not.toContain("store.appointment_acquired_date");
+    expect(saveCurrentBody).not.toContain("store.memo");
+  });
+
+  it("baseline は編集開始のたびに取り直す (前回の baseline を流用しない)", () => {
+    expect(code).toContain(
+      "const beginEditCurrent = () => { editBaselineRef.current = resetDraftFromStore(); setEditingCurrent(true); };",
+    );
+    // baseline と draft 初期値は同一 snapshot から作る (別々に props を読まない)。
+    expect(code).toContain("const snapshot = toSalesProgressDraft(store);");
+    // 編集中に props が届いても baseline を書き換えない = 代入は begin edit の 1 箇所だけ。
+    expect(code.match(/editBaselineRef\.current\s*=/g) ?? []).toHaveLength(1);
+  });
+
+  it("差分のあるフィールドだけを FormData へ入れる (無条件 set を持たない)", () => {
+    expect(saveCurrentBody).toContain(
+      "for (const [name, value] of changed) data.set(name, value);",
+    );
+    // 個別フィールド名を直接 set していないこと (差分判定を迂回する経路を残さない)。
+    expect(saveCurrentBody).not.toContain('data.set("appointment_acquired_date"');
+    expect(saveCurrentBody).not.toContain('data.set("assigned_sales_user_id"');
+    expect(saveCurrentBody).not.toContain('data.set("memo"');
+  });
+
+  it("変更が無ければ Server Action を呼ばない", () => {
+    // 空 FormData で呼ぶと Server Action は空 patch のまま repos.store.update へ
+    // 進む。Server Action 側に特例を足さず client 側で止める。
+    const noop = saveCurrentBody.slice(
+      saveCurrentBody.indexOf("if (changed.length === 0) {"),
+    );
+    expect(noop).toContain("if (changed.length === 0) {");
+    const guardEnd = noop.indexOf("startTransition");
+    expect(guardEnd).toBeGreaterThan(-1);
+    expect(noop.slice(0, guardEnd)).not.toContain("updateSalesProgressAction");
+    // action 呼び出しは差分ありの経路 1 箇所だけ。
     expect(
-      saveCurrentBody.match(/data\.set\("assigned_sales_user_id"/g) ?? [],
+      saveCurrentBody.match(/await updateSalesProgressAction\(/g) ?? [],
     ).toHaveLength(1);
-  });
-
-  it("draft が変わったときだけ Store の営業担当を送る", () => {
-    // set はガード節の内側にあること。
-    const guarded = saveCurrentBody.slice(
-      saveCurrentBody.indexOf("if (assignedSales !=="),
-    );
-    expect(guarded).toContain(
-      'data.set("assigned_sales_user_id", assignedSales);',
-    );
-    // Server Action 側の formData.has() による partial patch に委ねる。
-    // 送らない = 更新しない、なので UI 側で null 化の分岐を持たない。
-    expect(saveCurrentBody).not.toContain("assigned_sales_user_id: null");
-  });
-
-  it("未割当への変更 (空文字) も差分として送れる", () => {
-    // truthy 判定 (`if (assignedSales)` 等) で空文字を落とすと、
-    // 担当あり → 未割当 が永久に保存できなくなる。
-    expect(saveCurrentBody).not.toMatch(
-      /if\s*\(assignedSales\)|assignedSales\s*&&\s*data\.set/,
-    );
-    // 比較対象は "" 正規化済みの値で、null 混在の比較にしない。
-    expect(saveCurrentBody).toContain('store.assigned_sales_user_id ?? ""');
   });
 });
 
