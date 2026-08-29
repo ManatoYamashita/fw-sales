@@ -24,6 +24,11 @@ let code: string;
  * 行構造の検証は本文に限定する。
  */
 let cardBody: string;
+/**
+ * saveCurrent (「保存」で送る FormData を組み立てる部分) だけを切り出したコード。
+ * どのフィールドをどの条件で送るかは画面を開くまで気づけないので構造で固定する。
+ */
+let saveCurrentBody: string;
 
 /** カード本文に現れる行ラベルを出現順に抜き出す。 */
 function infoLabels(src: string): string[] {
@@ -44,6 +49,11 @@ beforeAll(async () => {
   expect(start).toBeGreaterThan(-1);
   expect(end).toBeGreaterThan(start);
   cardBody = code.slice(start, end);
+  const saveStart = code.indexOf("const saveCurrent = () =>");
+  const saveEnd = code.indexOf("return <div", saveStart);
+  expect(saveStart).toBeGreaterThan(-1);
+  expect(saveEnd).toBeGreaterThan(saveStart);
+  saveCurrentBody = code.slice(saveStart, saveEnd);
 });
 
 describe("表示モードと編集モードで行が消えない", () => {
@@ -170,8 +180,42 @@ describe("営業担当 Select", () => {
     expect(code).toContain('setAssignedSales(store.assigned_sales_user_id ?? "")');
   });
 
-  it("保存時に Store の営業担当だけを送る", () => {
-    expect(code).toContain('data.set("assigned_sales_user_id", assignedSales)');
+  it("メモだけ保存したときに stale な props で営業担当を巻き戻さない", () => {
+    // 基本情報カードでも営業担当は編集でき、そちらは updateStorePatchAction =
+    // revalidateTag(..., "max") (stale-while-revalidate) なので、このカードが
+    // 受け取る store props は担当変更直後に古いままのことがある。
+    // 無条件に送っていると、メモだけ保存したつもりで担当がエラーなく元へ戻る。
+    // draft が保存済みの値と一致する限り FormData に載せないことで防ぐ。
+    expect(saveCurrentBody).toContain(
+      'if (assignedSales !== (store.assigned_sales_user_id ?? "")) {',
+    );
+    // 差分ガードの外に無条件の set が残っていないこと (1 箇所だけ)。
+    expect(
+      saveCurrentBody.match(/data\.set\("assigned_sales_user_id"/g) ?? [],
+    ).toHaveLength(1);
+  });
+
+  it("draft が変わったときだけ Store の営業担当を送る", () => {
+    // set はガード節の内側にあること。
+    const guarded = saveCurrentBody.slice(
+      saveCurrentBody.indexOf("if (assignedSales !=="),
+    );
+    expect(guarded).toContain(
+      'data.set("assigned_sales_user_id", assignedSales);',
+    );
+    // Server Action 側の formData.has() による partial patch に委ねる。
+    // 送らない = 更新しない、なので UI 側で null 化の分岐を持たない。
+    expect(saveCurrentBody).not.toContain("assigned_sales_user_id: null");
+  });
+
+  it("未割当への変更 (空文字) も差分として送れる", () => {
+    // truthy 判定 (`if (assignedSales)` 等) で空文字を落とすと、
+    // 担当あり → 未割当 が永久に保存できなくなる。
+    expect(saveCurrentBody).not.toMatch(
+      /if\s*\(assignedSales\)|assignedSales\s*&&\s*data\.set/,
+    );
+    // 比較対象は "" 正規化済みの値で、null 混在の比較にしない。
+    expect(saveCurrentBody).toContain('store.assigned_sales_user_id ?? ""');
   });
 });
 

@@ -75,9 +75,17 @@ export function SalesProgressCard({ store, deals, profiles }: { store: Store; de
   const saveCurrent = () => startTransition(async () => {
     const data = new FormData();
     data.set("appointment_acquired_date", appointmentDate);
-    // Store.assigned_sales_user_id のみを更新する。Deal 側の担当 (その活動を誰が
-    // 行ったか) は営業記録フォームの責務で、ここからは絶対に触らない。
-    data.set("assigned_sales_user_id", assignedSales);
+    // 営業担当は draft が保存済みの値と異なるときだけ送る。基本情報カードなど
+    // 別の UI で担当が更新されても store props は stale なことがあり
+    // (updateStorePatchAction は revalidateTag(..., "max") = stale-while-revalidate)、
+    // 無条件に送ると「メモだけ保存したつもりが担当も古い値へ巻き戻る」が起きる。
+    // Server Action 側は formData.has() による partial patch なので、送らなければ
+    // assigned_sales_user_id は更新されない。
+    // 更新するのは Store.assigned_sales_user_id のみ。Deal 側の担当 (その活動を
+    // 誰が行ったか) は営業記録フォームの責務で、ここからは絶対に触らない。
+    if (assignedSales !== (store.assigned_sales_user_id ?? "")) {
+      data.set("assigned_sales_user_id", assignedSales);
+    }
     data.set("memo", memo);
     const result = await updateSalesProgressAction(store.id, data);
     if (!result.ok) return toast.error(result.error);
