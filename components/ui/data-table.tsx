@@ -4,6 +4,11 @@ import { type ReactNode } from "react";
 import { cn } from "@/lib/utils/cn";
 import { DataTableRow } from "./data-table-row";
 import { SortableHeader, type SortDir } from "./sortable-header";
+import {
+  DATA_TABLE_CONTAINER_CLASS,
+  resolveColumnHideClass,
+  type ColumnMinContainerWidth,
+} from "./data-table-responsive";
 
 export interface ColumnDef<T> {
   key: string;
@@ -11,6 +16,13 @@ export interface ColumnDef<T> {
   cell: (row: T) => ReactNode;
   width?: string;
   align?: "left" | "right" | "center";
+  /**
+   * `<th>` と `<td>` の双方へ付く追加 className。
+   *
+   * **display を切り替えるユーティリティを入れないこと。** 列の表示・非表示は
+   * `minContainerWidth` が一元管理しており、variant 付きの display を混ぜると
+   * 生成順に依存して勝敗が非決定的になる。
+   */
   className?: string;
   /**
    * このカラム上でのクリックは行リンクへ伝搬させない (例: 操作カラム)。
@@ -23,6 +35,16 @@ export interface ColumnDef<T> {
   maxWidth?: string;
   /** truncate 時の native tooltip (title 属性) として表示する全文。 */
   title?: (row: T) => string | undefined;
+  /**
+   * この列を描画するのに必要な**コンテナ幅** (px)。省略時は常に表示。
+   *
+   * viewport ではなくテーブルの表示領域を見るので、サイドバーの折りたたみに
+   * 自動追従する。適用は `DataTable` 側で `<th>` / `<td>` へ一括で行うため、
+   * 呼び出し元が viewport ブレークポイント付きの display ユーティリティを
+   * 直書きしてはいけない (片方だけ直る事故になる)。
+   * 取りうる値は `data-table-responsive.ts` 参照。
+   */
+  minContainerWidth?: ColumnMinContainerWidth;
   /**
    * URL クエリ `?sort=<sortKey>` に書き込むキー。
    * 指定された列ヘッダはクリックでソート切替できる button へ昇格する。
@@ -46,6 +68,13 @@ export interface DataTableProps<T> {
   density?: DataTableDensity;
   /** 行クリック時のラッパー (Link 用途) */
   rowHref?: (row: T) => string | undefined;
+  /**
+   * 現在有効なソートキー (URL の `?sort=`)。**サーバで確定した値**を渡す想定で、
+   * `DataTable` 側では `useSearchParams` を読まない (静的シェルを壊さないため)。
+   *
+   * 一致する `sortKey` を持つ列は `minContainerWidth` を無視して常に表示する。
+   */
+  activeSortKey?: string;
   rowSelection?: {
     selectedRowKeys: string[];
     onChange: (keys: string[]) => void;
@@ -73,6 +102,7 @@ export function DataTable<T>({
   density = "normal",
   rowHref,
   rowSelection,
+  activeSortKey,
 }: DataTableProps<T>) {
   if (rows.length === 0) {
     return <div className={className}>{emptyState ?? null}</div>;
@@ -97,8 +127,16 @@ export function DataTable<T>({
     else next.delete(id);
     rowSelection.onChange([...next]);
   };
+
+  // 列の出し分けはコンテナクエリ (CSS のみ)。選択列の有無で閾値が 48px ずれる。
+  const hideClass = (col: ColumnDef<T>) =>
+    resolveColumnHideClass(col, {
+      activeSortKey,
+      hasSelectionColumn: Boolean(rowSelection),
+    });
+
   return (
-    <div className={cn("overflow-x-auto", className)}>
+    <div className={cn(DATA_TABLE_CONTAINER_CLASS, "overflow-x-auto", className)}>
       <table className="w-full text-sm border-collapse">
         <thead>
           <tr className="text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground bg-muted/50 border-y border-border">
@@ -127,6 +165,7 @@ export function DataTable<T>({
                   col.align === "right" && "text-right",
                   col.align === "center" && "text-center",
                   col.className,
+                  hideClass(col),
                 )}
                 style={
                   col.width || col.maxWidth
@@ -191,6 +230,7 @@ export function DataTable<T>({
                       col.align === "right" && "text-right tabular-nums",
                       col.align === "center" && "text-center",
                       col.className,
+                      hideClass(col),
                     )}
                     style={col.maxWidth ? { maxWidth: col.maxWidth } : undefined}
                   >
