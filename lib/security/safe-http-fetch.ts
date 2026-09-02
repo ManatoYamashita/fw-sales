@@ -50,6 +50,7 @@ import {
   DEFAULT_ALLOWED_SCHEMES,
   type HostSafetyFailureReason,
 } from "./url-safety";
+import { clipForLog } from "@/lib/utils/log-sanitize";
 
 export type SafeFetchFailureReason =
   | "invalid_url"
@@ -106,29 +107,10 @@ const DEFAULT_TOTAL_TIMEOUT_MS = 8000;
 const DEFAULT_MAX_BODY_BYTES = 2_000_000;
 
 /**
- * 診断ログへ載せる文字列フィールドの最大長 (#208 review)。
- *
- * redirect先の`Location`ヘッダはサーバー由来の外部入力であり、そこから組み立てた
- * `URL`の`pathname`/`hostname`には長さの上限がない。Nodeの`maxHeaderSize`(既定16KB)が
- * 実質的な上限にはなるが、ログ1行のサイズが外部入力に比例して膨らむ状態は避ける。
- */
-const LOG_FIELD_MAX_CHARS = 200;
-
-/**
  * 診断ログへ載せる解決先IPの最大件数 (#208 review)。DNSが多数のAレコードを返した場合に
  * ログ1行が膨らむのを防ぐ。件数自体は`resolvedCount`で別途記録するため情報は失われない。
  */
 const LOG_MAX_RESOLVED_ADDRESSES = 8;
-
-/**
- * 診断ログ用に文字列を`LOG_FIELD_MAX_CHARS`で切り詰める。切り詰めた場合は元の長さを
- * 併記し、ログを読む側が「切り詰められた」ことと元のサイズを判別できるようにする。
- */
-function clipForLog(s: string): string {
-  return s.length <= LOG_FIELD_MAX_CHARS
-    ? s
-    : `${s.slice(0, LOG_FIELD_MAX_CHARS)}…(${s.length})`;
-}
 
 /** redirectとして追跡するHTTPステータス。それ以外の3xx(300/304/305/306等)や
  *  Location欠落の3xxはredirectとして扱わずfinal responseとして処理する。 */

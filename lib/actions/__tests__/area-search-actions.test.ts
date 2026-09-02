@@ -9,7 +9,14 @@
  *   distanceMeters は純関数のため実装をそのまま使う
  */
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  PLACES_USER_MESSAGES,
+  PlacesApiError,
+  PlacesApiKeyMissingError,
+  PlacesIncompleteDataError,
+} from "@/lib/places/errors";
+import { LOG_FIELD_MAX_CHARS } from "@/lib/utils/log-sanitize";
 import type { PlaceResult, PlaceSearchPage, SearchCenter } from "@/lib/places/types";
 import type { Store } from "@/types/store";
 import type { PlaceCandidate } from "@/types/place-candidate";
@@ -253,16 +260,19 @@ describe("searchPlacesWithMatchesAction", () => {
 
   // ---- L3: メイン catch の console.error ----
 
-  it("searchPlacesPage が throw した場合は console.error が呼ばれる (L3)", async () => {
+  it("searchPlacesPage が throw した場合は sanitized な構造化ログが出る (L3 / #201)", async () => {
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     mockResolveSearchCenter.mockResolvedValue(CENTER);
     mockSearchPlacesPage.mockRejectedValue(new Error("予期しないエラー"));
 
     await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", 1000);
 
+    // Error オブジェクトの丸投げではなく、分類済みの scalar だけを出す。
+    // Places 由来と判別できないため kind は "unknown" となり、DB 障害の調査可能性を
+    // 確保するため Postgres 解析結果 (ここでは undefined) と message が付く。
     expect(consoleSpy).toHaveBeenCalledWith(
-      expect.stringContaining("[area-search]"),
-      expect.any(Error),
+      "[area-search] searchPlacesWithMatchesAction failed",
+      expect.objectContaining({ kind: "unknown", status: undefined }),
     );
     consoleSpy.mockRestore();
   });
@@ -355,16 +365,166 @@ describe("searchPlacesWithMatchesAction", () => {
     }
   });
 
-  it("searchPlacesPage が throw した場合は failure に変換される", async () => {
+  it("searchPlacesPage が throw した場合は分類済みの安全な文言へ変換される (#201)", async () => {
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     mockResolveSearchCenter.mockResolvedValue(CENTER);
-    mockSearchPlacesPage.mockRejectedValue(new Error("Places API エラー (500): boom"));
+    mockSearchPlacesPage.mockRejectedValue(new PlacesApiError(500));
 
     const result = await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", 1000);
 
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toBe("Places API エラー (500): boom");
+    if (!result.ok) {
+      expect(result.error).toBe(PLACES_USER_MESSAGES.server_error);
+      // HTTP status も含め、外部 API 由来の情報を UI 文言へ載せない
+      expect(result.error).not.toContain("500");
+      expect(result.error).not.toContain("Places API");
+    }
     consoleSpy.mockRestore();
+  });
+
+  // ---- #201: Places API の生レスポンス本文をユーザーへ露出しない ----
+
+  describe("外部エラーの sanitize (#201)", () => {
+    // ファイル全体の beforeEach が `vi.resetAllMocks()` を呼ぶため、spy は
+    // それより後に張る必要がある (describe 評価時に張ると解除される)。
+    let consoleSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      consoleSpy.mockRestore();
+    });
+
+    it.each([
+      [400, PLACES_USER_MESSAGES.invalid_request],
+      [403, PLACES_USER_MESSAGES.permission_denied],
+      [404, PLACES_USER_MESSAGES.not_found],
+      [429, PLACES_USER_MESSAGES.rate_limited],
+      [500, PLACES_USER_MESSAGES.server_error],
+      [503, PLACES_USER_MESSAGES.server_error],
+    ])("HTTP %i は status 別の安全な文言になる", async (status, expected) => {
+      mockResolveSearchCenter.mockResolvedValue(CENTER);
+      mockSearchPlacesPage.mockRejectedValue(new PlacesApiError(status));
+
+      const result = await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", 1000);
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toBe(expected);
+    });
+
+    it("timeout は専用文言になる", async () => {
+      mockResolveSearchCenter.mockResolvedValue(CENTER);
+      const timeout = new Error("The operation was aborted due to timeout");
+      timeout.name = "TimeoutError";
+      mockSearchPlacesPage.mockRejectedValue(timeout);
+
+      const result = await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", 1000);
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error).toBe(PLACES_USER_MESSAGES.timeout);
+        expect(result.error).not.toContain("aborted");
+      }
+    });
+
+    it("API キー未設定は管理者向け導線の文言になる", async () => {
+      mockResolveSearchCenter.mockResolvedValue(CENTER);
+      mockSearchPlacesPage.mockRejectedValue(new PlacesApiKeyMissingError());
+
+      const result = await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", 1000);
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error).toBe(PLACES_USER_MESSAGES.missing_api_key);
+        expect(result.error).not.toContain("GOOGLE_PLACES_API_KEY");
+      }
+    });
+
+    it("旧形式の生 Error (本文込み) が渡っても本文は UI へ出ない", async () => {
+      // 型付きエラー化以前の message 形式。status のみ後方互換で読み取り、
+      // 本文 (`SECRET_BODY`) は決して戻り値へ載せない。
+      mockResolveSearchCenter.mockResolvedValue(CENTER);
+      mockSearchPlacesPage.mockRejectedValue(
+        new Error("Places API エラー (403): SECRET_BODY key=AIzaSyTESTTESTTESTTESTTESTTESTTESTTESTA"),
+      );
+
+      const result = await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", 1000);
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error).toBe(PLACES_USER_MESSAGES.permission_denied);
+        expect(result.error).not.toContain("SECRET_BODY");
+        expect(result.error).not.toContain("AIzaSy");
+      }
+    });
+
+    it("Places 由来でない例外 (DB エラー等) は fallback 固定文言になり message が漏れない", async () => {
+      mockResolveSearchCenter.mockResolvedValue(CENTER);
+      const pgError = Object.assign(new Error('relation "stores" does not exist'), {
+        name: "PostgresError",
+        code: "42P01",
+        table: "stores",
+      });
+      mockSearchPlacesPage.mockRejectedValue(pgError);
+
+      const result = await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", 1000);
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error).toBe("検索に失敗しました。時間をおいて再度お試しください。");
+        expect(result.error).not.toContain("stores");
+        expect(result.error).not.toContain("42P01");
+      }
+      // 調査可能性はログ側で確保する (store-actions.ts と同形)
+      expect(consoleSpy).toHaveBeenCalledWith(
+        "[area-search] searchPlacesWithMatchesAction failed",
+        expect.objectContaining({ kind: "unknown", code: "42P01", table: "stores" }),
+      );
+    });
+
+    it("診断ログの message も redact → clip を通す (#221 review)", async () => {
+      // Drizzle の `Failed query: ...` にはユーザー入力が載るため、ログ 1 行の長さが
+      // 外部入力に比例しないこと。API キー形状が本文に紛れても伏せること。
+      const key = "AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q";
+      mockResolveSearchCenter.mockResolvedValue(CENTER);
+      mockSearchPlacesPage.mockRejectedValue(
+        new Error(`Failed query: ${"x".repeat(5000)} key=${key}`),
+      );
+
+      await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", 1000);
+
+      const [, diagnostics] = consoleSpy.mock.calls[0] as [
+        string,
+        { message: string; stack?: string },
+      ];
+      expect(diagnostics.message.length).toBeLessThanOrEqual(LOG_FIELD_MAX_CHARS + 20);
+      expect(diagnostics.message).not.toContain("AIzaSy");
+    });
+
+    it("分類できない例外ではスタックを残す (#221 review)", async () => {
+      // 構造化ログ化でスタックが失われると、実装バグ (TypeError 等) の発生箇所を追えない。
+      mockResolveSearchCenter.mockResolvedValue(CENTER);
+      mockSearchPlacesPage.mockRejectedValue(new TypeError("cannot read lat of undefined"));
+
+      await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", 1000);
+
+      const [, diagnostics] = consoleSpy.mock.calls[0] as [string, { stack?: string }];
+      expect(diagnostics.stack).toBeTruthy();
+      expect(diagnostics.stack).toContain("TypeError");
+    });
+
+    it("Places 由来と分類できた場合はスタックを付けない", async () => {
+      // throw ヘルパーを指すだけで調査の役に立たず、ログを膨らませるだけのため。
+      mockResolveSearchCenter.mockResolvedValue(CENTER);
+      mockSearchPlacesPage.mockRejectedValue(new PlacesApiError(500));
+
+      await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", 1000);
+
+      const [, diagnostics] = consoleSpy.mock.calls[0] as [string, { stack?: string }];
+      expect(diagnostics.stack).toBeUndefined();
+    });
   });
 
   it("findAreaSearchCandidates の結果から DB登録済み判定 (matchedStore) が反映される", async () => {
@@ -801,12 +961,97 @@ describe("getPlaceDetailsForAreaSearchAction", () => {
     expect(mockGetPlaceDetails).not.toHaveBeenCalled();
   });
 
-  it("getPlaceDetails が例外を投げた場合は failure を返す", async () => {
-    mockGetPlaceDetails.mockRejectedValue(new Error("Places API エラー (404): not found"));
+  it("getPlaceDetails が例外を投げた場合は sanitized な failure を返す (#201)", async () => {
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockGetPlaceDetails.mockRejectedValue(new PlacesApiError(404));
 
     const result = await getPlaceDetailsForAreaSearchAction("ChIJdetail");
 
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toContain("Places API エラー (404)");
+    if (!result.ok) {
+      expect(result.error).toBe(PLACES_USER_MESSAGES.not_found);
+      expect(result.error).not.toContain("Places API");
+      expect(result.error).not.toContain("404");
+    }
+    // #129 A8: 従来この catch にはログが無く、障害時にサーバ側へ何も残らなかった
+    expect(consoleSpy).toHaveBeenCalledWith(
+      "[area-search] getPlaceDetailsForAreaSearchAction failed",
+      expect.objectContaining({ placeId: "ChIJdetail", kind: "not_found", status: 404 }),
+    );
+    consoleSpy.mockRestore();
+  });
+
+  it("必須フィールド欠落は再試行を促さない専用文言になる (#221 review)", async () => {
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockGetPlaceDetails.mockRejectedValue(new PlacesIncompleteDataError());
+
+    const result = await getPlaceDetailsForAreaSearchAction("ChIJdetail");
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBe(PLACES_USER_MESSAGES.incomplete_data);
+      // Google 側レコードの欠落は決定的なので、再試行を促すと無駄な Places 呼び出しになる
+      expect(result.error).not.toContain("時間をおいて");
+      // 内部文言 (旧 message) はそのまま出さない
+      expect(result.error).not.toContain("店舗情報が不足している");
+    }
+    expect(consoleSpy).toHaveBeenCalledWith(
+      "[area-search] getPlaceDetailsForAreaSearchAction failed",
+      expect.objectContaining({ placeId: "ChIJdetail", kind: "incomplete_data" }),
+    );
+    consoleSpy.mockRestore();
+  });
+
+  it("診断ログの placeId も redact → clip を通す (#221 review)", async () => {
+    // placeId はクライアントが Server Action へ直接渡す値で、長さ検証が無い。
+    // `message` / `stack` だけを clip して `extra` を素通しにすると、ログ 1 行の
+    // サイズが外部入力に比例して膨らむ穴が残る。
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const key = "AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q";
+    const hugePlaceId = `ChIJ${"A".repeat(500_000)}${key}`;
+    mockGetPlaceDetails.mockRejectedValue(new PlacesApiError(400));
+
+    await getPlaceDetailsForAreaSearchAction(hugePlaceId);
+
+    const [, diagnostics] = consoleSpy.mock.calls[0] as [string, { placeId: string }];
+    expect(diagnostics.placeId.length).toBeLessThanOrEqual(LOG_FIELD_MAX_CHARS + 20);
+    expect(diagnostics.placeId).not.toContain("AIzaSy");
+    consoleSpy.mockRestore();
+  });
+
+  it("キーワード由来の文字列を message に含む DB エラーを Places 由来へ誤分類しない (#221 review)", async () => {
+    // Drizzle の `Failed query: ...\nparams: ...` にはユーザー入力が載る。部分一致で
+    // 分類すると `parsePostgresError` が走らず、code / table / stack が丸ごと落ちる。
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const drizzleError = Object.assign(
+      new Error(
+        'Failed query: insert into "place_candidates" ...\nparams: 居酒屋 エラー (503),渋谷駅',
+      ),
+      { cause: Object.assign(new Error("deadlock detected"), {
+        name: "PostgresError",
+        code: "40P01",
+        table_name: "place_candidates",
+      }) },
+    );
+    mockGetPlaceDetails.mockRejectedValue(drizzleError);
+
+    const result = await getPlaceDetailsForAreaSearchAction("ChIJdetail");
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBe("詳細情報の取得に失敗しました。時間をおいて再度お試しください。");
+    }
+    expect(consoleSpy).toHaveBeenCalledWith(
+      "[area-search] getPlaceDetailsForAreaSearchAction failed",
+      expect.objectContaining({
+        kind: "unknown",
+        status: undefined,
+        code: "40P01",
+        table: "place_candidates",
+      }),
+    );
+    const [, diagnostics] = consoleSpy.mock.calls[0] as [string, { stack?: string }];
+    expect(diagnostics.stack).toBeTruthy();
+    consoleSpy.mockRestore();
   });
 });

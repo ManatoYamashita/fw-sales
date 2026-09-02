@@ -459,7 +459,7 @@ describe("getPlaceDetails", () => {
     await expect(getPlaceDetails("ChIJfood")).rejects.toThrow(/Places API エラー \(404\)/);
   });
 
-  it("必須フィールド (location) が欠けている場合は例外を投げる", async () => {
+  it("必須フィールド (location) が欠けている場合は型付きエラーを投げる (#221 review)", async () => {
     fetchMock = vi.fn().mockResolvedValue(
       jsonResponse({
         id: "ChIJfood",
@@ -469,7 +469,17 @@ describe("getPlaceDetails", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(getPlaceDetails("ChIJfood")).rejects.toThrow();
+    const err = await getPlaceDetails("ChIJfood").then(
+      () => {
+        throw new Error("should have thrown");
+      },
+      (e: unknown) => e as Error,
+    );
+
+    // 素の `Error` で投げると上位の分類器が "unknown" へ落とし、再試行を促す
+    // fallback 文言になってしまう (決定的な失敗なので誤誘導)。
+    expect(err.name).toBe("PlacesIncompleteDataError");
+    expect(err.message).toBe("店舗情報が不足しているため詳細を取得できませんでした");
   });
 
   it("nationalPhoneNumber がない場合 phone は空文字になる", async () => {
@@ -614,5 +624,123 @@ describe("timeoutMs オプション", () => {
     await expect(getPlaceById("ChIJfood", { timeoutMs: 1 })).rejects.toMatchObject({
       name: "TimeoutError",
     });
+  });
+});
+
+/**
+ * Issue #201: Google の生レスポンス本文を Error へ載せない。
+ *
+ * 本文は `[places] request failed` の構造化ログが唯一の記録点で、そこから先
+ * (Server Action の戻り値 → ユーザー UI) へは status のみが伝わる。
+ */
+describe("Places API エラーの sanitize (#201)", () => {
+  const SECRET_BODY =
+    '{"error":{"code":403,"message":"The caller does not have permission","details":["internal-project-42"]}}';
+  const API_KEY = "AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q";
+
+  let consoleSpy: ReturnType<typeof vi.spyOn>;
+
+  function errorResponse(status: number, body: string): Response {
+    return {
+      ok: false,
+      status,
+      json: async () => JSON.parse(body),
+      text: async () => body,
+    } as unknown as Response;
+  }
+
+  beforeEach(() => {
+    vi.stubEnv("GOOGLE_PLACES_API_KEY", "test-api-key");
+    consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+    consoleSpy.mockRestore();
+  });
+
+  it.each([
+    ["searchText", () => searchPlacesPage("居酒屋", "渋谷駅")],
+    ["resolveCenter", () => resolveSearchCenter("渋谷駅")],
+    ["placeDetails", () => getPlaceDetails("ChIJdetail")],
+  ] as const)("%s: 生レスポンス本文が Error.message に含まれない", async (scope, call) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(errorResponse(403, SECRET_BODY)));
+
+    const err = await call().then(
+      () => {
+        throw new Error("should have thrown");
+      },
+      (e: unknown) => e as Error,
+    );
+
+    expect(err.name).toBe("PlacesApiError");
+    expect((err as Error & { status: number }).status).toBe(403);
+    expect(err.message).toBe("Places API エラー (403)");
+    expect(err.message).not.toContain("internal-project-42");
+    expect(err.message).not.toContain("permission");
+
+    // 本文はログにだけ残る (scope 付きで、どの呼び出しかを判別できる)
+    expect(consoleSpy).toHaveBeenCalledWith(
+      "[places] request failed",
+      expect.objectContaining({ scope, status: 403 }),
+    );
+    expect(JSON.stringify(consoleSpy.mock.calls)).toContain("internal-project-42");
+  });
+
+  it("ログへ載せる本文から API キーを伏せる", async () => {
+    const body = `{"error":{"message":"API key ${API_KEY} is not valid"}}`;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(errorResponse(400, body)));
+
+    await expect(searchPlacesPage("居酒屋", "渋谷駅")).rejects.toThrow("Places API エラー (400)");
+
+    const logged = JSON.stringify(consoleSpy.mock.calls);
+    expect(logged).not.toContain("AIzaSy");
+    expect(logged).toContain("[REDACTED]");
+    // 秘匿値以外の診断情報は残す
+    expect(logged).toContain("is not valid");
+  });
+
+  it("ログへ載せる本文は 200 文字で切り詰める", async () => {
+    const body = "x".repeat(5000);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(errorResponse(500, body)));
+
+    await expect(searchPlacesPage("居酒屋", "渋谷駅")).rejects.toThrow("Places API エラー (500)");
+
+    const [, diagnostics] = consoleSpy.mock.calls[0] as [string, { bodyHead: string }];
+    expect(diagnostics.bodyHead.endsWith("…(5000)")).toBe(true);
+    expect(diagnostics.bodyHead.length).toBeLessThan(250);
+  });
+
+  it("本文の読み取りに失敗しても status 付きで throw する", async () => {
+    const unreadable = {
+      ok: false,
+      status: 502,
+      text: async () => {
+        throw new Error("stream closed");
+      },
+    } as unknown as Response;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(unreadable));
+
+    await expect(searchPlacesPage("居酒屋", "渋谷駅")).rejects.toThrow("Places API エラー (502)");
+    expect(consoleSpy).toHaveBeenCalledWith(
+      "[places] request failed",
+      expect.objectContaining({ status: 502, bodyHead: "" }),
+    );
+  });
+
+  it("API キー未設定は専用のエラー型で、message は従来文言を保つ", async () => {
+    vi.unstubAllEnvs();
+    vi.stubGlobal("fetch", vi.fn());
+
+    const err = await searchPlacesPage("居酒屋", "渋谷駅").then(
+      () => {
+        throw new Error("should have thrown");
+      },
+      (e: unknown) => e as Error,
+    );
+
+    expect(err.name).toBe("PlacesApiKeyMissingError");
+    expect(err.message).toBe("GOOGLE_PLACES_API_KEY が設定されていません");
   });
 });

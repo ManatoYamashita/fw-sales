@@ -10,6 +10,13 @@ import {
   getPlaceDetails,
   resolveSearchCenter,
 } from "@/lib/places/google";
+import {
+  classifyPlacesError,
+  getPlacesErrorStatus,
+  toUserFacingPlacesMessage,
+} from "@/lib/places/errors";
+import { parsePostgresError } from "@/lib/db/postgres-error";
+import { LOG_STACK_MAX_CHARS, clipForLog, redactSecrets } from "@/lib/utils/log-sanitize";
 import { placeResultToStoreInput } from "@/lib/places/to-store-input";
 import { placeResultToBasicInfo } from "@/lib/places/to-basic-info";
 import { attachStoreMatches, computePlacesBounds } from "@/lib/places/match-store";
@@ -50,7 +57,9 @@ async function persistAreaSearchCandidates(
       radiusMeters,
     });
   } catch (e) {
-    console.error("[area-search] 候補DB保存に失敗しました", e);
+    // ユーザーへは返らない (検索自体は成功扱い) が、診断ログの粒度は
+    // 同一機能の他の出力点と揃える (#221 review / PR #209 の教訓)。
+    logAreaSearchFailure("persistAreaSearchCandidates", e);
     return undefined;
   }
 }
@@ -72,7 +81,8 @@ async function attachAreaSearchCandidateInfo(
     const candidates = await repos.placeCandidate.findByGooglePlaceIds(placeIds);
     return attachCandidateInfo(viewModels, candidates);
   } catch (e) {
-    console.error("[area-search] 候補DB照合に失敗しました", e);
+    // 保存側と同じ理由でサニタイズ済みの構造化ログへ揃える (#221 review)。
+    logAreaSearchFailure("attachAreaSearchCandidateInfo", e);
     return viewModels;
   }
 }
@@ -103,6 +113,85 @@ async function createStoreFromPlaceTx(
     }
     return { id: created.id, name: created.name };
   });
+}
+
+/**
+ * `logAreaSearchFailure` の `extra` に載る値を、`message` / `stack` と同じ粒度で整える
+ * (#221 review)。
+ *
+ * 文字列だけが対象。`placeId` のような外部入力は `redactSecrets` → `clipForLog` の順で
+ * 通す (先に切り詰めると秘匿値の断片が末尾に残りうる)。数値・真偽値など長さが有界な値は
+ * そのまま残し、診断のノイズを増やさない。
+ */
+function sanitizeLogExtra(
+  extra: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (extra === undefined) return undefined;
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(extra)) {
+    sanitized[key] = typeof value === "string" ? clipForLog(redactSecrets(value)) : value;
+  }
+  return sanitized;
+}
+
+/**
+ * エリア検索系 Server Action の失敗を構造化ログへ 1 行で残す (Issue #201 / #129 A8)。
+ *
+ * ユーザー UI へは `toUserFacingPlacesMessage` の分類済み文言だけを返し、診断情報は
+ * ここへ集約する — PR #144 以来の二系統設計 (`lib/actions/store-actions.ts` と同形)。
+ *
+ * Places 由来と分類できた場合は `kind` / `status` だけを出す。Google のレスポンス本文は
+ * `lib/places/google.ts` の `[places] request failed` が唯一の記録点なので、ここでは
+ * 重ねて出さない。
+ *
+ * 分類できない (`kind === "unknown"`) 場合のみ Postgres エラーとしての解析を試みる。
+ * この catch は Places 呼び出しだけでなく `repos.store.findAreaSearchCandidates` の
+ * DB エラーも掴むため、DB 障害の調査可能性をログ側で確保しておく必要がある。
+ *
+ * ユーザーへ結果を返す catch だけでなく、握り潰す内部 catch
+ * (`persistAreaSearchCandidates` / `attachAreaSearchCandidateInfo`) からも呼ぶ。
+ * 同一機能の出力点でサニタイズ粒度が揃っていないと、片方だけ直る事故が起きるため
+ * (#221 review)。候補DB 系の失敗は Places 由来ではないので必ず `kind === "unknown"` へ
+ * 落ち、`code` / `constraint` / `table` / `stack` が付く。
+ *
+ * `message` / `stack` は外部が内容を左右しうる (Drizzle の `Failed query: ...` には
+ * ユーザー入力が載る) ため、本文と同じく `redactSecrets` → `clipForLog` を通す。
+ * 同一機能のログ出力点でサニタイズ粒度を揃える (#221 review / PR #209 の教訓)。
+ *
+ * `extra` も同じ経路を通す。`placeId` はクライアントが Server Action へ直接渡す値で、
+ * `typeof === "string"` しか検証しておらず長さに上限が無い。呼び出し側の規律に委ねると
+ * 「サニタイズ関数を持つヘルパーの、可変フィールドだけが素通り」という穴が残るため、
+ * ヘルパー側で閉じる (#221 review)。
+ */
+function logAreaSearchFailure(
+  scope: string,
+  err: unknown,
+  extra?: Record<string, unknown>,
+): void {
+  const kind = classifyPlacesError(err);
+  const diagnostics: Record<string, unknown> = {
+    ...sanitizeLogExtra(extra),
+    kind,
+    status: getPlacesErrorStatus(err),
+    name: err instanceof Error ? err.name : typeof err,
+  };
+  if (kind === "unknown") {
+    const parsed = parsePostgresError(err);
+    diagnostics.code = parsed?.code;
+    diagnostics.constraint = parsed?.constraint;
+    diagnostics.table = parsed?.table;
+    diagnostics.message = clipForLog(
+      redactSecrets(parsed?.message ?? (err instanceof Error ? err.message : String(err))),
+    );
+    // 変更前は `console.error(msg, e)` が Error を丸ごと出しており、スタックが残っていた。
+    // 構造化ログ化でこれが失われるため、発生箇所の特定が必要な "unknown" のときだけ復活させる
+    // (Places / Postgres と分類できた場合のスタックは throw ヘルパーを指すだけで無益) (#221 review)。
+    diagnostics.stack =
+      err instanceof Error && err.stack
+        ? clipForLog(redactSecrets(err.stack), LOG_STACK_MAX_CHARS)
+        : undefined;
+  }
+  console.error(`[area-search] ${scope} failed`, diagnostics);
 }
 
 export interface SearchPlacesWithMatchesOptions {
@@ -248,8 +337,10 @@ export async function searchPlacesWithMatchesAction(
       candidatePersistence,
     });
   } catch (e) {
-    console.error("[area-search] searchPlacesWithMatchesAction failed", e); // L3
-    return failure(e instanceof Error ? e.message : "検索に失敗しました");
+    logAreaSearchFailure("searchPlacesWithMatchesAction", e); // L3
+    return failure(
+      toUserFacingPlacesMessage(e, "検索に失敗しました。時間をおいて再度お試しください。"),
+    );
   }
 }
 
@@ -270,7 +361,13 @@ export async function getPlaceDetailsForAreaSearchAction(
     const details = await getPlaceDetails(placeId);
     return success(details);
   } catch (e) {
-    return failure(e instanceof Error ? e.message : "詳細情報の取得に失敗しました");
+    logAreaSearchFailure("getPlaceDetailsForAreaSearchAction", e, { placeId });
+    return failure(
+      toUserFacingPlacesMessage(
+        e,
+        "詳細情報の取得に失敗しました。時間をおいて再度お試しください。",
+      ),
+    );
   }
 }
 
@@ -285,7 +382,10 @@ export async function searchPlacesAction(
     const results = await searchPlaces(keyword, area);
     return success(results);
   } catch (e) {
-    return failure(e instanceof Error ? e.message : "検索に失敗しました");
+    logAreaSearchFailure("searchPlacesAction", e);
+    return failure(
+      toUserFacingPlacesMessage(e, "検索に失敗しました。時間をおいて再度お試しください。"),
+    );
   }
 }
 
@@ -313,7 +413,10 @@ export async function addStoreFromPlaceAction(
     revalidateTag(CACHE_TAGS.store(created.id), "max");
     return success({ id: created.id }, `「${created.name}」を追加しました`);
   } catch (e) {
-    return failure(e instanceof Error ? e.message : "追加に失敗しました");
+    logAreaSearchFailure("addStoreFromPlaceAction", e, { placeId });
+    return failure(
+      toUserFacingPlacesMessage(e, "追加に失敗しました。時間をおいて再度お試しください。"),
+    );
   }
 }
 
@@ -355,7 +458,10 @@ export async function bulkAddStoresFromPlacesAction(
       }
       const created = await createStoreFromPlaceTx(place);
       createdIds.push(created.id);
-    } catch {
+    } catch (e) {
+      // UI へは failedPlaceIds しか返さないため元から漏洩は無いが、1件ずつ握り潰すと
+      // 障害時にサーバ側へ何も残らないため sanitized な診断ログだけ残す (Issue #201)。
+      logAreaSearchFailure("bulkAddStoresFromPlacesAction", e, { placeId });
       failedPlaceIds.push(placeId);
     }
   }

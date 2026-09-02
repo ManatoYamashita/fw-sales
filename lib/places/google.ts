@@ -1,4 +1,6 @@
 import "server-only";
+import { clipForLog, redactSecrets } from "@/lib/utils/log-sanitize";
+import { PlacesApiError, PlacesApiKeyMissingError, PlacesIncompleteDataError } from "./errors";
 import type { PlaceDetailsResult, PlaceResult, PlaceSearchPage, SearchCenter } from "./types";
 
 const SEARCH_ENDPOINT = "https://places.googleapis.com/v1/places:searchText";
@@ -157,6 +159,37 @@ function abortSignalInit(options?: PlacesRequestOptions): { signal?: AbortSignal
   return options?.timeoutMs === undefined ? {} : { signal: AbortSignal.timeout(options.timeoutMs) };
 }
 
+/**
+ * Places API が非 2xx を返したときの共通処理 (Issue #201)。
+ *
+ * ## レスポンス本文はここが唯一の記録点
+ *
+ * 本文は Google 側が内容を決める外部入力であり、将来何が含まれるかをアプリ側では
+ * 保証できない。したがって `Error.message` には載せず (= 呼び出し元の `failure()` 経由で
+ * ユーザー UI へ到達させず)、サーバーの構造化ログにのみ残す。上位の
+ * `lib/actions/area-search-actions.ts` は分類済みの `kind` / `status` だけを出し、
+ * 本文を重ねて出さない (`lib/url-parser/ogp.ts` が `safeFetchHtml` のログを
+ * 重複させないのと同じ方針)。
+ *
+ * 本文は `redactSecrets` → `clipForLog` の順に通す。API キーはリクエストヘッダで
+ * 送っており本文へ反響する API は確認されていないが、多層防御として落としてから
+ * 切り詰める (先に切り詰めるとキーの断片が末尾に残りうる)。
+ *
+ * 戻り値の型は `never` (必ず throw する)。呼び出し側は `await` を付けて呼ぶこと。
+ */
+async function throwPlacesApiError(
+  scope: "searchText" | "resolveCenter" | "placeDetails",
+  response: Response,
+): Promise<never> {
+  const body = await response.text().catch(() => "");
+  console.error("[places] request failed", {
+    scope,
+    status: response.status,
+    bodyHead: clipForLog(redactSecrets(body)),
+  });
+  throw new PlacesApiError(response.status);
+}
+
 export interface SearchPlacesPageOptions extends PlacesRequestOptions {
   /** 1ページあたりの最大件数 (1-20)。未指定時は20。 */
   pageSize?: number;
@@ -189,7 +222,7 @@ export async function searchPlacesPage(
 ): Promise<PlaceSearchPage> {
   const apiKey = process.env.GOOGLE_PLACES_API_KEY;
   if (!apiKey) {
-    throw new Error("GOOGLE_PLACES_API_KEY が設定されていません");
+    throw new PlacesApiKeyMissingError();
   }
 
   const textQuery = [keyword.trim(), area.trim()].filter(Boolean).join(" ");
@@ -227,8 +260,7 @@ export async function searchPlacesPage(
   });
 
   if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    throw new Error(`Places API エラー (${response.status}): ${text}`);
+    await throwPlacesApiError("searchText", response);
   }
 
   const data = (await response.json()) as PlacesResponse;
@@ -273,7 +305,7 @@ export async function resolveSearchCenter(
 
   const apiKey = process.env.GOOGLE_PLACES_API_KEY;
   if (!apiKey) {
-    throw new Error("GOOGLE_PLACES_API_KEY が設定されていません");
+    throw new PlacesApiKeyMissingError();
   }
 
   const response = await fetch(SEARCH_ENDPOINT, {
@@ -293,8 +325,7 @@ export async function resolveSearchCenter(
   });
 
   if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    throw new Error(`Places API エラー (${response.status}): ${text}`);
+    await throwPlacesApiError("resolveCenter", response);
   }
 
   const data = (await response.json()) as PlacesResponse;
@@ -351,7 +382,7 @@ async function fetchRawPlaceDetails(
 ): Promise<RawPlace> {
   const apiKey = process.env.GOOGLE_PLACES_API_KEY;
   if (!apiKey) {
-    throw new Error("GOOGLE_PLACES_API_KEY が設定されていません");
+    throw new PlacesApiKeyMissingError();
   }
 
   const response = await fetch(buildPlaceDetailsUrl(placeId), {
@@ -365,8 +396,7 @@ async function fetchRawPlaceDetails(
   });
 
   if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    throw new Error(`Places API エラー (${response.status}): ${text}`);
+    await throwPlacesApiError("placeDetails", response);
   }
 
   return (await response.json()) as RawPlace;
@@ -396,7 +426,9 @@ export async function getPlaceDetails(placeId: string): Promise<PlaceDetailsResu
   const raw = await fetchRawPlaceDetails(placeId, PLACE_DETAILS_FIELD_MASK);
 
   if (!hasRequiredPlaceFields(raw)) {
-    throw new Error("店舗情報が不足しているため詳細を取得できませんでした");
+    // 型付きエラーで投げることで、上位の `toUserFacingPlacesMessage` が
+    // 「再試行を促さない」専用文言へ分類できる (#221 review)。message 自体は従来と同一。
+    throw new PlacesIncompleteDataError();
   }
 
   return {

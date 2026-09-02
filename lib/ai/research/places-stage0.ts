@@ -26,6 +26,7 @@
 import "server-only";
 
 import { getPlaceById, searchPlaces } from "@/lib/places/google";
+import { toPlacesDiagnosticKind } from "@/lib/places/errors";
 import { placeResultToBasicInfo } from "@/lib/places/to-basic-info";
 import type { PlaceResult } from "@/lib/places/types";
 import type { BasicInfo } from "@/types/basic-info";
@@ -239,28 +240,19 @@ export function diagnosePlacesMatch(
 }
 
 /**
- * Places API失敗時の生エラー(`lib/places/google.ts`が投げる`Error`)から、
- * secretや生レスポンス本文を含まないsanitizedな種別文字列を導出する
- * (feat/ai-research-final-quality、PR #187のGemini観測性修正と同じ方針)。
+ * Places API失敗時のエラーから、secretや生レスポンス本文を含まないsanitizedな
+ * 種別文字列を導出する (feat/ai-research-final-quality、PR #187のGemini観測性修正と
+ * 同じ方針)。戻り値は `"timeout"` / `"missing_api_key"` / `"api_error:<status>"` /
+ * `"unknown"`。
  *
- * `lib/places/google.ts`は`Error("Places API エラー (${status}): ${text}")`
- * 形式で投げるため、ここではstatusコードのみを抽出し、`text`(Google APIの
- * 生レスポンス本文)は一切含めない。判定できない場合は"unknown"。
+ * 実装は `lib/places/errors.ts` の `toPlacesDiagnosticKind` に一本化した (Issue #201)。
+ * 従来はここで `Error.message` を正規表現パースしていたが、`lib/places/google.ts` が
+ * status を持つ型付きエラー (`PlacesApiError`) を投げるようになったため、分類ロジックを
+ * Places モジュール側へ寄せ、同じ判定が2箇所に存在する状態を解消している。
+ * 本 export は既存呼び出し元 (本ファイル内および回帰テスト) の互換のために残す。
  */
 export function classifyPlacesError(err: unknown): string {
-  // 明示timeout(`AbortSignal.timeout`)由来の中断を専用種別へ落とす
-  // (runtime reliability hardening、F5)。`AbortSignal.timeout` は `TimeoutError`、
-  // 外部からの明示abortは `AbortError` を投げる。いずれも「Placesが応答しなかった」
-  // として同じ扱いでよい(呼び出し側はどちらもbest-effort失敗として続行する)。
-  // `err.name` による構造化判定であり、メッセージ文言には依存しない。
-  if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) {
-    return "timeout";
-  }
-  const message = err instanceof Error ? err.message : String(err);
-  if (message.includes("GOOGLE_PLACES_API_KEY")) return "missing_api_key";
-  const statusMatch = message.match(/エラー \((\d{3})\)/);
-  if (statusMatch) return `api_error:${statusMatch[1]}`;
-  return "unknown";
+  return toPlacesDiagnosticKind(err);
 }
 
 /**
