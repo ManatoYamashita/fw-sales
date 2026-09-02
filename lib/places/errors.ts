@@ -98,13 +98,32 @@ function asPlacesApiError(err: unknown): { status: number } | null {
     : null;
 }
 
+/**
+ * 型付きエラー化以前の生 `Error` message 形式。`lib/places/google.ts` が投げていた
+ * 文言そのものだけを認める。
+ *
+ * ## 先頭一致に限定する理由 (#221 review)
+ *
+ * `classifyPlacesError` は Places 由来かどうかを問わず**あらゆる catch のエラー**へ
+ * 適用される。部分一致にすると、message の中に第三者由来のテキストを含むエラーが
+ * Places 由来と誤判定される。具体的には Drizzle の `DrizzleQueryError.message` は
+ * `Failed query: <sql>\nparams: <params>` 形式で、`params` にはユーザーが入力した
+ * 検索キーワードがそのまま載る。キーワードに `エラー (503)` を含めて検索すると、
+ * 候補DB の失敗が `kind: "server_error"` へ誤分類され、`parsePostgresError` が
+ * 走らなくなって `code` / `constraint` / `table` / `stack` が丸ごと落ちる。
+ *
+ * 旧実装が投げていた message は必ずこの形で始まるため、先頭一致でも後方互換は保たれる。
+ */
+const LEGACY_API_ERROR_MESSAGE = /^Places API エラー \((\d{3})\)/;
+const LEGACY_API_KEY_MISSING_MESSAGE = /^GOOGLE_PLACES_API_KEY /;
+
 function isApiKeyMissingError(err: unknown): boolean {
   if (typeof err === "object" && err !== null && (err as { name?: unknown }).name === "PlacesApiKeyMissingError") {
     return true;
   }
   // 後方互換: 型付きエラー化以前の生 `Error` 経路 (他モジュール由来の再 throw 等)。
   const message = err instanceof Error ? err.message : String(err);
-  return message.includes("GOOGLE_PLACES_API_KEY");
+  return LEGACY_API_KEY_MISSING_MESSAGE.test(message);
 }
 
 /**
@@ -134,8 +153,9 @@ export function getPlacesErrorStatus(err: unknown): number | undefined {
   const parsed = asPlacesApiError(err);
   if (parsed) return parsed.status;
   // 後方互換: 型付きエラー化以前の message 形式からの抽出。
+  // 先頭一致に限定する理由は `LEGACY_API_ERROR_MESSAGE` を参照。
   const message = err instanceof Error ? err.message : String(err);
-  const match = message.match(/エラー \((\d{3})\)/);
+  const match = message.match(LEGACY_API_ERROR_MESSAGE);
   return match ? Number(match[1]) : undefined;
 }
 
@@ -204,8 +224,10 @@ export const PLACES_USER_MESSAGES: Record<PlacesErrorKind, string | null> = {
   permission_denied: "店舗情報サービスを利用できませんでした。管理者にお問い合わせください。",
   not_found: "対象の店舗情報が見つかりませんでした。別の候補をお試しください。",
   // 検索・詳細取得・追加のどこから出ても取れる行動だけを示す (#221 review)。
+  // 4xx は決定的な失敗なので「時間をおいて」は促さず、やり直しでも直らない場合の
+  // エスカレーション先だけを示す。「検索条件」のような特定導線の語彙は使わない。
   invalid_request:
-    "店舗情報を取得できませんでした。検索条件を変えるか、検索し直してから再度お試しください。",
+    "店舗情報を取得できませんでした。やり直しても解決しない場合は管理者にお問い合わせください。",
   server_error: "店舗情報サービスが一時的に利用できません。時間をおいて再度お試しください。",
   // 再試行で解消しない決定的な失敗なので、他と違い「時間をおいて」を含めない (#221 review)。
   incomplete_data:

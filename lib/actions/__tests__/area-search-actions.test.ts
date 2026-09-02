@@ -1001,4 +1001,57 @@ describe("getPlaceDetailsForAreaSearchAction", () => {
     );
     consoleSpy.mockRestore();
   });
+
+  it("診断ログの placeId も redact → clip を通す (#221 review)", async () => {
+    // placeId はクライアントが Server Action へ直接渡す値で、長さ検証が無い。
+    // `message` / `stack` だけを clip して `extra` を素通しにすると、ログ 1 行の
+    // サイズが外部入力に比例して膨らむ穴が残る。
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const key = "AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q";
+    const hugePlaceId = `ChIJ${"A".repeat(500_000)}${key}`;
+    mockGetPlaceDetails.mockRejectedValue(new PlacesApiError(400));
+
+    await getPlaceDetailsForAreaSearchAction(hugePlaceId);
+
+    const [, diagnostics] = consoleSpy.mock.calls[0] as [string, { placeId: string }];
+    expect(diagnostics.placeId.length).toBeLessThanOrEqual(LOG_FIELD_MAX_CHARS + 20);
+    expect(diagnostics.placeId).not.toContain("AIzaSy");
+    consoleSpy.mockRestore();
+  });
+
+  it("キーワード由来の文字列を message に含む DB エラーを Places 由来へ誤分類しない (#221 review)", async () => {
+    // Drizzle の `Failed query: ...\nparams: ...` にはユーザー入力が載る。部分一致で
+    // 分類すると `parsePostgresError` が走らず、code / table / stack が丸ごと落ちる。
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const drizzleError = Object.assign(
+      new Error(
+        'Failed query: insert into "place_candidates" ...\nparams: 居酒屋 エラー (503),渋谷駅',
+      ),
+      { cause: Object.assign(new Error("deadlock detected"), {
+        name: "PostgresError",
+        code: "40P01",
+        table_name: "place_candidates",
+      }) },
+    );
+    mockGetPlaceDetails.mockRejectedValue(drizzleError);
+
+    const result = await getPlaceDetailsForAreaSearchAction("ChIJdetail");
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBe("詳細情報の取得に失敗しました。時間をおいて再度お試しください。");
+    }
+    expect(consoleSpy).toHaveBeenCalledWith(
+      "[area-search] getPlaceDetailsForAreaSearchAction failed",
+      expect.objectContaining({
+        kind: "unknown",
+        status: undefined,
+        code: "40P01",
+        table: "place_candidates",
+      }),
+    );
+    const [, diagnostics] = consoleSpy.mock.calls[0] as [string, { stack?: string }];
+    expect(diagnostics.stack).toBeTruthy();
+    consoleSpy.mockRestore();
+  });
 });

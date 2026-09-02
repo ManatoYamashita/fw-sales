@@ -116,6 +116,25 @@ async function createStoreFromPlaceTx(
 }
 
 /**
+ * `logAreaSearchFailure` の `extra` に載る値を、`message` / `stack` と同じ粒度で整える
+ * (#221 review)。
+ *
+ * 文字列だけが対象。`placeId` のような外部入力は `redactSecrets` → `clipForLog` の順で
+ * 通す (先に切り詰めると秘匿値の断片が末尾に残りうる)。数値・真偽値など長さが有界な値は
+ * そのまま残し、診断のノイズを増やさない。
+ */
+function sanitizeLogExtra(
+  extra: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (extra === undefined) return undefined;
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(extra)) {
+    sanitized[key] = typeof value === "string" ? clipForLog(redactSecrets(value)) : value;
+  }
+  return sanitized;
+}
+
+/**
  * エリア検索系 Server Action の失敗を構造化ログへ 1 行で残す (Issue #201 / #129 A8)。
  *
  * ユーザー UI へは `toUserFacingPlacesMessage` の分類済み文言だけを返し、診断情報は
@@ -138,6 +157,11 @@ async function createStoreFromPlaceTx(
  * `message` / `stack` は外部が内容を左右しうる (Drizzle の `Failed query: ...` には
  * ユーザー入力が載る) ため、本文と同じく `redactSecrets` → `clipForLog` を通す。
  * 同一機能のログ出力点でサニタイズ粒度を揃える (#221 review / PR #209 の教訓)。
+ *
+ * `extra` も同じ経路を通す。`placeId` はクライアントが Server Action へ直接渡す値で、
+ * `typeof === "string"` しか検証しておらず長さに上限が無い。呼び出し側の規律に委ねると
+ * 「サニタイズ関数を持つヘルパーの、可変フィールドだけが素通り」という穴が残るため、
+ * ヘルパー側で閉じる (#221 review)。
  */
 function logAreaSearchFailure(
   scope: string,
@@ -146,7 +170,7 @@ function logAreaSearchFailure(
 ): void {
   const kind = classifyPlacesError(err);
   const diagnostics: Record<string, unknown> = {
-    ...extra,
+    ...sanitizeLogExtra(extra),
     kind,
     status: getPlacesErrorStatus(err),
     name: err instanceof Error ? err.name : typeof err,

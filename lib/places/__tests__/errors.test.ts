@@ -96,6 +96,17 @@ describe("getPlacesErrorStatus", () => {
     expect(getPlacesErrorStatus(new Error("relation does not exist"))).toBeUndefined();
     expect(getPlacesErrorStatus(null)).toBeUndefined();
   });
+
+  it("message の途中に status 形式を含むだけの他モジュール由来エラーは拾わない (#221 review)", () => {
+    // Drizzle の `DrizzleQueryError.message` は `Failed query: <sql>\nparams: <params>` 形式で、
+    // params にはユーザーが入力した検索キーワードがそのまま載る。部分一致で拾うと
+    // 「キーワードに `エラー (503)` と打つ」だけで DB 障害が Places 由来へ誤分類される。
+    const drizzleError = new Error(
+      'Failed query: insert into "place_candidates" ...\nparams: 居酒屋 エラー (503),渋谷駅',
+    );
+    expect(getPlacesErrorStatus(drizzleError)).toBeUndefined();
+    expect(classifyPlacesError(drizzleError)).toBe("unknown");
+  });
 });
 
 describe("classifyPlacesError", () => {
@@ -128,6 +139,15 @@ describe("classifyPlacesError", () => {
     expect(classifyPlacesError(new Error("boom"))).toBe("unknown");
     expect(classifyPlacesError("just a string")).toBe("unknown");
     expect(classifyPlacesError(undefined)).toBe("unknown");
+  });
+
+  it("message の途中に API キー名を含むだけの他モジュール由来エラーは拾わない (#221 review)", () => {
+    // status 形式と同じ理由。外部入力を含みうる message へ部分一致を掛けない。
+    expect(
+      classifyPlacesError(
+        new Error('Failed query: insert into "logs" ...\nparams: GOOGLE_PLACES_API_KEY'),
+      ),
+    ).toBe("unknown");
   });
 
   it("timeout 判定は message 文言ではなく name に依存する", () => {
@@ -201,7 +221,12 @@ describe("PLACES_USER_MESSAGES", () => {
     // このテーブルは検索 / 詳細取得 / 追加の 4 アクションで共用する。
     // 「店舗検索」を主語に固定したり「条件を変えて」のようにその画面に存在しない
     // 操作を促したりすると、詳細取得・追加の導線で取りようのない行動へ誘導する。
-    const contextBound = ["店舗検索", "条件を変えて"];
+    //
+    // 語幹ではなく語そのものを禁じる。「条件を変えて」だけを禁止していた版は
+    // 「検索条件を変えるか」を素通りさせており、テスト名が掲げる不変条件を
+    // 実際には守れていなかった (#221 review)。「候補」は 4 アクションすべてが
+    // 同じエリア検索結果の一覧を指すため許容する。
+    const contextBound = ["検索", "条件"];
     for (const [kind, message] of Object.entries(PLACES_USER_MESSAGES)) {
       if (message === null) continue;
       for (const phrase of contextBound) {
