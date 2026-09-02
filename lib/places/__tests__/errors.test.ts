@@ -11,6 +11,7 @@ import {
   PLACES_USER_MESSAGES,
   PlacesApiError,
   PlacesApiKeyMissingError,
+  PlacesIncompleteDataError,
   classifyPlacesError,
   getPlacesErrorStatus,
   toPlacesDiagnosticKind,
@@ -45,6 +46,34 @@ describe("PlacesApiKeyMissingError", () => {
     const err = new PlacesApiKeyMissingError();
     expect(err.message).toBe("GOOGLE_PLACES_API_KEY が設定されていません");
     expect(err.name).toBe("PlacesApiKeyMissingError");
+  });
+});
+
+describe("PlacesIncompleteDataError", () => {
+  it("既存文言を維持し、name で判別できる", () => {
+    const err = new PlacesIncompleteDataError();
+    expect(err.message).toBe("店舗情報が不足しているため詳細を取得できませんでした");
+    expect(err.name).toBe("PlacesIncompleteDataError");
+    expect(err).toBeInstanceOf(Error);
+  });
+
+  it("HTTP status を持たない (Places が 2xx を返した上での欠落であるため)", () => {
+    expect(getPlacesErrorStatus(new PlacesIncompleteDataError())).toBeUndefined();
+  });
+
+  it("kind / 診断種別ともに incomplete_data へ分類される", () => {
+    expect(classifyPlacesError(new PlacesIncompleteDataError())).toBe("incomplete_data");
+    expect(toPlacesDiagnosticKind(new PlacesIncompleteDataError())).toBe("incomplete_data");
+  });
+
+  it("再試行を促さない専用文言になり、fallback へ落ちない", () => {
+    const fallback = "詳細情報の取得に失敗しました。時間をおいて再度お試しください。";
+    const message = toUserFacingPlacesMessage(new PlacesIncompleteDataError(), fallback);
+
+    expect(message).toBe(PLACES_USER_MESSAGES.incomplete_data);
+    expect(message).not.toBe(fallback);
+    // 決定的な失敗なので再試行を促す文言を含めない (無駄な Places 呼び出しを誘発するため)
+    expect(message).not.toContain("時間をおいて");
   });
 });
 

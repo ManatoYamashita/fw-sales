@@ -37,6 +37,7 @@ export type PlacesErrorKind =
   | "not_found"
   | "invalid_request"
   | "server_error"
+  | "incomplete_data"
   | "unknown";
 
 /**
@@ -64,6 +65,26 @@ export class PlacesApiKeyMissingError extends Error {
 }
 
 /**
+ * Places が 2xx を返したが、必須フィールド (id / displayName.text / formattedAddress /
+ * location) が欠けていて `PlaceDetailsResult` を組み立てられない状態。
+ *
+ * **外部由来のテキストを含まない、アプリ自身が書いたドメイン例外**である点が
+ * `PlacesApiError` と決定的に違う。Google 側のレコード内容に起因する決定的な失敗
+ * なので、再試行で解消しない。分類器がこれを `"unknown"` に落とすと fallback 文言
+ * (「時間をおいて再度お試しください」) になり、無駄な再試行 = 余分な Places 呼び出しを
+ * 誘発するため、専用 kind を持たせる (#221 review)。
+ *
+ * message は型付きエラー化以前と同一文言を維持する (後方互換。`PlacesApiKeyMissingError`
+ * と同じ方針)。
+ */
+export class PlacesIncompleteDataError extends Error {
+  constructor() {
+    super("店舗情報が不足しているため詳細を取得できませんでした");
+    this.name = "PlacesIncompleteDataError";
+  }
+}
+
+/**
  * `instanceof` ではなく `name` + プロパティ形状で判定する。
  *
  * `lib/db/postgres-error.ts` の教訓と同じ理由: Vitest の module mock や bundler の
@@ -84,6 +105,19 @@ function isApiKeyMissingError(err: unknown): boolean {
   // 後方互換: 型付きエラー化以前の生 `Error` 経路 (他モジュール由来の再 throw 等)。
   const message = err instanceof Error ? err.message : String(err);
   return message.includes("GOOGLE_PLACES_API_KEY");
+}
+
+/**
+ * `PlacesIncompleteDataError` 判定。他の判定と同様、`instanceof` ではなく `name` を見る。
+ * 生 `Error` への後方互換 fallback は置かない (この文言を投げるのは `lib/places/google.ts`
+ * の 1 箇所だけで、型付きエラー化以前の値が永続化される経路が無いため)。
+ */
+function isIncompleteDataError(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    (err as { name?: unknown }).name === "PlacesIncompleteDataError"
+  );
 }
 
 /**
@@ -122,6 +156,7 @@ function kindFromStatus(status: number): PlacesErrorKind {
 export function classifyPlacesError(err: unknown): PlacesErrorKind {
   if (isTimeoutError(err)) return "timeout";
   if (isApiKeyMissingError(err)) return "missing_api_key";
+  if (isIncompleteDataError(err)) return "incomplete_data";
   const status = getPlacesErrorStatus(err);
   return status === undefined ? "unknown" : kindFromStatus(status);
 }
@@ -136,6 +171,7 @@ export function classifyPlacesError(err: unknown): PlacesErrorKind {
 export function toPlacesDiagnosticKind(err: unknown): string {
   if (isTimeoutError(err)) return "timeout";
   if (isApiKeyMissingError(err)) return "missing_api_key";
+  if (isIncompleteDataError(err)) return "incomplete_data";
   const status = getPlacesErrorStatus(err);
   return status === undefined ? "unknown" : `api_error:${status}`;
 }
@@ -160,6 +196,9 @@ export const PLACES_USER_MESSAGES: Record<PlacesErrorKind, string | null> = {
   not_found: "対象の店舗情報が見つかりませんでした。別の候補で再度お試しください。",
   invalid_request: "この条件では店舗検索を実行できませんでした。条件を変えて再度お試しください。",
   server_error: "店舗検索サービスが一時的に利用できません。時間をおいて再度お試しください。",
+  // 再試行で解消しない決定的な失敗なので、他と違い「時間をおいて」を含めない (#221 review)。
+  incomplete_data:
+    "この店舗は詳細情報が公開されていないため取得できませんでした。別の候補をお試しください。",
   unknown: null,
 };
 

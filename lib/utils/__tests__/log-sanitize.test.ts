@@ -7,7 +7,12 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { LOG_FIELD_MAX_CHARS, clipForLog, redactSecrets } from "../log-sanitize";
+import {
+  LOG_FIELD_MAX_CHARS,
+  LOG_STACK_MAX_CHARS,
+  clipForLog,
+  redactSecrets,
+} from "../log-sanitize";
 
 describe("clipForLog", () => {
   it("上限以下の文字列はそのまま返す", () => {
@@ -23,6 +28,18 @@ describe("clipForLog", () => {
 
   it("空文字を落とさない", () => {
     expect(clipForLog("")).toBe("");
+  });
+
+  it("maxChars を渡すとその上限で切り詰める (スタックトレース用)", () => {
+    const clipped = clipForLog("a".repeat(1500), LOG_STACK_MAX_CHARS);
+
+    expect(clipped).toHaveLength(LOG_STACK_MAX_CHARS + "…(1500)".length);
+    expect(clipped.endsWith("…(1500)")).toBe(true);
+  });
+
+  it("スタック用上限は既定より広い (上位フレームが落ちないこと)", () => {
+    // 既定の 200 文字ではスタックが 2 フレーム程度で切れ、発生箇所を特定できない。
+    expect(LOG_STACK_MAX_CHARS).toBeGreaterThan(LOG_FIELD_MAX_CHARS);
   });
 });
 

@@ -22,13 +22,23 @@
 export const LOG_FIELD_MAX_CHARS = 200;
 
 /**
- * 診断ログ用に文字列を `LOG_FIELD_MAX_CHARS` で切り詰める。切り詰めた場合は元の長さを
- * 併記し、ログを読む側が「切り詰められた」ことと元のサイズを判別できるようにする。
+ * スタックトレースをログへ載せるときの最大長。
+ *
+ * スタックは 1 フレームだけで 100 文字前後になるため、`LOG_FIELD_MAX_CHARS` では
+ * 先頭 2 フレーム程度しか残らず発生箇所の特定に足りない。一方で無制限にすると
+ * ログ 1 行が深さに比例して膨らむため、上位フレームが確実に収まる長さで別途上限を置く。
  */
-export function clipForLog(s: string): string {
-  return s.length <= LOG_FIELD_MAX_CHARS
-    ? s
-    : `${s.slice(0, LOG_FIELD_MAX_CHARS)}…(${s.length})`;
+export const LOG_STACK_MAX_CHARS = 1_000;
+
+/**
+ * 診断ログ用に文字列を切り詰める。切り詰めた場合は元の長さを併記し、ログを読む側が
+ * 「切り詰められた」ことと元のサイズを判別できるようにする。
+ *
+ * `maxChars` は既定で `LOG_FIELD_MAX_CHARS`。スタックトレースのように 1 フィールドだけ
+ * 長さの性質が異なるものは `LOG_STACK_MAX_CHARS` を明示して渡す。
+ */
+export function clipForLog(s: string, maxChars: number = LOG_FIELD_MAX_CHARS): string {
+  return s.length <= maxChars ? s : `${s.slice(0, maxChars)}…(${s.length})`;
 }
 
 /**

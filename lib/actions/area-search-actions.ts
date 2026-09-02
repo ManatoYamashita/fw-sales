@@ -16,6 +16,7 @@ import {
   toUserFacingPlacesMessage,
 } from "@/lib/places/errors";
 import { parsePostgresError } from "@/lib/db/postgres-error";
+import { LOG_STACK_MAX_CHARS, clipForLog, redactSecrets } from "@/lib/utils/log-sanitize";
 import { placeResultToStoreInput } from "@/lib/places/to-store-input";
 import { placeResultToBasicInfo } from "@/lib/places/to-basic-info";
 import { attachStoreMatches, computePlacesBounds } from "@/lib/places/match-store";
@@ -124,6 +125,10 @@ async function createStoreFromPlaceTx(
  * 分類できない (`kind === "unknown"`) 場合のみ Postgres エラーとしての解析を試みる。
  * この catch は Places 呼び出しだけでなく `repos.store.findAreaSearchCandidates` の
  * DB エラーも掴むため、DB 障害の調査可能性をログ側で確保しておく必要がある。
+ *
+ * `message` / `stack` は外部が内容を左右しうる (Drizzle の `Failed query: ...` には
+ * ユーザー入力が載る) ため、本文と同じく `redactSecrets` → `clipForLog` を通す。
+ * 同一機能のログ出力点でサニタイズ粒度を揃える (#221 review / PR #209 の教訓)。
  */
 function logAreaSearchFailure(
   scope: string,
@@ -142,7 +147,16 @@ function logAreaSearchFailure(
     diagnostics.code = parsed?.code;
     diagnostics.constraint = parsed?.constraint;
     diagnostics.table = parsed?.table;
-    diagnostics.message = parsed?.message ?? (err instanceof Error ? err.message : String(err));
+    diagnostics.message = clipForLog(
+      redactSecrets(parsed?.message ?? (err instanceof Error ? err.message : String(err))),
+    );
+    // 変更前は `console.error(msg, e)` が Error を丸ごと出しており、スタックが残っていた。
+    // 構造化ログ化でこれが失われるため、発生箇所の特定が必要な "unknown" のときだけ復活させる
+    // (Places / Postgres と分類できた場合のスタックは throw ヘルパーを指すだけで無益) (#221 review)。
+    diagnostics.stack =
+      err instanceof Error && err.stack
+        ? clipForLog(redactSecrets(err.stack), LOG_STACK_MAX_CHARS)
+        : undefined;
   }
   console.error(`[area-search] ${scope} failed`, diagnostics);
 }

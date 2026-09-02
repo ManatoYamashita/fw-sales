@@ -14,7 +14,9 @@ import {
   PLACES_USER_MESSAGES,
   PlacesApiError,
   PlacesApiKeyMissingError,
+  PlacesIncompleteDataError,
 } from "@/lib/places/errors";
+import { LOG_FIELD_MAX_CHARS } from "@/lib/utils/log-sanitize";
 import type { PlaceResult, PlaceSearchPage, SearchCenter } from "@/lib/places/types";
 import type { Store } from "@/types/store";
 import type { PlaceCandidate } from "@/types/place-candidate";
@@ -481,6 +483,48 @@ describe("searchPlacesWithMatchesAction", () => {
         expect.objectContaining({ kind: "unknown", code: "42P01", table: "stores" }),
       );
     });
+
+    it("診断ログの message も redact → clip を通す (#221 review)", async () => {
+      // Drizzle の `Failed query: ...` にはユーザー入力が載るため、ログ 1 行の長さが
+      // 外部入力に比例しないこと。API キー形状が本文に紛れても伏せること。
+      const key = "AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q";
+      mockResolveSearchCenter.mockResolvedValue(CENTER);
+      mockSearchPlacesPage.mockRejectedValue(
+        new Error(`Failed query: ${"x".repeat(5000)} key=${key}`),
+      );
+
+      await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", 1000);
+
+      const [, diagnostics] = consoleSpy.mock.calls[0] as [
+        string,
+        { message: string; stack?: string },
+      ];
+      expect(diagnostics.message.length).toBeLessThanOrEqual(LOG_FIELD_MAX_CHARS + 20);
+      expect(diagnostics.message).not.toContain("AIzaSy");
+    });
+
+    it("分類できない例外ではスタックを残す (#221 review)", async () => {
+      // 構造化ログ化でスタックが失われると、実装バグ (TypeError 等) の発生箇所を追えない。
+      mockResolveSearchCenter.mockResolvedValue(CENTER);
+      mockSearchPlacesPage.mockRejectedValue(new TypeError("cannot read lat of undefined"));
+
+      await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", 1000);
+
+      const [, diagnostics] = consoleSpy.mock.calls[0] as [string, { stack?: string }];
+      expect(diagnostics.stack).toBeTruthy();
+      expect(diagnostics.stack).toContain("TypeError");
+    });
+
+    it("Places 由来と分類できた場合はスタックを付けない", async () => {
+      // throw ヘルパーを指すだけで調査の役に立たず、ログを膨らませるだけのため。
+      mockResolveSearchCenter.mockResolvedValue(CENTER);
+      mockSearchPlacesPage.mockRejectedValue(new PlacesApiError(500));
+
+      await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", 1000);
+
+      const [, diagnostics] = consoleSpy.mock.calls[0] as [string, { stack?: string }];
+      expect(diagnostics.stack).toBeUndefined();
+    });
   });
 
   it("findAreaSearchCandidates の結果から DB登録済み判定 (matchedStore) が反映される", async () => {
@@ -933,6 +977,27 @@ describe("getPlaceDetailsForAreaSearchAction", () => {
     expect(consoleSpy).toHaveBeenCalledWith(
       "[area-search] getPlaceDetailsForAreaSearchAction failed",
       expect.objectContaining({ placeId: "ChIJdetail", kind: "not_found", status: 404 }),
+    );
+    consoleSpy.mockRestore();
+  });
+
+  it("必須フィールド欠落は再試行を促さない専用文言になる (#221 review)", async () => {
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockGetPlaceDetails.mockRejectedValue(new PlacesIncompleteDataError());
+
+    const result = await getPlaceDetailsForAreaSearchAction("ChIJdetail");
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBe(PLACES_USER_MESSAGES.incomplete_data);
+      // Google 側レコードの欠落は決定的なので、再試行を促すと無駄な Places 呼び出しになる
+      expect(result.error).not.toContain("時間をおいて");
+      // 内部文言 (旧 message) はそのまま出さない
+      expect(result.error).not.toContain("店舗情報が不足している");
+    }
+    expect(consoleSpy).toHaveBeenCalledWith(
+      "[area-search] getPlaceDetailsForAreaSearchAction failed",
+      expect.objectContaining({ placeId: "ChIJdetail", kind: "incomplete_data" }),
     );
     consoleSpy.mockRestore();
   });

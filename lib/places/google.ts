@@ -1,6 +1,6 @@
 import "server-only";
 import { clipForLog, redactSecrets } from "@/lib/utils/log-sanitize";
-import { PlacesApiError, PlacesApiKeyMissingError } from "./errors";
+import { PlacesApiError, PlacesApiKeyMissingError, PlacesIncompleteDataError } from "./errors";
 import type { PlaceDetailsResult, PlaceResult, PlaceSearchPage, SearchCenter } from "./types";
 
 const SEARCH_ENDPOINT = "https://places.googleapis.com/v1/places:searchText";
@@ -426,7 +426,9 @@ export async function getPlaceDetails(placeId: string): Promise<PlaceDetailsResu
   const raw = await fetchRawPlaceDetails(placeId, PLACE_DETAILS_FIELD_MASK);
 
   if (!hasRequiredPlaceFields(raw)) {
-    throw new Error("店舗情報が不足しているため詳細を取得できませんでした");
+    // 型付きエラーで投げることで、上位の `toUserFacingPlacesMessage` が
+    // 「再試行を促さない」専用文言へ分類できる (#221 review)。message 自体は従来と同一。
+    throw new PlacesIncompleteDataError();
   }
 
   return {

@@ -459,7 +459,7 @@ describe("getPlaceDetails", () => {
     await expect(getPlaceDetails("ChIJfood")).rejects.toThrow(/Places API エラー \(404\)/);
   });
 
-  it("必須フィールド (location) が欠けている場合は例外を投げる", async () => {
+  it("必須フィールド (location) が欠けている場合は型付きエラーを投げる (#221 review)", async () => {
     fetchMock = vi.fn().mockResolvedValue(
       jsonResponse({
         id: "ChIJfood",
@@ -469,7 +469,17 @@ describe("getPlaceDetails", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(getPlaceDetails("ChIJfood")).rejects.toThrow();
+    const err = await getPlaceDetails("ChIJfood").then(
+      () => {
+        throw new Error("should have thrown");
+      },
+      (e: unknown) => e as Error,
+    );
+
+    // 素の `Error` で投げると上位の分類器が "unknown" へ落とし、再試行を促す
+    // fallback 文言になってしまう (決定的な失敗なので誤誘導)。
+    expect(err.name).toBe("PlacesIncompleteDataError");
+    expect(err.message).toBe("店舗情報が不足しているため詳細を取得できませんでした");
   });
 
   it("nationalPhoneNumber がない場合 phone は空文字になる", async () => {
