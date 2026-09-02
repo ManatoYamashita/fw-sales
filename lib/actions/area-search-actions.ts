@@ -10,6 +10,12 @@ import {
   getPlaceDetails,
   resolveSearchCenter,
 } from "@/lib/places/google";
+import {
+  classifyPlacesError,
+  getPlacesErrorStatus,
+  toUserFacingPlacesMessage,
+} from "@/lib/places/errors";
+import { parsePostgresError } from "@/lib/db/postgres-error";
 import { placeResultToStoreInput } from "@/lib/places/to-store-input";
 import { placeResultToBasicInfo } from "@/lib/places/to-basic-info";
 import { attachStoreMatches, computePlacesBounds } from "@/lib/places/match-store";
@@ -103,6 +109,42 @@ async function createStoreFromPlaceTx(
     }
     return { id: created.id, name: created.name };
   });
+}
+
+/**
+ * エリア検索系 Server Action の失敗を構造化ログへ 1 行で残す (Issue #201 / #129 A8)。
+ *
+ * ユーザー UI へは `toUserFacingPlacesMessage` の分類済み文言だけを返し、診断情報は
+ * ここへ集約する — PR #144 以来の二系統設計 (`lib/actions/store-actions.ts` と同形)。
+ *
+ * Places 由来と分類できた場合は `kind` / `status` だけを出す。Google のレスポンス本文は
+ * `lib/places/google.ts` の `[places] request failed` が唯一の記録点なので、ここでは
+ * 重ねて出さない。
+ *
+ * 分類できない (`kind === "unknown"`) 場合のみ Postgres エラーとしての解析を試みる。
+ * この catch は Places 呼び出しだけでなく `repos.store.findAreaSearchCandidates` の
+ * DB エラーも掴むため、DB 障害の調査可能性をログ側で確保しておく必要がある。
+ */
+function logAreaSearchFailure(
+  scope: string,
+  err: unknown,
+  extra?: Record<string, unknown>,
+): void {
+  const kind = classifyPlacesError(err);
+  const diagnostics: Record<string, unknown> = {
+    ...extra,
+    kind,
+    status: getPlacesErrorStatus(err),
+    name: err instanceof Error ? err.name : typeof err,
+  };
+  if (kind === "unknown") {
+    const parsed = parsePostgresError(err);
+    diagnostics.code = parsed?.code;
+    diagnostics.constraint = parsed?.constraint;
+    diagnostics.table = parsed?.table;
+    diagnostics.message = parsed?.message ?? (err instanceof Error ? err.message : String(err));
+  }
+  console.error(`[area-search] ${scope} failed`, diagnostics);
 }
 
 export interface SearchPlacesWithMatchesOptions {
@@ -248,8 +290,10 @@ export async function searchPlacesWithMatchesAction(
       candidatePersistence,
     });
   } catch (e) {
-    console.error("[area-search] searchPlacesWithMatchesAction failed", e); // L3
-    return failure(e instanceof Error ? e.message : "検索に失敗しました");
+    logAreaSearchFailure("searchPlacesWithMatchesAction", e); // L3
+    return failure(
+      toUserFacingPlacesMessage(e, "検索に失敗しました。時間をおいて再度お試しください。"),
+    );
   }
 }
 
@@ -270,7 +314,13 @@ export async function getPlaceDetailsForAreaSearchAction(
     const details = await getPlaceDetails(placeId);
     return success(details);
   } catch (e) {
-    return failure(e instanceof Error ? e.message : "詳細情報の取得に失敗しました");
+    logAreaSearchFailure("getPlaceDetailsForAreaSearchAction", e, { placeId });
+    return failure(
+      toUserFacingPlacesMessage(
+        e,
+        "詳細情報の取得に失敗しました。時間をおいて再度お試しください。",
+      ),
+    );
   }
 }
 
@@ -285,7 +335,10 @@ export async function searchPlacesAction(
     const results = await searchPlaces(keyword, area);
     return success(results);
   } catch (e) {
-    return failure(e instanceof Error ? e.message : "検索に失敗しました");
+    logAreaSearchFailure("searchPlacesAction", e);
+    return failure(
+      toUserFacingPlacesMessage(e, "検索に失敗しました。時間をおいて再度お試しください。"),
+    );
   }
 }
 
@@ -313,7 +366,10 @@ export async function addStoreFromPlaceAction(
     revalidateTag(CACHE_TAGS.store(created.id), "max");
     return success({ id: created.id }, `「${created.name}」を追加しました`);
   } catch (e) {
-    return failure(e instanceof Error ? e.message : "追加に失敗しました");
+    logAreaSearchFailure("addStoreFromPlaceAction", e, { placeId });
+    return failure(
+      toUserFacingPlacesMessage(e, "追加に失敗しました。時間をおいて再度お試しください。"),
+    );
   }
 }
 
@@ -355,7 +411,10 @@ export async function bulkAddStoresFromPlacesAction(
       }
       const created = await createStoreFromPlaceTx(place);
       createdIds.push(created.id);
-    } catch {
+    } catch (e) {
+      // UI へは failedPlaceIds しか返さないため元から漏洩は無いが、1件ずつ握り潰すと
+      // 障害時にサーバ側へ何も残らないため sanitized な診断ログだけ残す (Issue #201)。
+      logAreaSearchFailure("bulkAddStoresFromPlacesAction", e, { placeId });
       failedPlaceIds.push(placeId);
     }
   }

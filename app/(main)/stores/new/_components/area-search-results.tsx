@@ -446,10 +446,13 @@ export function AreaSearchResults({
             apiCallEstimate: prev.apiCallEstimate + 1,
           }),
         );
-      } catch (e) {
+      } catch {
+        // Server Action 呼び出し自体が throw した場合 (ネットワーク断・RSC の転送失敗など)。
+        // 生の `Error.message` は開発時に内部情報を含みうるため UI へは出さず、
+        // Server Action が返す失敗と同じ定型文言に揃える (Issue #201)。
         setDetailsErrors((prev) => ({
           ...prev,
-          [placeId]: e instanceof Error ? e.message : "詳細情報の取得に失敗しました",
+          [placeId]: "詳細情報の取得に失敗しました。時間をおいて再度お試しください。",
         }));
       } finally {
         setDetailsLoadingPlaceIds((prev) => {
