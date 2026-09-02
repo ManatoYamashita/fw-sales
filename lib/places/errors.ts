@@ -184,18 +184,29 @@ export function toPlacesDiagnosticKind(err: unknown): string {
  * 次の行動を含む文にする (`registration-mode-card.tsx` の `REJECT_MESSAGE` と同じ規約)。
  * 診断情報はサーバー側の構造化ログが担う。
  *
+ * ## 文脈非依存であること (#221 review)
+ *
+ * このテーブルは検索 (`searchPlacesWithMatchesAction` / `searchPlacesAction`)・詳細取得
+ * (`getPlaceDetailsForAreaSearchAction`)・追加 (`addStoreFromPlaceAction`) の
+ * **4 アクションで共用**する。したがって主語を「店舗検索」に固定せず、どの導線から
+ * 出ても成立する表現にする。特に「条件を変えて」のような**その画面に存在しない操作**を
+ * 促す文言は、ユーザーが取りようのない行動へ誘導するため置かない。
+ * アクション固有の文脈は、呼び出し側が渡す `fallback` 文言が担う。
+ *
  * `"unknown"` だけは `null` = 「呼び出し側が指定した fallback 文言を使う」。
  * 分類できないエラー (Postgres エラーや想定外の例外) の message を UI へ流さないための
  * 明示的な穴埋めであり、ここが本 Issue の中核。
  */
 export const PLACES_USER_MESSAGES: Record<PlacesErrorKind, string | null> = {
-  missing_api_key: "店舗検索の設定に問題があります。管理者にお問い合わせください。",
-  timeout: "店舗検索が時間内に完了しませんでした。時間をおいて再度お試しください。",
-  rate_limited: "店舗検索の利用が集中しています。少し時間をおいて再度お試しください。",
-  permission_denied: "店舗検索を利用できませんでした。管理者にお問い合わせください。",
-  not_found: "対象の店舗情報が見つかりませんでした。別の候補で再度お試しください。",
-  invalid_request: "この条件では店舗検索を実行できませんでした。条件を変えて再度お試しください。",
-  server_error: "店舗検索サービスが一時的に利用できません。時間をおいて再度お試しください。",
+  missing_api_key: "店舗情報サービスの設定に問題があります。管理者にお問い合わせください。",
+  timeout: "店舗情報の取得が時間内に完了しませんでした。時間をおいて再度お試しください。",
+  rate_limited: "店舗情報サービスの利用が集中しています。少し時間をおいて再度お試しください。",
+  permission_denied: "店舗情報サービスを利用できませんでした。管理者にお問い合わせください。",
+  not_found: "対象の店舗情報が見つかりませんでした。別の候補をお試しください。",
+  // 検索・詳細取得・追加のどこから出ても取れる行動だけを示す (#221 review)。
+  invalid_request:
+    "店舗情報を取得できませんでした。検索条件を変えるか、検索し直してから再度お試しください。",
+  server_error: "店舗情報サービスが一時的に利用できません。時間をおいて再度お試しください。",
   // 再試行で解消しない決定的な失敗なので、他と違い「時間をおいて」を含めない (#221 review)。
   incomplete_data:
     "この店舗は詳細情報が公開されていないため取得できませんでした。別の候補をお試しください。",

@@ -38,6 +38,11 @@ describe("エリア検索が外部エラーの生文言を UI へ渡さない (#
     "app/(main)/stores/new/_components/area-search-results.tsx",
     "app/(main)/stores/new/_components/place-result-list.tsx",
     "app/(main)/stores/new/_components/registration-mode-card.tsx",
+    // 地図も同じエリア検索画面の Client Component。旧実装は `errorMessage` state へ
+    // 生の `Error.message` を入れて dev ビルドでのみ描画していたが、診断は
+    // `console.error("[AreaSearchMap] ...", error)` が Error 全体 + スタックごと
+    // 担っており表示は情報を増やしていなかったため撤去した (#221 review)。
+    "app/(main)/stores/new/_components/area-search-map.tsx",
   ])("%s に `e instanceof Error ? e.message` 形の透過が無い", async (relativePath) => {
     const source = await readSource(relativePath);
     expect(
@@ -74,12 +79,20 @@ describe("エリア検索が外部エラーの生文言を UI へ渡さない (#
     }
   });
 
-  it("ユーザーへ返す catch はすべて診断ログを残す (#129 A8)", async () => {
+  it("失敗を握る catch はすべて診断ログを残す (#129 A8)", async () => {
     const source = await readSource("lib/actions/area-search-actions.ts");
 
-    // ヘルパー定義 1 + 5 つの catch からの呼び出し。
-    // (search / details / legacy search / add / bulk)
-    expect((source.match(/logAreaSearchFailure\(/g) ?? []).length).toBe(6);
+    // ヘルパー定義 1
+    // + ユーザーへ結果を返す catch 5 (search / details / legacy search / add / bulk)
+    // + 握り潰す内部 catch 2 (候補DB 保存 / 候補DB 照合。#221 review でサニタイズ粒度を統一)
+    expect((source.match(/logAreaSearchFailure\(/g) ?? []).length).toBe(8);
+
+    // 生 Error を丸ごと渡す旧形式が同ファイルへ再び混ざらないこと。
+    // (`logAreaSearchFailure` は scalar だけを出す構造化ログに統一する)
+    // 行コメントは除去してから検査する。旧形式を「引用して説明する」コメントが
+    // 実装内に残っており、素の grep では誤検知するため。
+    const code = source.replace(/^\s*\/\/.*$/gm, "");
+    expect(code).not.toMatch(/console\.error\([^)]*,\s*e\s*\)/);
   });
 
   it("google.ts がレスポンス本文を Error へ埋め込まない", async () => {

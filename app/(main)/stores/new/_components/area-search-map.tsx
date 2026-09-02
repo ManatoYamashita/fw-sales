@@ -89,7 +89,6 @@ export function AreaSearchMap({
     Map<string, { marker: google.maps.Marker; listener: google.maps.MapsEventListener }>
   >(new Map());
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   // L1: tracks the last search params for which we auto-zoomed; avoids overriding
   // a user's manual zoom when the same search result is re-rendered.
   const prevSearchRef = useRef<{ center: SearchCenter; radiusMeters: number } | null>(null);
@@ -110,12 +109,11 @@ export function AreaSearchMap({
           });
           setStatus("ready");
         } catch (error) {
+          // 診断は console.error が担う (Error オブジェクト全体 + スタックが残る)。
+          // UI へは定型文言だけを出し、生の `Error.message` を描画しない (Issue #201)。
           console.error("[AreaSearchMap] Google Maps init failed", error);
           if (!cancelled) {
             setStatus("error");
-            setErrorMessage(
-              error instanceof Error ? error.message : "Google Mapsの初期化に失敗しました",
-            );
           }
         }
       })
@@ -123,9 +121,6 @@ export function AreaSearchMap({
         console.error("[AreaSearchMap] Google Maps load failed", error);
         if (!cancelled) {
           setStatus("error");
-          setErrorMessage(
-            error instanceof Error ? error.message : "Google Mapsの読み込みに失敗しました",
-          );
         }
       });
     return () => {
@@ -278,9 +273,6 @@ export function AreaSearchMap({
           className="flex h-[280px] lg:h-[520px] w-full flex-col items-center justify-center gap-1 rounded-md border border-border bg-muted"
         >
           <p className="text-sm text-destructive">地図の読み込みに失敗しました。</p>
-          {process.env.NODE_ENV === "development" && errorMessage && (
-            <p className="text-[11px] text-muted-foreground">{errorMessage}</p>
-          )}
         </div>
       ) : (
         <>

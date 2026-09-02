@@ -197,6 +197,22 @@ describe("PLACES_USER_MESSAGES", () => {
     }
   });
 
+  it("文言が特定アクションの文脈に依存しない (#221 review)", () => {
+    // このテーブルは検索 / 詳細取得 / 追加の 4 アクションで共用する。
+    // 「店舗検索」を主語に固定したり「条件を変えて」のようにその画面に存在しない
+    // 操作を促したりすると、詳細取得・追加の導線で取りようのない行動へ誘導する。
+    const contextBound = ["店舗検索", "条件を変えて"];
+    for (const [kind, message] of Object.entries(PLACES_USER_MESSAGES)) {
+      if (message === null) continue;
+      for (const phrase of contextBound) {
+        expect(
+          message,
+          `${kind}: "${phrase}" は検索導線を前提にした表現です。詳細取得・追加でも成立する文言にしてください。`,
+        ).not.toContain(phrase);
+      }
+    }
+  });
+
   it("ユーザー向け文言に技術用語 (HTTP status / API / Google) を出さない", () => {
     const forbidden = ["HTTP", "API", "Google", "status", "GOOGLE_PLACES", "4", "5"];
     for (const [kind, message] of Object.entries(PLACES_USER_MESSAGES)) {

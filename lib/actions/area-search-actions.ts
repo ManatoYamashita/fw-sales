@@ -57,7 +57,9 @@ async function persistAreaSearchCandidates(
       radiusMeters,
     });
   } catch (e) {
-    console.error("[area-search] 候補DB保存に失敗しました", e);
+    // ユーザーへは返らない (検索自体は成功扱い) が、診断ログの粒度は
+    // 同一機能の他の出力点と揃える (#221 review / PR #209 の教訓)。
+    logAreaSearchFailure("persistAreaSearchCandidates", e);
     return undefined;
   }
 }
@@ -79,7 +81,8 @@ async function attachAreaSearchCandidateInfo(
     const candidates = await repos.placeCandidate.findByGooglePlaceIds(placeIds);
     return attachCandidateInfo(viewModels, candidates);
   } catch (e) {
-    console.error("[area-search] 候補DB照合に失敗しました", e);
+    // 保存側と同じ理由でサニタイズ済みの構造化ログへ揃える (#221 review)。
+    logAreaSearchFailure("attachAreaSearchCandidateInfo", e);
     return viewModels;
   }
 }
@@ -125,6 +128,12 @@ async function createStoreFromPlaceTx(
  * 分類できない (`kind === "unknown"`) 場合のみ Postgres エラーとしての解析を試みる。
  * この catch は Places 呼び出しだけでなく `repos.store.findAreaSearchCandidates` の
  * DB エラーも掴むため、DB 障害の調査可能性をログ側で確保しておく必要がある。
+ *
+ * ユーザーへ結果を返す catch だけでなく、握り潰す内部 catch
+ * (`persistAreaSearchCandidates` / `attachAreaSearchCandidateInfo`) からも呼ぶ。
+ * 同一機能の出力点でサニタイズ粒度が揃っていないと、片方だけ直る事故が起きるため
+ * (#221 review)。候補DB 系の失敗は Places 由来ではないので必ず `kind === "unknown"` へ
+ * 落ち、`code` / `constraint` / `table` / `stack` が付く。
  *
  * `message` / `stack` は外部が内容を左右しうる (Drizzle の `Failed query: ...` には
  * ユーザー入力が載る) ため、本文と同じく `redactSecrets` → `clipForLog` を通す。
