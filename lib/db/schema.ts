@@ -196,57 +196,10 @@ export const deals = pgTable("deals", {
   index("deals_store_id_idx").on(table.store_id),
 ]);
 
-/**
- * research テーブル (旧・手入力の調査フォーム)
- *
- * **Issue #110 で撤去予定。本定義は物理 DROP を行う後続 PR まで残す暫定状態です。**
- * アプリケーションコードからの参照は既にゼロで、書き込み経路 (`saveResearchAction`)
- * も読み出し経路 (`getResearchByStore` / `repos.research.list`) も撤去済み。
- * ここに定義が残っているのは、`pnpm db:generate` が `drizzle/meta/` の最新
- * snapshot との差分から DROP TABLE migration を生成する必要があるためであり、
- * schema 変更と生成物を同一 PR に閉じて再現性を保つ意図です。
- * 現行の店舗調査は `storeResearchRuns` (AI 店舗調査 / Plan v3.2) が担当します。
- *
- * 旧 `types/research.ts` の `Research` インタフェースと 1:1 で対応していました。
- *
- * - `store_id` は `stores.id` への外部キー制約を持ち、不存在 store_id への Research 作成を
- *   DB レベルで拒否します (Req 2.5, 10.5)
- * - 1 店舗 1 調査 (1:1) はアプリ層で担保。DB レベルの UNIQUE 制約は付けず、
- *   Mock 慣習との整合と import 時のエラー設計回避を優先します (research-handoff-db-migration design Q1)
- * - 列挙型 (`Channel` / `ResearchStatus`) は Postgres ENUM 化せず text として保持します
- * - `created_at` / `updated_at` は `YYYY-MM-DD` 形式の text として保持 (Req 10.2)
- */
-export const research = pgTable("research", {
-  id: text("id").primaryKey(),
-  store_id: text("store_id")
-    .notNull()
-    .references(() => stores.id, { onDelete: "cascade" }),
-  store_name: text("store_name").notNull(),
-  total_review: text("total_review").notNull(),
-  strength1: text("strength1").notNull(),
-  strength2: text("strength2").notNull(),
-  strength3: text("strength3").notNull(),
-  weakness1: text("weakness1").notNull(),
-  weakness2: text("weakness2").notNull(),
-  weakness3: text("weakness3").notNull(),
-  review_positive: text("review_positive").notNull(),
-  review_negative: text("review_negative").notNull(),
-  meo_gap: text("meo_gap").notNull(),
-  hp_gap: text("hp_gap").notNull(),
-  instagram_gap: text("instagram_gap").notNull(),
-  channel: text("channel").notNull(),
-  channel_reason: text("channel_reason").notNull(),
-  sales_hook: text("sales_hook").notNull(),
-  entry_product: text("entry_product").notNull(),
-  main_product: text("main_product").notNull(),
-  researcher: text("researcher").notNull(),
-  status: text("status").notNull(),
-  created_at: text("created_at").notNull(),
-  updated_at: text("updated_at").notNull(),
-}, (table) => [
-  // store-cascade-delete (#152): FK 列インデックス (deals_store_id_idx と同趣旨)。
-  index("research_store_id_idx").on(table.store_id),
-]);
+// Issue #110: 旧手入力調査テーブル `research` を撤去。
+// 書き込み UI (`research-form.tsx`) が #180 で消えて以降ゼロ参照になっていた。
+// 物理 DROP は drizzle migration 0027 で実施。現行の店舗調査は
+// `storeResearchRuns` (AI 店舗調査 / Plan v3.2) が担当する。
 
 /**
  * handoffs テーブル
