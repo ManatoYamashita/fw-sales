@@ -14,7 +14,7 @@
 
 import "server-only";
 
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, count as countAll, desc, eq, isNull } from "drizzle-orm";
 import { db, type DbClient, type Tx } from "./client";
 import { storeResearchRuns } from "./schema";
 import type {
@@ -206,6 +206,13 @@ export function makeResearchRunRepo(
           ),
         );
       return rows.map((row) => row.store_id);
+    },
+
+    async count() {
+      const rows = await executor
+        .select({ value: countAll() })
+        .from(storeResearchRuns);
+      return rows[0]?.value ?? 0;
     },
 
     async getForUpdate(id) {

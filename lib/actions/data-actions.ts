@@ -5,12 +5,13 @@
  *
  * 役割:
  * - Settings 画面から呼ばれる Reset / Clear / Import / Export のエントリ。
- *   `stores` / `deals` / `research` / `handoffs` の 4 entity 全てを DB へ直接適用する
+ *   `stores` / `deals` / `handoffs` の 3 entity 全てを DB へ直接適用する
  *   (Req 8.1〜8.5、research-handoff-db-migration §8)。
+ *   Issue #110 で旧 `research` テーブルを撤去したため 4 → 3 entity になった。
  *
  * 制約 / 例外:
  * - 本ファイルは design.md の "Allowed Dependencies / Documented exception" に
- *   従い、`lib/db/client.ts` (`db`) と `lib/db/schema.ts` (4 entity 全テーブル) を
+ *   従い、`lib/db/client.ts` (`db`) と `lib/db/schema.ts` (3 entity 全テーブル) を
  *   参照する。これは TRUNCATE / BULK UPSERT 等 Repository interface で
  *   表現できない DDL 級操作を扱うための data-actions.ts と scripts/seed.ts
  *   限定の例外であり、他ファイルでは追加してはならない。
@@ -26,12 +27,7 @@
  */
 
 import { revalidateTag } from "next/cache";
-import {
-  SEED_STORES,
-  SEED_DEALS,
-  SEED_RESEARCH,
-  SEED_HANDOFFS,
-} from "@/lib/db/seed-data";
+import { SEED_STORES, SEED_DEALS, SEED_HANDOFFS } from "@/lib/db/seed-data";
 import type { DbSnapshot } from "@/lib/db/snapshot";
 import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
@@ -41,7 +37,6 @@ import { requireAdmin } from "./_authz";
 function invalidateAll() {
   for (const tag of [
     CACHE_TAGS.stores,
-    CACHE_TAGS.research,
     CACHE_TAGS.deals,
     CACHE_TAGS.handoffs,
     CACHE_TAGS.stats,
@@ -56,23 +51,20 @@ function invalidateAll() {
 export async function resetToSeedAction(): Promise<ActionResult> {
   const guard = await requireAdmin("data.resetToSeed");
   if (!guard.ok) return guard.denied;
-  // 4 entity 全てを DB トランザクション内でリセット
+  // 3 entity 全てを DB トランザクション内でリセット
   // (research-handoff-db-migration §8.3, §8.4, §8.5)。
   // lib/db/* は DATABASE_URL 必須の副作用を持つため動的 import する (Issue 2)。
   try {
     const { db } = await import("@/lib/db/client");
-    const { stores, deals, research, handoffs } = await import(
-      "@/lib/db/schema"
-    );
+    const { stores, deals, handoffs } = await import("@/lib/db/schema");
     const { toDbRow: storeToDbRow } = await import(
       "@/lib/db/store-repository"
     );
     await db.transaction(async (tx) => {
       // FK 整合のため子→親の順で削除
       // (handoffs.deal_id → deals, handoffs.store_id → stores,
-      //  research.store_id → stores, deals.store_id → stores)
+      //  deals.store_id → stores)
       await tx.delete(handoffs);
-      await tx.delete(research);
       await tx.delete(deals);
       await tx.delete(stores);
 
@@ -91,13 +83,7 @@ export async function resetToSeedAction(): Promise<ActionResult> {
           .values(d)
           .onConflictDoUpdate({ target: deals.id, set: d });
       }
-      // Research / Handoff は primitive のみで toDbRow 不要
-      for (const r of SEED_RESEARCH) {
-        await tx
-          .insert(research)
-          .values(r)
-          .onConflictDoUpdate({ target: research.id, set: r });
-      }
+      // Handoff は primitive のみで toDbRow 不要
       for (const h of SEED_HANDOFFS) {
         await tx
           .insert(handoffs)
@@ -121,18 +107,15 @@ export async function resetToSeedAction(): Promise<ActionResult> {
 export async function clearAllAction(): Promise<ActionResult> {
   const guard = await requireAdmin("data.clearAll");
   if (!guard.ok) return guard.denied;
-  // 4 entity 全てを DB トランザクション内で全削除
+  // 3 entity 全てを DB トランザクション内で全削除
   // (research-handoff-db-migration §8.4, §8.5)。
   // lib/db/* は DATABASE_URL 必須の副作用を持つため動的 import する (Issue 2)。
   try {
     const { db } = await import("@/lib/db/client");
-    const { stores, deals, research, handoffs } = await import(
-      "@/lib/db/schema"
-    );
+    const { stores, deals, handoffs } = await import("@/lib/db/schema");
     await db.transaction(async (tx) => {
       // FK 整合のため子→親の順で削除
       await tx.delete(handoffs);
-      await tx.delete(research);
       await tx.delete(deals);
       await tx.delete(stores);
     });
@@ -166,9 +149,6 @@ export async function importJsonAction(
     const importedStores = Array.isArray(parsed?.stores)
       ? (parsed.stores as DbSnapshot["stores"])
       : undefined;
-    const importedResearch = Array.isArray(parsed?.research)
-      ? (parsed.research as DbSnapshot["research"])
-      : undefined;
     const importedDeals = Array.isArray(parsed?.deals)
       ? (parsed.deals as DbSnapshot["deals"])
       : undefined;
@@ -176,19 +156,15 @@ export async function importJsonAction(
       ? (parsed.handoffs as DbSnapshot["handoffs"])
       : undefined;
 
-    // 4 entity 全てを DB へトランザクション内で upsert
+    // 3 entity 全てを DB へトランザクション内で upsert
     // (research-handoff-db-migration §8.2, §8.4, §8.5)。
+    // Issue #110 で撤去した旧 `research` キーを含む過去のエクスポート JSON も、
+    // 各 entity を個別に取り出す下の構造により「読まれずに無視される」形で
+    // そのまま受理される (バリデーションで弾かない)。
     // lib/db/* は DATABASE_URL 必須の副作用を持つため動的 import する (Issue 2)。
-    if (
-      importedStores ||
-      importedDeals ||
-      importedResearch ||
-      importedHandoffs
-    ) {
+    if (importedStores || importedDeals || importedHandoffs) {
       const { db } = await import("@/lib/db/client");
-      const { stores, deals, research, handoffs } = await import(
-        "@/lib/db/schema"
-      );
+      const { stores, deals, handoffs } = await import("@/lib/db/schema");
       const { toDbRow: storeToDbRow } = await import(
         "@/lib/db/store-repository"
       );
@@ -212,15 +188,7 @@ export async function importJsonAction(
               .onConflictDoUpdate({ target: deals.id, set: d });
           }
         }
-        // Research / Handoff は primitive のみで toDbRow 不要
-        if (importedResearch) {
-          for (const r of importedResearch) {
-            await tx
-              .insert(research)
-              .values(r)
-              .onConflictDoUpdate({ target: research.id, set: r });
-          }
-        }
+        // Handoff は primitive のみで toDbRow 不要
         if (importedHandoffs) {
           for (const h of importedHandoffs) {
             await tx
@@ -243,18 +211,12 @@ export async function importJsonAction(
 }
 
 export async function getSnapshotForExportAction(): Promise<DbSnapshot> {
-  // 4 entity を DB から並列取得 (Req 8.1, 8.4)。
-  const [dbDeals, dbStores, dbResearch, dbHandoffs] = await Promise.all([
+  // 3 entity を DB から並列取得 (Req 8.1, 8.4)。
+  const [dbDeals, dbStores, dbHandoffs] = await Promise.all([
     repos.deal.list(),
     repos.store.list(),
-    repos.research.list(),
     repos.handoff.list(),
   ]);
 
-  return {
-    stores: dbStores,
-    research: dbResearch,
-    deals: dbDeals,
-    handoffs: dbHandoffs,
-  };
+  return { stores: dbStores, deals: dbDeals, handoffs: dbHandoffs };
 }

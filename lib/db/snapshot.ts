@@ -1,10 +1,9 @@
 import type { Store } from "@/types/store";
-import type { Research } from "@/types/research";
 import type { Deal } from "@/types/deal";
 import type { Handoff } from "@/types/handoff";
 
 /**
- * Export / Import 経路で授受される 4 entity のスナップショット型。
+ * Export / Import 経路で授受される 3 entity のスナップショット型。
  *
  * `/api/export` (GET) と `lib/actions/data-actions.ts` の
  * `importJsonAction` / `getSnapshotForExportAction` で共有される構造体。
@@ -13,10 +12,13 @@ import type { Handoff } from "@/types/handoff";
  * `profiles` / `notifications` フィールドは旧実装では optional だったが、
  * export/import 経路への組込が行われないまま dead code 化していたため除去した。
  * 必要になった時点で追加すること。
+ *
+ * Issue #110: 旧手入力調査テーブルの撤去に伴い `research` フィールドを削除した。
+ * 過去に出力した JSON に残る `research` キーは `importJsonAction` が読まずに
+ * 無視するため、旧バックアップのインポートは引き続き成功する。
  */
 export interface DbSnapshot {
   stores: Store[];
-  research: Research[];
   deals: Deal[];
   handoffs: Handoff[];
 }
