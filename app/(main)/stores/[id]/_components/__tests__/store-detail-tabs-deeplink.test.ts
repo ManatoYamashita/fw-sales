@@ -17,6 +17,15 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 let tabsSource: string;
+let detailPageSource: string;
+/** コメントを除いた実コード。撤去を記録した JSDoc に誤ヒットしないようにする。 */
+let tabsCode: string;
+let detailPageCode: string;
+
+/** ブロックコメント / 行コメントを取り除く (文字列内の // は本ファイルの用途では出現しない)。 */
+function stripComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+}
 
 beforeAll(async () => {
   tabsSource = await readFile(
@@ -26,6 +35,12 @@ beforeAll(async () => {
     ),
     "utf8",
   );
+  detailPageSource = await readFile(
+    path.join(process.cwd(), "app/(main)/stores/[id]/page.tsx"),
+    "utf8",
+  );
+  tabsCode = stripComments(tabsSource);
+  detailPageCode = stripComments(detailPageSource);
 });
 
 describe("store-detail-tabs の初期タブ deep link", () => {
@@ -48,5 +63,25 @@ describe("store-detail-tabs の初期タブ deep link", () => {
 
   it("導出した initialTab を Tabs の defaultValue に渡す (導出したまま使い忘れない)", () => {
     expect(tabsSource).toMatch(/<Tabs defaultValue=\{initialTab\}/);
+  });
+});
+
+describe("撤去済み Deep Research 資産が実コードへ復活していない", () => {
+  it("`#deep-research` アンカーへのスクロール処理を持たない", () => {
+    expect(tabsCode).not.toContain('getElementById("deep-research")');
+    expect(tabsCode).not.toContain("#deep-research");
+    expect(tabsCode).not.toContain("requestAnimationFrame");
+  });
+
+  it("店舗詳細に旧 Deep Research のコンポーネント / クエリが存在しない", () => {
+    for (const symbol of [
+      "DeepResearchSection",
+      "DeepResearchReportView",
+      "getDeepResearchReport",
+      "deepResearchSlot",
+    ]) {
+      expect(tabsCode, `store-detail-tabs.tsx に "${symbol}"`).not.toContain(symbol);
+      expect(detailPageCode, `page.tsx に "${symbol}"`).not.toContain(symbol);
+    }
   });
 });
