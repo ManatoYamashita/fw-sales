@@ -6,6 +6,8 @@ import {
   COLUMN_HIDE_CLASSES,
   COLUMN_HIDE_CLASSES_WITH_SELECTION,
   DATA_TABLE_CONTAINER_CLASS,
+  VIEW_SWITCH_CARD_CLASSES,
+  VIEW_SWITCH_TABLE_CLASSES,
 } from "../data-table-responsive";
 
 /**
@@ -82,5 +84,21 @@ describe("段階表示クラスの CSS 生成", () => {
   it("存在しないクラスは何も生成しない (このテスト自体が空振りしていないことの確認)", async () => {
     const css = await buildCss(["@max-[999999px]/nonexistent-container:not-a-utility"]);
     expect(normalize(css)).not.toContain("@container");
+  });
+});
+
+describe("表 ⇄ カード切替クラスの CSS 生成 (#234)", () => {
+  it("表側は width < N、カード側は width >= N を生成する", async () => {
+    // 補集合であることを実際に生成された CSS で確かめる。
+    // どちらかが生成されないと、その幅で「両方出る」に劣化する (安全側だが意図とは違う)。
+    for (const key of ["false", "true"] as const) {
+      const table = normalize(await buildCss([VIEW_SWITCH_TABLE_CLASSES[key]]));
+      const card = normalize(await buildCss([VIEW_SWITCH_CARD_CLASSES[key]]));
+      const n = key === "false" ? 640 : 688;
+      expect(table).toContain(`@container data-table (width < ${n}px)`);
+      expect(card).toContain(`@container data-table (width >= ${n}px)`);
+      expect(table).toContain("display: none");
+      expect(card).toContain("display: none");
+    }
   });
 });

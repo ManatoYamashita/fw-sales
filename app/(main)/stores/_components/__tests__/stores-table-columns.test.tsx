@@ -7,7 +7,11 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import type { ColumnMinContainerWidth } from "@/components/ui/data-table-responsive";
+import {
+  CARD_VIEW_BREAKPOINT,
+  SELECTION_COLUMN_WIDTH,
+  type ColumnMinContainerWidth,
+} from "@/components/ui/data-table-responsive";
 
 // 対象モジュールは Server Action を import しており、その先の repos → lib/db が
 // 実 DB 接続を試みるためモックで遮断する (stores-table-empty-state.test.tsx と同規約)。
@@ -92,5 +96,18 @@ describe("店舗一覧の列優先度", () => {
       expect(column(key).maxWidth, `${key} の上限`).toBe(maxWidth);
       expect(column(key).truncate, `${key} は truncate されるべき`).toBe(true);
     }
+  });
+
+  it("always 列の min-content 合計がカード切替閾値に収まる (#234)", () => {
+    // 「表ビューは always 列が確実に収まるときだけ描画される」という不変条件。
+    // always 列を増やしたり cap を広げたりすると、表を出したまま横スクロールが
+    // 残る帯が生まれる。そのときは切替閾値も一緒に上げること。
+    const ALWAYS_MIN_CONTENT = 632; // 店舗名 260 + 次回アクション 272 + 操作 100
+    expect(buildColumns(false).filter((c) => c.minContainerWidth === undefined).map((c) => c.key))
+      .toEqual(["name", "next", "actions"]);
+    expect(ALWAYS_MIN_CONTENT).toBeLessThanOrEqual(CARD_VIEW_BREAKPOINT);
+    expect(ALWAYS_MIN_CONTENT + SELECTION_COLUMN_WIDTH).toBeLessThanOrEqual(
+      CARD_VIEW_BREAKPOINT + SELECTION_COLUMN_WIDTH,
+    );
   });
 });

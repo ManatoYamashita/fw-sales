@@ -124,7 +124,7 @@ function GroupLabel({ children }: { children: React.ReactNode }) {
  */
 export function quickFilterChipClassName(active: boolean): string {
   return cn(
-    "inline-flex items-center gap-1 h-9 px-3 rounded-full text-sm",
+    "inline-flex items-center gap-1 h-11 md:h-9 px-3 rounded-full text-sm",
     "border transition-[background-color,color,border-color]",
     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
     active

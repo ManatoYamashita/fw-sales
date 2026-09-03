@@ -4,9 +4,11 @@ import { type ReactNode } from "react";
 import { cn } from "@/lib/utils/cn";
 import { DataTableRow } from "./data-table-row";
 import { SortableHeader, type SortDir } from "./sortable-header";
+import { DataTableSortSelect, type SortOption } from "./data-table-sort-select";
 import {
   DATA_TABLE_CONTAINER_CLASS,
   resolveColumnHideClass,
+  resolveViewSwitchClasses,
   type ColumnMinContainerWidth,
 } from "./data-table-responsive";
 
@@ -81,6 +83,27 @@ export interface DataTableProps<T> {
     allRowsLabel?: string;
     rowLabel?: (row: T) => string;
   };
+  /**
+   * サーバで確定した現在のソート方向 (#234)。カードモードの並び替えコントロールが
+   * 現在値を表示するために使う。`activeSortKey` と同じく `useSearchParams` は読まない。
+   */
+  activeSortDir?: SortDir;
+  /**
+   * 狭いコンテナで `<table>` の代わりに描画するカード (#234 / PR3/3)。
+   *
+   * **未指定なら出力は現行と 1 バイトも変わらない。** カードビューを必要としない
+   * テーブル (dashboard / handoffs) へ影響を出さないための設計。
+   *
+   * 指定すると表とカードリストの**両方を DOM に出し**、コンテナクエリで排他に
+   * 出し分ける。JS による viewport 判定は使わない (PPR の静的シェルが viewport を
+   * 知らず、hydration 後の差し替えでレイアウトシフトとフォーカス喪失が起きるため)。
+   */
+  cardView?: {
+    /** 1 行を 1 枚のカードとして描画する。 */
+    render: (row: T) => ReactNode;
+    /** カードリストの aria-label。 */
+    label?: string;
+  };
 }
 
 const ROW_PADDING: Record<DataTableDensity, string> = {
@@ -103,6 +126,8 @@ export function DataTable<T>({
   rowHref,
   rowSelection,
   activeSortKey,
+  activeSortDir,
+  cardView,
 }: DataTableProps<T>) {
   if (rows.length === 0) {
     return <div className={className}>{emptyState ?? null}</div>;
@@ -135,25 +160,49 @@ export function DataTable<T>({
       hasSelectionColumn: Boolean(rowSelection),
     });
 
+  // 表 ⇄ カードの切替も同じコンテナクエリで行う。2 本は完全な補集合なので
+  // 「両方隠れる」状態は構造上作れない。
+  const viewSwitch = resolveViewSwitchClasses({
+    hasSelectionColumn: Boolean(rowSelection),
+  });
+  const sortOptions: SortOption[] = cardView
+    ? columns
+        .filter((c) => c.sortKey)
+        .map((c) => ({
+          sortKey: c.sortKey!,
+          label:
+            typeof c.header === "string"
+              ? c.header
+              : (c.sortAriaLabel ?? c.sortKey!),
+          defaultDir: c.sortDefaultDir ?? "asc",
+        }))
+    : [];
+
   return (
     <div className={cn(DATA_TABLE_CONTAINER_CLASS, "overflow-x-auto", className)}>
-      <table className="w-full text-sm border-collapse">
+      <table
+        className={cn(
+          "w-full text-sm border-collapse",
+          // cardView が無いときは素の table のまま (blast radius ゼロ)。
+          cardView && viewSwitch.table,
+        )}
+      >
         <thead>
           <tr className="text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground bg-muted/50 border-y border-border">
             {rowSelection ? (
-              <th
-                className={cn(
-                  HEADER_PADDING[density],
-                  "font-semibold whitespace-nowrap w-10 text-center",
-                )}
-              >
-                <input
-                  type="checkbox"
-                  checked={Boolean(allSelected)}
-                  onChange={(e) => toggleAllRows(e.currentTarget.checked)}
-                  aria-label={rowSelection.allRowsLabel ?? "全行を選択"}
-                  className="h-4 w-4 accent-primary"
-                />
+              // 44px のタッチターゲットを <label> で確保する (#234)。セル padding を
+              // 4px まで詰めることで min-content は 4 + 44 = 48px となり、
+              // SELECTION_COLUMN_WIDTH と 段階表示の閾値表はどちらも不変のまま。
+              <th className="px-0.5 py-0 font-semibold whitespace-nowrap w-12 text-center">
+                <label className="inline-flex h-11 w-11 cursor-pointer items-center justify-center align-middle">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(allSelected)}
+                    onChange={(e) => toggleAllRows(e.currentTarget.checked)}
+                    aria-label={rowSelection.allRowsLabel ?? "全行を選択"}
+                    className="h-4 w-4 accent-primary"
+                  />
+                </label>
               </th>
             ) : null}
             {columns.map((col) => (
@@ -205,19 +254,18 @@ export function DataTable<T>({
                   <td
                     data-no-row-click="true"
                     onClick={(e) => e.stopPropagation()}
-                    className={cn(
-                      ROW_PADDING[density],
-                      "align-middle text-center w-10",
-                    )}
+                    className="px-0.5 py-0 align-middle text-center w-12"
                   >
-                    <input
-                      type="checkbox"
-                      checked={selectedSet.has(id)}
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={(e) => toggleOneRow(id, e.currentTarget.checked)}
-                      aria-label={rowSelection.rowLabel?.(row) ?? "行を選択"}
-                      className="h-4 w-4 accent-primary"
-                    />
+                    <label className="inline-flex h-11 w-11 cursor-pointer items-center justify-center align-middle">
+                      <input
+                        type="checkbox"
+                        checked={selectedSet.has(id)}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => toggleOneRow(id, e.currentTarget.checked)}
+                        aria-label={rowSelection.rowLabel?.(row) ?? "行を選択"}
+                        className="h-4 w-4 accent-primary"
+                      />
+                    </label>
                   </td>
                 ) : null}
                 {columns.map((col) => (
@@ -248,6 +296,69 @@ export function DataTable<T>({
           })}
         </tbody>
       </table>
+
+      {cardView ? (
+        <div className={cn("flex flex-col gap-2 py-2", viewSwitch.cardList)}>
+          {rowSelection || sortOptions.length > 0 ? (
+            <div className="flex flex-wrap items-center gap-2">
+              {rowSelection ? (
+                // 表の <thead> チェックボックスがカードモードでは消えるため、
+                // 等価の「すべて選択」をここに置く。これが無いと admin は狭幅で
+                // 一括操作へ到達できなくなる。
+                <label className="inline-flex h-11 cursor-pointer items-center gap-2 rounded-md px-2 text-sm text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(allSelected)}
+                    onChange={(e) => toggleAllRows(e.currentTarget.checked)}
+                    aria-label={rowSelection.allRowsLabel ?? "全行を選択"}
+                    className="h-4 w-4 accent-primary"
+                  />
+                  すべて選択
+                </label>
+              ) : null}
+              {sortOptions.length > 0 ? (
+                <DataTableSortSelect
+                  options={sortOptions}
+                  activeSortKey={activeSortKey}
+                  activeSortDir={activeSortDir}
+                  className="min-w-0 flex-1"
+                />
+              ) : null}
+            </div>
+          ) : null}
+
+          {/*
+            Tailwind preflight が `list-style: none` を当てるため、Safari + VoiceOver で
+            リストのセマンティクスが失われる。role="list" で明示的に復元する。
+          */}
+          <ul
+            role="list"
+            aria-label={cardView.label ?? "一覧 (カード表示)"}
+            className="flex flex-col gap-2"
+          >
+            {rows.map((row) => {
+              const id = rowKey(row);
+              return (
+                <li key={id} className="flex items-start gap-1">
+                  {rowSelection ? (
+                    <label className="inline-flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center">
+                      <input
+                        type="checkbox"
+                        checked={selectedSet.has(id)}
+                        onChange={(e) => toggleOneRow(id, e.currentTarget.checked)}
+                        aria-label={rowSelection.rowLabel?.(row) ?? "行を選択"}
+                        className="h-4 w-4 accent-primary"
+                      />
+                    </label>
+                  ) : null}
+                  {/* min-w-0 が無いと子の truncate が効かず 375px で横溢れする。 */}
+                  <div className="min-w-0 flex-1">{cardView.render(row)}</div>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ) : null}
     </div>
   );
 }

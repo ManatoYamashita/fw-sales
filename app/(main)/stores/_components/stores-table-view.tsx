@@ -6,17 +6,18 @@ import { useRouter } from "next/navigation";
 import { Inbox, SearchX, Trash2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { DataTable, type ColumnDef } from "@/components/ui/data-table";
+import { type SortDir } from "@/components/ui/sortable-header-params";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { StageBadge } from "@/components/feature/stage-badge";
 import { ChannelBadge } from "@/components/feature/channel-badge";
 import { SalesStateBadge } from "@/components/feature/sales-state-badge";
-import { Badge } from "@/components/ui/badge";
 import { IndividualStoreBadge } from "@/components/feature/individual-store-badge";
 import { formatDate } from "@/lib/utils/date";
 import { toast } from "@/components/ui/toast";
-import { NEXT_ACTION_URGENCY_LABELS, type NextActionUrgency, type SalesProgressRow } from "@/lib/domain/sales-progress";
+import { type SalesProgressRow } from "@/lib/domain/sales-progress";
+import { StoreCard, renderNextAction } from "./store-card";
 import { StoreRowActions } from "./store-row-actions";
 import { StoreDeleteConfirmDialog } from "./store-delete-confirm-dialog";
 import { buildStoreLocationColumn } from "./store-location-column";
@@ -32,6 +33,11 @@ export interface StoresTableViewProps {
    * 画面から消え、方向も変えられなくなる (issue #220 要件 5)。
    */
   activeSortKey?: string;
+  /**
+   * 現在のソート方向 (`page.tsx` の `parseSort` がサーバで確定させた値)。
+   * カードモードの並び替えコントロールが現在値を表示するために使う。
+   */
+  activeSortDir?: SortDir;
   /**
    * 削除系 UI (行の削除ボタン / チェックボックス列 / 一括削除バー) を出すか。
    *
@@ -73,8 +79,6 @@ export function buildEmptyState(isFiltered: boolean) {
     />
   );
 }
-
-const URGENCY_TONE: Record<Exclude<NextActionUrgency, "unset">, "destructive" | "warning" | "info"> = { overdue: "destructive", today: "warning", upcoming: "info" };
 
 /**
  * 行クリック (`rowHref`) と店舗名リンクの遷移先。
@@ -142,7 +146,9 @@ export function buildColumns(canDelete: boolean): ColumnDef<SalesProgressRow>[] 
       cell: (r) => r.store.genre || "—",
     },
     { key: "salesState", header: "現在の営業状態", minContainerWidth: 874, cell: (r) => <SalesStateBadge state={r.currentSalesState} /> },
-    { key: "next", header: "次回アクション", sortKey: "next", sortDefaultDir: "asc", cell: (r) => <div className="max-w-[240px] space-y-1">{r.urgency !== "unset" ? <Badge tone={URGENCY_TONE[r.urgency]}>{NEXT_ACTION_URGENCY_LABELS[r.urgency]}</Badge> : <Badge tone="outline">未設定</Badge>}<div className="text-xs">{r.currentNextAction.date ? formatDate(r.currentNextAction.date) : "—"}{r.currentNextAction.type ? ` / ${r.currentNextAction.type}` : ""}</div>{r.currentNextAction.note ? <p className="truncate text-xs text-muted-foreground" title={r.currentNextAction.note}>{r.currentNextAction.note}</p> : null}</div> },
+    // 描画は store-card.tsx の renderNextAction が単一の真実 (カードと共有)。
+    // max-w-[240px] は列予算 272px (= 240 + padding 32) を確定させるための cap。
+    { key: "next", header: "次回アクション", sortKey: "next", sortDefaultDir: "asc", cell: (r) => <div className="max-w-[240px]">{renderNextAction(r)}</div> },
     {
       key: "stage",
       header: "状態",
@@ -200,6 +206,7 @@ export function StoresTableView({
   canDelete,
   isFiltered,
   activeSortKey,
+  activeSortDir,
 }: StoresTableViewProps) {
   const router = useRouter();
   const columns = buildColumns(canDelete);
@@ -251,6 +258,23 @@ export function StoresTableView({
           rowKey={(r) => r.store.id}
           rowHref={storeDetailHref}
           activeSortKey={activeSortKey}
+          activeSortDir={activeSortDir}
+          /*
+            コンテナ 640px 未満 (admin は 688px 未満) では <table> を捨ててカードに
+            切り替える (#234 / PR3/3)。always 列の min-content は非 admin 632px /
+            admin 680px あり、375px viewport のコンテナ 341px では列を落としきっても
+            収まらないため、ビューごと差し替える以外に横スクロールを消す手段がない。
+          */
+          cardView={{
+            label: "店舗一覧 (カード表示)",
+            render: (r) => (
+              <StoreCard
+                row={r}
+                href={storeDetailHref(r)}
+                canDelete={canDelete}
+              />
+            ),
+          }}
           /*
             一般営業担当が使える一括操作は存在しない (bulk は削除のみ)。
             選ぶだけ選べて何もできないチェックボックス列は認知負荷でしかないので、
@@ -279,7 +303,7 @@ export function StoresTableView({
           aria-label="選択した店舗の一括操作"
           className="sticky bottom-0 z-30 flex flex-wrap items-center gap-2 border-t border-border bg-background/80 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-md"
         >
-          <Button variant="ghost" size="sm" onClick={() => setSelectedIds([])}>
+          <Button variant="ghost" size="touch" onClick={() => setSelectedIds([])}>
             選択を解除
           </Button>
           <span className="text-sm text-muted-foreground" aria-live="polite">
@@ -287,7 +311,7 @@ export function StoresTableView({
           </span>
           <Button
             variant="destructive"
-            size="sm"
+            size="touch"
             onClick={() => setBulkOpen(true)}
             disabled={isDeleting}
             className="ml-auto gap-1.5"

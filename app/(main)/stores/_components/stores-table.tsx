@@ -79,6 +79,7 @@ export async function StoresTable({
       // client で useSearchParams を読むと静的シェルが壊れるので、
       // page.tsx が既にサーバで確定させた sort をそのまま下ろす。
       activeSortKey={sort.key}
+      activeSortDir={sort.dir}
       // 0 件だったときに「条件に一致しない」と「店舗がまだ無い」を言い分けるため。
       // 解決前の filter を見る (`sales=me` は解決の前後でキーの有無が変わらない)。
       isFiltered={hasAnyProgressFilter(filter)}

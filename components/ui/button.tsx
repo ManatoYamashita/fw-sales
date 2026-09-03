@@ -41,6 +41,17 @@ const buttonVariants = cva(
         icon: "h-9 w-9 rounded-md",
         "icon-sm": "h-8 w-8 rounded-md",
         "icon-lg": "h-10 w-10 rounded-md",
+        /**
+         * タッチ操作向けの 44px (#234)。既定 (`md` = 36px) は据え置き、モバイル主要
+         * 導線でだけ使う。既存 variant の値を動かすと 49 ファイルに波及するため、
+         * 全画面での 44px 化の要否は #225 Phase 1 で別途決める。
+         *
+         * `size="sm"` に `className="h-11"` を重ねる回避策は採れない。`cn` は素の
+         * clsx (tailwind-merge なし) で、同じプロパティを 2 つ並べると CSS の記述順で
+         * 勝敗が決まるため (store-quick-filters.tsx の JSDoc が名指しで禁じている)。
+         */
+        touch: "h-11 px-4 text-sm rounded-md",
+        "icon-touch": "h-11 w-11 rounded-md",
       },
     },
     defaultVariants: {

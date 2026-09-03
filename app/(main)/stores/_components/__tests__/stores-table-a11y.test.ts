@@ -30,6 +30,7 @@ let viewCode: string;
 let rowCode: string;
 let tableCode: string;
 let actionsCode: string;
+let dataTableCode: string;
 
 beforeAll(async () => {
   viewCode = stripComments(
@@ -42,6 +43,7 @@ beforeAll(async () => {
   actionsCode = stripComments(
     await read("app/(main)/stores/_components/store-row-actions.tsx"),
   );
+  dataTableCode = stripComments(await read("components/ui/data-table.tsx"));
 });
 
 describe("A: 店舗名は正式なリンクである", () => {
@@ -124,5 +126,37 @@ describe("C: sales=me の解決", () => {
     expect(tableCode).toMatch(
       /const NO_SESSION_SALES_SENTINEL = "__no-session__"/,
     );
+  });
+});
+
+describe("D: 狭幅カードビュー (#234)", () => {
+  it("カードも行クリックと同じ storeDetailHref を使う", () => {
+    // 別々に組み立てると「押した場所で飛び先が変わる」事故になる。
+    // 表の店舗名リンクとカードの 2 箇所で使われる。
+    expect(viewCode.split("storeDetailHref(r)").length - 1).toBeGreaterThanOrEqual(2);
+  });
+
+  it("カードの削除ボタンもサーバ確定の canDelete で出し分ける", () => {
+    expect(viewCode).toContain("canDelete={canDelete}");
+  });
+
+  it("カードリストにラベルを与える", () => {
+    expect(viewCode).toContain("カード表示");
+  });
+
+  it('カードリストは role="list" を明示し、偽テーブルを作らない', () => {
+    // Tailwind preflight の list-style: none で Safari + VoiceOver がリストの
+    // セマンティクスを失うため role で復元する。狭幅で role="table" は使わない
+    // (2〜3 項目のカードで列見出しを読み上げるのはノイズ)。
+    expect(dataTableCode).toContain('role="list"');
+    expect(dataTableCode).not.toContain('role="table"');
+  });
+
+  it("表とカードは CSS だけで排他に出し分ける (JS の viewport 判定を使わない)", () => {
+    // PPR の静的シェルは viewport を知らないため、JS 判定だと hydration 後に
+    // DOM が入れ替わってレイアウトシフトとフォーカス喪失が起きる。
+    expect(dataTableCode).toContain("resolveViewSwitchClasses");
+    expect(dataTableCode).not.toContain("matchMedia");
+    expect(dataTableCode).not.toContain("useMediaQuery");
   });
 });
