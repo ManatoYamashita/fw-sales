@@ -87,17 +87,23 @@ export type StorePatch = Partial<StoreInput>;
 /**
  * 店舗削除時に影響を受ける紐づけデータのカテゴリ別件数 (#152 store-cascade-delete)。
  *
- * deals / handoffs は店舗削除で連鎖削除され、place_candidates は
+ * deals / store_research_runs / handoffs は店舗削除で連鎖削除され、place_candidates は
  * 紐付け解除 (matched_store_id が NULL 化) される。件数は取得時点の実データに基づく。
  * 削除確認ダイアログの影響表示に用いる。
  *
- * Issue #110: 旧 `research` テーブル撤去に伴い `research` を削除した (4 → 3 カテゴリ)。
- * なお `store_research_runs` も cascade 削除されるが、本型は元から数えていない
- * (旧 research を数えていた)。AI 調査 run の影響表示は別途の課題。
+ * キーは子テーブル名と一致させる。stores を参照する子テーブルが増えた場合はここへ
+ * 追加する義務があり (design.md §Revalidation Triggers)、その履行は
+ * store-cascade-fk-coverage.test.ts が schema.ts の FK 実態と突き合わせて機械検証する。
+ *
+ * Issue #110: 旧 `research` テーブル撤去に伴い `research` を削除した。
+ * Issue #229: #180 で追加された `store_research_runs` の連鎖削除が開示されておらず、
+ * 本番の 13 店舗 (75 run) で「紐づけデータはありません」と誤表示していたため追加した。
  */
 export interface StoreDeleteImpact {
   /** 削除される商談件数 */
   deals: number;
+  /** 削除される AI 店舗調査 run 件数 (#229) */
+  store_research_runs: number;
   /** 削除される引き継ぎ件数 */
   handoffs: number;
   /** 紐付け解除される場所候補件数 */
