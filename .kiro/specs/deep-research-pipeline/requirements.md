@@ -1,5 +1,13 @@
 # Requirements Document
 
+> **2026-09-03 更新**: 本仕様の要件 (R1〜R8) は **すべて削除されました** (#110)。
+> 本文中の全要件記述は **取り消し線扱いの履歴** として参照してください。
+> 引き続き有効な要件はありません。後継は AI 店舗調査 (Plan v3.2 / Issue #180): `app/(main)/research/**` / `lib/ai/research/**` / `workflows/store-research.ts`。
+>
+> 例外として §1.4 (エリア検索の画面に調査のキュー登録アクションを露出させない)
+> だけは、後継の AI 店舗調査でも同じ UX 方針を維持しており、そのガードは
+> `app/(main)/stores/__tests__/area-search-no-deep-research.test.ts` に残置しています。
+
 ## Project Description (Input)
 
 **参照 Issue**: [#43 feat: ディープリサーチ・パイプライン構築（Vercel Hobby + GitHub Actions cron + Deep Research polling）](https://github.com/ManatoYamashita/fw-sales/issues/43)

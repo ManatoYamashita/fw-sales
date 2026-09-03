@@ -1,15 +1,21 @@
-# deep-research-pipeline: デプロイ Runbook (Issue #43)
+# deep-research-pipeline: デプロイ Runbook (Issue #43) 【廃止・履歴保存】
 
 Deep Research パイプラインの初期セットアップ + 以降の運用手順。
-仕様詳細: `.kiro/specs/deep-research-pipeline/design.md`
+仕様詳細: `.kiro/specs/deep-research-pipeline/design.md` (`spec.json` の `phase` は `removed`)
 
-> **⚠ 2026-06-03 — 本パイプラインは死蔵 (Issue #102)**
-> Stage 1 (Google Deep Research API) + GitHub Actions cron が完走しない問題のため、
-> **手動貼付フロー**へ移行しました。`poll-research.yml` の cron は停止済み
-> (`workflow_dispatch` のみ)、店舗詳細の「Deep Research を実行」ボタンも撤去済みです。
-> 新フローでは Gemini UI (専用 Gem) で DeepResearch を実行し、結果 Markdown を
-> `/research/[storeId]` の貼付ワークベンチに貼り付けて構造化・架電生成します。
-> 以下の cron / Stage 1 セットアップ手順は**履歴参照用**です (コード自体は残置)。
+> **⚠ 2026-09-03 — 本 Runbook は全面廃止 (Issue #110)**
+> #102 で運用を停止し、**コードも #116 / #125 / #180 / #185 / #213 / #110 で
+> 物理削除済み**です (2026-06-03 時点の注記「コード自体は残置」は失効しました)。
+> 以下に登場する GitHub Secrets (`CRON_SECRET` / `VERCEL_URL`)、`DEEP_RESEARCH_*`
+> 系 env、`poll-research.yml`、`/api/cron/poll-research`、`research_jobs` /
+> `research_reports` テーブル、貼付ワークベンチ導線は **いずれも現存しません**。
+> セットアップ手順として実行しないでください。
+>
+> 現行の店舗調査は AI 店舗調査 (Plan v3.2 / Issue #180): `/research` から実行し
+> 53 項目レビューで採否を決めます (`lib/ai/research/**` / `workflows/store-research.ts`)。
+>
+> **本ファイルで現行も有効な唯一の節**は「## 運用フロー > ### 新規 migration 追加時」
+> (`pnpm db:generate` → `check-migrations.yml` → merge で `migrate.yml` 自動適用) です。
 
 > **CI 自動 migration**: PR merge 時に `drizzle/**` 変更があれば GitHub Actions
 > (`migrate.yml`) が `pnpm db:migrate` を自動実行。手動 SQL 適用は不要。
@@ -22,6 +28,10 @@ Deep Research パイプラインの初期セットアップ + 以降の運用手
 
 ### 1. GitHub Secrets
 
+> **【廃止】** `CRON_SECRET` / `VERCEL_URL` はコードからもワークフローからも参照が
+> ゼロです (旧 `poll-research.yml` 専用だった)。削除して構いません。
+> `DATABASE_URL` は `migrate.yml` / `supabase-keepalive.yml` が使用中のため**削除不可**。
+
 ```bash
 gh secret set CRON_SECRET    # openssl rand -hex 32 で生成した値
 gh secret set VERCEL_URL      # https://fw-sales.vercel.app
@@ -33,6 +43,9 @@ gh secret set DATABASE_URL    # Supabase Session Pooler (port 5432) の接続文
 > アプリ (Vercel) 側は Transaction Pooler のまま変更不要。
 
 ### 2. Vercel Env Vars
+
+> **【廃止】** 下表の `CRON_SECRET` / `DEEP_RESEARCH_*` 系は現行コードに存在しません。
+> 現行の必須 env は `.env.example` と `scripts/check-required-env.mjs` を参照。
 
 **Production / Preview / Development の 3 環境すべて** に以下を登録:
 
@@ -69,6 +82,8 @@ gh secret set DATABASE_URL    # Supabase Session Pooler (port 5432) の接続文
 
 ### 3. DB マイグレーション
 
+> **【履歴】** 0008 / 0009 が作成したテーブルは 0017 で DROP 済みです。
+
 **CI が自動適用** (`migrate.yml`)。 `drizzle/**` 変更を含む PR を main にマージ
 するだけで `pnpm db:migrate` が実行される。
 
@@ -95,6 +110,8 @@ pnpm db:migrate  # DATABASE_URL が .env.local に設定済みであること
 
 ### GitHub Actions cron
 
+> **【廃止】** `poll-research.yml` は #125 で削除済みです。以下のコマンドは実行できません。
+
 `poll-research.yml` が 30 分間隔 (`*/30 * * * *`) で Vercel の
 `/api/cron/poll-research` を呼び出す。
 
@@ -113,6 +130,9 @@ gh workflow enable "Poll Deep Research Jobs"
 ---
 
 ## E2E 動作確認
+
+> **【廃止】** 貼付ワークベンチと店舗詳細の Deep Research セクションは #180 / #125 で
+> 撤去済みです。現行の E2E 手順は AI 店舗調査フローに読み替えてください。
 
 本番 (`https://fw-sales.vercel.app`) にログイン後:
 
@@ -136,6 +156,9 @@ gh workflow enable "Poll Deep Research Jobs"
 ---
 
 ## Rollback 手順
+
+> **【廃止】** `research_jobs` / `research_reports` は
+> `drizzle/0017_remove_deep_research_tables.sql` で DROP 済みです。
 
 ```bash
 # 1. cron 停止 (最速の blast 制御)

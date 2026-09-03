@@ -1,9 +1,23 @@
 {
   "feature_name": "deep-research-pipeline",
   "created_at": "2026-05-17T06:34:41Z",
-  "updated_at": "2026-05-25T17:00:00Z",
+  "updated_at": "2026-09-03T00:00:00Z",
   "language": "ja",
-  "phase": "completed",
+  "phase": "removed",
+  "removed_features": [
+    "deep-research-queue-ui",
+    "deep-research-job-detail-route",
+    "github-actions-cron-polling",
+    "stage1-deep-research-api-client",
+    "stage2-structuring-schema",
+    "research-jobs-research-reports-tables",
+    "deep-research-notifications",
+    "deep-research-budget-caps"
+  ],
+  "remaining_features": [],
+  "removed_at": "2026-09-03",
+  "removed_by": ["#102", "#116", "#121", "#125", "#180", "#185", "#213", "#110"],
+  "superseded_by": "AI 店舗調査 (Plan v3.2 / Issue #180): app/(main)/research/**, lib/ai/research/**, workflows/store-research.ts",
   "approvals": {
     "requirements": {
       "generated": true,
