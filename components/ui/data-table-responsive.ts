@@ -35,22 +35,48 @@ export const DATA_TABLE_CONTAINER_CLASS = "@container/data-table";
  * 生成されない。しかもその失敗は無言 (単に横スクロールが残るだけ) で気づけないため、
  * `__tests__/data-table-responsive.test.ts` がソーステキストを直接検査している。
  *
- * 閾値の根拠は issue #220 の実測表 (累計 min-content 幅):
- * always = 店舗名260 + 次回アクション272 + 操作100 = 632
+ * ## 閾値は 1 本のはしごではなく、**テーブルごとの列予算の和集合**である
+ * 複数の画面が同じマップを共有するため、キーは画面をまたいで交互に噛み合う。
+ * キーを足すときは必ず「どの画面のどの列か」をコメントに書くこと。
+ *
+ * ### /stores 一覧 (#220) — always = 店舗名260 + 次回アクション272 + 操作100 = 632
  *   728 = +状態96 / 874 = +現在の営業状態146 / 971 = +営業担当97
  *  1171 = +最寄駅200 / 1281 = +チャネル110 / 1391 = +最終営業日110 / 1492 = +業態101
+ *
+ * ### /dashboard 最近登録した店舗 (#224) — always = 店舗名200 + 状態96 = 296
+ *   406 = +チャネル110 / 516 = +更新110 / 652 = +エリア136 / 792 = +業態140
+ *
+ * 652 だけは実測ではなく、コンテナ平地 654px (768px 折畳 / 1280px 展開の 2 構成が
+ * 同値) にエリア列を載せるため `maxWidth` を 136px へ意図的に締めた結果。予算を
+ * 160px にすると閾値が 676 になり、22px 足りずにその平地で落ちる。
+ *
+ * ## 新しいキーを足すときの制約
+ * **どの 2 キーも {@link SELECTION_COLUMN_WIDTH} ちょうど離れてはいけない。**
+ * 離れていると `HIDE_BELOW[b]` と `HIDE_BELOW_WITH_SELECTION[b - 48]` が同一文字列に
+ * なり、`__tests__/data-table-responsive-css.test.ts` の
+ * 「ユニークなクエリ数 === トークン数」が**原因の分からないメッセージで**落ちる。
+ * `__tests__/data-table-responsive.test.ts` に、原因を名指しする先回りのガードがある。
  */
 const HIDE_BELOW = {
-  728: "@max-[728px]/data-table:hidden",
-  874: "@max-[874px]/data-table:hidden",
-  971: "@max-[971px]/data-table:hidden",
-  1171: "@max-[1171px]/data-table:hidden",
-  1281: "@max-[1281px]/data-table:hidden",
-  1391: "@max-[1391px]/data-table:hidden",
-  1492: "@max-[1492px]/data-table:hidden",
+  406: "@max-[406px]/data-table:hidden", // #224 dashboard: +チャネル
+  516: "@max-[516px]/data-table:hidden", // #224 dashboard: +更新
+  652: "@max-[652px]/data-table:hidden", // #224 dashboard: +エリア
+  728: "@max-[728px]/data-table:hidden", // #220 stores:    +状態
+  792: "@max-[792px]/data-table:hidden", // #224 dashboard: +業態
+  874: "@max-[874px]/data-table:hidden", // #220 stores:    +現在の営業状態
+  971: "@max-[971px]/data-table:hidden", // #220 stores:    +営業担当
+  1171: "@max-[1171px]/data-table:hidden", // #220 stores:  +最寄駅
+  1281: "@max-[1281px]/data-table:hidden", // #220 stores:  +チャネル
+  1391: "@max-[1391px]/data-table:hidden", // #220 stores:  +最終営業日
+  1492: "@max-[1492px]/data-table:hidden", // #220 stores:  +業態
 } as const;
 
-/** 選択列 (admin の一括操作チェックボックス) が描画される幅。実測値。 */
+/**
+ * 選択列 (admin の一括操作チェックボックス) が描画される幅。実測値。
+ *
+ * この値は 2 本のマップの差分であると同時に、**閾値キー同士が取ってはいけない間隔**
+ * でもある (詳細は {@link HIDE_BELOW} のドックコメント)。
+ */
 export const SELECTION_COLUMN_WIDTH = 48;
 
 /**
@@ -63,7 +89,11 @@ export const SELECTION_COLUMN_WIDTH = 48;
  * 閾値そのものを切り替える。
  */
 const HIDE_BELOW_WITH_SELECTION = {
+  406: "@max-[454px]/data-table:hidden",
+  516: "@max-[564px]/data-table:hidden",
+  652: "@max-[700px]/data-table:hidden",
   728: "@max-[776px]/data-table:hidden",
+  792: "@max-[840px]/data-table:hidden",
   874: "@max-[922px]/data-table:hidden",
   971: "@max-[1019px]/data-table:hidden",
   1171: "@max-[1219px]/data-table:hidden",

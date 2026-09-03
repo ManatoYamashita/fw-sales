@@ -72,7 +72,9 @@ describe("段階表示クラスの CSS 生成", () => {
     }
     // 隠す指定であること (display:none 以外へ化けていない)
     expect(css).toContain("display: none");
-    // 14 本すべてが別々のクエリとして出る (重複キーによる取りこぼしの検出)
+    // 全トークンが別々のクエリとして出る (重複キーによる取りこぼしの検出)。
+    // 閾値キーが 2 つ SELECTION_COLUMN_WIDTH ちょうど離れているとここが落ちるが、
+    // 原因が分かりにくいので data-table-responsive.test.ts が先回りで名指しする。
     const queries = new Set(
       [...css.matchAll(/@container data-table \(width < \d+px\)/g)].map((m) => m[0]),
     );

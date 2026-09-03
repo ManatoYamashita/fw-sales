@@ -34,9 +34,46 @@ function hiddenBelowPx(className: string): number {
   return Number(m![1]);
 }
 
+/**
+ * 閾値がどの画面の列予算から来たか。
+ *
+ * マップは 1 本のはしごではなく**テーブルごとの予算の和集合**なので、キーを足す人に
+ * 「どの画面のぶんか」を書かせるための表でもある。ここを更新せずにマップだけ触ると
+ * 下の 2 つのテストが落ちる。
+ */
+const STORES_LADDER = [728, 874, 971, 1171, 1281, 1391, 1492] as const; // #220
+const DASHBOARD_LADDER = [406, 516, 652, 792] as const; // #224
+
 describe("閾値マップ", () => {
-  it("issue #220 の配分表と一致する", () => {
-    expect(thresholds).toEqual([728, 874, 971, 1171, 1281, 1391, 1492]);
+  it("#220 (/stores) と #224 (/dashboard) の配分表の和集合と一致する", () => {
+    expect(thresholds).toEqual([
+      406, 516, 652, 728, 792, 874, 971, 1171, 1281, 1391, 1492,
+    ]);
+  });
+
+  it("すべての閾値がいずれかの画面の予算に由来する", () => {
+    // 出自不明の閾値が紛れ込むと、後から「これは何の列だったか」を誰も辿れなくなる。
+    const declared = [...STORES_LADDER, ...DASHBOARD_LADDER].sort((a, b) => a - b);
+    expect(new Set(STORES_LADDER).size + new Set(DASHBOARD_LADDER).size).toBe(
+      new Set(declared).size,
+    ); // 2 つのラダーは互いに素
+    expect(declared).toEqual(thresholds);
+  });
+
+  it("どの 2 閾値も選択列幅ちょうど離れていない", () => {
+    // 事故: 差が SELECTION_COLUMN_WIDTH だと HIDE_BELOW[b] と
+    // HIDE_BELOW_WITH_SELECTION[b - 48] が同一文字列になり、Set が重複を潰して
+    // data-table-responsive-css.test.ts の「ユニークなクエリ数 === トークン数」が
+    // **原因の分からないメッセージで**落ちる。ここで先回りして名指しする。
+    for (const a of thresholds) {
+      for (const b of thresholds) {
+        expect(
+          b - a,
+          `閾値 ${a} と ${b} が選択列幅 (${SELECTION_COLUMN_WIDTH}px) ちょうど離れている。` +
+            `どちらかを 1px でもずらすこと。`,
+        ).not.toBe(SELECTION_COLUMN_WIDTH);
+      }
+    }
   });
 
   it("選択列ありのマップはキー集合が一致し、閾値がちょうど選択列幅ぶん大きい", () => {
