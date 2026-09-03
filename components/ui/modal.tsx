@@ -14,6 +14,15 @@ import {
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
+import {
+  MODAL_BODY_CLASS,
+  MODAL_DIALOG_CLASS,
+  MODAL_FOOTER_CLASS,
+  MODAL_HEADER_CLASS,
+  MODAL_OVERLAY_CLASS,
+  MODAL_WIDTH_CLASS,
+  type ModalSize,
+} from "./modal-classes";
 
 interface ModalContextValue {
   open: boolean;
@@ -84,15 +93,10 @@ interface ModalContentProps {
   title: ReactNode;
   description?: ReactNode;
   children: ReactNode;
-  size?: "sm" | "md" | "lg";
+  size?: ModalSize;
   className?: string;
 }
 
-const sizeClass: Record<NonNullable<ModalContentProps["size"]>, string> = {
-  sm: "max-w-md",
-  md: "max-w-lg",
-  lg: "max-w-2xl",
-};
 
 export function ModalContent({
   title,
@@ -150,7 +154,7 @@ export function ModalContent({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-foreground/40 backdrop-blur-sm animate-fade-in"
+      className={MODAL_OVERLAY_CLASS}
       onClick={() => setOpen(false)}
       role="presentation"
     >
@@ -159,14 +163,10 @@ export function ModalContent({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className={cn(
-          "w-full bg-popover text-popover-foreground border border-border rounded-xl shadow-modal animate-slide-up",
-          sizeClass[size],
-          className,
-        )}
+        className={cn(MODAL_DIALOG_CLASS, MODAL_WIDTH_CLASS[size], className)}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-start justify-between gap-4 px-5 py-4 border-b border-border">
+        <div className={MODAL_HEADER_CLASS}>
           <div>
             <h2
               id={titleId}
@@ -189,7 +189,7 @@ export function ModalContent({
             <X className="h-4 w-4" />
           </button>
         </div>
-        <div className="px-5 py-4">{children}</div>
+        <div className={MODAL_BODY_CLASS}>{children}</div>
       </div>
     </div>,
     document.body,
@@ -205,10 +205,7 @@ export function ModalFooter({
 }) {
   return (
     <div
-      className={cn(
-        "flex items-center justify-end gap-2 px-5 py-3 border-t border-border bg-muted/30 -mx-5 -mb-4 mt-4",
-        className,
-      )}
+      className={cn(MODAL_FOOTER_CLASS, className)}
     >
       {children}
     </div>
