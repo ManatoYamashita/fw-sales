@@ -78,7 +78,8 @@ function invalidateDealScopes(dealId?: string, storeId?: string) {
   // revalidateTag(_, "max") は stale-while-revalidate 挙動のため、Server Action 直後の
   // router.refresh() が失効前のキャッシュを返し「保存したのに古い内容が表示される」
   // read-your-own-writes 違反が起きていた。updateTag は Server Action 専用 API で、
-  // 同一リクエスト内から失効が保証される (app-settings-actions.ts と同規約)。
+  // 同一リクエスト内から失効が保証される (profile-actions.ts / prompt-template-actions.ts
+  // と同規約。この規約を最初に明記していた app-settings-actions.ts は #213 で撤去済み)。
   updateTag(CACHE_TAGS.deals);
   if (dealId) updateTag(CACHE_TAGS.deal(dealId));
   if (storeId) {
