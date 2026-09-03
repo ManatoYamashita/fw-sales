@@ -1,14 +1,14 @@
 import type { Store } from "@/types/store";
-import type { Research } from "@/types/research";
 
-export function generateTelScript(
-  store: Store,
-  research: Research | null,
-): string {
-  const hook =
-    research?.sales_hook ||
-    "WEB上での集客改善でお役に立てると思いご連絡しました。";
-
+/**
+ * テレアポ台本の定型文を組み立てる。
+ *
+ * Issue #110 で旧 `research` テーブル (手入力の営業フック) を撤去したため、
+ * 店舗情報のみから生成する定型文になっている。調査結果を織り込んだ架電
+ * スクリプトが必要な場合は AI 店舗調査 + 営業資産生成
+ * (`generateSalesAssetsAction` の `call_script`) を使うこと。
+ */
+export function generateTelScript(store: Store): string {
   return `【架電スクリプト】
 
 ▼ 切り出し
@@ -19,7 +19,7 @@ Firstwebという飲食店向けのWEB集客支援をしております佐藤と
 
 ▼ OK の場合
 「${store.name}さんのお店について、ネット上での情報を拝見しました。
-${hook}
+WEB上での集客改善でお役に立てると思いご連絡しました。
 
 Googleマップのお問い合わせや来店数を増やすお手伝いをしているのですが、
 現在、集客でお困りなことはありますか?」
