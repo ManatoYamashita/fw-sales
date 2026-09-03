@@ -24,6 +24,12 @@ describe("店舗一覧の最寄駅列", () => {
     expect(column.maxWidth).toBe("200px");
   });
 
+  it("業態より上位の閾値を持つ (#220 の列優先度)", () => {
+    // 2000px 未満では必ず 1 列落ちる。落とすのは業態であって最寄駅ではない
+    // (#175 / #177 の意思決定が乗っている側を残す)。
+    expect(locationColumn().minContainerWidth).toBe(1171);
+  });
+
   it("最寄駅をtrimして表示し、titleに全文を設定する", () => {
     const column = locationColumn();
     const row = rowWithBasicInfo({
