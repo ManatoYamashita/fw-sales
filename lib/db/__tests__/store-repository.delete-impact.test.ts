@@ -3,7 +3,7 @@
  *
  * テスト方針 (place-candidate-repository.test.ts と同様):
  * - `@/lib/db/client` をモックして実 DB 接続を防ぐ
- * - executor.execute をモックし、単一 SELECT (スカラーサブクエリ ×4) の結果行を返す
+ * - executor.execute をモックし、単一 SELECT (スカラーサブクエリ ×3) の結果行を返す
  * - 「空配列は DB へ問い合わせない」「1 往復で取得する」という契約
  *   (design.md §StoreRepository.getDeleteImpact) を検証する
  */
@@ -30,7 +30,6 @@ describe("getDeleteImpact", () => {
 
     await expect(repo.getDeleteImpact([])).resolves.toEqual({
       deals: 0,
-      research: 0,
       handoffs: 0,
       place_candidates: 0,
     });
@@ -39,7 +38,7 @@ describe("getDeleteImpact", () => {
 
   it("単一クエリ (1 往復) の結果行をカテゴリ別件数へマッピングする", async () => {
     const { execute, executor } = makeExecutor([
-      { deals: 3, research: 2, handoffs: 1, place_candidates: 4 },
+      { deals: 3, handoffs: 1, place_candidates: 4 },
     ]);
     const repo = makeStoreRepo(executor);
 
@@ -47,7 +46,6 @@ describe("getDeleteImpact", () => {
       repo.getDeleteImpact(["store_a", "store_b"]),
     ).resolves.toEqual({
       deals: 3,
-      research: 2,
       handoffs: 1,
       place_candidates: 4,
     });
@@ -60,7 +58,6 @@ describe("getDeleteImpact", () => {
 
     await expect(repo.getDeleteImpact(["store_a"])).resolves.toEqual({
       deals: 0,
-      research: 0,
       handoffs: 0,
       place_candidates: 0,
     });
@@ -71,7 +68,6 @@ describe("getDeleteImpact", () => {
     const { executor } = makeExecutor([
       {
         deals: "5",
-        research: 0,
         handoffs: BigInt(2),
         place_candidates: null,
       },
@@ -80,7 +76,6 @@ describe("getDeleteImpact", () => {
 
     await expect(repo.getDeleteImpact(["store_a"])).resolves.toEqual({
       deals: 5,
-      research: 0,
       handoffs: 2,
       place_candidates: 0,
     });

@@ -47,7 +47,6 @@ interface ImpactCategoryDef {
  */
 export const DELETE_IMPACT_CATEGORIES: readonly ImpactCategoryDef[] = [
   { key: "deals", label: "営業記録", effect: "delete" },
-  { key: "research", label: "調査", effect: "delete" },
   { key: "handoffs", label: "引き継ぎ", effect: "delete" },
   { key: "place_candidates", label: "場所候補", effect: "unlink" },
 ];

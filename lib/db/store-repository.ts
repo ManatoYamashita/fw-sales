@@ -23,7 +23,7 @@
 import "server-only";
 import { eq, desc, and, or, ilike, inArray, gte, lte, sql, type SQL } from "drizzle-orm";
 import { db, type DbClient, type Tx } from "./client";
-import { deals, handoffs, placeCandidates, research, stores } from "./schema";
+import { deals, handoffs, placeCandidates, stores } from "./schema";
 import {
   OPERATOR_TYPES,
   type OperatorType,
@@ -288,7 +288,7 @@ export function makeStoreRepo(executor: DbClient | Tx): StoreRepository {
 
     async bulkDelete(ids) {
       if (ids.length === 0) return 0;
-      // 関連テーブル (deals / research / handoffs / handoffs.deal_id) は FK の
+      // 関連テーブル (deals / handoffs / handoffs.deal_id / store_research_runs) は FK の
       // ON DELETE CASCADE (migration 0021 で再宣言 / #152) で連鎖削除される。
       // (0015 は水位線スキップで本番未適用のまま残った経緯があり、実効宣言は 0021。)
       // 単発 DML 文 `DELETE FROM stores WHERE id IN (...)` は PostgreSQL の
@@ -308,9 +308,9 @@ export function makeStoreRepo(executor: DbClient | Tx): StoreRepository {
 
     async getDeleteImpact(ids) {
       if (ids.length === 0) {
-        return { deals: 0, research: 0, handoffs: 0, place_candidates: 0 };
+        return { deals: 0, handoffs: 0, place_candidates: 0 };
       }
-      // 単一 SELECT のスカラーサブクエリ ×4 で 1 往復・同一スナップショットの件数を得る
+      // 単一 SELECT のスカラーサブクエリ ×3 で 1 往復・同一スナップショットの件数を得る
       // (design.md §StoreRepository.getDeleteImpact / Issue #152)。
       // - handoffs は store_id 基準で数える (deal_id 経由の間接連鎖は同一店舗前提の
       //   データモデルであり、二重計上を避ける)
@@ -322,14 +322,12 @@ export function makeStoreRepo(executor: DbClient | Tx): StoreRepository {
       const rows = await executor.execute(sql`
         select
           (select count(*)::int from ${deals} where ${inArray(deals.store_id, idArray)}) as deals,
-          (select count(*)::int from ${research} where ${inArray(research.store_id, idArray)}) as research,
           (select count(*)::int from ${handoffs} where ${inArray(handoffs.store_id, idArray)}) as handoffs,
           (select count(*)::int from ${placeCandidates} where ${inArray(placeCandidates.matched_store_id, idArray)}) as place_candidates
       `);
       const row = (rows as Array<Record<string, unknown>>)[0];
       return {
         deals: toImpactCount(row?.deals),
-        research: toImpactCount(row?.research),
         handoffs: toImpactCount(row?.handoffs),
         place_candidates: toImpactCount(row?.place_candidates),
       } satisfies StoreDeleteImpact;
