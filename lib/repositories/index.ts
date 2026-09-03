@@ -24,7 +24,6 @@ import "server-only";
 
 import type { DealRepository } from "./deal-repository";
 import type { StoreRepository } from "./store-repository";
-import type { ResearchRepository } from "./research-repository";
 import type { HandoffRepository } from "./handoff-repository";
 import type { ProfileRepository } from "./profile-repository";
 import type { NotificationRepository } from "./notification-repository";
@@ -36,7 +35,6 @@ import type { ResearchRunRepository } from "./research-run-repository";
 export type {
   DealRepository,
   StoreRepository,
-  ResearchRepository,
   HandoffRepository,
   ProfileRepository,
   NotificationRepository,
@@ -58,7 +56,6 @@ export type {
 export interface TxRepos {
   deal: DealRepository;
   store: StoreRepository;
-  research: ResearchRepository;
   handoff: HandoffRepository;
   profile: ProfileRepository;
   notification: NotificationRepository;
@@ -71,6 +68,7 @@ export interface TxRepos {
   /** AI 店舗調査 run (AI 店舗調査再設計 Plan v3.2, PR1) で追加。 */
   researchRun: ResearchRunRepository;
   // task 4.2 (PR3a): deepResearch を撤去 (#121 / #110 連動)。
+  // Issue #110: 旧手入力調査テーブルの research も撤去。
 }
 
 /**
@@ -78,7 +76,6 @@ export interface TxRepos {
  */
 export interface Repos {
   store: StoreRepository;
-  research: ResearchRepository;
   deal: DealRepository;
   handoff: HandoffRepository;
   profile: ProfileRepository;
@@ -105,7 +102,6 @@ async function buildRepos(): Promise<Repos> {
     db,
     dbDealRepo,
     dbStoreRepo,
-    dbResearchRepo,
     dbHandoffRepo,
     dbProfileRepo,
     dbNotificationRepo,
@@ -115,7 +111,6 @@ async function buildRepos(): Promise<Repos> {
     dbResearchRunRepo,
     makeDealRepo,
     makeStoreRepo,
-    makeResearchRepo,
     makeHandoffRepo,
     makeProfileRepo,
     makeNotificationRepo,
@@ -127,7 +122,6 @@ async function buildRepos(): Promise<Repos> {
 
   return Object.freeze({
     store: dbStoreRepo,
-    research: dbResearchRepo,
     deal: dbDealRepo,
     handoff: dbHandoffRepo,
     profile: dbProfileRepo,
@@ -141,7 +135,6 @@ async function buildRepos(): Promise<Repos> {
         fn({
           deal: makeDealRepo(tx),
           store: makeStoreRepo(tx),
-          research: makeResearchRepo(tx),
           handoff: makeHandoffRepo(tx),
           profile: makeProfileRepo(tx),
           notification: makeNotificationRepo(tx),

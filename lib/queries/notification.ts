@@ -1,11 +1,15 @@
 /**
- * Notification 関連の `'use cache'` クエリ (deep-research-pipeline spec #43, Task 3.4)
+ * Notification 関連の `'use cache'` クエリ (初出: deep-research-pipeline spec #43, Task 3.4)
  *
  * - `getRecentNotifications(userId, limit?)`: 当該ユーザー宛通知を新しい順で返す
  *
- * Topbar Bell (NotificationBell, Task 5.5) の親 RSC が呼び、props で
- * Client Component に渡す前提。`createDeepResearchNotification` (Task 3.3) 後の
- * `revalidateTag(CACHE_TAGS.notifications)` で SWR される。
+ * Topbar Bell (NotificationBell) の親 RSC が呼び、props で Client Component に
+ * 渡す前提。
+ *
+ * 注意: 現在この通知を発行する writer はアプリ内に存在しない
+ * (`deep_research_*` の通知種別は #185 で撤去、`repos.notification` は
+ * 読み取りのみ)。`revalidateTag(CACHE_TAGS.notifications)` による失効契約だけを
+ * 維持しており、writer を足す際はそのタグを叩くこと。
  *
  * 関連: design.md §Components and Interfaces / NotificationBell,
  *       requirements.md §4.1, §4.2, §4.3

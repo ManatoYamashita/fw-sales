@@ -1,9 +1,6 @@
 import "server-only";
-import { cacheLife, cacheTag } from "next/cache";
 import { repos } from "@/lib/repositories";
-import { CACHE_TAGS } from "@/lib/cache";
 import { classifyResearchQueue, type ResearchQueueBuckets } from "@/lib/domain/research-review";
-import type { Research } from "@/types/research";
 
 export type ResearchQueue = ResearchQueueBuckets;
 
@@ -15,6 +12,9 @@ export type ResearchQueue = ResearchQueueBuckets;
  * Server Action/Route Handler の外で完結する(`revalidateTag` が確実に効くとは
  * 限らない、beta SDKのため未検証)。このため本クエリは `'use cache'` を使わず、
  * 呼び出しの都度 DB から直接読む(近リアルタイム性を優先、Plan §6)。
+ *
+ * Issue #110: 旧 `research` テーブルを読む `getResearchByStore` は撤去した。
+ * 本ファイルに残るのは AI 店舗調査 (`store_research_runs`) 側のクエリのみ。
  */
 export async function getResearchQueue(): Promise<ResearchQueue> {
   const [stores, needsReviewStoreIds] = await Promise.all([
@@ -23,13 +23,4 @@ export async function getResearchQueue(): Promise<ResearchQueue> {
   ]);
 
   return classifyResearchQueue(stores, new Set(needsReviewStoreIds));
-}
-
-export async function getResearchByStore(
-  storeId: string,
-): Promise<Research | null> {
-  "use cache";
-  cacheLife("longBackstop");
-  cacheTag(CACHE_TAGS.researchByStore(storeId), CACHE_TAGS.research);
-  return repos.research.getByStoreId(storeId);
 }

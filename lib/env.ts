@@ -165,8 +165,9 @@ export function getResearchMaxOutputTokens(): number {
  * - 本番に旧値(例 `10`)が設定済みでも、コード側 default の変更だけでは不具合が
  *   残ってしまうため、下限未満は clamp する。
  *
- * 旧 `DEEP_RESEARCH_*` 系(このファイル下部)とは無関係の新設定。撤去済み
- * Deep Research パイプラインの再利用ではない。
+ * 旧 `DEEP_RESEARCH_*` 系(deep-research-pipeline #43)とは無関係の新設定。
+ * 同系統の env と getter は Issue #110 で全て撤去済みで、本ファイルには残っていない。
+ * 撤去済みパイプラインの設定を再利用したものではないので、混同しないこと。
  */
 export function getResearchRunExpiresMarginMinutes(): number {
   const configured = readPositiveInt(

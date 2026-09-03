@@ -1,5 +1,4 @@
 import type { Store } from "@/types/store";
-import type { Research } from "@/types/research";
 import type { Deal } from "@/types/deal";
 import type { Handoff } from "@/types/handoff";
 import { daysAgo } from "@/lib/utils/date";
@@ -195,74 +194,6 @@ export const SEED_STORES: readonly Store[] = [
     next_action_note: null,
     created_at: daysAgo(14),
     updated_at: daysAgo(0),
-  },
-];
-
-export const SEED_RESEARCH: readonly Research[] = [
-  {
-    id: "res_001",
-    store_id: "store_001",
-    store_name: "導楽",
-    total_review: "食べログ3.4点 / 12件 | 口コミ返信なし",
-    strength1: "お刺身の鮮度・品質が高い(複数口コミで言及)",
-    strength2: "雰囲気が良く居心地の良さを評価するコメントあり",
-    strength3: "常連客に支持されている地元密着型店舗",
-    weakness1: "コスパへの不満が複数口コミで指摘(「コスパは…」)",
-    weakness2: "公式サイト・Instagramが存在しない(情報ゼロ)",
-    weakness3: "Googleマップ情報が不完全・写真不足・口コミ返信ゼロ",
-    review_positive:
-      "「お刺身おいしい」「魚料理が新鮮」「雰囲気が良い」「常連でよく行く」",
-    review_negative:
-      "「コスパが微妙」「値段の割に量が少ない」「情報が少なくて行きづらい」",
-    meo_gap:
-      "Googleマップ情報不完全。写真不足。口コミ返信ゼロ。上位表示の余地大。",
-    hp_gap:
-      "公式サイトなし。料金・メニュー・アクセスが検索から見えない状態。",
-    instagram_gap:
-      "Instagram未開設。お刺身・料理写真の映えポテンシャルあり。",
-    channel: "テレアポ推奨",
-    channel_reason:
-      "公式サイト・問い合わせフォームが存在しない。電話番号が唯一の接触窓口。",
-    sales_hook:
-      "「お刺身の評判は高いのに、ネット上での情報発信が弱く、新規客が来づらい状態です。Googleマップ整備とHP作成で新規来店数を増やせます。」",
-    entry_product: "MEO対策(初期費用11万円〜)",
-    main_product: "HP制作(竹プラン29.8万)+MEO月額運用セット",
-    researcher: "佐藤",
-    status: "完了",
-    created_at: daysAgo(2),
-    updated_at: daysAgo(1),
-  },
-  {
-    id: "res_002",
-    store_id: "store_002",
-    store_name: "CAFE VERDE",
-    total_review: "食べログ3.8点 / 28件 | 口コミ返信あり",
-    strength1: "おしゃれな内装・写真映えする空間として評価",
-    strength2: "スイーツやドリンクメニューが豊富で評価高い",
-    strength3: "Instagramアカウント開設済み(素地はある)",
-    weakness1: "Instagram更新が3ヶ月以上止まっている",
-    weakness2: "Googleマップの投稿写真が古く店の現状が伝わらない",
-    weakness3: "ランチ情報がネット上で弱く集客機会ロスの可能性",
-    review_positive:
-      "「インスタ映え」「雰囲気最高」「スイーツがおいしい」「落ち着ける」",
-    review_negative:
-      "「更新が少なくて最新情報が分からない」「座席少なくて待つことある」",
-    meo_gap:
-      "Googleマップ写真の更新が必要。投稿写真の品質改善で集客向上余地あり。",
-    hp_gap: "公式サイトはあるが更新が少ない。ランチメニューの掲載が不十分。",
-    instagram_gap:
-      "アカウントはあるが3ヶ月更新停止。再起動・動画活用で認知拡大余地大。",
-    channel: "DM推奨",
-    channel_reason:
-      "公式サイトに問い合わせフォームあり。メール経由での非同期接触が有効。",
-    sales_hook:
-      "「Instagramが止まっているのが一番もったいないです。映える空間があるのに発信できていない。月額プランで代行再開できます。」",
-    entry_product: "Instagram運用指南(5.5万円単発)",
-    main_product: "MEO月額+Instagram定期支援セット",
-    researcher: "佐藤",
-    status: "完了",
-    created_at: daysAgo(4),
-    updated_at: daysAgo(2),
   },
 ];
 

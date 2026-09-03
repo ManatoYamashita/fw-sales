@@ -3,8 +3,10 @@
  *
  * 用途:
  * - 既存同期 AI 分析 (`lib/ai/schema.ts:getAiAnalysisJsonSchema`)
- * - Deep Research パイプライン Stage 2 構造化 (`lib/ai/deep-research/schema.ts`)
+ * - AI 店舗調査の応答スキーマ生成 (`lib/ai/research/schema-builder.ts`)
  *   の両者から参照される。
+ *   (初出の消費者だった Deep Research Stage 2 構造化は #121/#125 で撤去済み。
+ *    本ファイルは上記 2 つの現役消費者を持つため撤去対象ではない。)
  *
  * 設計上のポイント:
  * - Gemini API は JSON Schema の **subset** しか受理せず、`$schema` / `maxLength`

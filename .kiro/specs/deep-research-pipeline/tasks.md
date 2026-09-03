@@ -1,5 +1,12 @@
 # Implementation Plan — deep-research-pipeline
 
+> **2026-09-03 更新**: 本ファイルの **全タスクは取り消し線扱いの履歴情報** です。
+> 実装済みの成果物は #116 / #125 / #180 / #185 / #213 / #110 で全て削除されました。後継は AI 店舗調査 (Plan v3.2 / Issue #180): `app/(main)/research/**` / `lib/ai/research/**` / `workflows/store-research.ts`。
+>
+> 唯一の例外は Task 2.1 で抽出された `lib/ai/_shared/json-schema-utils.ts` で、
+> 現在も `lib/ai/schema.ts` と `lib/ai/research/schema-builder.ts` から使われている
+> **現役モジュール** です。撤去対象と誤認しないでください。
+
 - [ ] 1. Foundation: PoC・DB スキーマ・基盤インタフェース整備
 - [ ] 1.1 Phase 0 PoC: Gemini Deep Research SDK・cancelTask・gemini-2.5-flash-lite の実機検証
   - `@google/genai@1.52.0` で `interactions.create({background:true})` / `interactions.get(taskName)` / cancel に相当するメソッドの実体を確認

@@ -30,8 +30,11 @@ export interface ProfileRepository {
     readonly excludePlaceholders?: boolean;
   }): Promise<readonly Profile[]>;
   /**
-   * 管理者ロールのプロフィール一覧を返す (deep-research-pipeline spec #43)。
-   * 月次予算警告通知の fan-out 先解決で使用する。
+   * 管理者ロールのプロフィール一覧を返す。
+   *
+   * 現在の用途は `updateProfileRoleAction` の「最後の管理者保護」(#155)。
+   * 初出は deep-research-pipeline (#43) の月次予算警告通知の fan-out 先解決だが、
+   * その通知経路は #185 で撤去済み。
    */
   findAdmins(): Promise<readonly Profile[]>;
   /**

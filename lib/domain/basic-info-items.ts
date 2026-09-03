@@ -13,8 +13,9 @@
  *   `TOTAL_BASIC_INFO_ITEMS` は定義から動的算出するため、表記と実数が乖離しない。
  *
  * 依存方向について:
- * - `lib/domain` は `lib/ai` を import しない(逆流禁止)。`lib/ai/deep-research/schema.ts`
- *   の `DEEP_RESEARCH_ITEMS`(構造化 spec 用、#110/#121 で撤去予定)に依存せず、その内容を
+ * - `lib/domain` は `lib/ai` を import しない(逆流禁止)。かつて存在した
+ *   `lib/ai/deep-research/schema.ts` の `DEEP_RESEARCH_ITEMS`(構造化 spec 用。
+ *   #121/#125 でファイルごと撤去済み)に依存せず、その内容を
  *   母体に**独立定義**する。これにより構造化資産の撤去後も本表は独立して残る。
  *
  * primary(優先ソース)について:

@@ -8,8 +8,6 @@ export const CACHE_TAGS = {
   stats: "stats",
   stores: "stores",
   store: (id: string) => `store:${id}`,
-  research: "research",
-  researchByStore: (storeId: string) => `research:store:${storeId}`,
   deals: "deals",
   deal: (id: string) => `deal:${id}`,
   dealsByStore: (storeId: string) => `deals:store:${storeId}`,
@@ -26,6 +24,8 @@ export const CACHE_TAGS = {
   notification: (id: string) => `notification:${id}`,
   // task 4.2 (PR3a): deepResearchByStore / deepResearchJob / deepResearchQueue を撤去
   // (#121 / #110 連動)。
+  // Issue #110: 旧手入力調査テーブルの research / researchByStore も撤去。
+  // AI 店舗調査 (`store_research_runs`) の失効は stores / store(id) タグに相乗りする。
   // AI プロンプトテンプレート (Issue #42)
   promptTemplates: "prompt-templates",
   // アプリ全体設定 key-value (store-flow-guidance / Issue #122)

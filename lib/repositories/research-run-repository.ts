@@ -105,4 +105,13 @@ export interface ResearchRunRepository {
    * 即座に解放されるため、複数操作の直列化という目的を果たさない。
    */
   getForUpdate(id: string): Promise<StoreResearchRun | null>;
+
+  /**
+   * run の総件数を返す (Issue #110)。
+   *
+   * 設定画面の件数カードが、撤去した旧 `research` テーブルの代わりに
+   * AI 店舗調査の実行規模を表示するために使う。行を全件ロードしないよう
+   * `count(*)` を DB 側で計算する。
+   */
+  count(): Promise<number>;
 }

@@ -2,7 +2,8 @@
  * StoreDeleteConfirmDialog の表示ロジック (純関数部) のユニットテスト
  * (#152 store-cascade-delete)。
  *
- * - カテゴリ定義: 4 カテゴリの表示順・ラベル・処理種別 (削除 / 紐付け解除) の単一の真実
+ * - カテゴリ定義: 3 カテゴリの表示順・ラベル・処理種別 (削除 / 紐付け解除) の単一の真実
+ *   (Issue #110 で旧 research を撤去し 4 → 3 カテゴリ)
  * - visibleImpactEntries: 件数 > 0 のカテゴリのみを定義順で返す (Req 3.2 / 3.3)
  *
  * ステートフルな描画 (取得中 / 失敗 / 成功の 3 状態, aria-live) は現行テスト基盤
@@ -25,25 +26,22 @@ const {
 } = await import("../store-delete-confirm-dialog");
 
 describe("DELETE_IMPACT_CATEGORIES", () => {
-  it("4 カテゴリを定義順 (営業記録 → 調査 → 引き継ぎ → 場所候補) で保持する", () => {
+  it("3 カテゴリを定義順 (営業記録 → 引き継ぎ → 場所候補) で保持する", () => {
     expect(DELETE_IMPACT_CATEGORIES.map((c) => c.key)).toEqual([
       "deals",
-      "research",
       "handoffs",
       "place_candidates",
     ]);
     expect(DELETE_IMPACT_CATEGORIES.map((c) => c.label)).toEqual([
       "営業記録",
-      "調査",
       "引き継ぎ",
       "場所候補",
     ]);
   });
 
-  it("処理種別は deals/research/handoffs = delete、place_candidates = unlink (Req 3.2)", () => {
+  it("処理種別は deals/handoffs = delete、place_candidates = unlink (Req 3.2)", () => {
     const byKey = new Map(DELETE_IMPACT_CATEGORIES.map((c) => [c.key, c.effect]));
     expect(byKey.get("deals")).toBe("delete");
-    expect(byKey.get("research")).toBe("delete");
     expect(byKey.get("handoffs")).toBe("delete");
     expect(byKey.get("place_candidates")).toBe("unlink");
   });
@@ -58,7 +56,6 @@ describe("visibleImpactEntries", () => {
   it("件数 > 0 のカテゴリのみを定義順で返す (0 件カテゴリは非表示 / Req 3.3)", () => {
     const entries = visibleImpactEntries({
       deals: 3,
-      research: 0,
       handoffs: 1,
       place_candidates: 4,
     });
@@ -73,7 +70,6 @@ describe("visibleImpactEntries", () => {
     expect(
       visibleImpactEntries({
         deals: 0,
-        research: 0,
         handoffs: 0,
         place_candidates: 0,
       }),

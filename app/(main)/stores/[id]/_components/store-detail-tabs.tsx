@@ -39,30 +39,14 @@ export function StoreDetailTabs({
 }: StoreDetailTabsProps) {
   const editHref = `/stores/${store.id}/edit`;
 
-  // 調査ページの完了行から `?tab=ai#deep-research` で来た場合は AI 分析タブを初期表示。
-  // `?tab=progress` は営業進捗タブへの deep link (営業進捗一覧からの遷移用)。
+  // `?tab=ai` は AI 分析タブ、`?tab=progress` は営業進捗タブへの deep link。
+  // 旧 `#deep-research` アンカーへのスクロール処理は Issue #110 で撤去した
+  // (対象の DeepResearchSection が #125 で消え、常に空振りしていたため)。
+  // `tab` パラメータの解釈自体はブックマーク互換のため維持する。
   const searchParams = useSearchParams();
   const tabParam = searchParams.get("tab");
   const initialTab =
     tabParam === "ai" ? "ai" : tabParam === "progress" ? "progress" : "basic";
-
-  // `#deep-research` アンカー指定時は Deep Research セクションへスクロール。
-  // スロットは Suspense ストリーミングで遅延描画されるため数回リトライする。
-  useEffect(() => {
-    if (initialTab !== "ai" || window.location.hash !== "#deep-research") return;
-    let attempts = 0;
-    let raf = 0;
-    const tryScroll = () => {
-      const el = document.getElementById("deep-research");
-      if (el) {
-        el.scrollIntoView({ behavior: "smooth", block: "start" });
-        return;
-      }
-      if (attempts++ < 30) raf = requestAnimationFrame(tryScroll);
-    };
-    raf = requestAnimationFrame(tryScroll);
-    return () => cancelAnimationFrame(raf);
-  }, [initialTab]);
 
   return (
     <Tabs defaultValue={initialTab} variant="pill">

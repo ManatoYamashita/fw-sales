@@ -1,5 +1,9 @@
 # Gap Analysis — deep-research-pipeline
 
+> **2026-09-03 更新**: 本ファイルは **2026-05-17 時点のスナップショット** です。
+> 仕様は #110 で全撤去済み (`spec.json` の `phase` は `removed`)。現行コードベースの
+> 調査結果としては使えません。後継は AI 店舗調査 (Plan v3.2 / Issue #180): `app/(main)/research/**` / `lib/ai/research/**` / `workflows/store-research.ts`。
+
 **Date**: 2026-05-17
 **Inputs**: `requirements.md` (R1〜R8), `.kiro/steering/{product,tech,structure}.md`, Issue #43
 **Scope**: 既存 fw-sales コードベースに対する Deep Research 非同期パイプラインの実装ギャップを洗い出し、設計フェーズへ持ち越す論点を整理する。
