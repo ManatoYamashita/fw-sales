@@ -197,9 +197,17 @@ export const deals = pgTable("deals", {
 ]);
 
 /**
- * research テーブル
+ * research テーブル (旧・手入力の調査フォーム)
  *
- * `types/research.ts` の `Research` インタフェースと 1:1 で対応します。
+ * **Issue #110 で撤去予定。本定義は物理 DROP を行う後続 PR まで残す暫定状態です。**
+ * アプリケーションコードからの参照は既にゼロで、書き込み経路 (`saveResearchAction`)
+ * も読み出し経路 (`getResearchByStore` / `repos.research.list`) も撤去済み。
+ * ここに定義が残っているのは、`pnpm db:generate` が `drizzle/meta/` の最新
+ * snapshot との差分から DROP TABLE migration を生成する必要があるためであり、
+ * schema 変更と生成物を同一 PR に閉じて再現性を保つ意図です。
+ * 現行の店舗調査は `storeResearchRuns` (AI 店舗調査 / Plan v3.2) が担当します。
+ *
+ * 旧 `types/research.ts` の `Research` インタフェースと 1:1 で対応していました。
  *
  * - `store_id` は `stores.id` への外部キー制約を持ち、不存在 store_id への Research 作成を
  *   DB レベルで拒否します (Req 2.5, 10.5)
