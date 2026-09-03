@@ -72,7 +72,8 @@ describe("段階表示クラスの CSS 生成", () => {
     }
     // 隠す指定であること (display:none 以外へ化けていない)
     expect(css).toContain("display: none");
-    // 14 本すべてが別々のクエリとして出る (重複キーによる取りこぼしの検出)
+    // 全トークン (現在 28 本) が別々のクエリとして出る。畳まれるのは 2 マップ間で
+    // px が衝突したとき = 閾値どうしが 48px 差のとき (data-table-responsive.test.ts)。
     const queries = new Set(
       [...css.matchAll(/@container data-table \(width < \d+px\)/g)].map((m) => m[0]),
     );
