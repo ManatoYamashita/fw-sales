@@ -228,7 +228,10 @@ pause しない。
 
 - 認可: `Authorization: Bearer ${CRON_SECRET}`。Vercel Cron がこの env var の値を自動送信する。
   **未設定なら 401 ではなく 500** を返す (設定漏れを「正しく拒否できている」ように見せないため)。
-  Vercel 側は Production / Preview / Development の 3 環境すべてに登録すること。
+  Vercel 側で**必須なのは Production のみ** (cron が走るのは production deployment だけ)。
+  Preview / Development は無くてもビルドも動作も壊れない (`check-required-env.mjs` の
+  REQUIRED には入れていない)。`vercel env pull` でローカルへ引ける値を揃えたい場合のみ
+  3 環境に登録する。
 - 最終実行時刻は `app_settings.keepalive_last_run_at` に記録され、設定画面に表示される。
   Vercel の Runtime Logs は Hobby プランでは 1 時間で消えるため、翌日以降に
   「cron が実際に DB へ届いたか」を確かめられるのはこの行だけである。
