@@ -299,6 +299,8 @@ CI は typecheck / lint / vitest の 3 ジョブで、**`next build` を持た�
 | `components/ui/modal-classes.ts` | モーダルのクラス契約と、そう書いた理由 |
 | 各ビューの `_components/__tests__/*-table-columns.test.tsx` | そのビューの決定表 (`EXPECTED`) と列単体予算 (`BUDGET`)、予算の実測値の採り方。**always 列の予算も含め `BUDGET` が唯一の出所**で、直値の定数を別に置かない (#244) |
 | `components/ui/__tests__/support/column-budget.ts` | 予算→閾値の検証ロジック (`expectBudgetLadder` / `expectCapsMatchBudget` / `NARROWEST_CONTAINER`) と、空洞化しないための作り。3 ビュー共通 (#244) |
+| `components/ui/stat.tsx` | `Stat` と `StatSkeleton` が共有する箱のクラス (`STAT_BOX_CLASS`) と、144px の内訳がどこから来るか。placeholder に高さを数値で持たせない理由 (#265) |
+| `app/(main)/settings/_components/counts-grid.tsx` | 件数カードの列ラダーと枚数。4 列化が `lg:` である理由 (#265) |
 
 **数値と機構固有の契約はソース側が単一の真実。** ここに写経すると必ず片方が古くなる。この文書からは「どこを見ればよいか」だけを指す。
 
