@@ -315,9 +315,10 @@ export function StoresTableView({
           <Button
             variant="destructive"
             size="touch"
+            gap="tight"
             onClick={() => setBulkOpen(true)}
             disabled={isDeleting}
-            className="ml-auto gap-1.5"
+            className="ml-auto"
           >
             {isDeleting ? <Spinner /> : <Trash2 className="h-3.5 w-3.5" />}
             削除

@@ -1,10 +1,17 @@
 import { cn } from "@/lib/utils/cn";
 
-export function Skeleton({ className }: { className?: string }) {
+export function Skeleton({
+  className,
+  tone = "muted",
+}: {
+  className?: string;
+  tone?: "muted" | "card";
+}) {
   return (
     <div
       className={cn(
-        "animate-pulse bg-muted rounded-md",
+        "animate-pulse rounded-md",
+        tone === "card" ? "bg-card" : "bg-muted",
         className,
       )}
       aria-hidden
@@ -69,7 +76,7 @@ export function KanbanSkeleton({ columns = 6 }: { columns?: number }) {
           </div>
           <div className="flex-1 p-2 space-y-2">
             {Array.from({ length: 3 }).map((_, i) => (
-              <Skeleton key={i} className="h-16 w-full bg-card" />
+              <Skeleton key={i} className="h-16 w-full" tone="card" />
             ))}
           </div>
         </div>
@@ -84,7 +91,8 @@ export function StatGridSkeletonShared({ count = 8 }: { count?: number }) {
       {Array.from({ length: count }).map((_, i) => (
         <Skeleton
           key={i}
-          className="h-[112px] bg-card border border-border"
+          className="h-[112px] border border-border"
+          tone="card"
         />
       ))}
     </div>

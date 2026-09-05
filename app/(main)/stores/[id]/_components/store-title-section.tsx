@@ -107,11 +107,10 @@ export function StoreTitleSection({
         <ResearchPhaseBadge phase={phase} />
         <Button
           type="button"
-          variant="ghost"
+          variant="ghost-muted"
           size="sm"
           onClick={() => setEditing(true)}
           aria-label="店舗名・業態を編集"
-          className="text-muted-foreground"
         >
           <Pencil className="h-3.5 w-3.5" />
         </Button>

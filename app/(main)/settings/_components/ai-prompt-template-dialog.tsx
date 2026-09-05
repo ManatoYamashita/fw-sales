@@ -286,10 +286,9 @@ function TemplateRow({
         {t.is_default ? (
           <Button
             size="sm"
-            variant="ghost"
+            variant="destructive-outline"
             disabled
             title="デフォルトテンプレートは削除できません"
-            className="text-destructive"
           >
             <Trash2 className="h-3.5 w-3.5" />
             削除
@@ -297,11 +296,10 @@ function TemplateRow({
         ) : (
           <Button
             size="sm"
-            variant="ghost"
+            variant="destructive-outline"
             onClick={onDelete}
             disabled={denyDelete}
             title={denyDelete ? "管理者のみ実行できます" : undefined}
-            className="text-destructive hover:text-destructive hover:bg-destructive/10"
           >
             <Trash2 className="h-3.5 w-3.5" />
             削除

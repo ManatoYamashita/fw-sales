@@ -105,10 +105,11 @@ export function UserManagementShell({
                   {ROLE_LABEL[role] ?? role}
                 </Badge>
                 <Select
+                  width="auto"
                   value={role}
                   disabled={pending}
                   aria-label={`${u.display_name} のロール`}
-                  className="w-32 text-foreground"
+                  className="w-32"
                   onChange={(e) => onSelect(u, e.target.value as ProfileRole)}
                 >
                   <option value="member">メンバー</option>

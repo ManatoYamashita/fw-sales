@@ -55,6 +55,7 @@ export function DealStatusForm({ deal }: { deal: Deal }) {
         <Card.Body className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <FormField label="ステータス" htmlFor="status">
             <Select
+              width="full"
               id="status"
               name="status"
               value={form.status}

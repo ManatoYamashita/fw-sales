@@ -627,9 +627,10 @@ export function AreaSearchResults({
                 <Button
                   variant="outline"
                   size="sm"
+                  gap="tight"
                   onClick={handleLoadMore}
                   disabled={isLoadingMore}
-                  className="gap-1.5 shrink-0"
+                  className="shrink-0"
                 >
                   {isLoadingMore ? (
                     <>
@@ -681,13 +682,13 @@ export function AreaSearchResults({
                       key={chip}
                       variant={exploredRunIds.has(runId) ? "ghost" : "outline"}
                       size="sm"
+                      gap="tight"
                       onClick={() => handleExplore("keyword", chip)}
                       disabled={
                         explorationPendingId !== null || exploredRunIds.has(runId)
                       }
-                      className="gap-1.5"
                     >
-                      {explorationPendingId === runId && <Spinner className="h-3 w-3" />}
+                      {explorationPendingId === runId && <Spinner size="sm" />}
                       {chip}
                       {exploredRunIds.has(runId) && (
                         <span className="text-xs text-muted-foreground">探索済み</span>
@@ -715,13 +716,13 @@ export function AreaSearchResults({
                       key={chip}
                       variant={exploredRunIds.has(runId) ? "ghost" : "outline"}
                       size="sm"
+                      gap="tight"
                       onClick={() => handleExplore("center", chip)}
                       disabled={
                         explorationPendingId !== null || exploredRunIds.has(runId)
                       }
-                      className="gap-1.5"
                     >
-                      {explorationPendingId === runId && <Spinner className="h-3 w-3" />}
+                      {explorationPendingId === runId && <Spinner size="sm" />}
                       {chip}
                       {exploredRunIds.has(runId) && (
                         <span className="text-xs text-muted-foreground">探索済み</span>
@@ -745,13 +746,13 @@ export function AreaSearchResults({
                       key={chip}
                       variant={exploredRunIds.has(runId) ? "ghost" : "outline"}
                       size="sm"
+                      gap="tight"
                       onClick={() => handleExplore("radius", chip)}
                       disabled={
                         explorationPendingId !== null || exploredRunIds.has(runId)
                       }
-                      className="gap-1.5"
                     >
-                      {explorationPendingId === runId && <Spinner className="h-3 w-3" />}
+                      {explorationPendingId === runId && <Spinner size="sm" />}
                       {label}
                       {exploredRunIds.has(runId) && (
                         <span className="text-xs text-muted-foreground">探索済み</span>
@@ -828,11 +829,12 @@ export function AreaSearchResults({
               <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 表示順
                 <Select
+                  width="auto"
+                  density="compact"
                   value={sortMode}
                   onChange={(e) =>
                     setSortMode(e.target.value as AreaSearchSortMode)
                   }
-                  className="h-8 w-auto text-xs"
                   aria-label="表示順を切り替え"
                 >
                   {AREA_SEARCH_SORT_MODES.map((mode) => (
@@ -960,13 +962,14 @@ export function AreaSearchResults({
               <Button
                 variant="primary"
                 size="sm"
+                gap="tight"
                 onClick={handleBulkAdd}
                 disabled={isBulkPending}
-                className="ml-auto gap-1.5"
+                className="ml-auto"
               >
                 {isBulkPending ? (
                   <>
-                    <Spinner className="text-primary-foreground" />
+                    <Spinner tone="primary" />
                     登録中…
                   </>
                 ) : (

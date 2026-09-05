@@ -235,7 +235,7 @@ export function UrlSearchPanel({ onLoaded }: UrlSearchPanelProps) {
         >
           {pending ? (
             <>
-              <Spinner className="text-primary-foreground" />
+              <Spinner tone="primary" />
               読込中…
             </>
           ) : (
@@ -390,6 +390,7 @@ export function AreaSearchPanel({
           hint="中心からの距離"
         >
           <Select
+            width="full"
             id="radius"
             value={radiusMeters}
             onChange={(e) => setRadiusMeters(Number(e.target.value))}
@@ -418,7 +419,7 @@ export function AreaSearchPanel({
           >
             {pending ? (
               <>
-                <Spinner className="text-primary-foreground" />
+                <Spinner tone="primary" />
                 検索中…
               </>
             ) : (

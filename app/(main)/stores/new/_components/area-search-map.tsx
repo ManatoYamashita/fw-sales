@@ -282,7 +282,7 @@ export function AreaSearchMap({
           />
           {status === "loading" && (
             <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Spinner className="h-3 w-3" />
+              <Spinner size="sm" />
               地図を読み込み中…
             </p>
           )}

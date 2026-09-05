@@ -88,10 +88,10 @@ export function DataActions() {
         <Modal open={resetOpen} onOpenChange={setResetOpen}>
           <Button
             variant="outline"
+            size="touch"
             onClick={() => setResetOpen(true)}
             disabled={denyDestructive}
             title={adminOnlyTitle}
-            className="h-11"
           >
             <RotateCcw className="h-4 w-4" />
             シードデータに戻す
@@ -118,11 +118,11 @@ export function DataActions() {
 
         <Modal open={clearOpen} onOpenChange={setClearOpen}>
           <Button
-            variant="ghost"
+            size="touch"
             onClick={() => setClearOpen(true)}
             disabled={denyDestructive}
             title={adminOnlyTitle}
-            className="h-11 text-red-600 hover:text-red-700 hover:bg-red-50"
+            variant="ghost-destructive"
           >
             <Trash2 className="h-4 w-4" />
             全データを削除
