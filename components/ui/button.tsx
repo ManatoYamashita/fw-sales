@@ -87,9 +87,26 @@ export const BUTTON_VARIANT_CLASSES = {
     "bg-destructive text-destructive-foreground hover:bg-destructive/90 shadow-sm",
 } as const;
 
+/**
+ * アイコンとラベルの間隔。既定は 8px。
+ *
+ * `className="gap-1.5"` で詰める書き方は成立しない。`cn` は素の clsx なので基底の
+ * `gap-2` と両方が出力され、生成 CSS では `.gap-1.5` (4984) より `.gap-2` (5039) が
+ * 後に来て勝つ。7 箇所でその指定が一度も描画されていなかった (#250 レビュー)。
+ * 間隔を詰めたいときは `className` ではなくこの軸を使う。
+ *
+ * 基底から `gap-2` を外してここへ移したのは、基底に残したままだと `tight` を選んでも
+ * `gap-2` と争って同じ事故になるため。**基底とこの表で同じプロパティを二重に持たせない。**
+ * `class-conflicts.test.ts` の自己衝突検査がこれを固定する。
+ */
+export const BUTTON_GAP_CLASSES = {
+  default: "gap-2",
+  tight: "gap-1.5",
+} as const;
+
 const buttonVariants = cva(
   cn(
-    "inline-flex items-center justify-center gap-2 font-medium whitespace-nowrap",
+    "inline-flex items-center justify-center font-medium whitespace-nowrap",
     "transition-[background-color,color,border-color,box-shadow,transform] duration-150",
     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
     "disabled:cursor-not-allowed disabled:opacity-50",
@@ -99,10 +116,12 @@ const buttonVariants = cva(
     variants: {
       variant: BUTTON_VARIANT_CLASSES,
       size: BUTTON_SIZE_CLASSES,
+      gap: BUTTON_GAP_CLASSES,
     },
     defaultVariants: {
       variant: "default",
       size: "md",
+      gap: "default",
     },
   },
 );

@@ -315,6 +315,7 @@ export function StoresTableView({
           <Button
             variant="destructive"
             size="touch"
+            gap="tight"
             onClick={() => setBulkOpen(true)}
             disabled={isDeleting}
             className="ml-auto"

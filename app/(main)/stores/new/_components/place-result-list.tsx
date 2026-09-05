@@ -228,6 +228,7 @@ export function PlaceResultList({
                         <Button
                           variant="ghost"
                           size="sm"
+                          gap="tight"
                           onClick={(e) => {
                             e.stopPropagation();
                             onFetchDetails(place.placeId);

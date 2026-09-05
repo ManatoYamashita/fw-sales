@@ -30,6 +30,7 @@ import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  BUTTON_GAP_CLASSES,
   BUTTON_SIZE_CLASSES,
   BUTTON_VARIANT_CLASSES,
   buttonVariants,
@@ -179,6 +180,7 @@ export function cssProperties(token: string): string[] {
 const PROP_VALUES: Record<string, readonly string[]> = {
   "Button.variant": Object.keys(BUTTON_VARIANT_CLASSES),
   "Button.size": Object.keys(BUTTON_SIZE_CLASSES),
+  "Button.gap": Object.keys(BUTTON_GAP_CLASSES),
   "Select.width": ["full", "auto"],
   "Select.density": ["default", "compact"],
   "Card.Body.padding": ["default", "compact", "flush", "spacious"],
@@ -220,15 +222,19 @@ function baseClasses(
     case "Button": {
       const variants = pick("variant", "Button.variant");
       const sizes = pick("size", "Button.size");
+      const gaps = pick("gap", "Button.gap");
       const out: string[][] = [];
       for (const variant of variants) {
         for (const size of sizes) {
-          out.push(
-            buttonVariants({
-              variant: variant as never,
-              size: size as never,
-            }).split(/\s+/),
-          );
+          for (const gap of gaps) {
+            out.push(
+              buttonVariants({
+                variant: variant as never,
+                size: size as never,
+                gap: gap as never,
+              }).split(/\s+/),
+            );
+          }
         }
       }
       return collect(out);
@@ -464,5 +470,122 @@ describe("UI primitive class conflict guard", () => {
     expect(
       findClassConflicts('<Card.Body className="py-4" />', "Card.Body"),
     ).toBeNull();
+  });
+});
+
+/**
+ * プリミティブが**自分自身の基底クラスの中で**同じ CSS プロパティを二重に設定していないか。
+ *
+ * 利用側の `className` を見るだけでは足りない。`Button` の基底に `gap-2` を残したまま
+ * `gap` 軸へ `gap-1.5` を足す、`Select` の基底に `text-sm` を残したまま `density="compact"`
+ * へ `text-xs` を足す、といった形だと**プリミティブの内部で記述順勝負になる**。
+ * どちらも実際に起きた (#250 レビュー)。
+ */
+const SELF_CONFLICT_CASES: Array<{ name: string; classes: () => string[] }> = [
+  ...Object.keys(BUTTON_VARIANT_CLASSES).flatMap((variant) =>
+    Object.keys(BUTTON_SIZE_CLASSES).flatMap((size) =>
+      Object.keys(BUTTON_GAP_CLASSES).map((gap) => ({
+        name: `Button variant=${variant} size=${size} gap=${gap}`,
+        classes: () =>
+          buttonVariants({
+            variant: variant as never,
+            size: size as never,
+            gap: gap as never,
+          }).split(/\s+/),
+      })),
+    ),
+  ),
+  ...(["full", "auto"] as const).flatMap((width) =>
+    (["default", "compact"] as const).map((density) => ({
+      name: `Select width=${width} density=${density}`,
+      classes: () =>
+        renderedClassName(Select({ width, density })).split(/\s+/),
+    })),
+  ),
+  ...(["default", "compact", "flush", "spacious"] as const).map((padding) => ({
+    name: `Card.Body padding=${padding}`,
+    classes: () => renderedClassName(CardBody({ padding })).split(/\s+/),
+  })),
+  ...(["muted", "card"] as const).map((tone) => ({
+    name: `Skeleton tone=${tone}`,
+    classes: () => renderedClassName(Skeleton({ tone })).split(/\s+/),
+  })),
+  ...(["sm", "md", "lg"] as const).flatMap((size) =>
+    (["muted", "primary"] as const).map((tone) => ({
+      name: `Spinner size=${size} tone=${tone}`,
+      classes: () => renderedClassName(Spinner({ size, tone })).split(/\s+/),
+    })),
+  ),
+];
+
+/**
+ * `variant: link` は `px-0 h-auto` で size の寸法を打ち消す作りだが、`px-0` は
+ * どの size の `px-*` にも負ける (実測: `.px-0` 5089 < `.px-4` 5149)。`h-auto` は
+ * 逆に全数値高さより後に出るので効く。**現状 `variant="link"` の呼び出しは 0 件**
+ * なので実害は無いが、使い始めるなら先に size を打ち消す方法ごと設計し直すこと。
+ * ここで除外しているのはこの既知の 1 組だけで、新しい自己衝突は落ちる。
+ */
+const KNOWN_SELF_CONFLICTS = new Set(
+  Object.keys(BUTTON_SIZE_CLASSES).flatMap((size) =>
+    Object.keys(BUTTON_GAP_CLASSES).map(
+      (gap) => `Button variant=link size=${size} gap=${gap}`,
+    ),
+  ),
+);
+
+/**
+ * ショートハンドの段階。`px-3 pr-8` のように**より具体的な側が後から上書きする**書き方は
+ * Tailwind が「一括 → 軸 → 辺」の順で出力するので順序が保証されており、事故ではない。
+ * 自己衝突として数えるのは**同じ段階どうし**が同じ辺を争う場合だけ。
+ *
+ * 利用側 `className` との突き合わせ (`findClassConflicts`) ではこの段階を見ない。
+ * 呼び出し側は基底より後に書いても勝てない (#248 の `Card.Body` + `p-0` がその実例) ため、
+ * 段階が違っても「上書きできない」ことに変わりがないからである。
+ */
+function specificity(token: string): number {
+  if (/^p[trblse]-/.test(token)) return 2;
+  if (/^p[xy]-/.test(token)) return 1;
+  if (/^p-/.test(token)) return 0;
+  if (/^rounded-(tl|tr|br|bl)(-|$)/.test(token)) return 2;
+  if (/^rounded-(t|r|b|l)(-|$)/.test(token)) return 1;
+  return 0;
+}
+
+/** 同じプロパティを同じ段階で 2 回以上設定しているトークンの組。 */
+function selfConflicts(classes: string[]): string[] {
+  const byProperty = new Map<string, { property: string; tokens: string[] }>();
+  for (const token of classes) {
+    for (const property of cssProperties(token)) {
+      const key = `${property}@${specificity(token)}`;
+      const entry = byProperty.get(key) ?? { property, tokens: [] };
+      entry.tokens = [...new Set([...entry.tokens, token])];
+      byProperty.set(key, entry);
+    }
+  }
+  return [...byProperty.values()]
+    .filter(({ tokens }) => tokens.length > 1)
+    .map(({ property, tokens }) => `${property}: ${tokens.join(" vs ")}`);
+}
+
+describe("プリミティブ自身の基底クラスが自己衝突しない", () => {
+  it("検査対象の組み合わせが空でない", () => {
+    expect(SELF_CONFLICT_CASES.length).toBeGreaterThan(0);
+  });
+
+  it.each(SELF_CONFLICT_CASES.filter((c) => !KNOWN_SELF_CONFLICTS.has(c.name)))(
+    "$name",
+    ({ classes }) => {
+      expect(selfConflicts(classes())).toEqual([]);
+    },
+  );
+
+  it("既知の自己衝突は検知できている (除外が空振りしていないことの確認)", () => {
+    const link = SELF_CONFLICT_CASES.find(
+      (c) => c.name === "Button variant=link size=md gap=default",
+    );
+    expect(link).toBeDefined();
+    expect(selfConflicts(link!.classes())).toContain(
+      "padding-pl: px-0 vs px-4",
+    );
   });
 });

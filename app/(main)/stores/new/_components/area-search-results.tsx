@@ -627,6 +627,7 @@ export function AreaSearchResults({
                 <Button
                   variant="outline"
                   size="sm"
+                  gap="tight"
                   onClick={handleLoadMore}
                   disabled={isLoadingMore}
                   className="shrink-0"
@@ -681,6 +682,7 @@ export function AreaSearchResults({
                       key={chip}
                       variant={exploredRunIds.has(runId) ? "ghost" : "outline"}
                       size="sm"
+                      gap="tight"
                       onClick={() => handleExplore("keyword", chip)}
                       disabled={
                         explorationPendingId !== null || exploredRunIds.has(runId)
@@ -714,6 +716,7 @@ export function AreaSearchResults({
                       key={chip}
                       variant={exploredRunIds.has(runId) ? "ghost" : "outline"}
                       size="sm"
+                      gap="tight"
                       onClick={() => handleExplore("center", chip)}
                       disabled={
                         explorationPendingId !== null || exploredRunIds.has(runId)
@@ -743,6 +746,7 @@ export function AreaSearchResults({
                       key={chip}
                       variant={exploredRunIds.has(runId) ? "ghost" : "outline"}
                       size="sm"
+                      gap="tight"
                       onClick={() => handleExplore("radius", chip)}
                       disabled={
                         explorationPendingId !== null || exploredRunIds.has(runId)
@@ -958,6 +962,7 @@ export function AreaSearchResults({
               <Button
                 variant="primary"
                 size="sm"
+                gap="tight"
                 onClick={handleBulkAdd}
                 disabled={isBulkPending}
                 className="ml-auto"
