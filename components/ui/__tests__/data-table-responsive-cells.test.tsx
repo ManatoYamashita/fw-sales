@@ -39,7 +39,7 @@ function columns(): ColumnDef<Row>[] {
       key: "updated",
       header: "最終営業日",
       sortKey: "meeting",
-      minContainerWidth: 1391,
+      minContainerWidth: 1422,
       cell: () => "u",
     },
   ];
@@ -90,7 +90,7 @@ describe("DataTable の列段階表示", () => {
     expect(bare).toHaveLength(1 + ROWS.length);
 
     // 使っていない閾値のクラスが紛れ込んでいないこと。
-    const used = new Set([COLUMN_HIDE_CLASSES[728], COLUMN_HIDE_CLASSES[1391]]);
+    const used = new Set([COLUMN_HIDE_CLASSES[728], COLUMN_HIDE_CLASSES[1422]]);
     for (const token of Object.values(COLUMN_HIDE_CLASSES)) {
       if (used.has(token)) continue;
       expect(html).not.toContain(token);
@@ -110,7 +110,7 @@ describe("DataTable の列段階表示", () => {
 
   it("ソート中の列は th/td ともに閾値クラスを持たない (要件5)", () => {
     const html = render({ activeSortKey: "meeting" });
-    expect(html).not.toContain(COLUMN_HIDE_CLASSES[1391]);
+    expect(html).not.toContain(COLUMN_HIDE_CLASSES[1422]);
     // 他の列は影響を受けない
     expect(html).toContain(COLUMN_HIDE_CLASSES[728]);
   });
@@ -118,6 +118,6 @@ describe("DataTable の列段階表示", () => {
   it("強制表示の判定は key ではなく sortKey を見る", () => {
     // key:"updated" を activeSortKey に渡しても、sortKey は "meeting" なので隠れたまま。
     const html = render({ activeSortKey: "updated" });
-    expect(html).toContain(COLUMN_HIDE_CLASSES[1391]);
+    expect(html).toContain(COLUMN_HIDE_CLASSES[1422]);
   });
 });
