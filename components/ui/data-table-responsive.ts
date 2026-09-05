@@ -30,18 +30,72 @@ export const DATA_TABLE_CONTAINER_CLASS = "@container/data-table";
  * キーは `ColumnDef.minContainerWidth` = **その列を表示するのに必要なコンテナ幅**。
  * 値はその裏返しで、`@container (width < キー)` のときに `display: none` にする。
  *
- * **値は必ずリテラル文字列で書くこと。** Tailwind はソースを静的走査してクラス名を
- * 集めるため、`` `@max-[${n}px]/data-table:hidden` `` のような実行時生成では CSS が
- * 生成されない。しかもその失敗は無言 (単に横スクロールが残るだけ) で気づけないため、
- * `__tests__/data-table-responsive.test.ts` がソーステキストを直接検査している。
+ * ## このマップはテーブル横断で共有される (#220 → #224)
  *
- * 閾値の根拠は issue #220 の実測表 (累計 min-content 幅):
- * always = 店舗名260 + 次回アクション272 + 操作100 = 632
- *   728 = +状態96 / 874 = +現在の営業状態146 / 971 = +営業担当97
- *  1171 = +最寄駅200 / 1281 = +チャネル110 / 1391 = +最終営業日110 / 1492 = +業態101
+ * キーは「あるテーブルの、ある列までの累計 min-content 幅」であって、キー同士に
+ * 意味のある順序関係は無い。隣り合うキーが別テーブルの列に属することもある
+ * (673 は dashboard の更新列、718 は handoffs の初期・月額列)。どのキーがどの
+ * テーブルのものかは下の内訳だけが真実。
+ *
+ * {@link ColumnMinContainerWidth} はテーブルを区別しないので、他テーブルの閾値を
+ * 誤って書いても型では止まらない。検出するのは各テーブルの列テスト (決定表) の役目。
+ *
+ * ## 内訳 (単体予算 = その列だけの幅。累計ではなく単体を残すこと)
+ *
+ * ### /stores 一覧 (#220) — always = 店舗名 260 + 次回アクション 272 + 操作 100 = 632
+ *    728 = +状態 96     /  874 = +現在の営業状態 146 /  971 = +営業担当 97
+ *   1171 = +最寄駅 200  / 1281 = +チャネル 110       / 1391 = +最終営業日 110
+ *   (/stores のチャネル 110 は「DM推奨」での実測で最大値ではない。同じバッジの
+ *    最長値は 138 なので 1281 以降は約 28px 不足している。既存の未修正点で、
+ *    再測定は別 issue。ここから数値を流用しないこと)
+ *   1492 = +業態 101
+ *
+ * ### /dashboard 最近登録した店舗 (#224) — always = 店舗名 200 + 状態 96 = 296
+ *    456 = +エリア 160  /  594 = +チャネル 138       /  695 = +更新 101
+ *    835 = +業態 140
+ *   チャネルの 138 は最長の「テレアポ推奨」をアイコン込みで測った値。バッジ本体は
+ *   状態列 (同じ 6 文字で 120) にアイコン 12 と字間 4、outline の枠線 2 を足した形に
+ *   なる。当初 122 と見積もって上の 3 段すべてが 16px 不足し、コンテナ 578/673/813 の
+ *   直上で横スクロールが戻っていた。**アイコンを持つバッジ列は必ずアイコン込みで測ること。**
+ *
+ * ### /handoffs 引き継ぎ一覧 (#224) — always = 店舗 200 + 状態 120 = 320
+ *    428 = +期日 108    /  528 = +運用担当 100       /  718 = +初期・月額 189
+ *   (列幅の丸め和は 717 だが、テーブルの実 min-content は 718。累計は合計ではなく
+ *    実測の min-content を採ること)
+ *   初期・月額は金額なので truncate できない (桁を誤読させる)。上限を付けられない列は
+ *   落とす順序の最下位に置き、後続の閾値がずれない位置に閉じ込めてある。
+ *
+ * 単体予算を必ず併記するのは、累計しか残さないと将来 `DataTable` 本体へ列優先度 API を
+ * 昇格させる (Epic #225 Phase 2) ときに累計から自幅へ戻せなくなるため。
+ *
+ * ## 閾値を足すときの制約
+ *
+ * 1. **値は必ずリテラル文字列で書くこと。** Tailwind はソースを静的走査してクラス名を
+ *    集めるため、テンプレートリテラルで組み立てた瞬間に CSS が生成されない。しかも
+ *    その失敗は無言 (単に横スクロールが残るだけ) で気づけないため、
+ *    `__tests__/data-table-responsive.test.ts` がソーステキストを直接検査している。
+ * 2. **2 本のマップへ同時に足す。** キー集合の一致と px 差 48 はテストが強制する。
+ * 3. 新しい閾値 N は既存の全キー M に対して **|N − M| ≠ 48**。破ると
+ *    `HIDE_BELOW_WITH_SELECTION[N]` と `HIDE_BELOW[M]` が同じ px になり、CSS 側で
+ *    1 本のクエリに畳まれて `data-table-responsive-css.test.ts` の
+ *    「生成クエリ数 = トークン数」が落ちる。衝突したら N を**大きい方へ**ずらすこと。
+ *    小さくすると累計 < 閾値となり、その帯で横スクロールが無言で戻る。
+ * 4. 昇順に並べて書く (単調性テストがある)。
+ * 5. **この JSDoc にクラス名の形をした文字列を書かない。** Tailwind が走査して未使用の
+ *    CSS を生成する (Epic #225 の方針 D2)。根拠は数値だけで書くこと。
+ *
+ * #224 の閾値は `/dashboard` `/handoffs` が `lib/domain/nav-routes.ts` で無効化されている
+ * 状態での暫定値。ルート再有効化時は列構成ごと再測定すること。
  */
 const HIDE_BELOW = {
+  428: "@max-[428px]/data-table:hidden",
+  456: "@max-[456px]/data-table:hidden",
+  528: "@max-[528px]/data-table:hidden",
+  594: "@max-[594px]/data-table:hidden",
+  695: "@max-[695px]/data-table:hidden",
+  718: "@max-[718px]/data-table:hidden",
   728: "@max-[728px]/data-table:hidden",
+  835: "@max-[835px]/data-table:hidden",
   874: "@max-[874px]/data-table:hidden",
   971: "@max-[971px]/data-table:hidden",
   1171: "@max-[1171px]/data-table:hidden",
@@ -50,7 +104,13 @@ const HIDE_BELOW = {
   1492: "@max-[1492px]/data-table:hidden",
 } as const;
 
-/** 選択列 (admin の一括操作チェックボックス) が描画される幅。実測値。 */
+/**
+ * 選択列 (admin の一括操作チェックボックス) が描画される幅。
+ *
+ * `w-10` (40px) ではなくチェックボックス 16px + `px-4` 32px = 48px が実効値
+ * (`box-sizing: border-box`)。`DataTable` の `density="compact"` は `px-3` になり
+ * 40px へ変わるが、現在 `density` を渡している呼び出し元は無い。
+ */
 export const SELECTION_COLUMN_WIDTH = 48;
 
 /**
@@ -61,9 +121,22 @@ export const SELECTION_COLUMN_WIDTH = 48;
  * `48 + 632 + 96 = 776 > 734` となり、**主要ゴールがちょうど未達帯の中**に落ちる。
  * 現行ユーザーは全員 admin なので、それでは誰もゴールに到達しない。選択列の有無で
  * 閾値そのものを切り替える。
+ *
+ * `/dashboard` と `/handoffs` は `rowSelection` を使わないため、#224 で追加した 7 キーの
+ * 選択列側クラスは現時点で**未使用 (dead CSS)** になる。キー集合の一致をテストが強制する
+ * 以上避けられない意図的な冗長で、「テーブル別にマップを分けない」判断とセット。分けると
+ * {@link resolveColumnHideClass} にテーブル種別を渡す必要が生じ、Epic #225 Phase 2 の
+ * 「`DataTable` 本体へ列優先度 API を昇格」と正面衝突する。
  */
 const HIDE_BELOW_WITH_SELECTION = {
+  428: "@max-[476px]/data-table:hidden",
+  456: "@max-[504px]/data-table:hidden",
+  528: "@max-[576px]/data-table:hidden",
+  594: "@max-[642px]/data-table:hidden",
+  695: "@max-[743px]/data-table:hidden",
+  718: "@max-[766px]/data-table:hidden",
   728: "@max-[776px]/data-table:hidden",
+  835: "@max-[883px]/data-table:hidden",
   874: "@max-[922px]/data-table:hidden",
   971: "@max-[1019px]/data-table:hidden",
   1171: "@max-[1219px]/data-table:hidden",
@@ -77,6 +150,9 @@ const HIDE_BELOW_WITH_SELECTION = {
  *
  * 任意の数値を許すと Tailwind が対応クラスを持たず無言で効かなくなるため、
  * マップのキーに型で縛る。新しい閾値が要るときは 2 本のマップへリテラルを追加する。
+ *
+ * **この union にはテーブル横断の値が入る** ({@link HIDE_BELOW} の内訳を参照)。型では
+ * 取り違えを防げないので、各テーブルの列テストが決定表として `key → 閾値` を固定する。
  */
 export type ColumnMinContainerWidth = keyof typeof HIDE_BELOW;
 

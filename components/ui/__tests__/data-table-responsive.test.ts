@@ -11,11 +11,15 @@ import {
 } from "../data-table-responsive";
 
 /**
- * 列の段階表示 (#220 / PR2/3) の閾値マップと解決ロジックの単体テスト。
+ * 列の段階表示 (#220 / #224) の閾値マップと解決ロジックの単体テスト。
  *
  * ここが守っているのは「閾値表の写し間違い」と「Tailwind が拾えない書き方への退化」。
  * 実際に CSS が生成されるかは data-table-responsive-css.test.ts、
  * th/td の双方へ付くかは data-table-responsive-cells.test.tsx が見る。
+ *
+ * マップは 3 つのテーブル (/stores・/dashboard・/handoffs) で共有される横断
+ * レジストリなので、キーの由来はここではなく各テーブルの列テストが持つ。
+ * ここが見るのはマップ自身の整合性だけ。
  */
 
 const SOURCE_PATH = path.resolve(
@@ -35,8 +39,12 @@ function hiddenBelowPx(className: string): number {
 }
 
 describe("閾値マップ", () => {
-  it("issue #220 の配分表と一致する", () => {
-    expect(thresholds).toEqual([728, 874, 971, 1171, 1281, 1391, 1492]);
+  it("#220 / #224 の配分表と一致する", () => {
+    // 由来は data-table-responsive.ts の内訳コメントを参照。
+    // 428/528/718 = /handoffs、456/594/695/835 = /dashboard、残りが /stores。
+    expect(thresholds).toEqual([
+      428, 456, 528, 594, 695, 718, 728, 835, 874, 971, 1171, 1281, 1391, 1492,
+    ]);
   });
 
   it("選択列ありのマップはキー集合が一致し、閾値がちょうど選択列幅ぶん大きい", () => {
@@ -61,6 +69,23 @@ describe("閾値マップ", () => {
   it("狭い方で隠す方向に単調である", () => {
     const px = thresholds.map((t) => hiddenBelowPx(COLUMN_HIDE_CLASSES[t]));
     expect([...px].sort((a, b) => a - b)).toEqual(px);
+  });
+
+  it("どの 2 つの閾値も選択列幅ぶんの差にならない", () => {
+    // N と M が 48px 差だと HIDE_BELOW_WITH_SELECTION[N] と HIDE_BELOW[M] が同じ
+    // px になり、CSS 側では 1 本の container query に畳まれる。それを検出するのは
+    // data-table-responsive-css.test.ts の「生成クエリ数 = トークン数」だが、
+    // あちらは "expected 27 to be 28" としか言わず衝突した組を名指ししない。
+    // 閾値を足すときに原因が読める形をここに置く。
+    // 衝突したら N を大きい方へずらすこと (小さくすると累計 < 閾値となり、
+    // その帯で横スクロールが無言で戻る)。
+    const collisions = thresholds.flatMap((a) =>
+      thresholds
+        .filter((b) => b - a === SELECTION_COLUMN_WIDTH)
+        .map((b) => [a, b]),
+    );
+
+    expect(collisions).toEqual([]);
   });
 
   it("コンテナは名前付きで、クラス側の container 名と一致する", () => {
