@@ -23,6 +23,11 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { cn } from "@/lib/utils/cn";
+import {
+  OVERLAY_ANCHOR_CONTAINER,
+  OVERLAY_PANEL_ALIGN_END,
+  OVERLAY_PANEL_ALIGN_START,
+} from "@/components/ui/overlay-anchor-classes";
 import { DEAL_STATUSES } from "@/types/deal";
 import { STAGES } from "@/types/stage";
 import { CHANNELS } from "@/types/store";
@@ -87,7 +92,8 @@ function Popover({
       className={cn(
         "absolute z-40 mt-2 min-w-[260px] rounded-xl border border-border bg-popover text-popover-foreground shadow-popover",
         "animate-slide-up origin-top",
-        align === "end" ? "right-0" : "left-0",
+        // 位置の契約は overlay-anchor-classes.ts が単一の真実 (#225 Phase 3)。
+        align === "end" ? OVERLAY_PANEL_ALIGN_END : OVERLAY_PANEL_ALIGN_START,
         className,
       )}
     >
@@ -331,7 +337,19 @@ export function ProgressFilterBar({ profileEntries }: ProgressFilterBarProps) {
         <span aria-hidden className="hidden sm:block w-px self-stretch my-1 bg-border" />
 
         {/* 絞り込みトリガー */}
-        <div ref={filterAnchor} className="relative">
+        {/*
+          md 未満は `static`。パネルの基準をトリガから外し、ビューポート基準へ移す。
+          トリガ基準のままだと `right-0` がトリガの右端 (375px 幅で x=129) に
+          パネル右端を合わせるため、345px 幅のパネルが -216..129 に置かれ **63% が
+          画面外**になる。左へのはみ出しは `scrollWidth` を増やさないので、
+          #261 の棚卸し (scrollWidth 基準) では検出できていなかった。
+
+          ブレークポイントでアンカーを左右に切り替える案は成立しない。正しい向きは
+          フィルタバーの折返し次第で変わり、実測では 375/414px でトリガが x=25、
+          640/767px では x=511/638 と逆側に来る (`left-0` 固定にすると後者で 231px
+          右へ溢れる)。トリガ位置に依存しない基準へ移すのが唯一の解。
+        */}
+        <div ref={filterAnchor} className={OVERLAY_ANCHOR_CONTAINER}>
           <TriggerButton
             onClick={() => setOpenFilter((v) => !v)}
             active={filterCount > 0}
