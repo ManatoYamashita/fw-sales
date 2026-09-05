@@ -45,11 +45,18 @@ export const DATA_TABLE_CONTAINER_CLASS = "@container/data-table";
  * ### /stores 一覧 (#220) — always = 店舗名 260 + 次回アクション 272 + 操作 100 = 632
  *    728 = +状態 96     /  874 = +現在の営業状態 146 /  971 = +営業担当 97
  *   1171 = +最寄駅 200  / 1281 = +チャネル 110       / 1391 = +最終営業日 110
+ *   (/stores のチャネル 110 は「DM推奨」での実測で最大値ではない。同じバッジの
+ *    最長値は 138 なので 1281 以降は約 28px 不足している。既存の未修正点で、
+ *    再測定は別 issue。ここから数値を流用しないこと)
  *   1492 = +業態 101
  *
  * ### /dashboard 最近登録した店舗 (#224) — always = 店舗名 200 + 状態 96 = 296
- *    456 = +エリア 160  /  578 = +チャネル 122       /  673 = +更新 95
- *    813 = +業態 140
+ *    456 = +エリア 160  /  594 = +チャネル 138       /  695 = +更新 101
+ *    835 = +業態 140
+ *   チャネルの 138 は最長の「テレアポ推奨」をアイコン込みで測った値。バッジ本体は
+ *   状態列 (同じ 6 文字で 120) にアイコン 12 と字間 4、outline の枠線 2 を足した形に
+ *   なる。当初 122 と見積もって上の 3 段すべてが 16px 不足し、コンテナ 578/673/813 の
+ *   直上で横スクロールが戻っていた。**アイコンを持つバッジ列は必ずアイコン込みで測ること。**
  *
  * ### /handoffs 引き継ぎ一覧 (#224) — always = 店舗 200 + 状態 120 = 320
  *    428 = +期日 108    /  528 = +運用担当 100       /  718 = +初期・月額 189
@@ -84,11 +91,11 @@ const HIDE_BELOW = {
   428: "@max-[428px]/data-table:hidden",
   456: "@max-[456px]/data-table:hidden",
   528: "@max-[528px]/data-table:hidden",
-  578: "@max-[578px]/data-table:hidden",
-  673: "@max-[673px]/data-table:hidden",
+  594: "@max-[594px]/data-table:hidden",
+  695: "@max-[695px]/data-table:hidden",
   718: "@max-[718px]/data-table:hidden",
   728: "@max-[728px]/data-table:hidden",
-  813: "@max-[813px]/data-table:hidden",
+  835: "@max-[835px]/data-table:hidden",
   874: "@max-[874px]/data-table:hidden",
   971: "@max-[971px]/data-table:hidden",
   1171: "@max-[1171px]/data-table:hidden",
@@ -125,11 +132,11 @@ const HIDE_BELOW_WITH_SELECTION = {
   428: "@max-[476px]/data-table:hidden",
   456: "@max-[504px]/data-table:hidden",
   528: "@max-[576px]/data-table:hidden",
-  578: "@max-[626px]/data-table:hidden",
-  673: "@max-[721px]/data-table:hidden",
+  594: "@max-[642px]/data-table:hidden",
+  695: "@max-[743px]/data-table:hidden",
   718: "@max-[766px]/data-table:hidden",
   728: "@max-[776px]/data-table:hidden",
-  813: "@max-[861px]/data-table:hidden",
+  835: "@max-[883px]/data-table:hidden",
   874: "@max-[922px]/data-table:hidden",
   971: "@max-[1019px]/data-table:hidden",
   1171: "@max-[1219px]/data-table:hidden",

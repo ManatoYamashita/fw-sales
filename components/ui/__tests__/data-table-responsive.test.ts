@@ -41,9 +41,9 @@ function hiddenBelowPx(className: string): number {
 describe("閾値マップ", () => {
   it("#220 / #224 の配分表と一致する", () => {
     // 由来は data-table-responsive.ts の内訳コメントを参照。
-    // 428/528/718 = /handoffs、456/578/673/813 = /dashboard、残りが /stores。
+    // 428/528/718 = /handoffs、456/594/695/835 = /dashboard、残りが /stores。
     expect(thresholds).toEqual([
-      428, 456, 528, 578, 673, 718, 728, 813, 874, 971, 1171, 1281, 1391, 1492,
+      428, 456, 528, 594, 695, 718, 728, 835, 874, 971, 1171, 1281, 1391, 1492,
     ]);
   });
 

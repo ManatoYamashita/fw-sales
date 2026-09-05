@@ -16,14 +16,34 @@ import type { ColumnMinContainerWidth } from "@/components/ui/data-table-respons
 import type { Store } from "@/types/store";
 import { buildColumns } from "../recent-stores-table-view";
 
+/**
+ * 列単体の予算 (px)。セル左右の padding 32px を含む実効幅。
+ *
+ * cap を持つ列は `maxWidth` がそのまま予算になる。それ以外は本番と同じフォント
+ * (Inter / Noto Sans JP) を読み込んだブラウザでの実測値。アイコンを持つバッジは
+ * アイコンと字間を含めて測ること (チャネルの 138 はこれを外して 122 と見積もり、
+ * この列以降 3 段が 16px 不足していた)。
+ */
+const BUDGET = {
+  name: 200,
+  stage: 96,
+  location: 160,
+  channel: 138,
+  updated: 101,
+  genre: 140,
+} as const;
+
+/** always の上に積む順 = 優先度の高い順。`/stores` (#220) の落とす順と整合させている。 */
+const LADDER = ["location", "channel", "updated", "genre"] as const;
+
 /** 決定表。`undefined` は always (常時表示)。内訳は data-table-responsive.ts と対。 */
 const EXPECTED: Record<string, ColumnMinContainerWidth | undefined> = {
   name: undefined, // 店舗名 200 (cap) ┐
   stage: undefined, // 状態 96         ┴ always 計 296
   location: 456, // + エリア 160 (cap)
-  channel: 578, // + チャネル 122
-  updated: 673, // + 更新 95
-  genre: 813, // + 業態 140 (cap)
+  channel: 594, // + チャネル 138
+  updated: 695, // + 更新 101
+  genre: 835, // + 業態 140 (cap)
 };
 
 /**
@@ -67,6 +87,34 @@ describe("最近登録した店舗の列優先度", () => {
     expect(
       Object.fromEntries(columns.map((c) => [c.key, c.minContainerWidth])),
     ).toEqual(EXPECTED);
+  });
+
+  it("閾値は always 予算 + 優先度順の累積と厳密に一致する", () => {
+    // 決定表 (EXPECTED) は閾値を写経しているだけなので、cap や実測値を直したのに
+    // 閾値を直し忘れた事故は捕まえられない。予算からの累積をここで独立に組み直す。
+    // 実測値そのものの誤りは検出できない (それはブラウザ計測の仕事) が、
+    // 「予算を直したのに閾値が動いていない」は必ずここで落ちる。
+    const columns = buildColumns();
+    let acc = BUDGET.name + BUDGET.stage;
+    expect(acc, "always 合計").toBe(296);
+
+    for (const key of LADDER) {
+      acc += BUDGET[key];
+      expect(
+        columns.find((c) => c.key === key)!.minContainerWidth,
+        `${key} の閾値`,
+      ).toBe(acc);
+    }
+  });
+
+  it("cap を持つ列は maxWidth と予算が一致する", () => {
+    // cap 列の予算は実測ではなく maxWidth そのもの。片方だけ動かすと上の累積が嘘になる。
+    const columns = buildColumns();
+    for (const key of ["name", "location", "genre"] as const) {
+      expect(columns.find((c) => c.key === key)!.maxWidth, `${key} の cap`).toBe(
+        `${BUDGET[key]}px`,
+      );
+    }
   });
 
   it("always 列は店舗名と状態の 2 列で、375px のコンテナに収まる", () => {
