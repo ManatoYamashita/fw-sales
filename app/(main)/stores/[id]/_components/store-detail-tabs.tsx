@@ -137,14 +137,20 @@ function MoreActionsMenu({ children }: { children: ReactNode }) {
 
   return (
     <div ref={rootRef} className="relative">
+      {/*
+        正方形のアイコンボタンは `size="icon"` (h-9 w-9) を使う。`size="sm"` に
+        `h-9 w-9 p-0` を重ねる書き方は成立しない。`cn` は素の clsx で
+        tailwind-merge を持たないため `p-0` と `sm` の `px-3` が両方出力され、
+        生成 CSS では `.px-3` が後に来て勝つ。左右 padding が 12px 残り、
+        16px のアイコンが 10px 幅に潰れる (docs/architecture/responsive.md §4.3)。
+      */}
       <Button
         variant="outline"
-        size="sm"
+        size="icon"
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label="その他のアクション"
-        className="h-9 w-9 p-0"
       >
         <MoreHorizontal className="h-4 w-4" />
       </Button>

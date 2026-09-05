@@ -43,12 +43,14 @@ const buttonVariants = cva(
         "icon-lg": "h-10 w-10 rounded-md",
         /**
          * タッチ操作向けの 44px (#234)。既定 (`md` = 36px) は据え置き、モバイル主要
-         * 導線でだけ使う。既存 variant の値を動かすと 49 ファイルに波及するため、
-         * 全画面での 44px 化の要否は #225 Phase 1 で別途決める。
+         * 導線でだけ使う。既存 variant の値を動かすと 38 ファイル・size 指定 68 箇所に
+         * 波及するため、全画面での 44px 化の要否は #225 Phase 1 で別途決める。
          *
          * `size="sm"` に `className="h-11"` を重ねる回避策は採れない。`cn` は素の
          * clsx (tailwind-merge なし) で、同じプロパティを 2 つ並べると CSS の記述順で
          * 勝敗が決まるため (store-quick-filters.tsx の JSDoc が名指しで禁じている)。
+         * 正方形のアイコンボタンで `size="sm"` + `p-0` としても、`p-0` が `sm` の
+         * `px-3` に負けて左右 padding が残る。`icon` 系 size を使うこと。
          */
         touch: "h-11 px-4 text-sm rounded-md",
         "icon-touch": "h-11 w-11 rounded-md",
