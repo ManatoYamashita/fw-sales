@@ -46,6 +46,7 @@
 
 ### Revalidation Triggers
 - stores を参照する新テーブルの追加(→ `getDeleteImpact` の集計対象・ダイアログのカテゴリ定義・FK ポリシー宣言の 3 点を同時更新する義務)
+  - 3 点とも PR 段階の CI ガード下にある。集計対象は `store-repository.delete-impact.test.ts`、カテゴリ定義と FK ポリシー宣言(`scripts/_store-fk-policy.mjs` の `EXPECTED`)は `store-cascade-fk-coverage.test.ts` が `lib/db/store-child-fks.ts` の走査結果と突き合わせる(#229 / #241)。宣言と**本番 DB 実態**の一致だけは PR では確認できず、`db:verify-fks`(migrate 後 / 週次)が担う
 - `ActionResult` の形状変更、`Modal` compound API の変更
 - migration 適用機構(watermark 方式・migrate.yml のトリガ条件)の変更
 - per-action 認可の導入(削除 action に認可層が入る場合、影響カウント action にも同一ゲートが必要)
