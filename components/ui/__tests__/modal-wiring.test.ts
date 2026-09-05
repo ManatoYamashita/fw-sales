@@ -34,6 +34,24 @@ describe("modal.tsx の配線", () => {
     }
   });
 
+  it("ボディのスクロール領域がキーボードで操作できる", async () => {
+    // 事故: フッタが sticky で常時可視になったため、「focusable な子を持たない
+    // スクローラを自動で focusable にする」ブラウザのヒューリスティクスが空振りする。
+    // tabIndex を落とすと、本文に focusable 要素が無いモーダル (店舗削除の影響カウント
+    // 一覧など) はキーボードだけでは読み進められなくなる。しかもエラーは出ない。
+    //
+    // コメントへの自己ヒットで空虚に green にならないよう、ファイル全体ではなく
+    // MODAL_BODY_CLASS を載せた JSX 要素の開始タグだけを切り出して検査する。
+    const source = await read("modal.tsx");
+    const openingTag = /<div\s+className=\{MODAL_BODY_CLASS\}([^>]*)>/.exec(source);
+    expect(openingTag, "className={MODAL_BODY_CLASS} を持つ div が見つからない").not.toBeNull();
+    const attrs = openingTag![1]!;
+    expect(attrs, "スクロール領域が tabIndex を持たない").toContain("tabIndex={0}");
+    // 増えたタブ停止に名前を与える (無名のフォーカス停止は読み上げで意味を成さない)。
+    expect(attrs).toContain('role="group"');
+    expect(attrs).toContain("aria-labelledby={titleId}");
+  });
+
   it("旧リテラルが残っていない", async () => {
     // 事故: 定数を足しただけで元のインライン文字列を消し忘れると、
     // 定数テストは緑のまま実際の DOM には古いクラスが載り続ける。

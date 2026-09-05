@@ -91,6 +91,11 @@ export const MODAL_HEADER_CLASS =
  * (`flex: 0 1 auto` + `min-h-0` で「必要なときだけ縮む」が正しく、`flex-1` は
  * `flex-basis: 0` を持ち込んで短いモーダルの高さ計算を揺らす)。
  * `overscroll-contain` は iOS のラバーバンドが背景ページへ連鎖するのを止める。
+ *
+ * このクラスを載せた要素は**必ず `tabIndex={0}` と併せて使うこと**。フッタが sticky に
+ * なったことで「focusable な子を持たないスクローラを自動で focusable にする」ブラウザの
+ * ヒューリスティクスが空振りし、キーボードだけではスクロールできなくなるため
+ * (`modal.tsx` の該当箇所と `modal-wiring.test.ts` を参照)。
  */
 export const MODAL_BODY_CLASS =
   "min-h-0 overflow-y-auto overscroll-contain px-5 py-4";

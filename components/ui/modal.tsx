@@ -189,7 +189,24 @@ export function ModalContent({
             <X className="h-4 w-4" />
           </button>
         </div>
-        <div className={MODAL_BODY_CLASS}>{children}</div>
+        {/*
+          スクロール領域はキーボードだけでも操作できなければならない。
+          Chrome には「focusable な子を持たないスクローラを自動で focusable にする」
+          ヒューリスティクスがあるが、フッタを sticky にしたことでこれが空振りする。
+          唯一の focusable な子であるフッタのボタンは常時可視なので、そこへ Tab しても
+          scrollIntoView が何もせず、本文は 1px も動かないためである。
+          本文に focusable 要素を持たないモーダル (例: 店舗削除の影響カウント一覧) では、
+          この tabIndex が無いとキーボード利用者が本文を読み進められない。
+          role + aria-labelledby は、増えたタブ停止に「何の中身なのか」を与える。
+        */}
+        <div
+          className={MODAL_BODY_CLASS}
+          tabIndex={0}
+          role="group"
+          aria-labelledby={titleId}
+        >
+          {children}
+        </div>
       </div>
     </div>,
     document.body,
