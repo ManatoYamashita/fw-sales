@@ -17,8 +17,33 @@
 ### Non-Goals
 - Edge Middleware の fail-fast 防御（PR #146 で実装済み・本設計では不変更）。
 - Supabase 有料プラン移行（pause 根本解だがコストのため不採用）。
-- Vercel Cron での実装（middleware fetch loop リスク回避のため外部 CI で完結）。
+- ~~Vercel Cron での実装（middleware fetch loop リスク回避のため外部 CI で完結）。~~
+  **2026-09-05 撤回 (Issue #242)** — 下記「方針転換」参照。
 - RLS/anon 公開範囲の見直し、スキーマ追加、専用 keep-alive テーブルの新設。
+
+> **方針転換（2026-09-05 / Issue #242）**: Non-Goals の「Vercel Cron での実装」を撤回し、
+> `app/api/cron/keepalive` + `vercel.json` の `crons` を **GitHub Actions 版と恒久的に並走**
+> させる形で追加した。本 design が記述する GHA 版ワークフローは**不変のまま存続**する
+> (置き換えではなく二重化)。
+>
+> 撤回の根拠は 2 つで、いずれも実測に基づく:
+>
+> 1. **却下理由が成立しない。** 「middleware fetch loop リスク」を理由に Vercel 経路を
+>    避けたが、`proxy.ts` の `config.matcher` は否定先読みで `/api/*` を除外しており、
+>    cron → route → DB の経路に proxy は一切介在しない。本番実測でも
+>    `GET https://fw-sales.vercel.app/api/export` は認証リダイレクト (307) ではなく
+>    **401 JSON** を返す。
+> 2. **OQ3 を棚上げしたままにできなくなった。** 本 design は OQ3 で「GitHub の 60 日
+>    auto-disable はコードでは解決できず運用観測で担保する」としたが、60 日無活動とは
+>    「誰も見ていない期間」そのものであり、運用観測が最も働かない局面で keepalive が
+>    止まる賭けの構造になっていた。Vercel Cron はこの規約の対象外であり、コード側で
+>    閉じられる。
+>
+> 併せて、Vercel 側の route は **`app_settings` に最終実行時刻を書き込む** (GHA 版の
+> 読み取り専用方針は GHA 側では不変)。Vercel の Runtime Logs は Hobby プランでは
+> 1 時間しか残らず、「cron が実際に DB へ届いたか」を翌日以降に確認できる証跡が
+> DB 側にしか作れないためである。実装詳細は `app/api/cron/keepalive/route.ts` の
+> ヘッダコメントに置いた。
 
 ## Boundary Commitments
 

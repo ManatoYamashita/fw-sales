@@ -8,6 +8,7 @@ import { DataActions } from "./_components/data-actions";
 import { ThemeToggleCard } from "./_components/theme-toggle-card";
 import { UserManagementCard } from "./_components/user-management-card";
 import { AiPromptTemplatesCard } from "./_components/ai-prompt-templates-card";
+import { KeepaliveStatusCard } from "./_components/keepalive-status-card";
 import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
 import {
@@ -98,6 +99,11 @@ export default function SettingsPage() {
       {/* getCurrentSession() で cookies を読む動的コンポーネント。静的シェルを保つため隔離。 */}
       <Suspense fallback={null}>
         <AiPromptTemplatesCard />
+      </Suspense>
+
+      {/* app_settings を 1 行読む動的コンポーネント。静的シェルを保つため隔離。 */}
+      <Suspense fallback={null}>
+        <KeepaliveStatusCard />
       </Suspense>
 
       <Card>

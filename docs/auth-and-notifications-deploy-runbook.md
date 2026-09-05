@@ -29,6 +29,8 @@ E2E 検証: `docs/auth-and-notifications-e2e.md` 参照。
 ## 事前準備 (両環境共通)
 
 > **2026-05-17 更新**: 商談リマインダー Cron + Resend メール通知関連を削除。env は 8 件 → 5 件に縮小。削除済 env (`RESEND_API_KEY` / `RESEND_FROM_EMAIL` / `CRON_SECRET`) は取り消し線で履歴残存。
+>
+> **2026-09-05 追記 (Issue #242)**: `CRON_SECRET` は **別用途で復活**しました。商談リマインダーではなく Supabase keepalive (`/api/cron/keepalive`) の Bearer 認可に使います。以降の取り消し線は「商談リマインダー用途としては廃止」の意味で読んでください。詳細は README の「Vercel Cron (Supabase keepalive)」節。
 
 ### env 変数チェックリスト
 
