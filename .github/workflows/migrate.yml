@@ -9,6 +9,10 @@
 # - timeout: 5 分 (通常 10 秒以内で完了)
 # - 失敗時: workflow が赤くなるだけ、 partial 適用リスクは低い (各 SQL = 単一 DDL)
 #
+# 適用後の検証 (いずれも読み取り専用):
+# - `db:verify-hashes`: journal と `__drizzle_migrations` の来歴突合 (適用されたか)
+# - `db:verify-fks`: FK ポリシー宣言と DB 実態の一致 (適用の結果が意図どおりか / #238)
+#
 # 前提: GitHub Secret `DATABASE_URL` に本番 Supabase Postgres connection string を登録。
 #       `check-migrations.yml` が PR 段階で整合性チェック済み。
 
@@ -57,5 +61,22 @@ jobs:
       # 新規に発生したものだけがここで落ちる。
       - name: Verify migration provenance
         run: set -o pipefail; pnpm db:verify-hashes 2>&1 | cat
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      # DDL が本番へ当たった直後に FK ポリシー宣言と DB 実態の一致を確認する (#238)。
+      # 前ステップが「migration が適用されたか」を見るのに対し、本ステップは
+      # 「適用の結果、制約が意図どおりの ON DELETE になっているか」を見る。
+      # 逆方向チェックにより、stores を親とする FK が EXPECTED 未登録のまま増えた場合も
+      # ここで落ちる — 削除確認ダイアログの影響カウント漏れ (#229) と同じ経路である。
+      #
+      # PR 段階では走らせない。PR 時点で migration は本番へ未適用のため、子テーブルを
+      # 正しく追加した PR ほど「制約が存在しません」で偽陽性の赤になる。PR 段階では
+      # store-cascade-fk-coverage.test.ts (schema.ts のメタデータ走査) が schema.ts と
+      # DELETE_IMPACT_CATEGORIES の一致を守るが、同テストは verify-store-cascade-fks.mjs
+      # の EXPECTED を検査しないため等価な防御ではない。両方へ正しく登録し EXPECTED
+      # だけ忘れた変更を捕まえられるのは、適用後に走る本ステップだけである。
+      - name: Verify FK policy against production schema
+        run: set -o pipefail; pnpm db:verify-fks 2>&1 | cat
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
