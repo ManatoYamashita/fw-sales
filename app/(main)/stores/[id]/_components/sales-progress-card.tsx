@@ -159,7 +159,7 @@ export function SalesProgressCard({ store, deals, profiles }: { store: Store; de
 
           <Info label="営業担当" htmlFor={editingCurrent ? "assigned-sales" : undefined}>
             {editingCurrent ? (
-              <Select id="assigned-sales" value={assignedSales} onChange={(e) => setAssignedSales(e.target.value)} className="text-foreground">
+              <Select width="full" id="assigned-sales" value={assignedSales} onChange={(e) => setAssignedSales(e.target.value)}>
                 <option value="">未割当</option>
                 {profiles.map((p) => <option key={p.id} value={p.id}>{p.display_name}</option>)}
                 {/*
@@ -231,7 +231,7 @@ export function SalesProgressCard({ store, deals, profiles }: { store: Store; de
           ? <SalesActivityForm store={store} deal={latest} profiles={profiles} onClose={closeForm} />
           : <ActivityDetails deal={latest} profileName={latest.assigned_sales_user_id ? profileMap.get(latest.assigned_sales_user_id) : undefined} />}
       </Card.Body>
-    </Card> : <Card><Card.Body className="py-8 text-center text-muted-foreground">営業記録はまだありません。</Card.Body></Card>}
+    </Card> : <Card><Card.Body padding="spacious" className="text-center text-muted-foreground">営業記録はまだありません。</Card.Body></Card>}
 
     {history.length ? <section className="space-y-2"><h3 className="font-semibold">過去の営業履歴</h3>{history.map((deal) => <details key={deal.id} open={formTarget === deal.id} className="rounded-lg border border-border bg-card p-3"><summary className="cursor-pointer flex flex-wrap items-center gap-3"><span>{formatDate(deal.date)}</span><span>{deal.meeting_type}</span><DealStatusBadge status={deal.status} />{deal.next_action_date ? <span className="text-xs text-muted-foreground">次回 {formatDate(deal.next_action_date)}</span> : null}</summary><div className="pt-4">{formTarget === deal.id ? <SalesActivityForm store={store} deal={deal} profiles={profiles} onClose={closeForm} /> : <><ActivityDetails deal={deal} profileName={deal.assigned_sales_user_id ? profileMap.get(deal.assigned_sales_user_id) : undefined} /><div className="mt-3"><ActivityRowActions deal={deal} onEdit={() => setFormTarget(deal.id)} onDelete={() => setDeleteTarget(deal)} /></div></>}</div></details>)}</section> : null}
 
@@ -264,7 +264,7 @@ export function SalesProgressCard({ store, deals, profiles }: { store: Store; de
 function ActivityRowActions({ deal, onEdit, onDelete }: { deal: Deal; onEdit: () => void; onDelete: () => void }) {
   return <div className="flex items-center gap-1.5">
     <Button variant="outline" size="sm" onClick={onEdit}><Pencil className="h-4 w-4" />編集</Button>
-    <Button variant="ghost" size="sm" onClick={onDelete} aria-label={`${formatDate(deal.date)}の営業記録を削除`} className="text-red-600 hover:text-red-700 hover:bg-red-50"><Trash2 className="h-4 w-4" />削除</Button>
+    <Button variant="ghost-destructive" size="sm" onClick={onDelete} aria-label={`${formatDate(deal.date)}の営業記録を削除`}><Trash2 className="h-4 w-4" />削除</Button>
   </div>;
 }
 

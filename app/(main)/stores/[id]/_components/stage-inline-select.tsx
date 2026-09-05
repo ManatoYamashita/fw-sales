@@ -32,11 +32,12 @@ export function StageInlineSelect({
 
   return (
     <Select
+      width="auto"
       value={current}
       onChange={handleChange}
       disabled={pending}
       aria-label="状態"
-      className="w-auto min-w-32 h-9 text-foreground"
+      className="min-w-32"
     >
       {STAGES.map((s) => (
         <option key={s.id} value={s.id}>

@@ -43,10 +43,11 @@ export function PipelineFilters({ profiles }: PipelineFiltersProps) {
         />
       </div>
       <Select
+        width="auto"
         defaultValue={params.get("priority") ?? ""}
         onChange={(e) => update("priority", e.target.value)}
         aria-label="優先度"
-        className="w-auto min-w-32"
+        className="min-w-32"
       >
         <option value="">優先度すべて</option>
         {PRIORITIES.map((p) => (
@@ -56,10 +57,11 @@ export function PipelineFilters({ profiles }: PipelineFiltersProps) {
         ))}
       </Select>
       <Select
+        width="auto"
         defaultValue={params.get("sales") ?? ""}
         onChange={(e) => update("sales", e.target.value)}
         aria-label="営業担当"
-        className="w-auto min-w-32"
+        className="min-w-32"
       >
         <option value="">担当者すべて</option>
         {profiles.map((p) => (

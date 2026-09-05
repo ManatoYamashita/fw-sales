@@ -113,7 +113,7 @@ export function PlaceResultList({
                   !isWithinRadius && "opacity-60",
                 )}
               >
-                <Card.Body className="flex items-start gap-3 py-4">
+                <Card.Body className="flex items-start gap-3">
                   {/* チェックボックス列: 選択可能な店舗のみ表示、幅を固定して揃える */}
                   <div className="pt-0.5 shrink-0 w-4">
                     {isEligible && (
@@ -237,7 +237,7 @@ export function PlaceResultList({
                         >
                           {isDetailsLoading ? (
                             <>
-                              <Spinner className="h-3 w-3" />
+                              <Spinner size="sm" />
                               取得中…
                             </>
                           ) : isDetailsLoaded ? (

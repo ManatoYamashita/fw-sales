@@ -101,7 +101,7 @@ export function MapEmbedCard({ store }: { store: Store }) {
           </Button>
         )}
       </Card.Header>
-      <Card.Body className={editing ? undefined : "p-0"}>
+      <Card.Body padding={editing ? "default" : "flush"}>
         {editing ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <FormField label="緯度 (lat)" htmlFor="lat">

@@ -53,8 +53,19 @@ function CardDescription({
   );
 }
 
-function CardBody({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("px-5 py-4", className)} {...props} />;
+type CardBodyProps = HTMLAttributes<HTMLDivElement> & {
+  padding?: "default" | "compact" | "flush" | "spacious";
+};
+
+function CardBody({ className, padding = "default", ...props }: CardBodyProps) {
+  const paddingClass = {
+    default: "px-5 py-4",
+    compact: "px-5 py-1",
+    flush: "p-0",
+    spacious: "px-5 py-8",
+  }[padding];
+
+  return <div className={cn(paddingClass, className)} {...props} />;
 }
 
 function CardFooter({ className, ...props }: HTMLAttributes<HTMLDivElement>) {

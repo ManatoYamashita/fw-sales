@@ -70,6 +70,7 @@ export function ActionRecordForm({ storeId }: { storeId: string }) {
           </FormField>
           <FormField label="結果" htmlFor="result">
             <Select
+              width="full"
               id="result"
               name="result"
               value={form.result}

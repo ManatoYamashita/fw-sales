@@ -180,6 +180,7 @@ export function BasicInfoCard({ store, profiles }: BasicInfoCardProps) {
             </FormField>
             <FormField label="問い合わせフォーム" htmlFor="has_contact_form">
               <Select
+                width="full"
                 id="has_contact_form"
                 value={form.has_contact_form}
                 onChange={onText("has_contact_form")}
@@ -193,6 +194,7 @@ export function BasicInfoCard({ store, profiles }: BasicInfoCardProps) {
             </FormField>
             <FormField label="想定チャネル" htmlFor="channel">
               <Select
+                width="full"
                 id="channel"
                 value={form.channel}
                 onChange={onText("channel")}
@@ -212,6 +214,7 @@ export function BasicInfoCard({ store, profiles }: BasicInfoCardProps) {
             </FormField>
             <FormField label="運営者種別" htmlFor="operator_type">
               <Select
+                width="full"
                 id="operator_type"
                 value={form.operator_type}
                 onChange={onText("operator_type")}
@@ -233,6 +236,7 @@ export function BasicInfoCard({ store, profiles }: BasicInfoCardProps) {
             </FormField>
             <FormField label="プランナー" htmlFor="assigned_planner_user_id">
               <Select
+                width="full"
                 id="assigned_planner_user_id"
                 value={form.assigned_planner_user_id}
                 onChange={onText("assigned_planner_user_id")}
@@ -247,6 +251,7 @@ export function BasicInfoCard({ store, profiles }: BasicInfoCardProps) {
             </FormField>
             <FormField label="営業担当" htmlFor="assigned_sales_user_id">
               <Select
+                width="full"
                 id="assigned_sales_user_id"
                 value={form.assigned_sales_user_id}
                 onChange={onText("assigned_sales_user_id")}

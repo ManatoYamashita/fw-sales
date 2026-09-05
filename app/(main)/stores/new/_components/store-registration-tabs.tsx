@@ -174,9 +174,7 @@ export function StoreRegistrationTabs({
                 <TabsTrigger value="url">GoogleマップURL</TabsTrigger>
               </TabsList>
               {isPending && (
-                <Spinner
-                  className="absolute right-0 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
-                />
+                <Spinner className="absolute right-0 top-1/2 -translate-y-1/2" />
               )}
             </div>
           </Tabs>

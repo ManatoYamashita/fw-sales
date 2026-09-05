@@ -112,7 +112,7 @@ export function WebAssetCard({ store }: { store: Store }) {
           </Button>
         )}
       </Card.Header>
-      <Card.Body className={editing ? undefined : "py-1"}>
+      <Card.Body padding={editing ? "default" : "compact"}>
         {editing ? (
           <div className="grid grid-cols-1 gap-3">
             <FormField label="GoogleマップURL" htmlFor="map_url">

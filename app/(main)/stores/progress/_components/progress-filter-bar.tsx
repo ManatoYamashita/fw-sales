@@ -416,9 +416,8 @@ export function ProgressFilterBar({ profileEntries }: ProgressFilterBarProps) {
 
           <Button
             variant="ghost"
-            size="sm"
+            size="xs"
             onClick={clearAll}
-            className="text-xs h-7 px-2"
           >
             すべて解除
           </Button>
@@ -573,7 +572,7 @@ function FilterPanel({
 
       <div className="px-4 py-3 space-y-4 max-h-[60vh] overflow-y-auto">
         <PanelGroup label="現在の営業状態">
-          <Select value={state} onChange={(e) => onChange("state", e.target.value)} aria-label="現在の営業状態で絞り込み">
+          <Select width="full" value={state} onChange={(e) => onChange("state", e.target.value)} aria-label="現在の営業状態で絞り込み">
             <option value="">すべて</option>
             {CURRENT_SALES_STATES.map((value) => <option key={value} value={value}>{CURRENT_SALES_STATE_LABELS[value]}</option>)}
           </Select>
@@ -604,6 +603,7 @@ function FilterPanel({
 
         <PanelGroup label="営業担当">
           <Select
+            width="full"
             value={sales}
             onChange={(e) => onChange("sales", e.target.value)}
             aria-label="営業担当で絞り込み"
@@ -615,8 +615,8 @@ function FilterPanel({
             ))}
           </Select>
         </PanelGroup>
-        <PanelGroup label="調査段階"><Select value={stage} onChange={(e) => onChange("stage", e.target.value)} aria-label="調査段階で絞り込み"><option value="">すべて</option>{STAGES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</Select></PanelGroup>
-        <PanelGroup label="チャネル"><Select value={channel} onChange={(e) => onChange("channel", e.target.value)} aria-label="チャネルで絞り込み"><option value="">すべて</option>{CHANNELS.map((value) => <option key={value} value={value}>{value}</option>)}</Select></PanelGroup>
+        <PanelGroup label="調査段階"><Select width="full" value={stage} onChange={(e) => onChange("stage", e.target.value)} aria-label="調査段階で絞り込み"><option value="">すべて</option>{STAGES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</Select></PanelGroup>
+        <PanelGroup label="チャネル"><Select width="full" value={channel} onChange={(e) => onChange("channel", e.target.value)} aria-label="チャネルで絞り込み"><option value="">すべて</option>{CHANNELS.map((value) => <option key={value} value={value}>{value}</option>)}</Select></PanelGroup>
       </div>
     </div>
   );

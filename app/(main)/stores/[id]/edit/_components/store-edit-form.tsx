@@ -155,6 +155,7 @@ export function StoreEditForm({
             hint="個人店は受注成約率が高い傾向があり営業優先度の判断に使います"
           >
             <Select
+              width="full"
               id="operator_type"
               name="operator_type"
               value={form.operator_type}
@@ -231,6 +232,7 @@ export function StoreEditForm({
             htmlFor="has_contact_form"
           >
             <Select
+              width="full"
               id="has_contact_form"
               name="has_contact_form"
               value={form.has_contact_form}
@@ -245,6 +247,7 @@ export function StoreEditForm({
           </FormField>
           <FormField label="想定チャネル" htmlFor="channel">
             <Select
+              width="full"
               id="channel"
               name="channel"
               value={form.channel}
@@ -274,6 +277,7 @@ export function StoreEditForm({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <FormField label="プランナー" htmlFor="assigned_planner_user_id">
               <Select
+                width="full"
                 id="assigned_planner_user_id"
                 name="assigned_planner_user_id"
                 value={form.assigned_planner_user_id}
@@ -289,6 +293,7 @@ export function StoreEditForm({
             </FormField>
             <FormField label="営業担当" htmlFor="assigned_sales_user_id">
               <Select
+                width="full"
                 id="assigned_sales_user_id"
                 name="assigned_sales_user_id"
                 value={form.assigned_sales_user_id}

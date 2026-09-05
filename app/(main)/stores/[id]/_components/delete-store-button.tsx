@@ -34,12 +34,11 @@ export function DeleteStoreButton({
   return (
     <>
       <Button
-        variant="ghost"
+        variant="ghost-destructive"
         size="sm"
         onClick={() => setOpen(true)}
         disabled={denyDelete}
         title={denyDelete ? "管理者のみ実行できます" : undefined}
-        className="text-red-600 hover:text-red-700 hover:bg-red-50"
       >
         <Trash2 className="h-4 w-4" /> 削除
       </Button>

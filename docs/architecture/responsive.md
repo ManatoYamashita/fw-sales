@@ -167,6 +167,8 @@ Tailwind v4 のクラス生成は**ソースの静的走査**。テンプレー�
 
 必要なら**variant を追加する**（`button.tsx` の `touch` / `icon-touch` がその例）。既存 variant の値は変えない（波及範囲は `button.tsx` の JSDoc にある。回帰面が読めなくなる）。**正方形のアイコンボタンは `size="icon"` / `icon-sm` / `icon-lg` / `icon-touch` を使う。** `size="sm"` に `h-9 w-9 p-0` を重ねると、`p-0` が `sm` の `px-3` に負けて左右 padding が 12px 残り、中のアイコンが潰れる。
 
+UI プリミティブのサイズ、幅、余白、色を利用側の `className` で上書きしない。`Select` は `width` と `density`、`Spinner` は `size` と `tone`、`Card.Body` は `padding`、`Skeleton` は `tone`、`Button` は `size` / `variant` を使い、意図を props で表現する。`cn` は `tailwind-merge` を持たないため、これらの基底クラスと同じ CSS プロパティを `className` に書くと CI のクラス衝突ガードで落ちる。新しい例外が必要なら、先にプリミティブの variant を追加する。
+
 ### 4.4 flex の子への `min-w-0` 付け忘れ
 
 §D4 のとおり。`truncate` が効かず横溢れする。

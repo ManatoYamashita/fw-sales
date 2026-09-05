@@ -109,6 +109,7 @@ export function HandoffNewForm({ deal }: { deal: Deal }) {
           </FormField>
           <FormField label="運用担当" htmlFor="ops_assignee">
             <Select
+              width="full"
               id="ops_assignee"
               name="ops_assignee"
               value={form.ops_assignee}
