@@ -76,7 +76,7 @@ export const BUTTON_VARIANT_CLASSES = {
     "bg-transparent text-destructive hover:bg-destructive/10 hover:text-destructive",
   outline:
     "border border-input bg-background text-foreground hover:bg-accent hover:text-accent-foreground shadow-xs",
-  link: "bg-transparent text-foreground underline-offset-4 hover:underline px-0 h-auto",
+  link: "bg-transparent text-foreground underline-offset-4 hover:underline",
   destructive:
     "bg-destructive text-destructive-foreground hover:bg-destructive/90 shadow-sm",
   "destructive-outline":
@@ -126,21 +126,49 @@ const buttonVariants = cva(
   },
 );
 
+export type ButtonVariantProps = VariantProps<typeof buttonVariants>;
+
 export interface ButtonProps
   extends ButtonHTMLAttributes<HTMLButtonElement>,
-    VariantProps<typeof buttonVariants> {}
+    ButtonVariantProps {}
+
+/**
+ * 箱を持たない variant。size の寸法を**一切適用しない**。
+ *
+ * `link` はテキストとして描くための variant なので、`px-*` や `min-h-*` を持つと意味が
+ * 壊れる。以前は variant 側へ `px-0 h-auto` を書いて打ち消していたが、`cn` は素の clsx
+ * なので `px-0` は size の `px-*` に負けており (実測 `.px-0` 5089 < `.px-4` 5149)、
+ * **打ち消しは半分しか成立していなかった** (`h-auto` は逆に勝つ)。
+ * 打ち消しではなく**そもそも適用しない**形へ変えたので、記述順に依存しなくなった。
+ */
+const BOXLESS_VARIANTS: ReadonlySet<string> = new Set(["link"]);
+
+/**
+ * その props から実際に出るクラス。**`Button` も検査もこの 1 つを通す。**
+ *
+ * `buttonVariants()` を直接呼ぶと、component 側の解決 (boxless の除外、`gap` の受け渡し)
+ * が抜けた別物を見ることになる。実際 `gap` 軸を足した直後、component が `gap` を
+ * `buttonVariants()` へ渡しておらず、検査だけが `gap-1.5` を見ている状態になっていた。
+ * `button-wiring.test.tsx` が「描画結果 == この関数の出力」を固定する。
+ */
+export function buttonClasses({ variant, size, gap }: ButtonVariantProps): string {
+  const boxless = variant != null && BOXLESS_VARIANTS.has(variant);
+  // cva は `null` を渡すとその軸を defaultVariants ごと飛ばす。
+  return buttonVariants({ variant, size: boxless ? null : size, gap });
+}
 
 export function Button({
   className,
   variant,
   size,
+  gap,
   type = "button",
   ...props
 }: ButtonProps) {
   return (
     <button
       type={type}
-      className={cn(buttonVariants({ variant, size }), className)}
+      className={cn(buttonClasses({ variant, size, gap }), className)}
       {...props}
     />
   );

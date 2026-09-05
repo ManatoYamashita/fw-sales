@@ -33,7 +33,7 @@ import {
   BUTTON_GAP_CLASSES,
   BUTTON_SIZE_CLASSES,
   BUTTON_VARIANT_CLASSES,
-  buttonVariants,
+  buttonClasses,
 } from "../button";
 import { CardBody } from "../card";
 import { Select } from "../select";
@@ -228,7 +228,9 @@ function baseClasses(
         for (const size of sizes) {
           for (const gap of gaps) {
             out.push(
-              buttonVariants({
+              // `buttonVariants()` ではなく component と同じ resolver を通す。
+              // 直接呼ぶと boxless variant の除外が抜けた別物を検査してしまう。
+              buttonClasses({
                 variant: variant as never,
                 size: size as never,
                 gap: gap as never,
@@ -487,7 +489,7 @@ const SELF_CONFLICT_CASES: Array<{ name: string; classes: () => string[] }> = [
       Object.keys(BUTTON_GAP_CLASSES).map((gap) => ({
         name: `Button variant=${variant} size=${size} gap=${gap}`,
         classes: () =>
-          buttonVariants({
+          buttonClasses({
             variant: variant as never,
             size: size as never,
             gap: gap as never,
@@ -517,21 +519,6 @@ const SELF_CONFLICT_CASES: Array<{ name: string; classes: () => string[] }> = [
     })),
   ),
 ];
-
-/**
- * `variant: link` は `px-0 h-auto` で size の寸法を打ち消す作りだが、`px-0` は
- * どの size の `px-*` にも負ける (実測: `.px-0` 5089 < `.px-4` 5149)。`h-auto` は
- * 逆に全数値高さより後に出るので効く。**現状 `variant="link"` の呼び出しは 0 件**
- * なので実害は無いが、使い始めるなら先に size を打ち消す方法ごと設計し直すこと。
- * ここで除外しているのはこの既知の 1 組だけで、新しい自己衝突は落ちる。
- */
-const KNOWN_SELF_CONFLICTS = new Set(
-  Object.keys(BUTTON_SIZE_CLASSES).flatMap((size) =>
-    Object.keys(BUTTON_GAP_CLASSES).map(
-      (gap) => `Button variant=link size=${size} gap=${gap}`,
-    ),
-  ),
-);
 
 /**
  * ショートハンドの段階。`px-3 pr-8` のように**より具体的な側が後から上書きする**書き方は
@@ -572,20 +559,27 @@ describe("プリミティブ自身の基底クラスが自己衝突しない", (
     expect(SELF_CONFLICT_CASES.length).toBeGreaterThan(0);
   });
 
-  it.each(SELF_CONFLICT_CASES.filter((c) => !KNOWN_SELF_CONFLICTS.has(c.name)))(
-    "$name",
-    ({ classes }) => {
-      expect(selfConflicts(classes())).toEqual([]);
-    },
-  );
+  it.each(SELF_CONFLICT_CASES)("$name", ({ classes }) => {
+    expect(selfConflicts(classes())).toEqual([]);
+  });
 
-  it("既知の自己衝突は検知できている (除外が空振りしていないことの確認)", () => {
-    const link = SELF_CONFLICT_CASES.find(
-      (c) => c.name === "Button variant=link size=md gap=default",
-    );
-    expect(link).toBeDefined();
-    expect(selfConflicts(link!.classes())).toContain(
+  it("同じ段階の重複を検知し、段階違いは見逃さない (negative control)", () => {
+    // 実際に起きた 2 件。基底へ `gap-2` を残したまま `gap` 軸を足した形と、
+    // 基底へ `text-sm` を残したまま compact へ `text-xs` を足した形。
+    expect(selfConflicts(["gap-2", "gap-1.5"])).toEqual([
+      "column-gap: gap-2 vs gap-1.5",
+      "row-gap: gap-2 vs gap-1.5",
+    ]);
+    expect(selfConflicts(["text-sm", "text-xs"])).toEqual([
+      "font-size: text-sm vs text-xs",
+    ]);
+    // `variant: link` が持っていた形。size を非適用にしたので実装からは消えた。
+    expect(selfConflicts(["px-0", "px-4"])).toEqual([
       "padding-pl: px-0 vs px-4",
-    );
+      "padding-pr: px-0 vs px-4",
+    ]);
+    // 段階が違う組は意図的なカスケードなので数えない。
+    expect(selfConflicts(["px-3", "pr-8"])).toEqual([]);
+    expect(selfConflicts(["p-0", "px-5", "py-4"])).toEqual([]);
   });
 });

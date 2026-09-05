@@ -41,8 +41,9 @@ describe("クラス衝突の勝敗を決める並び", () => {
   });
 
   it("`px-0` は size の `px-*` に負け、`h-auto` は数値高さに勝つ", async () => {
-    // `variant: link` の `px-0 h-auto` が半分しか効かない理由。呼び出しは現状 0 件だが、
-    // 使い始めるなら size の打ち消し方から設計し直す必要がある。
+    // `variant: link` がかつて `px-0 h-auto` で size を打ち消そうとして半分しか効かず、
+    // 「打ち消し」ではなく「size を非適用にする」形 (`buttonClasses` の boxless) へ
+    // 変えた理由。同じ発想で書き直す誘惑が出たときにここへ戻ること。
     const found = await offsets(["px-0", "px-4", "h-9", "h-11", "h-auto"]);
 
     expectAscending(found, ["px-0", "px-4"]);
