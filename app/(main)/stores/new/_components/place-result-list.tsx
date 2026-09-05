@@ -233,7 +233,6 @@ export function PlaceResultList({
                             onFetchDetails(place.placeId);
                           }}
                           disabled={isDetailsLoading || isDetailsLoaded}
-                          className="gap-1.5"
                         >
                           {isDetailsLoading ? (
                             <>

@@ -27,6 +27,10 @@ import { cn } from "@/lib/utils/cn";
  * `h-8` / `h-9` / `h-10` はいずれも据え置きで、md 未満に下限を重ねただけ。デスクトップの
  * 見た目は完全に不変で、回帰面はモバイルに閉じている。**新しい size を足すときは
  * ここへ 44px の下限も足すこと** (`button-touch-target.test.ts` が全 size を走査して強制する)。
+ *
+ * `xs` (28px) は #250 で追加。`size="sm"` に `className="h-7 px-2 text-xs"` を重ねる
+ * 書き方が記述順勝負になっていた箇所 (progress-filter-bar の「すべて解除」) を
+ * variant 側へ寄せるためのもの。デスクトップだけ 28px で、モバイルは他と同じ 44px。
  */
 export const BUTTON_SIZE_CLASSES = {
   xs: "h-7 min-h-11 md:min-h-0 px-2 text-xs rounded-md",
@@ -51,6 +55,38 @@ export const BUTTON_SIZE_CLASSES = {
   "icon-touch": "h-11 w-11 rounded-md",
 } as const;
 
+/**
+ * variant ごとのクラス。色・境界・影だけを持ち、寸法は `BUTTON_SIZE_CLASSES` が持つ。
+ *
+ * `class-conflicts.test.ts` がこの表を直接読んで「利用側 `className` が基底と同じ CSS
+ * プロパティを設定していないか」を検査する。variant を足したら検査対象も自動で増える。
+ */
+export const BUTTON_VARIANT_CLASSES = {
+  default:
+    "bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm",
+  primary:
+    "bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm",
+  secondary:
+    "bg-secondary text-secondary-foreground hover:bg-secondary/80",
+  ghost:
+    "bg-transparent text-foreground hover:bg-accent hover:text-accent-foreground",
+  "ghost-muted":
+    "bg-transparent text-muted-foreground hover:bg-accent hover:text-foreground",
+  "ghost-destructive":
+    "bg-transparent text-destructive hover:bg-destructive/10 hover:text-destructive",
+  outline:
+    "border border-input bg-background text-foreground hover:bg-accent hover:text-accent-foreground shadow-xs",
+  link: "bg-transparent text-foreground underline-offset-4 hover:underline px-0 h-auto",
+  destructive:
+    "bg-destructive text-destructive-foreground hover:bg-destructive/90 shadow-sm",
+  "destructive-outline":
+    "border border-destructive/40 bg-background text-destructive hover:bg-destructive/10",
+  success:
+    "bg-success text-success-foreground hover:bg-success/90 shadow-sm",
+  danger:
+    "bg-destructive text-destructive-foreground hover:bg-destructive/90 shadow-sm",
+} as const;
+
 const buttonVariants = cva(
   cn(
     "inline-flex items-center justify-center gap-2 font-medium whitespace-nowrap",
@@ -61,31 +97,7 @@ const buttonVariants = cva(
   ),
   {
     variants: {
-      variant: {
-        default:
-          "bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm",
-        primary:
-          "bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm",
-        secondary:
-          "bg-secondary text-secondary-foreground hover:bg-secondary/80",
-        ghost:
-          "bg-transparent text-foreground hover:bg-accent hover:text-accent-foreground",
-        "ghost-muted":
-          "bg-transparent text-muted-foreground hover:bg-accent hover:text-foreground",
-        "ghost-destructive":
-          "bg-transparent text-destructive hover:bg-destructive/10 hover:text-destructive",
-        outline:
-          "border border-input bg-background text-foreground hover:bg-accent hover:text-accent-foreground shadow-xs",
-        link: "bg-transparent text-foreground underline-offset-4 hover:underline px-0 h-auto",
-        destructive:
-          "bg-destructive text-destructive-foreground hover:bg-destructive/90 shadow-sm",
-        "destructive-outline":
-          "border border-destructive/40 bg-background text-destructive hover:bg-destructive/10",
-        success:
-          "bg-success text-success-foreground hover:bg-success/90 shadow-sm",
-        danger:
-          "bg-destructive text-destructive-foreground hover:bg-destructive/90 shadow-sm",
-      },
+      variant: BUTTON_VARIANT_CLASSES,
       size: BUTTON_SIZE_CLASSES,
     },
     defaultVariants: {

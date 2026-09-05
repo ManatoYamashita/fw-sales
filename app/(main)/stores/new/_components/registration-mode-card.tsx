@@ -419,7 +419,7 @@ export function AreaSearchPanel({
           >
             {pending ? (
               <>
-          <Spinner tone="primary" />
+                <Spinner tone="primary" />
                 検索中…
               </>
             ) : (

@@ -20,8 +20,10 @@ export function Select({
   return (
     <select
       className={cn(
-        "flex appearance-none rounded-md border border-input bg-background px-3 pr-8 text-sm",
-        density === "compact" ? "h-8 text-xs" : "h-9",
+        "flex appearance-none rounded-md border border-input bg-background px-3 pr-8",
+        // 高さと字送りは density で排他にする。基底へ `text-sm` を残して compact 側に
+        // `text-xs` を重ねると、`cn` (素の clsx) では勝敗が生成 CSS の順序で決まる。
+        density === "compact" ? "h-8 text-xs" : "h-9 text-sm",
         width === "full" && "w-full",
         "text-foreground shadow-xs transition-[box-shadow,border-color,background-color]",
         "bg-no-repeat bg-[right_0.6rem_center] [background-size:12px_12px]",

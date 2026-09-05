@@ -267,7 +267,7 @@ function TemplateRow({
         {!t.is_default && (
           <Button
             size="sm"
-            variant="destructive-outline"
+            variant="ghost"
             onClick={() => onSetDefault(t.id)}
             disabled={isAnyChanging}
             title={isChangingThis ? "変更中…" : "デフォルトにする"}
@@ -286,7 +286,7 @@ function TemplateRow({
         {t.is_default ? (
           <Button
             size="sm"
-            variant="ghost"
+            variant="destructive-outline"
             disabled
             title="デフォルトテンプレートは削除できません"
           >

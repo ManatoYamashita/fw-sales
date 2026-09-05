@@ -317,7 +317,7 @@ export function StoresTableView({
             size="touch"
             onClick={() => setBulkOpen(true)}
             disabled={isDeleting}
-            className="ml-auto gap-1.5"
+            className="ml-auto"
           >
             {isDeleting ? <Spinner /> : <Trash2 className="h-3.5 w-3.5" />}
             削除

@@ -629,7 +629,7 @@ export function AreaSearchResults({
                   size="sm"
                   onClick={handleLoadMore}
                   disabled={isLoadingMore}
-                  className="gap-1.5 shrink-0"
+                  className="shrink-0"
                 >
                   {isLoadingMore ? (
                     <>
@@ -685,7 +685,6 @@ export function AreaSearchResults({
                       disabled={
                         explorationPendingId !== null || exploredRunIds.has(runId)
                       }
-                      className="gap-1.5"
                     >
                       {explorationPendingId === runId && <Spinner size="sm" />}
                       {chip}
@@ -719,7 +718,6 @@ export function AreaSearchResults({
                       disabled={
                         explorationPendingId !== null || exploredRunIds.has(runId)
                       }
-                      className="gap-1.5"
                     >
                       {explorationPendingId === runId && <Spinner size="sm" />}
                       {chip}
@@ -749,7 +747,6 @@ export function AreaSearchResults({
                       disabled={
                         explorationPendingId !== null || exploredRunIds.has(runId)
                       }
-                      className="gap-1.5"
                     >
                       {explorationPendingId === runId && <Spinner size="sm" />}
                       {label}
@@ -963,7 +960,7 @@ export function AreaSearchResults({
                 size="sm"
                 onClick={handleBulkAdd}
                 disabled={isBulkPending}
-                className="ml-auto gap-1.5"
+                className="ml-auto"
               >
                 {isBulkPending ? (
                   <>
