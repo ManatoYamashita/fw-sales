@@ -86,11 +86,12 @@ const storeDetailHref = (row: SalesProgressRow) =>
 /**
  * 一覧の列定義。
  *
- * `minContainerWidth` は「その列を出すのに要るコンテナ幅 (px)」で、issue #220 の
- * 実測 min-content 幅の累計から決めている。always 列 (店舗名 / 次回アクション /
- * 操作) = 632px を土台に、狭い順へ 状態 → 現在の営業状態 → 営業担当 → 最寄駅 →
- * チャネル → 最終営業日 → 業態 と積む。落とす順は「直近の意思決定が乗っていない
- * 列から」で、最寄駅 (#175 / #177) は業態より上位に置く。
+ * `minContainerWidth` は「その列を出すのに要るコンテナ幅 (px)」で、列単体の実測
+ * min-content 幅 (cap を持つ列は cap そのもの) の累計から決めている。always 列
+ * (店舗名 / 次回アクション / 操作) = 632px を土台に、狭い順へ 状態 → 現在の営業状態 →
+ * 営業担当 → 最寄駅 → チャネル → 最終営業日 → 業態 と積む。落とす順は「直近の
+ * 意思決定が乗っていない列から」で、最寄駅 (#175 / #177) は業態より上位に置く。
+ * 単体予算の内訳と積み直しの検算は `__tests__/stores-table-columns.test.tsx` (#237)。
  *
  * テストから配分表を固定するため export している。
  */
@@ -135,10 +136,11 @@ export function buildColumns(canDelete: boolean): ColumnDef<SalesProgressRow>[] 
       sortDefaultDir: "asc",
       // 業態は自由入力なので上限が無いと min-content が青天井になり、
       // 以降の列の閾値がまとめてずれる。truncate + maxWidth で予算を確定させる。
+      // 列予算はこの cap そのもの (#237)。
       truncate: true,
       maxWidth: "160px",
       title: (r) => r.store.genre || undefined,
-      minContainerWidth: 1492,
+      minContainerWidth: 1582,
       cell: (r) => r.store.genre || "—",
     },
     { key: "salesState", header: "現在の営業状態", minContainerWidth: 874, cell: (r) => <SalesStateBadge state={r.currentSalesState} /> },
@@ -156,7 +158,7 @@ export function buildColumns(canDelete: boolean): ColumnDef<SalesProgressRow>[] 
       header: "チャネル",
       sortKey: "channel",
       sortDefaultDir: "asc",
-      minContainerWidth: 1281,
+      minContainerWidth: 1312,
       cell: (r) => <ChannelBadge channel={r.store.channel} />,
     },
     {
@@ -165,10 +167,11 @@ export function buildColumns(canDelete: boolean): ColumnDef<SalesProgressRow>[] 
       sortKey: "sales",
       sortDefaultDir: "asc",
       truncate: true,
-      // 実測 min-content は 97px。上限を 140px のままにすると長い表示名で
-      // 最大 43px はみ出し、この列以降の閾値がすべてずれるため実測値まで締める。
+      // 上限を 140px のままにすると長い表示名で最大 43px はみ出し、この列以降の
+      // 閾値がすべてずれるため 100px まで締める。列予算はこの cap そのもの
+      // (#237。短いデータでの実測 97px を予算にすると cap 一杯の値で 3px 溢れる)。
       maxWidth: "100px",
-      minContainerWidth: 971,
+      minContainerWidth: 974,
       title: (r) => r.salesName ?? undefined,
       cell: (r) => r.salesName ?? "—",
     },
@@ -177,7 +180,7 @@ export function buildColumns(canDelete: boolean): ColumnDef<SalesProgressRow>[] 
       header: "最終営業日",
       sortKey: "meeting",
       sortDefaultDir: "desc",
-      minContainerWidth: 1391,
+      minContainerWidth: 1422,
       cell: (r) => (
         <span className="text-xs text-muted-foreground whitespace-nowrap">
           {r.latestMeetingDate ? formatDate(r.latestMeetingDate) : "—"}

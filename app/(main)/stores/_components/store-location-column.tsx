@@ -17,7 +17,7 @@ export function buildStoreLocationColumn(): ColumnDef<SalesProgressRow> {
     maxWidth: "200px",
     // 業態より上位。#175 / #177 が「エリア表示を最寄駅表示へ」と決めた列なので、
     // 2000px 未満で 1 列落とすときは業態を先に落とす (issue #220)。
-    minContainerWidth: 1171,
+    minContainerWidth: 1174,
     title: (row) =>
       getNearestStationValue(row.store.basic_info) ?? undefined,
     cell: (row) => (
