@@ -26,7 +26,7 @@
 ### This Spec Owns
 - 店舗削除フローの 3 経路(一覧行・詳細・一括)の確認 UI と、その影響表示の意味論
 - 削除影響カウントの読み取り契約 `StoreRepository.getDeleteImpact` と `getStoreDeleteImpactAction`
-- stores を親とする子データの削除ポリシー(deals/research/handoffs = cascade、place_candidates.matched_store_id = set null)の**宣言と DB 実態の一致**
+- stores を親とする子データの削除ポリシー(deals/store_research_runs/handoffs = cascade、place_candidates.matched_store_id = set null)の**宣言と DB 実態の一致**
 - migration `0021`(制約再宣言)・`0022`(FK 列インデックス)と、journal `when` 単調性の静的チェック
 - SQLSTATE 23503 の UI 文言
 
@@ -78,7 +78,7 @@ graph TB
     subgraph Postgres
         StoresT[stores]
         DealsT[deals cascade]
-        ResearchT[research cascade]
+        RunsT[store_research_runs cascade]
         HandoffsT[handoffs cascade]
         CandT[place_candidates set null]
     end
@@ -100,7 +100,7 @@ graph TB
     BulkAct --> Repo
     Repo --> StoresT
     StoresT --> DealsT
-    StoresT --> ResearchT
+    StoresT --> RunsT
     StoresT --> HandoffsT
     StoresT --> CandT
     Mig21 --> StoresT
@@ -220,7 +220,7 @@ flowchart LR
 | 2.3 | キャンセルで無変更 | StoreDeleteConfirmDialog | close で何も呼ばない |
 | 2.4 | 対象店舗名の提示 | StoreDeleteConfirmDialog | `target.kind = "single"` の storeName 表示 |
 | 2.5 | 一括の件数提示 | StoreDeleteConfirmDialog | `target.kind = "bulk"` の storeIds.length 表示 |
-| 3.1 | カテゴリ別実件数 | getDeleteImpact, ImpactAction, Dialog | `StoreDeleteImpact` 4 カテゴリ |
+| 3.1 | カテゴリ別実件数 | getDeleteImpact, ImpactAction, Dialog | `StoreDeleteImpact` 4 カテゴリ (#110 で research 撤去 / #229 で store_research_runs 追加) |
 | 3.2 | 処理種別の明示 | Dialog(カテゴリ定義) | `effect: "delete" \| "unlink"` の表示 |
 | 3.3 | 0 件カテゴリ非表示 | Dialog | count === 0 を描画スキップ |
 | 3.4 | 全 0 件時の文言 | Dialog | 「紐づけデータなし」分岐 |
@@ -312,8 +312,8 @@ flowchart LR
 export interface StoreDeleteImpact {
   /** 削除される商談件数 */
   deals: number;
-  /** 削除される調査件数 */
-  research: number;
+  /** 削除される AI 店舗調査 run 件数 (#229) */
+  store_research_runs: number;
   /** 削除される引き継ぎ件数 */
   handoffs: number;
   /** 紐付け解除される場所候補件数 */
@@ -430,12 +430,17 @@ interface ImpactCategoryDef {
 
 ### Physical Data Model
 
-**FK ポリシー(0021 適用後の宣言 = DB 実態)**:
+**FK ポリシー(現況の宣言 = DB 実態)**:
+
+> 初出は 0021 適用後の 5 本。その後 #110 (PR #228) で `research` を DROP し、
+> #180 で `store_research_runs` が加わった。本表は `pnpm db:verify-fks` の
+> `EXPECTED` と同じ 5 本で、`DELETE_IMPACT_CATEGORIES` はこのうち stores を親と
+> する 4 本に対応する (`handoffs.deal_id` は親が deals のため影響カテゴリ外) (#229)。
 
 | 子テーブル.列 | 制約名 | ON DELETE | 意味 |
 |---|---|---|---|
 | deals.store_id | deals_store_id_stores_id_fk | CASCADE | 店舗削除で商談を削除 |
-| research.store_id | research_store_id_stores_id_fk | CASCADE | 店舗削除で調査を削除 |
+| store_research_runs.store_id | store_research_runs_store_id_stores_id_fk | CASCADE | 店舗削除で AI 調査 run を削除 |
 | handoffs.store_id | handoffs_store_id_stores_id_fk | CASCADE | 店舗削除で引き継ぎを削除 |
 | handoffs.deal_id | handoffs_deal_id_deals_id_fk | CASCADE | 商談削除に引き継ぎが追従 |
 | place_candidates.matched_store_id | place_candidates_matched_store_id_stores_id_fk | SET NULL | 店舗削除で候補は未マッチに戻る(候補行は残す) |

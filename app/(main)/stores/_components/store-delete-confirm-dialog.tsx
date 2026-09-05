@@ -44,9 +44,15 @@ interface ImpactCategoryDef {
  * カテゴリ表示定義 (単一の真実)。表示順もこの配列順に従う。
  * stores を参照する子テーブルが増えた場合は、getDeleteImpact / FK ポリシーと
  * あわせてここへ追加する (design.md §Revalidation Triggers)。
+ *
+ * この義務は人間の注意力に委ねない。`store-cascade-fk-coverage.test.ts` が
+ * schema.ts の FK 実態 (drizzle メタデータ) と本配列を突き合わせ、追加漏れと
+ * effect の不整合を CI で落とす。#180 で store_research_runs の追加が漏れ、
+ * 本番 13 店舗が「紐づけデータはありません」と誤表示した再発を防ぐため (#229)。
  */
 export const DELETE_IMPACT_CATEGORIES: readonly ImpactCategoryDef[] = [
   { key: "deals", label: "営業記録", effect: "delete" },
+  { key: "store_research_runs", label: "AI調査", effect: "delete" },
   { key: "handoffs", label: "引き継ぎ", effect: "delete" },
   { key: "place_candidates", label: "場所候補", effect: "unlink" },
 ];

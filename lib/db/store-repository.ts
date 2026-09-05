@@ -23,7 +23,13 @@
 import "server-only";
 import { eq, desc, and, or, ilike, inArray, gte, lte, sql, type SQL } from "drizzle-orm";
 import { db, type DbClient, type Tx } from "./client";
-import { deals, handoffs, placeCandidates, stores } from "./schema";
+import {
+  deals,
+  handoffs,
+  placeCandidates,
+  storeResearchRuns,
+  stores,
+} from "./schema";
 import {
   OPERATOR_TYPES,
   type OperatorType,
@@ -308,12 +314,20 @@ export function makeStoreRepo(executor: DbClient | Tx): StoreRepository {
 
     async getDeleteImpact(ids) {
       if (ids.length === 0) {
-        return { deals: 0, handoffs: 0, place_candidates: 0 };
+        return {
+          deals: 0,
+          store_research_runs: 0,
+          handoffs: 0,
+          place_candidates: 0,
+        };
       }
-      // 単一 SELECT のスカラーサブクエリ ×3 で 1 往復・同一スナップショットの件数を得る
+      // 単一 SELECT のスカラーサブクエリ ×4 で 1 往復・同一スナップショットの件数を得る
       // (design.md §StoreRepository.getDeleteImpact / Issue #152)。
+      // - 集計対象は stores を親とする FK を持つ子テーブル全件。取りこぼすと削除確認
+      //   ダイアログが「紐づけデータはありません」と誤って断言する (Issue #229 の実害)
       // - handoffs は store_id 基準で数える (deal_id 経由の間接連鎖は同一店舗前提の
       //   データモデルであり、二重計上を避ける)
+      // - store_research_runs は複合 index (store_id, started_at) の先頭列で引ける
       // - 存在しない ID は各 count が 0 になるだけでエラーにしない
       // - 読み取りのみ。delete / bulkDelete の単発 DML 構造 (原子性) には関与しない
       // - ID 群は `inArray` で合成する。`sql` テンプレートへ配列を直接埋め込むと
@@ -322,12 +336,14 @@ export function makeStoreRepo(executor: DbClient | Tx): StoreRepository {
       const rows = await executor.execute(sql`
         select
           (select count(*)::int from ${deals} where ${inArray(deals.store_id, idArray)}) as deals,
+          (select count(*)::int from ${storeResearchRuns} where ${inArray(storeResearchRuns.store_id, idArray)}) as store_research_runs,
           (select count(*)::int from ${handoffs} where ${inArray(handoffs.store_id, idArray)}) as handoffs,
           (select count(*)::int from ${placeCandidates} where ${inArray(placeCandidates.matched_store_id, idArray)}) as place_candidates
       `);
       const row = (rows as Array<Record<string, unknown>>)[0];
       return {
         deals: toImpactCount(row?.deals),
+        store_research_runs: toImpactCount(row?.store_research_runs),
         handoffs: toImpactCount(row?.handoffs),
         place_candidates: toImpactCount(row?.place_candidates),
       } satisfies StoreDeleteImpact;
