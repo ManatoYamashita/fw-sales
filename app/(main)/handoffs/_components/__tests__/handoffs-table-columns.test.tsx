@@ -12,8 +12,48 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { ColumnMinContainerWidth } from "@/components/ui/data-table-responsive";
+import {
+  NARROWEST_CONTAINER,
+  expectBudgetLadder,
+  expectCapsMatchBudget,
+  visibleAt as visibleColumnsAt,
+} from "@/components/ui/__tests__/support/column-budget";
 import type { Handoff } from "@/types/handoff";
 import { buildColumns } from "../handoffs-table-view";
+
+/**
+ * 列単体の予算 (px)。セル左右の padding 32px を含む実効幅。
+ *
+ * cap (`maxWidth`) を持つ列は **cap がそのまま予算**。cap を持たない列は本番と同じ
+ * フォントを読み込んだブラウザでの実測値で、閉じた enum は全値のうち最長を測る。
+ *
+ * `/dashboard` (#224) はチャネルをアイコン抜きで見積もって 3 段まとめて 16px 不足させ、
+ * `/stores` (#237) は cap を持つ列に短いデータでの min-content を採って admin に
+ * 5 帯域の横スクロールを残した。この表は下の累積テストと対で意味を持つ。
+ */
+const BUDGET = {
+  store: 200, // cap
+  status: 120, // 閉じた enum のバッジ (運用確認待ち / 完了)
+  due: 108, // 固定書式の日付
+  ops: 100, // cap
+  fee: 189, // 金額 2 段。cap を付けられない (下記)
+} as const;
+
+/** 常時表示する列。この画面はフィルタ UI が無いので状態が唯一のトリアージ軸。 */
+const ALWAYS = ["store", "status"] as const;
+
+/** always の上に積む順 = 優先度の高い順。 */
+const LADDER = ["due", "ops", "fee"] as const;
+
+/** cap を持つ列。予算は実測ではなく `maxWidth` そのもの。 */
+const CAPPED = ["store", "ops"] as const;
+
+/**
+ * 累積と閾値のズレ。**閾値は列幅の丸め和ではなくテーブルの実 min-content を採る**ため、
+ * 初期・月額までの累積 320 + 108 + 100 + 189 = 717 に対し実測は 718 だった。
+ * 717 にするとその帯に 1px の横スクロールが残る (#224 の掃引検証で検出済み)。
+ */
+const SLACK = { fee: 1 } as const;
 
 /** 決定表。`undefined` は always (常時表示)。内訳は data-table-responsive.ts と対。 */
 const EXPECTED: Record<string, ColumnMinContainerWidth | undefined> = {
@@ -25,17 +65,12 @@ const EXPECTED: Record<string, ColumnMinContainerWidth | undefined> = {
   //          閾値は列幅の和 717 ではなくテーブルの実 min-content 718。
 };
 
-/** viewport 375px・サイドバー非表示のときのコンテナ幅 (375 − padding 32 − border 2)。 */
-const NARROWEST_CONTAINER = 341;
-
 /** 状態バッジ (運用確認待ち / 完了) の実効幅。閉じた enum なので確定する。 */
 const STATUS_COLUMN_BUDGET = 120;
 
-/** コンテナ幅 `w` で表示される列。CSS 側は `width < N` で隠すので表示条件は `w >= N`。 */
+/** コンテナ幅 `w` で表示される列 (判定ロジックは 3 ビュー共通)。 */
 function visibleAt(w: number): string[] {
-  return buildColumns()
-    .filter((c) => c.minContainerWidth === undefined || w >= c.minContainerWidth)
-    .map((c) => c.key);
+  return visibleColumnsAt(buildColumns(), w);
 }
 
 function handoffWith(partial: Partial<Handoff>): Handoff {
@@ -67,6 +102,25 @@ describe("引き継ぎ一覧の列優先度", () => {
     expect(
       Object.fromEntries(columns.map((c) => [c.key, c.minContainerWidth])),
     ).toEqual(EXPECTED);
+  });
+
+  it("閾値は always 予算 + 優先度順の累積と厳密に一致する (Epic #225 Phase 2)", () => {
+    // 決定表 (EXPECTED) は閾値を写経しているだけなので、cap や実測値を直したのに
+    // 閾値を直し忘れた事故は捕まえられない。予算からの累積を独立に組み直す。
+    // `/stores` (#237) と `/dashboard` (#224) には既にあり、ここだけ無かった。
+    expectBudgetLadder({
+      columns: buildColumns(),
+      budget: BUDGET,
+      always: ALWAYS,
+      ladder: LADDER,
+      alwaysTotal: 320,
+      slack: SLACK,
+    });
+  });
+
+  it("cap を持つ列は maxWidth と予算が一致する (Epic #225 Phase 2)", () => {
+    // cap 列の予算は実測ではなく maxWidth そのもの。片方だけ動かすと上の累積が嘘になる。
+    expectCapsMatchBudget({ columns: buildColumns(), budget: BUDGET, capped: CAPPED });
   });
 
   it("always 列は店舗と状態の 2 列で、375px のコンテナに収まる", () => {
@@ -107,9 +161,9 @@ describe("引き継ぎ一覧の列優先度", () => {
     const columns = buildColumns();
     const column = (key: string) => columns.find((c) => c.key === key)!;
 
-    const caps: Record<string, string> = { store: "200px", ops: "100px" };
-    for (const [key, maxWidth] of Object.entries(caps)) {
-      expect(column(key).maxWidth, `${key} の上限`).toBe(maxWidth);
+    // cap の値そのものは上の `cap を持つ列は maxWidth と予算が一致する` が
+    // BUDGET と突き合わせる。ここでは truncate との対応だけを見る。
+    for (const key of CAPPED) {
       expect(column(key).truncate, `${key} は truncate されるべき`).toBe(true);
     }
 
