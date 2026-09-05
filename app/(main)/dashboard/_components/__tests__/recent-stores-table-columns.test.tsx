@@ -58,9 +58,6 @@ const EXPECTED: Record<string, ColumnMinContainerWidth | undefined> = {
   genre: 835, // + 業態 140 (cap)
 };
 
-/** 状態バッジ (未調査 / 調査済み / 架電済み) の実効幅。閉じた enum なので確定する。 */
-const STAGE_COLUMN_BUDGET = 96;
-
 /** コンテナ幅 `w` で表示される列 (判定ロジックは 3 ビュー共通)。 */
 function visibleAt(w: number): string[] {
   return visibleColumnsAt(buildColumns(), w);
@@ -119,11 +116,13 @@ describe("最近登録した店舗の列優先度", () => {
 
     // 店舗名の cap を `/stores` と同じ 260px へ戻すと 260 + 96 = 356 > 341 となり、
     // 375px で横スクロールが復活する。cap と always 集合はこの不等式で結ばれている。
+    // 状態の実効幅は写経せず BUDGET から採る。ここを直値にすると「予算を直したのに
+    // この不変条件だけ古い数字のまま」が起こり、341px の破れを検出できなくなる。
     const nameCap = Number.parseInt(
       columns.find((c) => c.key === "name")!.maxWidth!,
       10,
     );
-    expect(nameCap + STAGE_COLUMN_BUDGET).toBeLessThanOrEqual(NARROWEST_CONTAINER);
+    expect(nameCap + BUDGET.stage).toBeLessThanOrEqual(NARROWEST_CONTAINER);
   });
 
   it("上限の無い列を残さない (閾値の前提が実測幅であるため)", () => {
