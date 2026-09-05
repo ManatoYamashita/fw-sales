@@ -90,7 +90,7 @@ try {
       `   stores を親とする FK が EXPECTED に未登録です (ON DELETE ${got})`,
     );
     console.error(
-      "   → 本スクリプトの EXPECTED と、削除確認ダイアログの" +
+      "   → scripts/_store-fk-policy.mjs の EXPECTED と、削除確認ダイアログの" +
         " DELETE_IMPACT_CATEGORIES / StoreDeleteImpact への追加が必要です",
     );
   }

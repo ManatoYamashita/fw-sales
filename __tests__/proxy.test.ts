@@ -72,6 +72,10 @@ describe("proxy config.matcher — 除外対象", () => {
     "/terms",
     // API 経路
     "/api/export",
+    // Vercel Cron の宛先 (#242)。ここが matcher に入ると未認証リダイレクトが返り、
+    // Vercel Cron は 3xx を「完了」として扱いログにも残さないため、keepalive が
+    // 無言で死ぬ。除外され続けることをピン留めする。
+    "/api/cron/keepalive",
     // Next.js 内部アセット
     "/_next/static/chunks/main.js",
     "/_next/image",

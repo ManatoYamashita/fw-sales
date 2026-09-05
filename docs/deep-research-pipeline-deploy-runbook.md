@@ -28,9 +28,13 @@ Deep Research パイプラインの初期セットアップ + 以降の運用手
 
 ### 1. GitHub Secrets
 
-> **【廃止】** `CRON_SECRET` / `VERCEL_URL` はコードからもワークフローからも参照が
-> ゼロです (旧 `poll-research.yml` 専用だった)。削除して構いません。
+> **【廃止】** **GitHub Secret の** `CRON_SECRET` / `VERCEL_URL` はコードからもワークフローからも
+> 参照がゼロです (旧 `poll-research.yml` 専用だった)。削除して構いません。
 > `DATABASE_URL` は `migrate.yml` / `supabase-keepalive.yml` が使用中のため**削除不可**。
+>
+> ⚠️ **同名の Vercel env var `CRON_SECRET` とは別物です。** そちらは 2026-09-05 に
+> Supabase keepalive (Issue #242 / `/api/cron/keepalive`) 用として現役になりました。
+> 消してよいのは GitHub Secret 側だけです。
 
 ```bash
 gh secret set CRON_SECRET    # openssl rand -hex 32 で生成した値
@@ -44,8 +48,13 @@ gh secret set DATABASE_URL    # Supabase Session Pooler (port 5432) の接続文
 
 ### 2. Vercel Env Vars
 
-> **【廃止】** 下表の `CRON_SECRET` / `DEEP_RESEARCH_*` 系は現行コードに存在しません。
+> **【廃止】** 下表の `DEEP_RESEARCH_*` 系は現行コードに存在しません。
 > 現行の必須 env は `.env.example` と `scripts/check-required-env.mjs` を参照。
+>
+> `CRON_SECRET` は **現役**です。ただし用途は本 spec の research ポーリングではなく、
+> Supabase keepalive (Issue #242 / `/api/cron/keepalive`) に変わりました。
+> 下表の「GitHub Secrets と同一値」という説明も過去のもので、現在は Vercel 側だけで
+> 完結します (GitHub Actions からこの値を使う経路はありません)。
 
 **Production / Preview / Development の 3 環境すべて** に以下を登録:
 
@@ -58,7 +67,7 @@ gh secret set DATABASE_URL    # Supabase Session Pooler (port 5432) の接続文
 | `DATABASE_POOL_MAX` | 必須 | |
 | `GEMINI_API_KEY` | 必須 | Google AI API キー |
 | `GEMINI_MODEL` | 必須 | e.g. `gemini-3.6-flash` — 旧記載の `gemini-2.5-flash` は **2026-10-16 シャットダウン**のため設定例として使わないこと ([移行 runbook](./gemini-model-migration-runbook.md)) |
-| `CRON_SECRET` | 必須 | GitHub Secrets と同一値 |
+| `CRON_SECRET` | 必須 | Supabase keepalive cron の Bearer 認可 (#242)。3 環境すべてに登録 |
 | `NEXT_PUBLIC_APP_URL` | 必須 | |
 | `DEEP_RESEARCH_MODEL` | 任意 | default: `deep-research-preview-04-2026` |
 | `DEEP_RESEARCH_STRUCTURER_MODEL` | 任意 | default: `gemini-2.5-flash-lite` |

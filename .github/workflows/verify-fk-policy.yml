@@ -50,10 +50,15 @@
 #   Actions の有効状態を確認する。#241 以降、本 workflow が disable されても
 #   「EXPECTED 登録漏れ」の窓は開かない — 宣言どうしの整合は PR の Vitest ガードが
 #   落とすため、ここで見えなくなるのは帯域外 DDL によるドリフトだけである。
-#   実害が重いのは keepalive 側 (7 日 pause → 本番 504 / #147) で、恒久対策は #242 で扱う
+#   実害が重かったのは keepalive 側 (7 日 pause → 本番 504 / #147) だが、そちらは #242 で
+#   Vercel Cron (`app/api/cron/keepalive`) を並走させ、auto-disable されても本番が守られる
+#   状態にした。**本 workflow に対応する二重化は無い**ため、止まればドリフト検出は失われる
 # - 失敗時は workflow が red になり、GitHub 標準の失敗通知が本ファイル最終変更者へ飛ぶ
-# - 失敗ログには「EXPECTED と DELETE_IMPACT_CATEGORIES / StoreDeleteImpact への追加が
-#   必要」まで出るため、そのまま作業指示として読める
+# - 失敗ログには「`scripts/_store-fk-policy.mjs` の EXPECTED と DELETE_IMPACT_CATEGORIES /
+#   StoreDeleteImpact への追加が必要」まで出るため、そのまま作業指示として読める。
+#   本 workflow が赤くなるのは誰も文脈を覚えていないタイミングなので、EXPECTED の置き場所を
+#   動かすときは `verify-store-cascade-fks.mjs` の出力文言とこの行を必ず一緒に更新すること
+#   (PR #243 の移設で一度この導線が切れ、指示先が実在しない状態になった)
 #
 # 前提: GitHub Secret `DATABASE_URL` に本番 Supabase connection string を登録
 #       (`migrate.yml` / `supabase-keepalive.yml` と共用。新規 secret は不要)。
