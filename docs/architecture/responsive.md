@@ -227,8 +227,7 @@ CI は typecheck / lint / vitest の 3 ジョブで、**`next build` を持た�
 | この文書 | 横断規約、判断基準、事故から導いた原則、検証手順 |
 | `components/ui/data-table-responsive.ts` | 閾値表そのもの、テーブル別の予算内訳、閾値を足すときの制約 |
 | `components/ui/modal-classes.ts` | モーダルのクラス契約と、そう書いた理由 |
-| `app/(main)/{stores,dashboard}/_components/__tests__/*-table-columns.test.tsx` | 列単体予算 (`BUDGET`) の実測値と採り方、そこからの累積が閾値と一致することの検証 |
-| `app/(main)/handoffs/_components/__tests__/handoffs-table-columns.test.tsx` | /handoffs の決定表。**ここだけ `BUDGET` からの独立累積を持たない**ので、予算を動かしたときの取りこぼしに注意 |
+| 各ビューの `_components/__tests__/*-table-columns.test.tsx` | 列単体予算 (`BUDGET`) の実測値と採り方、そこからの累積が閾値と一致することの検証。3 ビュー共通ヘルパ `components/ui/__tests__/support/column-budget.ts` への集約は #244 で進行中 |
 
 **数値と機構固有の契約はソース側が単一の真実。** ここに写経すると必ず片方が古くなる。この文書からは「どこを見ればよいか」だけを指す。
 
