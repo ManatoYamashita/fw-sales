@@ -434,7 +434,8 @@ interface ImpactCategoryDef {
 
 > 初出は 0021 適用後の 5 本。その後 #110 (PR #228) で `research` を DROP し、
 > #180 で `store_research_runs` が加わった。本表は `pnpm db:verify-fks` の
-> `EXPECTED` および `DELETE_IMPACT_CATEGORIES` と同じ集合を指す (#229)。
+> `EXPECTED` と同じ 5 本で、`DELETE_IMPACT_CATEGORIES` はこのうち stores を親と
+> する 4 本に対応する (`handoffs.deal_id` は親が deals のため影響カテゴリ外) (#229)。
 
 | 子テーブル.列 | 制約名 | ON DELETE | 意味 |
 |---|---|---|---|

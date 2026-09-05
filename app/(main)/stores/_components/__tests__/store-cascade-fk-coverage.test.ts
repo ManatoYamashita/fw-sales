@@ -8,7 +8,8 @@
  * 本番 13 店舗 (75 run) の削除ダイアログが「紐づけデータはありません」と誤って
  * 断言する状態が続いた。義務を人間の注意力に委ねないための CI ガードである。
  *
- * 検証は drizzle の `getTableConfig` によるスキーマ**メタデータ**走査で行う。
+ * 検証は drizzle の `getTableConfig` によるスキーマ**メタデータ**走査で行う
+ * (走査の実体は `lib/db/store-child-fks.ts`。SQL 網羅性ガードと母集合を共有する)。
  * schema.ts をソース文字列として grep する方式は採らない — このリポジトリには
  * 「文字列検査テストが撤去記録コメントに自己ヒットして空虚に green になる」
  * 失敗事例があり、メタデータ走査ならその失敗モード自体が存在しないため。
@@ -18,8 +19,7 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { getTableConfig, type PgTable } from "drizzle-orm/pg-core";
-import * as schema from "@/lib/db/schema";
+import { collectStoreChildForeignKeys } from "@/lib/db/store-child-fks";
 
 // 対象モジュールは Server Action を import しており、その先の repos → lib/db が
 // 実 DB 接続を試みるためモックで遮断する (store-delete-confirm-dialog.test.ts と同様)。
@@ -36,41 +36,6 @@ const ON_DELETE_TO_EFFECT: Record<string, "delete" | "unlink"> = {
   cascade: "delete",
   "set null": "unlink",
 };
-
-interface StoreChildFk {
-  /** 子テーブルの物理名 */
-  child: string;
-  /** FK を構成する列名 (複合 FK はカンマ区切り) */
-  column: string;
-  /** drizzle の onDelete 宣言。未指定は undefined (= NO ACTION) */
-  onDelete: string | undefined;
-}
-
-/**
- * schema.ts の全 export を走査し、`stores` を親とする FK を列挙する。
- * テーブル以外の export (型・enum・ヘルパー) は getTableConfig が例外を投げるので読み飛ばす。
- */
-function collectStoreChildForeignKeys(): StoreChildFk[] {
-  const found: StoreChildFk[] = [];
-  for (const exported of Object.values(schema)) {
-    let config: ReturnType<typeof getTableConfig>;
-    try {
-      config = getTableConfig(exported as PgTable);
-    } catch {
-      continue;
-    }
-    for (const fk of config.foreignKeys) {
-      const ref = fk.reference();
-      if (getTableConfig(ref.foreignTable).name !== "stores") continue;
-      found.push({
-        child: config.name,
-        column: ref.columns.map((c) => c.name).join(","),
-        onDelete: fk.onDelete,
-      });
-    }
-  }
-  return found;
-}
 
 describe("stores を参照する子テーブルと削除影響カテゴリの整合 (#229)", () => {
   it("stores 参照 FK は子テーブルごとに高々 1 本 (key = テーブル名の前提)", () => {

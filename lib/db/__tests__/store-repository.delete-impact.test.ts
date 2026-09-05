@@ -11,11 +11,15 @@
  * マッピングだけ足す」実装が常に 0 を返すのに green になる (型はキーの存在しか
  * 強制しない)。これを塞ぐため、発行される SQL 自体を PgDialect で実コンパイルして
  * 検証するケースを持つ (find-area-search-candidates.test.ts の手法を踏襲)。
+ * 期待する子テーブル集合は schema.ts のメタデータから導出する — 直値で固定すると
+ * 「今の 4 本」を写しただけの snapshot になり、5 本目が増えたときに同じ書き忘れを
+ * 素通ししてしまう。
  */
 
 import { describe, expect, it, vi } from "vitest";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
+import { collectStoreChildForeignKeys } from "../store-child-fks";
 
 vi.mock("@/lib/db/client", () => ({
   db: {},
@@ -108,41 +112,39 @@ describe("getDeleteImpact", () => {
     });
   });
 
-  it("stores を参照する 4 子テーブルすべてを 1 文で数える SQL を発行する", async () => {
+  it("stores を参照する子テーブルすべてを 1 文で数える SQL を発行する", async () => {
     // マッピングだけ足してサブクエリを忘れると常に 0 が返る。型では守れないため
     // 発行 SQL を実コンパイルして、カテゴリごとに count と別名が存在することを見る。
     const { executor, compiledQuery } = makeExecutor([
       { deals: 0, store_research_runs: 0, handoffs: 0, place_candidates: 0 },
     ]);
     const repo = makeStoreRepo(executor);
-    await repo.getDeleteImpact(["store_a", "store_b"]);
+    const ids = ["store_a", "store_b"];
+    await repo.getDeleteImpact(ids);
 
     const query = compiledQuery();
     const sql = normalizedSql(query.sql);
 
-    for (const [table, column, alias] of [
-      ["deals", "store_id", "deals"],
-      ["store_research_runs", "store_id", "store_research_runs"],
-      ["handoffs", "store_id", "handoffs"],
-      ["place_candidates", "matched_store_id", "place_candidates"],
-    ]) {
-      expect(sql, `${alias} のサブクエリが無い`).toContain(`from "${table}"`);
-      expect(sql, `${alias} の絞り込み列が違う`).toContain(`"${table}"."${column}"`);
-      expect(sql, `${alias} の別名が無い`).toContain(`as ${alias}`);
-    }
-    expect((sql.match(/count\(\*\)/g) ?? []).length).toBe(4);
+    // 期待集合は schema.ts の FK 実態から導出する。直値配列にすると、子テーブルが
+    // 増えたときに本ケースが「更新すべき snapshot」へ退化し、新カテゴリの
+    // サブクエリ欠落 (= 常に 0 件表示) を検出できなくなる。
+    const storeChildFks = collectStoreChildForeignKeys();
+    expect(storeChildFks.length, "stores 参照 FK を 1 本も列挙できていない").toBeGreaterThan(0);
 
-    // ID 群は inArray で 4 サブクエリぶん展開される (sql テンプレートへの直埋めは
+    for (const { child, column } of storeChildFks) {
+      // 別名は「StoreDeleteImpact のキー = 子テーブル名」規約に従う
+      // (規約自体は store-cascade-fk-coverage.test.ts が機械検証する)。
+      expect(sql, `${child} のサブクエリが無い`).toContain(`from "${child}"`);
+      expect(sql, `${child} の絞り込み列が違う`).toContain(`"${child}"."${column}"`);
+      expect(sql, `${child} の別名が無い`).toContain(`as ${child}`);
+    }
+    expect(
+      (sql.match(/count\(\*\)/g) ?? []).length,
+      "count(*) の本数が stores 参照 FK の本数と一致しない",
+    ).toBe(storeChildFks.length);
+
+    // ID 群は inArray で子テーブルの本数ぶん展開される (sql テンプレートへの直埋めは
     // `any(($1))` の不正 SQL になるため禁止 / store-repository.ts のコメント参照)。
-    expect(query.params).toEqual([
-      "store_a",
-      "store_b",
-      "store_a",
-      "store_b",
-      "store_a",
-      "store_b",
-      "store_a",
-      "store_b",
-    ]);
+    expect(query.params).toEqual(storeChildFks.flatMap(() => ids));
   });
 });
