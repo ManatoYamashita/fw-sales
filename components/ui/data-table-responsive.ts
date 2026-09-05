@@ -42,13 +42,18 @@ export const DATA_TABLE_CONTAINER_CLASS = "@container/data-table";
  *
  * ## 内訳 (単体予算 = その列だけの幅。累計ではなく単体を残すこと)
  *
- * ### /stores 一覧 (#220) — always = 店舗名 260 + 次回アクション 272 + 操作 100 = 632
- *    728 = +状態 96     /  874 = +現在の営業状態 146 /  971 = +営業担当 97
- *   1171 = +最寄駅 200  / 1281 = +チャネル 110       / 1391 = +最終営業日 110
- *   (/stores のチャネル 110 は「DM推奨」での実測で最大値ではない。同じバッジの
- *    最長値は 138 なので 1281 以降は約 28px 不足している。既存の未修正点で、
- *    再測定は別 issue。ここから数値を流用しないこと)
- *   1492 = +業態 101
+ * ### /stores 一覧 (#220 / #237 で再測定) — always = 店舗名 260 + 次回アクション 272 + 操作 100 = 632
+ *    728 = +状態 96     /  874 = +現在の営業状態 146 /  974 = +営業担当 100
+ *   1174 = +最寄駅 200  / 1312 = +チャネル 138       / 1422 = +最終営業日 110
+ *   1582 = +業態 160
+ *   #220 は営業担当 97 / チャネル 110 / 業態 101 と置いており、閾値の直上で
+ *   admin に 5 帯域・member に 1 帯域の横スクロールが残っていた (#237 で 1px 刻みの
+ *   掃引により確認)。原因は 2 つで、どちらも下の /dashboard と同じ取り違え。
+ *   - チャネルは「DM推奨」での実測だった。最長は「テレアポ推奨」で 138。
+ *   - 営業担当と業態は cap (100 / 160) を持つのに、短いデータでの min-content を
+ *     予算にしていた。**cap を持つ列の予算は cap そのもの**を採ること
+ *     (cap は「ここまで伸びうる」という宣言なので、実測が下回っても予算は縮まない)。
+ *   最終営業日の実測は 109.5 で、丸め上げて 110。
  *
  * ### /dashboard 最近登録した店舗 (#224) — always = 店舗名 200 + 状態 96 = 296
  *    456 = +エリア 160  /  594 = +チャネル 138       /  695 = +更新 101
@@ -97,11 +102,11 @@ const HIDE_BELOW = {
   728: "@max-[728px]/data-table:hidden",
   835: "@max-[835px]/data-table:hidden",
   874: "@max-[874px]/data-table:hidden",
-  971: "@max-[971px]/data-table:hidden",
-  1171: "@max-[1171px]/data-table:hidden",
-  1281: "@max-[1281px]/data-table:hidden",
-  1391: "@max-[1391px]/data-table:hidden",
-  1492: "@max-[1492px]/data-table:hidden",
+  974: "@max-[974px]/data-table:hidden",
+  1174: "@max-[1174px]/data-table:hidden",
+  1312: "@max-[1312px]/data-table:hidden",
+  1422: "@max-[1422px]/data-table:hidden",
+  1582: "@max-[1582px]/data-table:hidden",
 } as const;
 
 /**
@@ -138,11 +143,11 @@ const HIDE_BELOW_WITH_SELECTION = {
   728: "@max-[776px]/data-table:hidden",
   835: "@max-[883px]/data-table:hidden",
   874: "@max-[922px]/data-table:hidden",
-  971: "@max-[1019px]/data-table:hidden",
-  1171: "@max-[1219px]/data-table:hidden",
-  1281: "@max-[1329px]/data-table:hidden",
-  1391: "@max-[1439px]/data-table:hidden",
-  1492: "@max-[1540px]/data-table:hidden",
+  974: "@max-[1022px]/data-table:hidden",
+  1174: "@max-[1222px]/data-table:hidden",
+  1312: "@max-[1360px]/data-table:hidden",
+  1422: "@max-[1470px]/data-table:hidden",
+  1582: "@max-[1630px]/data-table:hidden",
 } as const;
 
 /**
