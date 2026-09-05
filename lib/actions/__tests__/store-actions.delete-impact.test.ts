@@ -60,7 +60,12 @@ describe("getStoreDeleteImpactAction", () => {
   });
 
   it("正常系: 正規化済み ID 群で影響件数を返し、キャッシュを一切 invalidate しない", async () => {
-    const impact = { deals: 3, handoffs: 1, place_candidates: 4 };
+    const impact = {
+      deals: 3,
+      store_research_runs: 22,
+      handoffs: 1,
+      place_candidates: 4,
+    };
     mockGetDeleteImpact.mockResolvedValueOnce(impact);
 
     const result = await getStoreDeleteImpactAction([

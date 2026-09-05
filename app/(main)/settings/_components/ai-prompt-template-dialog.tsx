@@ -480,7 +480,9 @@ function TemplateDialog({ dialogMode, onSuccess, onClose }: TemplateDialogProps)
         }
         size="lg"
       >
-        <div className="max-h-[60vh] overflow-y-auto space-y-6 pr-1">
+        {/* 高さとスクロールは ModalContent が一元管理する (#225 Phase 1)。
+            ここで独自の max-h / overflow-y を持つと入れ子スクロールになる。 */}
+        <div className="space-y-6 pr-1">
           {parseWarn && (
             <p className="text-sm text-warning bg-warning/10 rounded p-2" role="alert">
               テンプレートの内容を読み込めませんでした。内容を確認してから保存してください。

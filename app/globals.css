@@ -41,6 +41,16 @@
   --color-destructive-foreground: var(--destructive-foreground);
   --color-destructive-soft: var(--destructive-soft);
 
+  /* Component */
+  /*
+   * ModalFooter の背景 (#225 Phase 1)。
+   * 従来は `bg-muted/30` (半透明) を `bg-popover` の上に重ねていたが、フッタを
+   * sticky 化するとスクロール中の本文が背後を透けて見える。同じ実効色を
+   * **不透明色**として固定する。`@theme inline` により使用箇所へ展開されるため、
+   * `.dark` 側の `--muted` / `--popover` 上書きにもそのまま追従する。
+   */
+  --color-modal-footer: color-mix(in oklab, var(--muted) 30%, var(--popover));
+
   /* Borders & Rings */
   --color-border: var(--border);
   --color-input: var(--input);

@@ -1,7 +1,5 @@
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { compile } from "tailwindcss";
+import { buildCss, normalize } from "./support/build-css";
 import {
   COLUMN_HIDE_CLASSES,
   COLUMN_HIDE_CLASSES_WITH_SELECTION,
@@ -23,34 +21,6 @@ import {
  * `compile()` は Tailwind の準公開 API。ここが壊れたら「Tailwind の内部が変わった」
  * シグナルとして扱い、生成結果を実機で確認したうえで追随すること。
  */
-
-const ROOT = path.resolve(import.meta.dirname, "../../..");
-
-async function buildCss(candidates: string[]): Promise<string> {
-  const entry = path.join(ROOT, "app/globals.css");
-  const compiler = await compile(await readFile(entry, "utf8"), {
-    base: path.dirname(entry),
-    loadStylesheet: async (id: string, base: string) => {
-      const resolved =
-        id === "tailwindcss"
-          ? path.join(ROOT, "node_modules/tailwindcss/index.css")
-          : id.startsWith(".")
-            ? path.resolve(base, id)
-            : path.join(ROOT, "node_modules", id);
-      return {
-        path: resolved,
-        base: path.dirname(resolved),
-        content: await readFile(resolved, "utf8"),
-      };
-    },
-  });
-  return compiler.build(candidates);
-}
-
-/** 空白の揺れを潰して部分一致しやすくする。 */
-function normalize(css: string): string {
-  return css.replace(/\s+/g, " ");
-}
 
 describe("段階表示クラスの CSS 生成", () => {
   it("コンテナクラスが名前付きの inline-size コンテナを作る", async () => {
@@ -74,7 +44,8 @@ describe("段階表示クラスの CSS 生成", () => {
     }
     // 隠す指定であること (display:none 以外へ化けていない)
     expect(css).toContain("display: none");
-    // 14 本すべてが別々のクエリとして出る (重複キーによる取りこぼしの検出)
+    // 全トークン (現在 28 本) が別々のクエリとして出る。畳まれるのは 2 マップ間で
+    // px が衝突したとき = 閾値どうしが 48px 差のとき (data-table-responsive.test.ts)。
     const queries = new Set(
       [...css.matchAll(/@container data-table \(width < \d+px\)/g)].map((m) => m[0]),
     );

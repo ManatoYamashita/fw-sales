@@ -2,11 +2,19 @@
  * 店舗系 FK の ON DELETE 実態を検証する読み取り専用スクリプト (#152)。
  *
  * 検証内容 (design.md §Data Models の FK ポリシー宣言と DB 実態の一致):
- * - deals.store_id / handoffs.store_id / handoffs.deal_id → ON DELETE CASCADE
+ * - deals.store_id / store_research_runs.store_id / handoffs.store_id /
+ *   handoffs.deal_id → ON DELETE CASCADE
  *   (Issue #110 で research テーブルを DROP したため対象から外した)
  * - place_candidates.matched_store_id → ON DELETE SET NULL
  *
- * 一致しない・存在しない制約があれば一覧を出力して exit 1、全一致で exit 0。
+ * 検証は 2 方向で行う (Issue #229):
+ * 1. 順方向 — EXPECTED の各制約が宣言どおりの ON DELETE を持つか
+ * 2. 逆方向 — stores を親とする FK を pg_constraint から全数列挙し、EXPECTED に
+ *    未登録のものが無いか。1 だけだと「知っている制約しか見ない」ため、子テーブルが
+ *    増えても黙って通ってしまう。実際 #180 の store_research_runs はこの穴を通り、
+ *    削除確認ダイアログの影響カウントからも漏れたまま本番稼働した。
+ *
+ * 不一致・未登録・存在しない制約があれば一覧を出力して exit 1、全一致で exit 0。
  * pg_constraint への SELECT のみでデータ・スキーマへの書き込みは一切行わない。
  *
  * 実行: `pnpm db:verify-fks` (DATABASE_URL は .env.local または環境変数から供給)。
@@ -19,6 +27,11 @@ import postgres from "postgres";
 /** 期待する ON DELETE 挙動。confdeltype: c=CASCADE, n=SET NULL, a=NO ACTION, r=RESTRICT, d=SET DEFAULT */
 const EXPECTED = [
   { child: "deals", conname: "deals_store_id_stores_id_fk", deltype: "c" },
+  {
+    child: "store_research_runs",
+    conname: "store_research_runs_store_id_stores_id_fk",
+    deltype: "c",
+  },
   { child: "handoffs", conname: "handoffs_store_id_stores_id_fk", deltype: "c" },
   { child: "handoffs", conname: "handoffs_deal_id_deals_id_fk", deltype: "c" },
   {
@@ -50,14 +63,18 @@ const sql = postgres(url, {
 });
 
 try {
+  // EXPECTED の制約 (stores 以外を親とする handoffs.deal_id を含む) に加えて、
+  // stores を親とする FK を全数取得する。後者が逆方向チェックの母集合になる。
   const rows = await sql`
     select conname,
            conrelid::regclass::text as child,
+           confrelid::regclass::text as parent,
            confdeltype,
            pg_get_constraintdef(oid) as def
     from pg_constraint
     where contype = 'f'
-      and conname = any(${EXPECTED.map((e) => e.conname)})`;
+      and (conname = any(${EXPECTED.map((e) => e.conname)})
+           or confrelid = 'stores'::regclass)`;
   const byName = new Map(rows.map((r) => [r.conname, r]));
 
   let failures = 0;
@@ -81,15 +98,42 @@ try {
     console.log(`OK ${expected.child} | ${expected.conname} | ON DELETE ${want}`);
   }
 
-  await sql.end({ timeout: 5 });
-  if (failures > 0) {
+  // 逆方向: stores を親とする FK のうち EXPECTED に無いものを検出する。
+  const expectedNames = new Set(EXPECTED.map((e) => e.conname));
+  const storeChildren = rows.filter((r) => r.parent === "stores");
+  const unregistered = storeChildren.filter((r) => !expectedNames.has(r.conname));
+  for (const row of unregistered) {
+    const got = DELTYPE_LABEL[row.confdeltype] ?? row.confdeltype;
+    console.error(`NG ${row.child} | ${row.conname}`);
     console.error(
-      `\nVERIFY FAILED: ${failures}/${EXPECTED.length} 件の FK が期待と不一致です。` +
-        " migration 0021 (#152) の適用状況を確認してください。",
+      `   stores を親とする FK が EXPECTED に未登録です (ON DELETE ${got})`,
     );
+    console.error(
+      "   → 本スクリプトの EXPECTED と、削除確認ダイアログの" +
+        " DELETE_IMPACT_CATEGORIES / StoreDeleteImpact への追加が必要です",
+    );
+  }
+
+  await sql.end({ timeout: 5 });
+  if (failures > 0 || unregistered.length > 0) {
+    if (failures > 0) {
+      console.error(
+        `\nVERIFY FAILED: ${failures}/${EXPECTED.length} 件の FK が期待と不一致です。` +
+          " migration 0021 (#152) の適用状況を確認してください。",
+      );
+    }
+    if (unregistered.length > 0) {
+      console.error(
+        `\nVERIFY FAILED: stores を親とする FK ${unregistered.length} 件が未登録です。` +
+          " 子テーブル追加時の影響カウント漏れ (#229) と同じ経路です。",
+      );
+    }
     process.exit(1);
   }
-  console.log(`\nVERIFY OK: ${EXPECTED.length} 件の FK がすべて期待どおりです。`);
+  console.log(
+    `\nVERIFY OK: ${EXPECTED.length} 件の FK がすべて期待どおりです` +
+      ` (stores を親とする FK ${storeChildren.length} 件を全数走査し、未登録 0 件)。`,
+  );
 } catch (err) {
   console.error("VERIFY ERROR:", err instanceof Error ? err.message : String(err));
   await sql.end({ timeout: 5 }).catch(() => {});
