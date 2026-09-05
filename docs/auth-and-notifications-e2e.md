@@ -11,6 +11,7 @@
 
 - [ ] `.env.local` に 5 件の環境変数が設定済 (`NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` / `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET`)
   - ~~Resend / Cron 関連 (`RESEND_API_KEY` / `RESEND_FROM_EMAIL` / `CRON_SECRET`) は削除済~~
+    (`CRON_SECRET` のみ 2026-09-05 に Supabase keepalive 用途で復活 / Issue #242)
 - [ ] Supabase プロジェクトで Google OAuth プロバイダーが有効化済
 - ~~[ ] Resend で `RESEND_FROM_EMAIL` のドメインが verified 済~~ — 削除済
 - [ ] マイグレーション 0001-0006 を staging DB に適用済

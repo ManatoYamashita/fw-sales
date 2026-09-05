@@ -213,9 +213,39 @@ Supabase 側の Google OAuth プロバイダーで **誰でもサインイン可
 | `GOOGLE_OAUTH_CLIENT_ID` | Supabase Provider 側で設定する Google OAuth Client ID | Supabase 側設定がなければサインイン失敗 |
 | `GOOGLE_OAUTH_CLIENT_SECRET` | 同上 Secret | 同上 |
 
+### Vercel Cron (Supabase keepalive)
+
+`vercel.json` に Cron を 1 本登録している。
+
+| path | schedule (UTC) | 役割 |
+| --- | --- | --- |
+| `/api/cron/keepalive` | `0 21 * * *` (JST 06:00) | 本番 Supabase に実書き込みを 1 本投げ、Free プランの自動 pause を防ぐ |
+
+`.github/workflows/supabase-keepalive.yml` (09:00 UTC) と **恒久的に並走**する二重化である。
+GitHub は public repository の scheduled workflow を 60 日無活動で自動 disable するため、
+GHA 版だけでは「誰も見ていない期間」に静かに止まる (Issue #242)。どちらか一方が生きていれば
+pause しない。
+
+- 認可: `Authorization: Bearer ${CRON_SECRET}`。Vercel Cron がこの env var の値を自動送信する。
+  **未設定なら 401 ではなく 500** を返す (設定漏れを「正しく拒否できている」ように見せないため)。
+  Vercel 側で**必須なのは Production のみ** (cron が走るのは production deployment だけ)。
+  Preview / Development は無くてもビルドも動作も壊れない (`check-required-env.mjs` の
+  REQUIRED には入れていない)。`vercel env pull` でローカルへ引ける値を揃えたい場合のみ
+  3 環境に登録する。
+- 最終実行時刻は `app_settings.keepalive_last_run_at` に記録され、設定画面に表示される。
+  Vercel の Runtime Logs は Hobby プランでは 1 時間で消えるため、翌日以降に
+  「cron が実際に DB へ届いたか」を確かめられるのはこの行だけである。
+- ローカルで叩く場合:
+  `curl -H "Authorization: Bearer ${CRON_SECRET}" http://localhost:3000/api/cron/keepalive`
+
+> **注意**: 同名の GitHub Secret `CRON_SECRET` (旧 `poll-research.yml` 専用) は現在も参照ゼロで、
+> 上記の Vercel env var とは別物である。混同して片方を消さないこと。
+
 ### ~~Vercel Cron (商談リマインダー)~~ — 削除済 (2026-05-17)
 
-> 以下は履歴参照用。`vercel.json` の `crons` セクション、`/api/cron/deal-reminders` route、`lib/email/*` 一式、`RESEND_API_KEY` / `RESEND_FROM_EMAIL` / `CRON_SECRET` env、`resend` npm 依存はすべて削除済。再導入時は本コミットの revert と spec 復活が起点。
+> 以下は履歴参照用。`/api/cron/deal-reminders` route、`lib/email/*` 一式、`RESEND_API_KEY` / `RESEND_FROM_EMAIL` env、`resend` npm 依存は削除済。再導入時は本コミットの revert と spec 復活が起点。
+>
+> なお `vercel.json` の `crons` と `CRON_SECRET` env は **2026-09-05 に別用途 (Supabase keepalive / Issue #242) で復活している**。上節を参照のこと。
 
 ~~`vercel.json` で 2 つの Cron を登録済:~~
 

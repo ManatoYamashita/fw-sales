@@ -21,10 +21,27 @@
 # - prepare:false で Transaction Pooler (6543) でも動作。読み取り専用 (count) のため
 #   冪等で本番データを一切変更しない。
 #
+# Vercel Cron との二重化 (Issue #242):
+# GitHub は **public repository の scheduled workflow を 60 日無活動で自動 disable** する。
+# 60 日無活動とは「誰も見ていない期間」そのもので、本 workflow が最も静かに止まる局面と
+# pause が最も気づかれない局面が一致してしまう。この依存を断つため、同じ役目を負う
+# 2 本目の経路として `vercel.json` の cron → `app/api/cron/keepalive` を並走させている。
+# **どちらか一方が生きていれば pause しない**ので、本 workflow はもう単独の生命線ではない。
+#
+# 両者は障害モードが独立している (だから撤去せず恒久的に並走させる):
+# - 60 日 auto-disable / DATABASE_URL secret のローテーション漏れ … 本 workflow だけが止まる
+# - CRON_SECRET 不整合 / Vercel のデプロイ破損 / cron 機能の無効化 … Vercel 側だけが止まる
+#
+# 起動時刻を 09:00 UTC に置き Vercel 側 (21:00 UTC) と 12 時間ずらしているのは、pause 予防の
+# ためではなく (どちらも日次で余裕がある)、設定画面が読む最終実行時刻が常に約 12 時間以内に
+# 更新される状態を保ち、鮮度判定が平常のジッタで揺れないようにするため。
+#
 # 運用上の注意:
-# - GitHub は 60 日無活動の repo で scheduled workflow を自動 disable する。長期開発停止時は
-#   workflow_dispatch で手動 keep-warm するか、Actions の有効状態を確認すること。
+# - 60 日 auto-disable で本 workflow が止まっても Vercel Cron が pause を防ぐが、
+#   **止まったこと自体は静かに起きる**。Actions の有効状態は時折確認すること。
 # - 失敗時は workflow が red になり、GitHub 標準の失敗通知 (本ファイル最終変更者宛) が飛ぶ。
+#   Vercel Cron は失敗してもリトライも通知もせず、Runtime Logs も Hobby では 1 時間で消える。
+#   **人へ push される検知経路を持っているのは本 workflow だけ**である。
 #
 # 前提: GitHub Secret `DATABASE_URL` に本番 Supabase pooler connection string を登録 (migrate.yml と共用)。
 

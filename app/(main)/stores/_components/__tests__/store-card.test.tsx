@@ -5,7 +5,7 @@ import type { SalesProgressRow } from "@/lib/domain/sales-progress";
 /**
  * 狭幅カード (#234 / PR3/3) の内容を固定するテスト。
  *
- * カードは「コンテナ 971px 相当の列集合を縦に積んだもの」と定義しており、
+ * カードは「コンテナ 974px 相当の列集合を縦に積んだもの」と定義しており、
  * 何を載せ何を載せないかは #220 が合意した閾値順にそのまま従う。ここが動くと
  * その定義が崩れるので、決定を明示的にレビューへ乗せる。
  */
@@ -58,12 +58,12 @@ describe("カードに載せる情報", () => {
     expect(html).toContain("訪問"); // 次回アクション種別
     expect(html).toContain("前回は不在"); // メモ
     expect(html).toContain("期限超過"); // urgency バッジ
-    expect(html).toContain("山下"); // 営業担当 (971)
+    expect(html).toContain("山下"); // 営業担当 (974)
     expect(html).toContain("個人店"); // IndividualStoreBadge
   });
 
   it("最寄駅 / チャネル / 最終営業日 / 業態 は載せない", () => {
-    // 閾値 1171 以降の列。詳細画面 (店舗名リンク) へ送る。
+    // 閾値 1174 以降の列。詳細画面 (店舗名リンク) へ送る。
     const html = render();
     expect(html).not.toContain("東京都");
     expect(html).not.toContain("渋谷区");

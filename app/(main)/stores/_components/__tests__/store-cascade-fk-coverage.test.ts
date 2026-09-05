@@ -14,12 +14,22 @@
  * 「文字列検査テストが撤去記録コメントに自己ヒットして空虚に green になる」
  * 失敗事例があり、メタデータ走査ならその失敗モード自体が存在しないため。
  *
+ * 義務 3 (`scripts/verify-store-cascade-fks.mjs` が使う FK ポリシー期待値への登録) も
+ * 同じ母集合で突き合わせる (Issue #241)。期待値は `scripts/_store-fk-policy.mjs` に
+ * 切り出してあり、本テストと検証スクリプトの双方がそこを唯一の真実として読む。
+ * これが無いと、義務 1 と 2 を正しく履行し 3 だけ忘れた変更が PR を緑で通過し、
+ * 本番へ DDL が当たった後の `db:verify-fks` (逆方向チェック) で初めて落ちる。
+ *
  * DB には接続しない (CI の test job はダミー DATABASE_URL しか持たない)。
  * ON DELETE の宣言と本番 DB 実態の一致は `pnpm db:verify-fks` が別途担保する。
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { collectStoreChildForeignKeys } from "@/lib/db/store-child-fks";
+import {
+  collectForeignKeyDeclarations,
+  collectStoreChildForeignKeys,
+} from "@/lib/db/store-child-fks";
+import { EXPECTED } from "@/scripts/_store-fk-policy.mjs";
 
 // 対象モジュールは Server Action を import しており、その先の repos → lib/db が
 // 実 DB 接続を試みるためモックで遮断する (store-delete-confirm-dialog.test.ts と同様)。
@@ -30,6 +40,19 @@ vi.mock("@/lib/actions/store-actions", () => ({
 const { DELETE_IMPACT_CATEGORIES } = await import(
   "../store-delete-confirm-dialog"
 );
+
+/**
+ * `pg_constraint.confdeltype` の生値と drizzle の onDelete 宣言の対応。
+ * EXPECTED 側は SQL の生値 (c / n / ...)、schema.ts 側は drizzle の文字列を持つため、
+ * 突合にはこの変換が要る。表に無い deltype が現れた場合は undefined になって落ちる。
+ */
+const DELTYPE_TO_ON_DELETE: Record<string, string> = {
+  a: "no action",
+  r: "restrict",
+  c: "cascade",
+  n: "set null",
+  d: "set default",
+};
 
 /** ON DELETE 宣言と、ダイアログが表示する処理種別の対応。 */
 const ON_DELETE_TO_EFFECT: Record<string, "delete" | "unlink"> = {
@@ -102,5 +125,71 @@ describe("stores を参照する子テーブルと削除影響カテゴリの整
         onDelete: "cascade",
       },
     ]);
+  });
+});
+
+describe("FK ポリシー期待値 (EXPECTED) と schema.ts 宣言の整合 (#241)", () => {
+  const declarations = collectForeignKeyDeclarations();
+  const byName = new Map(declarations.map((fk) => [fk.name, fk]));
+
+  it("EXPECTED の各エントリが schema.ts の FK 宣言と一致する", () => {
+    for (const expected of EXPECTED) {
+      const declared = byName.get(expected.conname);
+      expect(
+        declared,
+        `${expected.conname} に対応する FK 宣言が schema.ts に無い` +
+          " (EXPECTED の残骸、または制約名が変わっている)",
+      ).toBeDefined();
+      const fk = declared!;
+
+      expect(
+        fk.child,
+        `${expected.conname} の子テーブルが EXPECTED と食い違う`,
+      ).toBe(expected.child);
+
+      const wantOnDelete = DELTYPE_TO_ON_DELETE[expected.deltype];
+      expect(
+        wantOnDelete,
+        `${expected.conname} の deltype "${expected.deltype}" が対応表に無い`,
+      ).toBeDefined();
+      // drizzle は onDelete 未指定を undefined で返す (= SQL 上の NO ACTION)。
+      expect(
+        fk.onDelete ?? "no action",
+        `${expected.conname} の ON DELETE 宣言が EXPECTED と食い違う`,
+      ).toBe(wantOnDelete);
+    }
+  });
+
+  it("stores を親とする FK がすべて EXPECTED に登録されている", () => {
+    const declaredStoreFks = declarations
+      .filter((fk) => fk.parent === "stores")
+      .map((fk) => fk.name)
+      .sort();
+
+    // EXPECTED 側の母集合も「解決した宣言の parent」で作る。制約名を文字列として
+    // パースして親を推測すると、drizzle の命名規約への依存が二重になるうえ、
+    // stores を親としないエントリ (handoffs.deal_id → deals.id) の除外を誤る。
+    const registeredStoreFks = EXPECTED.filter(
+      (expected) => byName.get(expected.conname)?.parent === "stores",
+    )
+      .map((expected) => expected.conname)
+      .sort();
+
+    // 差分そのものが作業指示になるよう集合を比較する。子テーブルを追加して
+    // scripts/_store-fk-policy.mjs への登録を忘れた変更は、ここで落ちる。
+    expect(registeredStoreFks).toEqual(declaredStoreFks);
+  });
+
+  it("EXPECTED のうち stores を親としないエントリを実測で固定する", () => {
+    // 直上のケースが意図的に見逃す除外集合。ここを固定しておかないと、
+    // 除外対象が黙って増えたときに逆方向の突合が骨抜きになる。
+    const nonStoreParents = EXPECTED.filter((expected) => {
+      const declared = byName.get(expected.conname);
+      return declared !== undefined && declared.parent !== "stores";
+    })
+      .map((expected) => expected.conname)
+      .sort();
+
+    expect(nonStoreParents).toEqual(["handoffs_deal_id_deals_id_fk"]);
   });
 });

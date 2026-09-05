@@ -21,33 +21,14 @@
  * 接続様式は supabase-keepalive.yml と同一 (Node postgres / prepare:false / 単一接続)。
  * psql (libpq) は DATABASE_URL 中の特殊文字を host と誤読するため使わない。
  * 接続文字列の値はログに出力しない。
+ *
+ * 期待値 (EXPECTED) は `_store-fk-policy.mjs` に置き、schema.ts 宣言との突合を行う
+ * Vitest ガード (store-cascade-fk-coverage.test.ts) と共有する (#241)。本ファイルは
+ * import しただけで DB へ接続し exit する副作用を持つため、期待値の側を切り出してある。
  */
 import postgres from "postgres";
 
-/** 期待する ON DELETE 挙動。confdeltype: c=CASCADE, n=SET NULL, a=NO ACTION, r=RESTRICT, d=SET DEFAULT */
-const EXPECTED = [
-  { child: "deals", conname: "deals_store_id_stores_id_fk", deltype: "c" },
-  {
-    child: "store_research_runs",
-    conname: "store_research_runs_store_id_stores_id_fk",
-    deltype: "c",
-  },
-  { child: "handoffs", conname: "handoffs_store_id_stores_id_fk", deltype: "c" },
-  { child: "handoffs", conname: "handoffs_deal_id_deals_id_fk", deltype: "c" },
-  {
-    child: "place_candidates",
-    conname: "place_candidates_matched_store_id_stores_id_fk",
-    deltype: "n",
-  },
-];
-
-const DELTYPE_LABEL = {
-  a: "NO ACTION",
-  r: "RESTRICT",
-  c: "CASCADE",
-  n: "SET NULL",
-  d: "SET DEFAULT",
-};
+import { DELTYPE_LABEL, EXPECTED } from "./_store-fk-policy.mjs";
 
 const url = process.env.DATABASE_URL;
 if (!url) {
@@ -109,7 +90,7 @@ try {
       `   stores を親とする FK が EXPECTED に未登録です (ON DELETE ${got})`,
     );
     console.error(
-      "   → 本スクリプトの EXPECTED と、削除確認ダイアログの" +
+      "   → scripts/_store-fk-policy.mjs の EXPECTED と、削除確認ダイアログの" +
         " DELETE_IMPACT_CATEGORIES / StoreDeleteImpact への追加が必要です",
     );
   }
