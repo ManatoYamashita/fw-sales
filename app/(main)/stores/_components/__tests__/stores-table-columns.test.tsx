@@ -16,6 +16,10 @@ import {
   SELECTION_COLUMN_WIDTH,
   type ColumnMinContainerWidth,
 } from "@/components/ui/data-table-responsive";
+import {
+  expectBudgetLadder,
+  expectCapsMatchBudget,
+} from "@/components/ui/__tests__/support/column-budget";
 
 // 対象モジュールは Server Action を import しており、その先の repos → lib/db が
 // 実 DB 接続を試みるためモックで遮断する (stores-table-empty-state.test.tsx と同規約)。
@@ -135,16 +139,17 @@ describe("店舗一覧の列優先度", () => {
   it("上限の無い列を残さない (閾値の前提が実測 min-content 幅であるため)", () => {
     // 幅が内容依存で青天井になりうるのは自由入力のテキスト列。
     // truncate + maxWidth か、閉じた enum のバッジであることを求める。
+    // cap と予算の一致は共有ヘルパが見る (cap を宣言していない列が maxWidth を
+    // 持っていないことも含む)。ここでは truncate との対応だけを足す。
     const columns = buildColumns(false);
-    const column = (key: string) => {
-      const found = columns.find((c) => c.key === key);
-      expect(found, `列 ${key} が見つからない`).toBeDefined();
-      return found!;
-    };
+
+    expectCapsMatchBudget({ columns, budget: BUDGET, capped: CAPPED });
 
     for (const key of CAPPED) {
-      expect(column(key).maxWidth, `${key} の上限`).toBe(`${BUDGET[key]}px`);
-      expect(column(key).truncate, `${key} は truncate されるべき`).toBe(true);
+      expect(
+        columns.find((c) => c.key === key)!.truncate,
+        `${key} は truncate されるべき`,
+      ).toBe(true);
     }
   });
 
@@ -167,26 +172,15 @@ describe("店舗一覧の列優先度", () => {
 
   it("閾値は always 予算 + 優先度順の累積と厳密に一致する (#237)", () => {
     // 決定表 (EXPECTED) は閾値を写経しているだけなので、予算を直したのに閾値を
-    // 直し忘れた事故は捕まえられない。ここで BUDGET からの累積を独立に組み直す。
-    // 実測値そのものの誤り (= #237 で踏んだ取り違え) は検出できない。それは
-    // ブラウザ計測の仕事で、ここが守るのは「予算と閾値の同期」だけ。
-    const columns = buildColumns(false);
-    const widthOf = (key: string) =>
-      columns.find((c) => c.key === key)!.minContainerWidth;
-
-    let acc = ALWAYS.reduce((sum, key) => sum + BUDGET[key], 0);
-    expect(acc, "always 合計").toBe(632);
-
-    for (const key of LADDER) {
-      acc += BUDGET[key];
-      expect(widthOf(key), `${key} の閾値`).toBe(acc);
-    }
-
-    // LADDER と ALWAYS で全列を尽くしていること (列を足して積み忘れると、上の
-    // ループが素通りして累積の検算が空洞になる)。
-    expect([...ALWAYS, ...LADDER].toSorted()).toEqual(
-      columns.map((c) => c.key).toSorted(),
-    );
+    // 直し忘れた事故は捕まえられない。BUDGET からの累積を独立に組み直す。
+    // 検証ロジックは 3 ビュー共通 (Epic #225 Phase 2)。
+    expectBudgetLadder({
+      columns: buildColumns(false),
+      budget: BUDGET,
+      always: ALWAYS,
+      ladder: LADDER,
+      alwaysTotal: 632,
+    });
   });
 
   it("最も広いコンテナでは全列が表示される (#237)", () => {

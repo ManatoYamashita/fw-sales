@@ -13,6 +13,12 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { ColumnMinContainerWidth } from "@/components/ui/data-table-responsive";
+import {
+  NARROWEST_CONTAINER,
+  expectBudgetLadder,
+  expectCapsMatchBudget,
+  visibleAt as visibleColumnsAt,
+} from "@/components/ui/__tests__/support/column-budget";
 import type { Store } from "@/types/store";
 import { buildColumns } from "../recent-stores-table-view";
 
@@ -33,8 +39,14 @@ const BUDGET = {
   genre: 140,
 } as const;
 
+/** 常時表示する列。コンテナ幅によらず描画される。 */
+const ALWAYS = ["name", "stage"] as const;
+
 /** always の上に積む順 = 優先度の高い順。`/stores` (#220) の落とす順と整合させている。 */
 const LADDER = ["location", "channel", "updated", "genre"] as const;
+
+/** cap を持つ列。予算は実測ではなく `maxWidth` そのもの。 */
+const CAPPED = ["name", "location", "genre"] as const;
 
 /** 決定表。`undefined` は always (常時表示)。内訳は data-table-responsive.ts と対。 */
 const EXPECTED: Record<string, ColumnMinContainerWidth | undefined> = {
@@ -46,23 +58,9 @@ const EXPECTED: Record<string, ColumnMinContainerWidth | undefined> = {
   genre: 835, // + 業態 140 (cap)
 };
 
-/**
- * このカードのコンテナ幅の下端。viewport 375px・サイドバー非表示のとき
- * `375 − padding 32 − Card border 2 = 341`。Epic #225 の下限幅がここ。
- */
-const NARROWEST_CONTAINER = 341;
-
-/** 状態バッジ (未調査 / 調査済み / 架電済み) の実効幅。閉じた enum なので確定する。 */
-const STAGE_COLUMN_BUDGET = 96;
-
-/**
- * コンテナ幅 `w` で表示される列。
- * CSS 側は `@container (width < N)` で隠すので、表示条件は `w >= N`。
- */
+/** コンテナ幅 `w` で表示される列 (判定ロジックは 3 ビュー共通)。 */
 function visibleAt(w: number): string[] {
-  return buildColumns()
-    .filter((c) => c.minContainerWidth === undefined || w >= c.minContainerWidth)
-    .map((c) => c.key);
+  return visibleColumnsAt(buildColumns(), w);
 }
 
 function storeWith(partial: Partial<Store>): Store {
@@ -91,30 +89,21 @@ describe("最近登録した店舗の列優先度", () => {
 
   it("閾値は always 予算 + 優先度順の累積と厳密に一致する", () => {
     // 決定表 (EXPECTED) は閾値を写経しているだけなので、cap や実測値を直したのに
-    // 閾値を直し忘れた事故は捕まえられない。予算からの累積をここで独立に組み直す。
+    // 閾値を直し忘れた事故は捕まえられない。予算からの累積を独立に組み直す。
     // 実測値そのものの誤りは検出できない (それはブラウザ計測の仕事) が、
     // 「予算を直したのに閾値が動いていない」は必ずここで落ちる。
-    const columns = buildColumns();
-    let acc = BUDGET.name + BUDGET.stage;
-    expect(acc, "always 合計").toBe(296);
-
-    for (const key of LADDER) {
-      acc += BUDGET[key];
-      expect(
-        columns.find((c) => c.key === key)!.minContainerWidth,
-        `${key} の閾値`,
-      ).toBe(acc);
-    }
+    expectBudgetLadder({
+      columns: buildColumns(),
+      budget: BUDGET,
+      always: ALWAYS,
+      ladder: LADDER,
+      alwaysTotal: 296,
+    });
   });
 
   it("cap を持つ列は maxWidth と予算が一致する", () => {
     // cap 列の予算は実測ではなく maxWidth そのもの。片方だけ動かすと上の累積が嘘になる。
-    const columns = buildColumns();
-    for (const key of ["name", "location", "genre"] as const) {
-      expect(columns.find((c) => c.key === key)!.maxWidth, `${key} の cap`).toBe(
-        `${BUDGET[key]}px`,
-      );
-    }
+    expectCapsMatchBudget({ columns: buildColumns(), budget: BUDGET, capped: CAPPED });
   });
 
   it("always 列は店舗名と状態の 2 列で、375px のコンテナに収まる", () => {
@@ -127,11 +116,13 @@ describe("最近登録した店舗の列優先度", () => {
 
     // 店舗名の cap を `/stores` と同じ 260px へ戻すと 260 + 96 = 356 > 341 となり、
     // 375px で横スクロールが復活する。cap と always 集合はこの不等式で結ばれている。
+    // 状態の実効幅は写経せず BUDGET から採る。ここを直値にすると「予算を直したのに
+    // この不変条件だけ古い数字のまま」が起こり、341px の破れを検出できなくなる。
     const nameCap = Number.parseInt(
       columns.find((c) => c.key === "name")!.maxWidth!,
       10,
     );
-    expect(nameCap + STAGE_COLUMN_BUDGET).toBeLessThanOrEqual(NARROWEST_CONTAINER);
+    expect(nameCap + BUDGET.stage).toBeLessThanOrEqual(NARROWEST_CONTAINER);
   });
 
   it("上限の無い列を残さない (閾値の前提が実測幅であるため)", () => {
@@ -145,13 +136,9 @@ describe("最近登録した店舗の列優先度", () => {
       return found!;
     };
 
-    const caps: Record<string, string> = {
-      name: "200px",
-      location: "160px",
-      genre: "140px",
-    };
-    for (const [key, maxWidth] of Object.entries(caps)) {
-      expect(column(key).maxWidth, `${key} の上限`).toBe(maxWidth);
+    // cap の値そのものは上の `cap を持つ列は maxWidth と予算が一致する` が
+    // BUDGET と突き合わせる。ここでは truncate との対応だけを見る。
+    for (const key of CAPPED) {
       expect(column(key).truncate, `${key} は truncate されるべき`).toBe(true);
     }
 
