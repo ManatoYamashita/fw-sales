@@ -348,15 +348,16 @@ export function StoreEditForm({
         </Card.Body>
       </Card>
 
-      {/* Submit footer (task 4.2 PR3a で AI Panel 撤去、本フォームは基本情報の編集のみ) */}
-      <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border bg-muted/30 rounded-md">
+      {/* Submit footer (task 4.2 PR3a で AI Panel 撤去、本フォームは基本情報の編集のみ)。
+          Card の外だがクラスを逐語コピーせず Card.Footer を呼ぶ (#270)。 */}
+      <Card.Footer className="rounded-md">
         <Button type="button" variant="ghost" onClick={() => router.back()}>
           キャンセル
         </Button>
         <Button type="submit" variant="primary" disabled={pending}>
           {pending ? "保存中…" : "保存する"}
         </Button>
-      </div>
+      </Card.Footer>
     </form>
   );
 }

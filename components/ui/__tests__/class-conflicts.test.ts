@@ -46,7 +46,7 @@ import {
   BUTTON_VARIANT_CLASSES,
   buttonClasses,
 } from "../button";
-import { CardBody } from "../card";
+import { CardBody, CardFooter, CardHeader } from "../card";
 import { Select } from "../select";
 import { Skeleton } from "../skeleton";
 import { Spinner } from "../spinner";
@@ -56,7 +56,14 @@ import {
   readStringAttribute,
 } from "./support/jsx-class-scan";
 
-type ComponentName = "Button" | "Card.Body" | "Select" | "Skeleton" | "Spinner";
+type ComponentName =
+  | "Button"
+  | "Card.Body"
+  | "Card.Header"
+  | "Card.Footer"
+  | "Select"
+  | "Skeleton"
+  | "Spinner";
 
 type ClassConflict = {
   component: ComponentName;
@@ -126,6 +133,22 @@ const DISPLAY_TOKENS = new Set([
 ]);
 
 /**
+ * flex コンテナの並べ方を決めるトークン (#270)。
+ *
+ * `Card.Header` / `Card.Footer` の契約はここに集中している (`flex-wrap` で折り返し、
+ * `justify-*` で寄せ、`items-*` で交差軸)。モデル化しないと、利用側が
+ * `className="flex-nowrap"` と書いても衝突として検出されず、**折り返しが無言で
+ * 消える**。`flex-1` / `flex-none` は flex アイテム側の指定なので別プロパティ。
+ */
+const FLEX_CONTAINER_TOKENS: ReadonlyArray<readonly [RegExp, string]> = [
+  [/^flex-(wrap|nowrap|wrap-reverse)$/, "flex-wrap"],
+  [/^flex-(row|row-reverse|col|col-reverse)$/, "flex-direction"],
+  [/^justify-/, "justify-content"],
+  [/^items-/, "align-items"],
+  [/^content-/, "align-content"],
+];
+
+/**
  * そのクラスが設定する CSS プロパティ。同じ値を返す 2 つは記述順で争う。
  * 判定できないもの (任意値、variant 付き、色以外の複合ユーティリティ) は空を返す。
  */
@@ -136,6 +159,9 @@ export function cssProperties(token: string): string[] {
   if (token.includes("[")) return [];
 
   if (DISPLAY_TOKENS.has(token)) return ["display"];
+  for (const [pattern, property] of FLEX_CONTAINER_TOKENS) {
+    if (pattern.test(token)) return [property];
+  }
   if (token === "shadow") return ["box-shadow"];
   if (token === "rounded") {
     return ["tl", "tr", "br", "bl"].map((c) => `border-radius-${c}`);
@@ -270,6 +296,12 @@ function baseClasses(
       }
       return collect(out);
     }
+    case "Card.Header": {
+      return renderedClassName(CardHeader({})).split(/\s+/);
+    }
+    case "Card.Footer": {
+      return renderedClassName(CardFooter({})).split(/\s+/);
+    }
     case "Card.Body": {
       return collect(
         pick("padding", "Card.Body.padding").map((padding) =>
@@ -334,6 +366,8 @@ async function collectTsxFiles(directory: string): Promise<string[]> {
 const COMPONENTS: ComponentName[] = [
   "Button",
   "Card.Body",
+  "Card.Header",
+  "Card.Footer",
   "Select",
   "Skeleton",
   "Spinner",

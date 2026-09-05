@@ -85,7 +85,7 @@ export function HandoffForm({ handoff }: { handoff: Handoff }) {
         </Card>
       ) : (
         <Card>
-          <Card.Body className="flex items-center justify-between gap-3">
+          <Card.Body className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <Badge tone="amber">運用確認待ち</Badge>
               <p className="text-sm text-foreground mt-2">
