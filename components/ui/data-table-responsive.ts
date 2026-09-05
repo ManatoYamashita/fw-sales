@@ -112,9 +112,17 @@ const HIDE_BELOW = {
 /**
  * 選択列 (admin の一括操作チェックボックス) が描画される幅。
  *
- * `w-10` (40px) ではなくチェックボックス 16px + `px-4` 32px = 48px が実効値
- * (`box-sizing: border-box`)。`DataTable` の `density="compact"` は `px-3` になり
- * 40px へ変わるが、現在 `density` を渡している呼び出し元は無い。
+ * 内訳は **セル左右の padding 2px ずつ (計 4px) + 44px のタッチターゲット**。
+ * セルに宣言してある 48px の固定幅は実測値に合わせた宣言であって、min-content を
+ * 決めているのは中身の 44 + 4 のほう (`box-sizing: border-box`)。
+ *
+ * #234 より前は「16px のチェックボックス + 左右 16px ずつの padding」で 48px だった。
+ * #234 はチェックボックスをラベルで包んで 44px のタッチターゲットにし、その代わりに
+ * padding を 4px へ詰めている。**合計 48px が動かないので、下の 2 本のマップの 48px 差
+ * という規約も、それを前提にした閾値もすべて不変**という前提で通してある。
+ *
+ * この 2 つのセルだけは density を参照しない (濃度別の padding 表を通さず直接書いて
+ * ある)。compact を渡しても選択列の幅は 48px のままで、他の列だけが詰まる。
  */
 export const SELECTION_COLUMN_WIDTH = 48;
 
@@ -203,4 +211,69 @@ export function resolveColumnHideClass(
   return hasSelectionColumn
     ? HIDE_BELOW_WITH_SELECTION[col.minContainerWidth]
     : HIDE_BELOW[col.minContainerWidth];
+}
+
+/**
+ * 表 ⇄ カードの切替閾値 (#234 / PR3/3)。
+ *
+ * ## なぜ列を削るのではなくビューごと差し替えるのか
+ * /stores の always 列 (店舗名 260 + 次回アクション 272 + 操作 100) は 632px、admin は
+ * 選択列を足して 680px ある。375px viewport のコンテナ幅は 341px なので、`<table>` を
+ * 使う限り**構造的に**横スクロールが消えない。always からさらに列を削ると、営業が
+ * 外で最も必要とする「次に何をするか」が画面から消えてしまう。
+ *
+ * ## 閾値の意味
+ * 「always 列が確実に収まるときだけ表を描画する」という不変条件を作る値。
+ * 632 / 680 に 8px の余裕を足した 640 / 688 とし、選択列の +48px は
+ * {@link SELECTION_COLUMN_WIDTH} の規約に揃える。
+ * この結果、768px タブレット + サイドバー折畳 (コンテナ 654px) では admin だけカードに
+ * なり、#223 で残っていた 26px の横スクロールが消える。
+ *
+ * ## フェイルセーフ (段階表示と同じ思想)
+ * 表とカードの**両方を DOM に出し、それぞれに「隠す」クラスだけを付ける**。
+ * 素の `hidden` を基底クラスとして置かない。こうすると CSS 生成失敗 / コンテナクラス
+ * 欠落 / container query 非対応のどの経路でも「両方出る」に劣化し、
+ * **「どちらも出ない」= 画面が空になる事故が構造的に起こらない**。
+ *
+ * `@max-[Npx]` は `(width < N)`、`@min-[Npx]` は `(width >= N)` に展開されるので、
+ * 同じ N を使う限り 2 本は境界に隙間も重複もない完全な補集合になる。
+ * (`__tests__/data-table-responsive.test.ts` が機械的に固定している。)
+ */
+export const CARD_VIEW_BREAKPOINT = 640;
+
+/** 表を隠す (= カードに切り替える) クラス。キーは選択列の有無。 */
+const TABLE_HIDE_BELOW_CARD = {
+  false: "@max-[640px]/data-table:hidden",
+  true: "@max-[688px]/data-table:hidden",
+} as const;
+
+/** カードリストを隠す (= 表に切り替える) クラス。上と同じ px の補集合。 */
+const CARD_LIST_HIDE_FROM = {
+  false: "@min-[640px]/data-table:hidden",
+  true: "@min-[688px]/data-table:hidden",
+} as const;
+
+export const VIEW_SWITCH_TABLE_CLASSES: Readonly<Record<"true" | "false", string>> =
+  TABLE_HIDE_BELOW_CARD;
+export const VIEW_SWITCH_CARD_CLASSES: Readonly<Record<"true" | "false", string>> =
+  CARD_LIST_HIDE_FROM;
+
+export interface ViewSwitchClasses {
+  /** `<table>` に付ける「狭いと隠す」クラス。 */
+  table: string;
+  /** カードリストに付ける「広いと隠す」クラス。 */
+  cardList: string;
+}
+
+/**
+ * 表とカードを排他に出し分けるクラスの組を返す。
+ *
+ * 必ず 2 本とも返す (どちらかが `undefined` になる経路は無い)。片方だけ返す設計だと
+ * 「両方隠れる」状態を作りうるため。
+ */
+export function resolveViewSwitchClasses({
+  hasSelectionColumn = false,
+}: { hasSelectionColumn?: boolean } = {}): ViewSwitchClasses {
+  const key = hasSelectionColumn ? "true" : "false";
+  return { table: TABLE_HIDE_BELOW_CARD[key], cardList: CARD_LIST_HIDE_FROM[key] };
 }

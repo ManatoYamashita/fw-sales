@@ -5,8 +5,16 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 import { type ReactNode } from "react";
 import { cn } from "@/lib/utils/cn";
+import {
+  buildSortHref,
+  nextSortDir,
+  readSortState,
+  type SortDir,
+} from "./sortable-header-params";
 
-export type SortDir = "asc" | "desc";
+// URL 組み立ては sortable-header-params.ts が単一の真実 (カードモードの
+// DataTableSortSelect と共有する)。型は既存の import 元を壊さないよう re-export する。
+export type { SortDir };
 
 export interface SortableHeaderProps {
   /** URL の `?sort=` に書き込むキー */
@@ -41,22 +49,15 @@ export function SortableHeader({
   const params = useSearchParams();
   const pathname = usePathname();
 
-  const currentSort = params.get("sort");
-  const currentDir = params.get("dir") === "asc" ? "asc" : "desc";
-  const isActive = currentSort === sortKey;
-  const effectiveDir: SortDir = isActive ? (currentDir as SortDir) : defaultDir;
-
-  // クリック時の遷移先: 新しい dir を計算
-  const nextDir: SortDir = isActive
-    ? effectiveDir === "asc"
-      ? "desc"
-      : "asc"
-    : defaultDir;
-
-  const next = new URLSearchParams(params.toString());
-  next.set("sort", sortKey);
-  next.set("dir", nextDir);
-  const href = `${pathname}?${next.toString()}`;
+  const current = readSortState(params);
+  const isActive = current.sortKey === sortKey;
+  const effectiveDir: SortDir = isActive ? current.dir : defaultDir;
+  const href = buildSortHref(
+    pathname,
+    params,
+    sortKey,
+    nextSortDir(sortKey, defaultDir, current),
+  );
 
   const Icon = !isActive ? ArrowUpDown : effectiveDir === "asc" ? ArrowUp : ArrowDown;
 

@@ -2,11 +2,15 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  CARD_VIEW_BREAKPOINT,
   COLUMN_HIDE_CLASSES,
   COLUMN_HIDE_CLASSES_WITH_SELECTION,
   DATA_TABLE_CONTAINER_CLASS,
   SELECTION_COLUMN_WIDTH,
+  VIEW_SWITCH_CARD_CLASSES,
+  VIEW_SWITCH_TABLE_CLASSES,
   resolveColumnHideClass,
+  resolveViewSwitchClasses,
   type ColumnMinContainerWidth,
 } from "../data-table-responsive";
 
@@ -158,6 +162,71 @@ describe("resolveColumnHideClass", () => {
     const col = { minContainerWidth: 874 } as const;
     expect(resolveColumnHideClass(col, { activeSortKey: undefined })).toBe(
       "@max-[874px]/data-table:hidden",
+    );
+  });
+});
+
+describe("表 ⇄ カードの切替クラス (#234)", () => {
+  /** `@max-[Npx]` / `@min-[Npx]` から px を取り出す。 */
+  const px = (className: string) => {
+    const m = /^@(?:max|min)-\[(\d+)px\]\/data-table:hidden$/.exec(className);
+    expect(m, `想定外のクラス形式: ${className}`).not.toBeNull();
+    return Number(m![1]);
+  };
+
+  it("切替閾値は always 列の下限 (632 / 680) を上回る", () => {
+    // 「表ビューは always 列が確実に収まるときだけ描画される」という不変条件。
+    // ここが崩れると表を出したまま横スクロールが残る。
+    expect(px(VIEW_SWITCH_TABLE_CLASSES.false)).toBe(CARD_VIEW_BREAKPOINT);
+    expect(px(VIEW_SWITCH_TABLE_CLASSES.false)).toBeGreaterThan(632);
+    expect(px(VIEW_SWITCH_TABLE_CLASSES.true)).toBeGreaterThan(680);
+  });
+
+  it("選択列ありは選択列幅ぶん大きい", () => {
+    expect(px(VIEW_SWITCH_TABLE_CLASSES.true) - px(VIEW_SWITCH_TABLE_CLASSES.false))
+      .toBe(SELECTION_COLUMN_WIDTH);
+  });
+
+  it("表側とカード側は同じ px の完全な補集合である", () => {
+    // これが本テストの要。@max-[N] は (width < N)、@min-[N] は (width >= N) なので、
+    // 同じ N を使う限り境界に隙間も重複もない。
+    // px がずれると「どちらも隠れる幅」または「両方出る幅」が生まれる。
+    for (const key of ["false", "true"] as const) {
+      expect(VIEW_SWITCH_TABLE_CLASSES[key].startsWith("@max-")).toBe(true);
+      expect(VIEW_SWITCH_CARD_CLASSES[key].startsWith("@min-")).toBe(true);
+      expect(px(VIEW_SWITCH_CARD_CLASSES[key])).toBe(px(VIEW_SWITCH_TABLE_CLASSES[key]));
+    }
+  });
+
+  it("resolveViewSwitchClasses は必ず 2 本とも返す", () => {
+    // 片方だけ返す設計だと「両方隠れる = 画面が空」を作りうる。
+    for (const hasSelectionColumn of [false, true]) {
+      const r = resolveViewSwitchClasses({ hasSelectionColumn });
+      expect(r.table).toBeTruthy();
+      expect(r.cardList).toBeTruthy();
+      expect(px(r.table)).toBe(px(r.cardList));
+    }
+    // 引数なしでも非選択側で解決する。
+    expect(resolveViewSwitchClasses().table).toBe(VIEW_SWITCH_TABLE_CLASSES.false);
+  });
+
+  it("切替クラスもソースへリテラルで書かれている", async () => {
+    const source = await readFile(SOURCE_PATH, "utf8");
+    for (const cls of [
+      ...Object.values(VIEW_SWITCH_TABLE_CLASSES),
+      ...Object.values(VIEW_SWITCH_CARD_CLASSES),
+    ]) {
+      expect(source, `${cls} がリテラルで書かれていない`).toContain(`"${cls}"`);
+    }
+  });
+
+  it("段階表示の閾値マップとは別 export のままである", () => {
+    // 切替クラスを COLUMN_HIDE_CLASSES に混ぜると #220 の閾値集合が壊れる。
+    expect(Object.values(COLUMN_HIDE_CLASSES)).not.toContain(
+      VIEW_SWITCH_TABLE_CLASSES.false,
+    );
+    expect(Object.values(COLUMN_HIDE_CLASSES_WITH_SELECTION)).not.toContain(
+      VIEW_SWITCH_TABLE_CLASSES.true,
     );
   });
 });

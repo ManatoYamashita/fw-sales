@@ -12,6 +12,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 import {
+  CARD_VIEW_BREAKPOINT,
   SELECTION_COLUMN_WIDTH,
   type ColumnMinContainerWidth,
 } from "@/components/ui/data-table-responsive";
@@ -145,6 +146,23 @@ describe("店舗一覧の列優先度", () => {
       expect(column(key).maxWidth, `${key} の上限`).toBe(`${BUDGET[key]}px`);
       expect(column(key).truncate, `${key} は truncate されるべき`).toBe(true);
     }
+  });
+
+  it("always 列の min-content 合計がカード切替閾値に収まる (#234)", () => {
+    // 「表ビューは always 列が確実に収まるときだけ描画される」という不変条件。
+    // always 列を増やしたり cap を広げたりすると、表を出したまま横スクロールが
+    // 残る帯が生まれる。そのときは切替閾値も一緒に上げること。
+    //
+    // 合計は写経せず #237 の BUDGET から積む。ここを直値にすると「予算を直したのに
+    // この不変条件だけ古い数字のまま」が起こる。
+    // 選択列ありの側 (680 <= 688) は両辺に同じ 48 を足すだけで下の式と同値になり
+    // 何も増やさないため置かない。閾値どうしが 48px 差であることは
+    // `data-table-responsive.test.ts` が別途固定している。
+    const alwaysMinContent = ALWAYS.reduce((sum, key) => sum + BUDGET[key], 0);
+
+    expect(buildColumns(false).filter((c) => c.minContainerWidth === undefined).map((c) => c.key))
+      .toEqual(["name", "next", "actions"]);
+    expect(alwaysMinContent).toBeLessThanOrEqual(CARD_VIEW_BREAKPOINT);
   });
 
   it("閾値は always 予算 + 優先度順の累積と厳密に一致する (#237)", () => {
