@@ -468,14 +468,14 @@ export async function deleteStoreAction(id: string): Promise<ActionResult> {
     if (parsed === null) dumpUnrecognizedErrorShape("[stores.delete]", err);
     return failure(formatUserMessage(parsed, "店舗の削除に失敗しました"));
   }
-  // 関連レコード (商談 / 調査 / 引き継ぎ) は FK の ON DELETE CASCADE (migration 0021 で
-  // 再宣言 / #152) により連鎖削除され、場所候補は SET NULL で紐付け解除される。
+  // 関連レコード (商談 / 引き継ぎ / AI 調査 run) は FK の ON DELETE CASCADE
+  // (migration 0021 で再宣言 / #152) により連鎖削除され、場所候補は SET NULL で
+  // 紐付け解除される。
   // task 4.2 (PR3a): Deep Research タグは撤去 (#121 / #110 連動)。
+  // Issue #110: 旧手入力調査テーブルの research / researchByStore タグも撤去。
   invalidateAllStoreScopes(id);
   revalidateTag(CACHE_TAGS.deals, "max");
   revalidateTag(CACHE_TAGS.dealsByStore(id), "max");
-  revalidateTag(CACHE_TAGS.research, "max");
-  revalidateTag(CACHE_TAGS.researchByStore(id), "max");
   revalidateTag(CACHE_TAGS.handoffs, "max");
   revalidateTag(CACHE_TAGS.handoffsByStore(id), "max");
   console.log("[audit] stores.delete", { by: guard.profile.email, id });
@@ -531,16 +531,15 @@ export async function bulkDeleteStoresAction(
 
   // 集合タグを広く revalidate する。
   // task 4.2 (PR3a): Deep Research タグは撤去 (#121 / #110 連動)。
+  // Issue #110: 旧手入力調査テーブルの research / researchByStore タグも撤去。
   invalidateAllStoreScopes();
   revalidateTag(CACHE_TAGS.deals, "max");
-  revalidateTag(CACHE_TAGS.research, "max");
   revalidateTag(CACHE_TAGS.handoffs, "max");
   // 各店舗スコープの *ByStore タグも削除 ID 分だけ飛ばし、単一削除 (deleteStoreAction) と
   // 対称にする。これらでタグ付けされた店舗詳細側のキャッシュが古い関連データを返すのを防ぐ。
   for (const id of uniqueIds) {
     revalidateTag(CACHE_TAGS.store(id), "max");
     revalidateTag(CACHE_TAGS.dealsByStore(id), "max");
-    revalidateTag(CACHE_TAGS.researchByStore(id), "max");
     revalidateTag(CACHE_TAGS.handoffsByStore(id), "max");
   }
 

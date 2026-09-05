@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { DbSnapshot } from "@/lib/db/snapshot";
 import { repos } from "@/lib/repositories";
 import { today } from "@/lib/utils/date";
+import { requireSignedIn } from "@/lib/actions/_authz";
 
 // Runtime: Node.js 固定。
 // postgres.js は Edge ランタイム非対応のため、本ルートは Node.js でしか
@@ -15,15 +16,37 @@ import { today } from "@/lib/utils/date";
 // は、ビルドシステム側でより強く保証されているためコメント化のみとする。
 
 export async function GET() {
-  // 4 entity を DB から並列取得 (waterfall 排除、design R5)。
+  // 認証ゲート。`proxy.ts` の `config.matcher` は `/api/*` を除外しており、
+  // Route Handler は proxy に守られない。本 route は DB スナップショット全件
+  // (店舗の連絡先・商談の見積/受注額・失注理由を含む) を返すため、認可は
+  // このハンドラ自身が持つ必要がある。
+  //
+  // ロールは問わない。設定画面の #155 の判断 (`data-actions.tsx`: リセット /
+  // 全削除 / インポートは admin 限定、「Export は非破壊のためゲートしない」)
+  // に合わせ、要求は「ログイン済みであること」に留める。admin 限定へ絞るかは
+  // 別途の運用ポリシー判断とする。
+  const denied = await requireSignedIn();
+  if (denied) {
+    console.warn("[authz] denied", {
+      action: "data.export",
+      reason: "unauthenticated",
+    });
+    // `requireSignedIn` は拒否時のみ ActionResult を返す契約だが、戻り値の型は
+    // ActionResult<never> の union なので失敗側へ絞ってから文言を取り出す。
+    // 絞れなかった場合も fail-closed で 401 にする (非 null = 拒否)。
+    const message = denied.ok === false ? denied.error : "ログインが必要です";
+    return NextResponse.json({ error: message }, { status: 401 });
+  }
+
+  // 3 entity を DB から並列取得 (waterfall 排除、design R5)。
   // research-handoff-db-migration §8.1 / §8.4 で Mock 経由を排除済。
-  const [deals, stores, research, handoffs] = await Promise.all([
+  // Issue #110 で旧 `research` テーブルを撤去したため 4 → 3 entity になった。
+  const [deals, stores, handoffs] = await Promise.all([
     repos.deal.list(),
     repos.store.list(),
-    repos.research.list(),
     repos.handoff.list(),
   ]);
-  const snapshot: DbSnapshot = { stores, research, deals, handoffs };
+  const snapshot: DbSnapshot = { stores, deals, handoffs };
 
   const body = JSON.stringify(snapshot, null, 2);
   return new NextResponse(body, {

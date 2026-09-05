@@ -49,6 +49,11 @@ export const config = {
    * - `/login` / `/auth/*` (認証経路自体)
    * - `/privacy` / `/terms` (未認証でも閲覧する法的ページ。`(legal)` Route Group)
    * - `/api/*` (API 経路)
+   *   **proxy はここを守らない。各 Route Handler が自前で認可すること。**
+   *   `/auth/callback` 等の未認証で通す必要がある経路と同居しているため一括保護は
+   *   できない。全件を返す READ も含め、認可は `lib/actions/_authz.ts` の
+   *   `requireSignedIn` / `requireAdmin` をハンドラ先頭で呼んで行う
+   *   (`app/api/export/route.ts` が例)。
    * - `/_next/*` (Next.js 内部アセット)
    * - 拡張子付き静的アセット (favicon / public/ 配下)
    * - `manifest.webmanifest` / `robots.txt` / `sitemap.xml` / `.well-known/*`

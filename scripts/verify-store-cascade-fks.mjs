@@ -2,7 +2,8 @@
  * 店舗系 FK の ON DELETE 実態を検証する読み取り専用スクリプト (#152)。
  *
  * 検証内容 (design.md §Data Models の FK ポリシー宣言と DB 実態の一致):
- * - deals.store_id / research.store_id / handoffs.store_id / handoffs.deal_id → ON DELETE CASCADE
+ * - deals.store_id / handoffs.store_id / handoffs.deal_id → ON DELETE CASCADE
+ *   (Issue #110 で research テーブルを DROP したため対象から外した)
  * - place_candidates.matched_store_id → ON DELETE SET NULL
  *
  * 一致しない・存在しない制約があれば一覧を出力して exit 1、全一致で exit 0。
@@ -18,7 +19,6 @@ import postgres from "postgres";
 /** 期待する ON DELETE 挙動。confdeltype: c=CASCADE, n=SET NULL, a=NO ACTION, r=RESTRICT, d=SET DEFAULT */
 const EXPECTED = [
   { child: "deals", conname: "deals_store_id_stores_id_fk", deltype: "c" },
-  { child: "research", conname: "research_store_id_stores_id_fk", deltype: "c" },
   { child: "handoffs", conname: "handoffs_store_id_stores_id_fk", deltype: "c" },
   { child: "handoffs", conname: "handoffs_deal_id_deals_id_fk", deltype: "c" },
   {

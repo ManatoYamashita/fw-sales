@@ -1,5 +1,12 @@
 # Design Document — deep-research-pipeline
 
+> **2026-09-03 更新**: 本仕様の実装は **全撤去済み** です (#102 で運用停止 →
+> #116 / #125 / #180 / #185 / #213 / #110 で物理削除)。以下の設計記述は
+> **すべて削除済機能の履歴** であり、対応する実装・テーブル・env・ワークフローは
+> 現行コードベースに一つも存在しません。後継は AI 店舗調査 (Plan v3.2 / Issue #180): `app/(main)/research/**` / `lib/ai/research/**` / `workflows/store-research.ts`。
+
+**Status**: Removed (2026-09-03)
+
 ## Overview
 
 **Purpose**: fw-sales の店舗ごとに、夜間バッチで Gemini Deep Research を呼び出し 8 カテゴリ・51 項目の構造化レポートを生成・蓄積する非同期パイプラインを提供する。営業担当者が「寝る前にキューに 1 件投入 → 翌朝アプリ内通知で結果を確認」できる動線を成立させる。

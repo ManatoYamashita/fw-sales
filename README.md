@@ -43,7 +43,7 @@ app/
 │   ├── layout.tsx
 │   ├── dashboard/             # KPI / アクションキュー / パイプラインサマリー
 │   ├── stores/                # 一覧・登録 (URL Import + AI 分析)・詳細・編集
-│   ├── research/              # 調査 (DeepResearch 結果貼付ワークベンチ)
+│   ├── research/              # AI 店舗調査 (実行 → 53 項目レビュー)
 │   ├── pipeline/              # Kanban
 │   ├── actions/               # DM/Tel スクリプト + 実行記録
 │   ├── deals/                 # 商談一覧・新規・詳細
@@ -68,14 +68,14 @@ lib/
 ├── queries/                   # 集計 / 取得関数 ('use cache' で包む)
 ├── actions/                   # Server Actions ('use server')
 ├── url-parser/                # 食べログ / Googleマップ URL 解析 + OGP fetch
-├── templates/                 # DM / テレアポ文面生成(純関数)
+├── templates/                 # DM / テレアポ文面生成(純関数。店舗情報のみの定型文)
 ├── hooks/                     # React hooks
 ├── utils/                     # date / format / id / cn(clsx)
 ├── env.ts                     # 環境変数バリデーション (fail-fast)
 └── cache.ts                   # CACHE_TAGS 定数
 
 proxy.ts                       # Supabase Auth セッション検証 (Node.js runtime)
-types/                         # Store / Research / Deal / Handoff / Stage
+types/                         # Store / Deal / Handoff / ResearchRun / Stage
 ```
 
 ## デザインシステム
@@ -94,7 +94,7 @@ types/                         # Store / Research / Deal / Handoff / Stage
 
 ## DB セットアップ手順 (Supabase + Drizzle)
 
-店舗 (Store) / 商談 (Deal) / 調査 (Research) / 引き継ぎ (Handoff) の 4 entity を Supabase Postgres + Drizzle ORM で永続化する手順です。`DATABASE_URL` は起動必須(未設定だと `lib/db/client.ts` が fail-fast)。
+店舗 (Store) / 商談 (Deal) / 引き継ぎ (Handoff) の 3 entity を Supabase Postgres + Drizzle ORM で永続化する手順です(旧「調査 (Research)」entity は Issue #110 で撤去し、店舗調査は `store_research_runs` が担います)。`DATABASE_URL` は起動必須(未設定だと `lib/db/client.ts` が fail-fast)。
 
 ### 1. Supabase プロジェクト作成
 
@@ -149,7 +149,7 @@ pnpm drizzle-kit push             # スキーマ差分を直接反映 (本番運
 
 ### 5. SEED データの投入
 
-`SEED_STORES` / `SEED_DEALS` / `SEED_RESEARCH` / `SEED_HANDOFFS` (`lib/db/seed-data.ts`) の 4 entity データを Postgres に upsert します。FK 整合のため `stores → deals → research → handoffs` の順で投入され、`ON CONFLICT DO UPDATE` でベキ等です。
+`SEED_STORES` / `SEED_DEALS` / `SEED_HANDOFFS` (`lib/db/seed-data.ts`) の 3 entity データを Postgres に upsert します。FK 整合のため `stores → deals → handoffs` の順で投入され、`ON CONFLICT DO UPDATE` でベキ等です。
 
 ```bash
 pnpm seed

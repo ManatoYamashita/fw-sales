@@ -15,8 +15,10 @@
  * - `member`      : Google OAuth でサインインした実ユーザー (既定値)
  * - `placeholder` : バックフィル時に旧 text 担当者値から自動生成された暫定プロフィール。
  *                   メール送信時は `@local.invalid` ガードで no-op となる。
- * - `admin`       : 管理者ユーザー (deep-research-pipeline spec #43 で追加)。
- *                   月次予算警告通知 (`deep_research_budget_warning`) の fan-out 先。
+ * - `admin`       : 管理者ユーザー。破壊的操作の認可 (#155) と設定画面の
+ *                   ユーザー管理 UI (#157) で参照される。初出は
+ *                   deep-research-pipeline (#43) の月次予算警告通知の fan-out 先
+ *                   だが、その通知経路は #185 で撤去済み。
  */
 export type ProfileRole = "member" | "placeholder" | "admin";
 

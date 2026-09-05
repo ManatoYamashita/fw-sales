@@ -21,26 +21,26 @@ export const metadata: Metadata = { title: "設定" };
 
 async function loadCounts() {
   "use cache";
-  // 4テーブルを full list する最重クエリ。longBackstop だと build 時 prerender 充填が走り、
+  // 3テーブルを full list する最重クエリ。longBackstop だと build 時 prerender 充填が走り、
   // データ増大時に将来 USE_CACHE_TIMEOUT を招き得る。
   // dynamicHole(expire<MIN_PRERENDERABLE_EXPIRE=300s。16.2 までの名称は DYNAMIC_EXPIRE)
   // で build 充填を回避し、リクエスト時充填 + 短期 runtime cache + タグ無効化で運用する。
+  //
+  // Issue #110: 旧 `research` テーブル撤去に伴い、「調査」カードは AI 店舗調査の
+  // run 総数 (`store_research_runs`) に差し替えた。件数は行を全件ロードせず
+  // `count(*)` で取る。run の作成・完了は `startResearchRunAction` 等が
+  // `CACHE_TAGS.stores` を revalidate するため、下のタグで失効が届く。
   cacheLife("dynamicHole");
-  cacheTag(
-    CACHE_TAGS.stores,
-    CACHE_TAGS.research,
-    CACHE_TAGS.deals,
-    CACHE_TAGS.handoffs,
-  );
-  const [stores, research, deals, handoffs] = await Promise.all([
+  cacheTag(CACHE_TAGS.stores, CACHE_TAGS.deals, CACHE_TAGS.handoffs);
+  const [stores, researchRuns, deals, handoffs] = await Promise.all([
     repos.store.list(),
-    repos.research.list(),
+    repos.researchRun.count(),
     repos.deal.list(),
     repos.handoff.list(),
   ]);
   return {
     stores: stores.length,
-    research: research.length,
+    researchRuns,
     deals: deals.length,
     handoffs: handoffs.length,
   };
@@ -64,7 +64,7 @@ async function CountsGrid() {
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
       <Stat label="店舗" value={counts.stores} icon={<StoreIcon />} />
-      <Stat label="調査" value={counts.research} icon={<Search />} />
+      <Stat label="AI調査" value={counts.researchRuns} icon={<Search />} />
       <Stat label="商談" value={counts.deals} icon={<Handshake />} />
       <Stat label="引き継ぎ" value={counts.handoffs} icon={<ArrowLeftRight />} />
     </div>

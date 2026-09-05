@@ -18,8 +18,14 @@ import type { Profile } from "@/types/profile";
  *   内部情報を一切含めない (#152 で確立した二系統設計を踏襲)。
  * - 認可の唯一の真の防御はこのサーバ層。UI 側のボタン無効化は UX 上の補助に過ぎない。
  *
- * 適用範囲は破壊的 8 action (store/deal/handoff の delete、data の reset/clear/import、
- * prompt-template の delete)。非破壊 WRITE や READ には適用しない。
+ * `requireAdmin` の適用範囲は破壊的 8 action (store/deal/handoff の delete、
+ * data の reset/clear/import、prompt-template の delete)。
+ *
+ * ただし **Server Action だけが認可の対象ではない**。`proxy.ts` の `config.matcher` は
+ * `/api/*` を除外しており Route Handler は proxy に守られないため、そこでも本モジュールの
+ * ガードをハンドラ先頭で呼ぶ必要がある。とくに **全件を返す READ 経路**は、破壊的でなくとも
+ * 無認証で叩けると DB スナップショットがそのまま流出する
+ * (`app/api/export/route.ts` が該当し `requireSignedIn` を使用)。
  */
 export type AdminGuard =
   | { ok: true; profile: Profile }
