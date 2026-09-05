@@ -16,6 +16,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Bell, Inbox } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
+import {
+  OVERLAY_ANCHOR_CONTAINER,
+  OVERLAY_PANEL_ALIGN_END,
+} from "@/components/ui/overlay-anchor-classes";
 import type { Notification, NotificationKind } from "@/types/notification";
 
 interface NotificationBellProps {
@@ -57,7 +61,9 @@ export function NotificationBell({ notifications }: NotificationBellProps) {
   const handleNavigate = useCallback(() => setOpen(false), []);
 
   return (
-    <div ref={containerRef} className="relative">
+    // 位置の契約は overlay-anchor-classes.ts が単一の真実 (#225 Phase 3)。
+    // ボタン側 (下の `relative`) は未読バッジの基準なのでそのまま残す。
+    <div ref={containerRef} className={OVERLAY_ANCHOR_CONTAINER}>
       <button
         type="button"
         aria-label={`通知 (${unreadCount} 件未読)`}
@@ -81,7 +87,10 @@ export function NotificationBell({ notifications }: NotificationBellProps) {
         <div
           role="dialog"
           aria-label="通知一覧"
-          className="absolute right-0 mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-md border border-border bg-popover shadow-md z-30"
+          className={cn(
+            "absolute mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-md border border-border bg-popover shadow-md z-30",
+            OVERLAY_PANEL_ALIGN_END,
+          )}
         >
           <div className="border-b border-border px-3 py-2 flex items-center justify-between">
             <span className="text-sm font-medium">通知</span>
