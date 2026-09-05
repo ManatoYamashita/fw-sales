@@ -107,9 +107,17 @@ const HIDE_BELOW = {
 /**
  * 選択列 (admin の一括操作チェックボックス) が描画される幅。
  *
- * `w-10` (40px) ではなくチェックボックス 16px + `px-4` 32px = 48px が実効値
- * (`box-sizing: border-box`)。`DataTable` の `density="compact"` は `px-3` になり
- * 40px へ変わるが、現在 `density` を渡している呼び出し元は無い。
+ * 内訳は **セル左右の padding 2px ずつ (計 4px) + 44px のタッチターゲット**。
+ * セルに宣言してある 48px の固定幅は実測値に合わせた宣言であって、min-content を
+ * 決めているのは中身の 44 + 4 のほう (`box-sizing: border-box`)。
+ *
+ * #234 より前は「16px のチェックボックス + 左右 16px ずつの padding」で 48px だった。
+ * #234 はチェックボックスをラベルで包んで 44px のタッチターゲットにし、その代わりに
+ * padding を 4px へ詰めている。**合計 48px が動かないので、下の 2 本のマップの 48px 差
+ * という規約も、それを前提にした閾値もすべて不変**という前提で通してある。
+ *
+ * この 2 つのセルだけは density を参照しない (濃度別の padding 表を通さず直接書いて
+ * ある)。compact を渡しても選択列の幅は 48px のままで、他の列だけが詰まる。
  */
 export const SELECTION_COLUMN_WIDTH = 48;
 
