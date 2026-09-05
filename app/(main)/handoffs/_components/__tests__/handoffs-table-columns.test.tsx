@@ -65,9 +65,6 @@ const EXPECTED: Record<string, ColumnMinContainerWidth | undefined> = {
   //          閾値は列幅の和 717 ではなくテーブルの実 min-content 718。
 };
 
-/** 状態バッジ (運用確認待ち / 完了) の実効幅。閉じた enum なので確定する。 */
-const STATUS_COLUMN_BUDGET = 120;
-
 /** コンテナ幅 `w` で表示される列 (判定ロジックは 3 ビュー共通)。 */
 function visibleAt(w: number): string[] {
   return visibleColumnsAt(buildColumns(), w);
@@ -132,11 +129,14 @@ describe("引き継ぎ一覧の列優先度", () => {
     // この画面にはフィルタ UI が無いので、状態が目視スキャンの唯一のトリアージ軸。
     expect(always).toEqual(["store", "status"]);
 
+    // 状態の実効幅は写経せず BUDGET から採る。ここを直値にすると「予算を直したのに
+    // この不変条件だけ古い数字のまま」が起こり、341px の破れを検出できなくなる
+    // (`/stores` のカード切替閾値の検算と同じ理由)。
     const storeCap = Number.parseInt(
       columns.find((c) => c.key === "store")!.maxWidth!,
       10,
     );
-    expect(storeCap + STATUS_COLUMN_BUDGET).toBeLessThanOrEqual(NARROWEST_CONTAINER);
+    expect(storeCap + BUDGET.status).toBeLessThanOrEqual(NARROWEST_CONTAINER);
   });
 
   it("上限の無い列は fee だけで、かつ最後に現れる列である", () => {
