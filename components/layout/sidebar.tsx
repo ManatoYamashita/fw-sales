@@ -5,6 +5,10 @@ import { usePathname, useRouter } from "next/navigation";
 import { LogOut, Menu, PanelLeft, PanelLeftClose, X, Zap } from "lucide-react";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { NAV_ITEMS } from "@/lib/domain/nav";
+import {
+  FOCUSABLE_SELECTOR,
+  resolveDrawerFocusWrap,
+} from "@/components/layout/sidebar-focus";
 import { cn } from "@/lib/utils/cn";
 import { signOutAction } from "@/lib/actions/auth-actions";
 import type { NavBadgeCounts } from "@/lib/queries/stats";
@@ -53,6 +57,79 @@ export function Sidebar({
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const close = () => setOpen(false);
+  const asideRef = useRef<HTMLElement>(null);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+  /** 直前の open。閉じた「瞬間」だけフォーカスを戻すために持つ。 */
+  const wasOpenRef = useRef(false);
+
+  // md 以上へ広がったらドロワーを閉じる。閉じないと、開いたままデスクトップ幅に
+  // なったときに下のスクロールロックとフォーカストラップが、常時可視のサイドバーに
+  // 対して働き続けてページがスクロールできなくなる。
+  //
+  // Epic #225 D2 が禁じる「viewport の JS 判定」は、静的シェルと hydration 後で
+  // 描画が食い違う場合の話。ここは初期値 false がサーバ・クライアントで一致し、
+  // 描画を分岐させないため該当しない。
+  useEffect(() => {
+    const desktop = window.matchMedia("(min-width: 768px)");
+    const syncToViewport = () => {
+      if (desktop.matches) setOpen(false);
+    };
+    syncToViewport();
+    desktop.addEventListener("change", syncToViewport);
+    return () => desktop.removeEventListener("change", syncToViewport);
+  }, []);
+
+  // ドロワー展開中のみ: Escape で閉じる / Tab をドロワー内で循環させる /
+  // 背後のページをスクロールさせない。
+  useEffect(() => {
+    if (!open) return;
+
+    const previousOverflowY = document.body.style.overflowY;
+    // `overflow: hidden` ではなく y 軸だけを止める。globals.css の
+    // `html, body { overflow-x: clip }` を上書きすると sticky が壊れるため。
+    document.body.style.overflowY = "hidden";
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setOpen(false);
+        return;
+      }
+      const root = asideRef.current;
+      if (!root) return;
+      const focusable = Array.from(
+        root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+      );
+      const target = resolveDrawerFocusWrap(
+        event.key,
+        event.shiftKey,
+        focusable.indexOf(document.activeElement as HTMLElement),
+        focusable.length,
+      );
+      if (target === null) return;
+      event.preventDefault();
+      focusable[target]!.focus();
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflowY = previousOverflowY;
+    };
+  }, [open]);
+
+  // 開いたらドロワー内へフォーカスを入れ、閉じたらハンバーガーへ戻す。
+  // 戻さないと、X を押した瞬間にフォーカスを持っていた要素ごと DOM から消え、
+  // 次の Tab がページ先頭からやり直しになる。
+  useEffect(() => {
+    if (open) {
+      asideRef.current
+        ?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR)
+        ?.focus();
+    } else if (wasOpenRef.current) {
+      menuButtonRef.current?.focus();
+    }
+    wasOpenRef.current = open;
+  }, [open]);
 
   // デスクトップ (md 以上) のアイコンレール折りたたみ。モバイルのドロワー (open) とは独立。
   const [collapsed, setCollapsed] = useState(defaultCollapsed);
@@ -114,16 +191,26 @@ export function Sidebar({
       ) : null}
 
       <aside
+        ref={asideRef}
         id="sidebar-nav"
         aria-label="メインナビゲーション"
         className={cn(
           "fixed md:sticky md:top-0 md:self-start z-40 h-dvh w-60 shrink-0",
           "bg-sidebar text-sidebar-foreground border-r border-sidebar-border",
           "flex flex-col",
-          "transition-[transform,width] duration-200 ease-out",
+          // visibility も遷移対象に含める。CSS の visibility は離散遷移なので、
+          // 開くときは即 visible、閉じるときは 200ms 後に hidden となり、
+          // スライドアウトのアニメーションを保ったまま隠せる。
+          "transition-[transform,width,visibility] duration-200 ease-out",
           // デスクトップのみ折りたたみ幅を切替 (モバイルは常に w-60 ドロワー)
           collapsed ? "md:w-16" : "md:w-60",
-          open ? "translate-x-0" : "-translate-x-full md:translate-x-0",
+          // 閉時は `invisible` で Tab 順と支援技術から外す (#253)。`-translate-x-full`
+          // だけでは画面外に居るだけで、375px でナビ全リンクへ Tab が到達していた。
+          // `display:none` ではなく visibility にするのは開閉アニメーションを保つため。
+          // md 以上ではドロワーではなく常時可視のサイドバーなので必ず `visible` に戻す。
+          open
+            ? "translate-x-0 visible"
+            : "-translate-x-full invisible md:translate-x-0 md:visible",
         )}
       >
         {/* Brand */}
@@ -365,6 +452,7 @@ export function Sidebar({
       {/* Mobile menu trigger ─ サイドバー閉時のみ表示。開時は内側 X ボタンで閉じる */}
       {!open ? (
         <button
+          ref={menuButtonRef}
           type="button"
           aria-label="メニューを開く"
           aria-expanded={open}
