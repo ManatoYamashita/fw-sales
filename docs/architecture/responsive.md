@@ -167,7 +167,7 @@ Tailwind v4 のクラス生成は**ソースの静的走査**。テンプレー�
 
 必要なら**variant を追加する**（`button.tsx` の `touch` / `icon-touch` がその例）。既存 variant の値は変えない（波及範囲は `button.tsx` の JSDoc にある。回帰面が読めなくなる）。**正方形のアイコンボタンは `size="icon"` / `icon-sm` / `icon-lg` / `icon-touch` を使う。** `size="sm"` に `h-9 w-9 p-0` を重ねると、`p-0` が `sm` の `px-3` に負けて左右 padding が 12px 残り、中のアイコンが潰れる。
 
-UI プリミティブのサイズ、幅、余白、色を利用側の `className` で上書きしない。`Select` は `width` と `density`、`Spinner` は `size` と `tone`、`Card.Body` は `padding`、`Skeleton` は `tone`、`Button` は `size` / `variant` / `gap` を使い、意図を props で表現する。`cn` は `tailwind-merge` を持たないため、基底クラスと同じ CSS プロパティを `className` に書くと、どちらが勝つかは生成 CSS の順序次第になる。この 5 つのプリミティブについては `components/ui/__tests__/class-conflicts.test.ts` が `app/` と `components/` の JSX を走査して落とす（ガードは実装の基底クラスを直接読むので、プリミティブ側を変えれば検査範囲も自動で追従する）。**ただし走査が読むのは二重引用符で囲んだ `className` のリテラルだけで、波括弧の式で書いた `className` はそのタグごと無検査で通る（#262）。** #248 の `Card.Body` は三項演算子で `p-0` を渡す形だったため、**その原文を書き戻してもこのガードは緑のままになる**（実測）。式で組み立てるときはガードが無いものとして扱い、意図した側が本当に描かれているかを自分で確かめること。新しい例外が必要なら、先にプリミティブへ軸を追加する（`gap-1.5` を通すために `Button` へ `gap` 軸を足したのがその例）。軸を足すときは**基底から同じプロパティのクラスを外す**こと。基底に残すと軸の値と基底が争い、同じ事故が起きる。
+UI プリミティブのサイズ、幅、余白、色を利用側の `className` で上書きしない。`Select` は `width` と `density`、`Spinner` は `size` と `tone`、`Card.Body` は `padding`、`Skeleton` は `tone`、`Button` は `size` / `variant` / `gap` を使い、意図を props で表現する。`cn` は `tailwind-merge` を持たないため、基底クラスと同じ CSS プロパティを `className` に書くと、どちらが勝つかは生成 CSS の順序次第になる。この 5 つのプリミティブについては `components/ui/__tests__/class-conflicts.test.ts` が `app/` と `components/` の JSX を走査して落とす（ガードは実装の基底クラスを直接読むので、プリミティブ側を変えれば検査範囲も自動で追従する）。`className` は**リテラルでも式でも読む**。式は取り出せた文字列リテラルを合併して検査するので、`className={editing ? undefined : "p-0"}` のように片方の枝だけが衝突する形も落ちる。変数参照のように**クラスを供給しうるのに中身を読めない部分があれば fail-closed で落とす**（#262）。落ちたらクラスを文字列リテラルで書くか、意図を props へ移すこと。新しい例外が必要なら、先にプリミティブへ軸を追加する（`gap-1.5` を通すために `Button` へ `gap` 軸を足したのがその例）。軸を足すときは**基底から同じプロパティのクラスを外す**こと。基底に残すと軸の値と基底が争い、同じ事故が起きる。
 
 ### 4.4 flex の子への `min-w-0` 付け忘れ
 
@@ -195,7 +195,7 @@ CI は typecheck / lint / vitest の 3 ジョブで、**`next build` を持た�
 | ② CSS 生成検査 | 本物の `tailwindcss` の `compile()` に本物の `app/globals.css` を食わせ、期待するクエリ・宣言が出ることを確かめる | `data-table-responsive-css.test.ts` / `modal-classes-css.test.ts`。ヘルパは `components/ui/__tests__/support/build-css.ts` |
 | ③ 配線検査 | 定数が実際にコンポーネントへ渡っているかを、**開始タグだけを正規表現で切り出して**検査する | `modal-wiring.test.ts` |
 | ④ 実描画検査 | 実コンポーネントを `renderToStaticMarkup` し、**実際に出た HTML と class** を見る。①③ と違いソース文字列ではなく結果を見る | `tabs-narrow.test.tsx` / `sidebar-drawer.test.tsx` / `data-table-responsive-cells.test.tsx` |
-| ⑤ 純粋関数の単体検査 | 判断ロジックを DOM から切り離した別モジュールへ出し、分岐を網羅する | `tabs-keyboard.test.ts` / `sidebar-focus-trap.test.ts` / `button-touch-target.test.ts` |
+| ⑤ 純粋関数の単体検査 | 判断ロジックを DOM から切り離した別モジュールへ出し、分岐を網羅する | `tabs-keyboard.test.ts` / `sidebar-focus-trap.test.ts` / `button-touch-target.test.ts` / `jsx-class-scan.test.ts` |
 
 ### 土台の完了条件
 
@@ -213,8 +213,6 @@ CI は typecheck / lint / vitest の 3 ジョブで、**`next build` を持た�
 ④ は SSR の初期状態しか描かない。**開閉・フォーカス移動・スクロールロックといったマウント後の状態には自動テストが無い。** ⑤ で判断ロジックの分岐は突けるが、そこから DOM への配線は手動確認に依存する。ドロワー展開時のフォーカストラップ (#253) がこの穴に落ちている。
 
 埋めるには React component テスト環境の導入が要り、それは D5 の「新規依存を避ける」と衝突する。**穴があること自体を書いて残す**のが現時点の扱いで、緑のチェックを「全部検証済み」と読ませないための記述である。
-
-クラス衝突ガード（`class-conflicts.test.ts`）にも同種の穴がある。**利用側の `className` を波括弧の式で書くと、そのタグは走査対象から外れる（#262）。** #250 の事故は実数 34 箇所で、そのうち 32 箇所は二重引用符の静的リテラルなのでガードが落とす（事故当時の `app/` 配下を書き戻して実測した）。**落とせないのは式で書かれた #248 の 2 箇所だけ**だが、穴が塞がるまで、式で書いた分は緑が何も保証しない。適用範囲は §4.3 に明記してある。
 
 ### 空振り検証を必ず添える
 

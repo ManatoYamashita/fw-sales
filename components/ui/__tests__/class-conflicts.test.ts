@@ -19,6 +19,17 @@
  * 突き合わせは**クラス名の一致ではなく CSS プロパティの一致**で行う。`gap-2` と
  * `gap-1.5`、`px-5` と `p-0` のように名前が違っても同じプロパティを争う組を拾うため。
  *
+ * ## className の読み取り
+ *
+ * 利用側の `className` は**リテラルでも式でも読む** (`support/jsx-class-scan.ts`)。
+ * 当初は `className="..."` の二重引用符しか読まず、`className={...}` はタグごと無検査で
+ * 通過していた。#248 の原文 (`className={editing ? undefined : "p-0"}`) がその形で、
+ * ガードは事故の実物を 1 件も落とせていなかった (#262)。
+ *
+ * 式は取り出せた文字列リテラルを合併して検査し、**クラスを供給しうるのに読めない部分**
+ * (変数参照など) があれば fail-closed で落とす。無検査で通すと、次に誰かがその形で
+ * 書いた瞬間に無言で穴が開く。
+ *
  * ## 既知の限界
  *
  * `padding={editing ? "default" : "flush"}` のように props が動的な場合は値を決められない。
@@ -39,6 +50,11 @@ import { CardBody } from "../card";
 import { Select } from "../select";
 import { Skeleton } from "../skeleton";
 import { Spinner } from "../spinner";
+import {
+  openingTags,
+  readClassAttribute,
+  readStringAttribute,
+} from "./support/jsx-class-scan";
 
 type ComponentName = "Button" | "Card.Body" | "Select" | "Skeleton" | "Spinner";
 
@@ -284,70 +300,15 @@ function baseClasses(
   }
 }
 
-// ---------------------------------------------------------------------------
-// JSX の走査
-// ---------------------------------------------------------------------------
-
-/** JSX の属性内にアロー関数があっても、`>` でタグを途中終了させない。 */
-function openingTags(
-  source: string,
-  component: ComponentName,
-): Array<{ text: string; index: number }> {
-  const tags: Array<{ text: string; index: number }> = [];
-  const marker = `<${component}`;
-  let from = 0;
-
-  while (true) {
-    const index = source.indexOf(marker, from);
-    if (index < 0) break;
-    const boundary = source[index + marker.length];
-    if (boundary && !/[\s/>]/.test(boundary)) {
-      from = index + marker.length;
-      continue;
-    }
-
-    let quote: '"' | "'" | "`" | null = null;
-    let braces = 0;
-    let end = index + marker.length;
-    for (; end < source.length; end += 1) {
-      const char = source[end];
-      if (quote) {
-        if (char === quote && source[end - 1] !== "\\") quote = null;
-        continue;
-      }
-      if (char === '"' || char === "'" || char === "`") {
-        quote = char;
-      } else if (char === "{") {
-        braces += 1;
-      } else if (char === "}") {
-        braces = Math.max(0, braces - 1);
-      } else if (char === ">" && braces === 0) {
-        tags.push({ text: source.slice(index, end + 1), index });
-        break;
-      }
-    }
-    from = Math.max(end + 1, index + marker.length);
-  }
-  return tags;
-}
-
-function attribute(tag: string, name: string): string | undefined {
-  return new RegExp(`\\b${name}\\s*=\\s*"([^"]*)"`).exec(tag)?.[1];
-}
-
-function classes(tag: string): string[] {
-  return (attribute(tag, "className") ?? "").split(/\s+/).filter(Boolean);
-}
-
 export function findClassConflicts(
   tag: string,
   component: ComponentName,
 ): ClassConflict | null {
-  const base = baseClasses(tag, component, (name) => attribute(tag, name));
+  const base = baseClasses(tag, component, (name) => readStringAttribute(tag, name));
   const baseProperties = new Set(base.flatMap(cssProperties));
   const baseTokens = new Set(base);
 
-  const conflicting = classes(tag).filter((token) => {
+  const conflicting = readClassAttribute(tag).tokens.filter((token) => {
     // 同一トークンの重複は勝敗が発生しないので無害。
     if (baseTokens.has(token)) return false;
     return cssProperties(token).some((property) => baseProperties.has(property));
@@ -378,27 +339,50 @@ const COMPONENTS: ComponentName[] = [
   "Spinner",
 ];
 
-async function scanRepository(): Promise<string[]> {
+type Scan = {
+  /** 基底クラスと同じ CSS プロパティを利用側が上書きしている箇所。 */
+  conflicts: string[];
+  /** `className` が式で、クラスを供給しうる読めない部分を含むタグ。 */
+  unreadable: string[];
+  /** 走査した `className` の書き方の内訳。空振り検出に使う。 */
+  forms: Record<"literal" | "expression", number>;
+};
+
+async function scanRepository(): Promise<Scan> {
   const files = [
     ...(await collectTsxFiles(path.join(ROOT, "app"))),
     ...(await collectTsxFiles(path.join(ROOT, "components"))),
   ];
-  const findings: string[] = [];
+  const scan: Scan = {
+    conflicts: [],
+    unreadable: [],
+    forms: { literal: 0, expression: 0 },
+  };
   for (const file of files) {
     const source = await readFile(file, "utf8");
     for (const component of COMPONENTS) {
       for (const tag of openingTags(source, component)) {
+        const where = () =>
+          `${path.relative(ROOT, file)}:${source.slice(0, tag.index).split("\n").length}`;
+
+        const attribute = readClassAttribute(tag.text);
+        if (attribute.form !== "absent") scan.forms[attribute.form] += 1;
+        // 読めない式を無検査で通さない (#262)。通すと、次に誰かがその形で
+        // 書いた瞬間に無言で穴が開き、緑のまま事故が入る。
+        if (attribute.unreadable) {
+          scan.unreadable.push(`${where()} <${component}>`);
+        }
+
         const conflict = findClassConflicts(tag.text, component);
         if (conflict) {
-          const line = source.slice(0, tag.index).split("\n").length;
-          findings.push(
-            `${path.relative(ROOT, file)}:${line} <${component}> ${conflict.classes.join(", ")}`,
+          scan.conflicts.push(
+            `${where()} <${component}> ${conflict.classes.join(", ")}`,
           );
         }
       }
     }
   }
-  return findings;
+  return scan;
 }
 
 describe("UI primitive class conflict guard", () => {
@@ -411,7 +395,20 @@ describe("UI primitive class conflict guard", () => {
   });
 
   it("リポジトリ内の基底クラスを className で上書きしない", async () => {
-    expect(await scanRepository()).toEqual([]);
+    expect((await scanRepository()).conflicts).toEqual([]);
+  });
+
+  it("className を式で書いていて中身を読めないタグが無い", async () => {
+    // fail-closed (#262)。読めない式を素通りさせると、そのタグは検査されていないのに
+    // 緑になる。導入時点の実測は 77 件すべてリテラルで、この検査の初期コストは 0 だった。
+    // 落ちた場合は「クラスを文字列リテラルで書く」か、props へ意図を移す。
+    expect((await scanRepository()).unreadable).toEqual([]);
+  });
+
+  it("className の走査が空振りしていない", async () => {
+    // 読み取りが壊れると衝突も出ないので、緑だけでは検知力を保証できない。
+    // 実際に className を読めている件数を下限で固定する。
+    expect((await scanRepository()).forms.literal).toBeGreaterThan(50);
   });
 
   it("負け側のクラスを negative control で検知する", () => {
@@ -461,6 +458,54 @@ describe("UI primitive class conflict guard", () => {
         "Select",
       ),
     ).toEqual({ component: "Select", classes: ["h-11", "text-destructive"] });
+  });
+
+  it("事故の原文 (式で書いた className) を negative control で検知する", () => {
+    // ここが #262 の中身。**書き方を静的リテラルへ直した negative control は全部
+    // 通っていた**一方で、実際に事故った行の原文はこの形で、1 件も落ちなかった。
+    // `docs/architecture/responsive.md` §5「壊し方は実際に事故った行の原文を使う」。
+
+    // #248 map-embed-card.tsx:104 の原文。
+    expect(
+      findClassConflicts(
+        '<Card.Body className={editing ? undefined : "p-0"}>',
+        "Card.Body",
+      ),
+    ).toEqual({ component: "Card.Body", classes: ["p-0"] });
+    // #248 web-asset-card.tsx:115 の原文。
+    expect(
+      findClassConflicts(
+        '<Card.Body className={editing ? undefined : "py-1"}>',
+        "Card.Body",
+      ),
+    ).toEqual({ component: "Card.Body", classes: ["py-1"] });
+
+    // 是正後の形は緑に転じる (弁別性)。
+    expect(
+      findClassConflicts(
+        '<Card.Body padding={editing ? "default" : "flush"}>',
+        "Card.Body",
+      ),
+    ).toBeNull();
+    expect(
+      findClassConflicts(
+        '<Card.Body padding={editing ? "default" : "compact"}>',
+        "Card.Body",
+      ),
+    ).toBeNull();
+
+    // 三項の両側を合併するので、どちらの枝で衝突しても落ちる。
+    expect(
+      findClassConflicts('<Spinner className={busy ? "h-3 w-3" : undefined} />', "Spinner"),
+    ).toEqual({ component: "Spinner", classes: ["h-3", "w-3"] });
+    // `cn(...)` の引数と `&&` の右辺も読む。
+    expect(
+      findClassConflicts('<Button className={cn("ml-auto", busy && "gap-1.5")} />', "Button"),
+    ).toEqual({ component: "Button", classes: ["gap-1.5"] });
+    // 単一引用符の props も読む (二重引用符しか読まない実装では size 既定と誤認した)。
+    expect(
+      findClassConflicts(`<Button size='sm' className="h-7" />`, "Button"),
+    ).toEqual({ component: "Button", classes: ["h-7"] });
   });
 
   it("variant 付きクラスと同一トークンは衝突扱いしない", () => {
