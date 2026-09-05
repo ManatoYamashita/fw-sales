@@ -13,10 +13,25 @@
 #
 # なぜ PR では走らせないのか:
 # PR 時点で migration は本番へ未適用のため、子テーブルを正しく追加した PR ほど
-# 順方向チェックが「制約が存在しません」で赤になる。確実に偽陽性を生む配置であり、
-# PR 段階の等価な防御は `store-cascade-fk-coverage.test.ts` (schema.ts のメタデータ
-# 走査。DB 非接続) が CI の Vitest job で既に担っている。
+# 順方向チェックが「制約が存在しません」で赤になる。確実に偽陽性を生む配置である。
+# PR 段階では `store-cascade-fk-coverage.test.ts` (schema.ts のメタデータ走査。DB 非接続)
+# が schema.ts と DELETE_IMPACT_CATEGORIES の一致を守る。ただしこれは**等価な防御では
+# ない** — 同テストは本スクリプトの EXPECTED を検査しないため、schema.ts とダイアログの
+# 両方へ正しく登録し EXPECTED だけ忘れた変更は PR を緑で通過し、本番への DDL 適用後に
+# migrate.yml 側の verify-fks で初めて落ちる。
 # PR トリガを持たないことで、fork PR へ `DATABASE_URL` secret が渡る経路も作らない。
+#
+# なぜ push トリガに guard が要るのか:
+# 本 workflow と `migrate.yml` は「`drizzle/**` と本スクリプトを同時に含む main への
+# push」に**両方マッチする**。これは stores 子テーブル追加の通常経路であり、実際に
+# 本スクリプトを変更した過去 3 push のうち 2 件 (#153 / #228) が該当する。
+# 両者は起動順序を持たず、前段ステップ (checkout / pnpm / node+cache / install) が
+# 同型のため、実測では migrate.yml が DDL を適用する 2 秒窓に本 workflow の SELECT が
+# 着地する (run 33745492910: job 開始ジッタ ±1s、install 完了 T+18s、DDL 適用 T+18〜20s)。
+# その状態で読むと順方向が「制約が存在しません」、DROP を伴う push では逆方向が
+# 「EXPECTED 未登録」で赤くなる。ドリフト警報を担う workflow が偽の赤を出せば、
+# 本物のドリフトも同じ赤に埋もれる。migration 同伴の push は migrate.yml が適用後に
+# 検証するため、本 workflow は降りる。
 #
 # 設計判断:
 # - スクリプトは `pg_constraint` への SELECT のみ。データ・スキーマへの書き込みは無い
@@ -25,6 +40,8 @@
 #   スクリプト側で `prepare: false` 済みのため Transaction Pooler (6543) でも動作する
 # - 週次で十分。migration 起因のドリフトは migrate.yml が即時に捕まえるため、ここが
 #   拾うのは人手による帯域外変更に限られ、日次にする根拠が無い
+# - 失敗時は 1 回だけ再試行する。本 workflow の赤には「本番 FK がドリフトした」という
+#   強い意味を持たせたく、pooler への一過性の接続失敗を同じ赤にしたくないため
 #
 # 運用上の注意:
 # - GitHub は 60 日無活動の repo で scheduled workflow を自動 disable する
@@ -49,10 +66,11 @@ on:
       - main
     paths:
       # 期待値そのものを変更したときは、次の定期実行を待たず即座に突合する。
+      # migration を同伴する push は下の guard ステップで降りる。
       - "scripts/verify-store-cascade-fks.mjs"
       - ".github/workflows/verify-fk-policy.yml"
 
-# 最小権限: checkout 以外に GITHUB_TOKEN を使わない。
+# 最小権限: checkout と compare API の読み取りにのみ GITHUB_TOKEN を使う。
 permissions:
   contents: read
 
@@ -62,6 +80,37 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      # migrate.yml と並走する push を検出して降りる (ファイル冒頭「なぜ push トリガに
+      # guard が要るのか」を参照)。判定できない場合は検証を実行する — ドリフトの
+      # 見逃しのほうが、偽陽性の赤より高くつくため。
+      - name: Skip when the same push also applies migrations
+        id: guard
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.event.after }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$BEFORE" =~ ^[0-9a-f]{40}$ ]] || [[ "$BEFORE" =~ ^0{40}$ ]]; then
+            echo "before=$BEFORE のため差分を確定できない。検証を実行する。"
+            exit 0
+          fi
+          if ! changed=$(gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/compare/${BEFORE}...${AFTER}" \
+            --jq '.files[].filename'); then
+            echo "compare API の取得に失敗した。検証を実行する。"
+            exit 0
+          fi
+          # grep をパイプで受けると、早期終了による SIGPIPE が pipefail で偽の失敗に
+          # なるため here-string で渡す。
+          if grep -q '^drizzle/' <<< "$changed"; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "この push は drizzle/** を含む。migrate.yml が DDL 適用後に db:verify-fks を実行するため、本 workflow では検証しない。"
+          else
+            echo "この push に drizzle/** の変更は無い。検証を実行する。"
+          fi
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -77,9 +126,18 @@ jobs:
           cache: "pnpm"
 
       - name: Install dependencies
+        if: steps.guard.outputs.skip != 'true'
         run: pnpm install --frozen-lockfile
 
+      # 1 回だけ再試行する。ポリシー違反なら再試行しても同じく落ちるため検知力は
+      # 鈍らず、pooler への一過性の接続失敗だけを赤から除ける。
       - name: Verify FK policy against production schema
-        run: set -o pipefail; pnpm db:verify-fks 2>&1 | cat
+        if: steps.guard.outputs.skip != 'true'
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          set -o pipefail
+          if pnpm db:verify-fks 2>&1 | cat; then exit 0; fi
+          echo "--- 1 回目が失敗した。一過性の接続失敗と切り分けるため 15 秒後に再試行する ---"
+          sleep 15
+          pnpm db:verify-fks 2>&1 | cat

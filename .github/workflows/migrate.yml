@@ -71,8 +71,11 @@ jobs:
       # ここで落ちる — 削除確認ダイアログの影響カウント漏れ (#229) と同じ経路である。
       #
       # PR 段階では走らせない。PR 時点で migration は本番へ未適用のため、子テーブルを
-      # 正しく追加した PR ほど「制約が存在しません」で偽陽性の赤になる。PR 時点の
-      # 等価な防御は store-cascade-fk-coverage.test.ts (schema.ts のメタデータ走査) が担う。
+      # 正しく追加した PR ほど「制約が存在しません」で偽陽性の赤になる。PR 段階では
+      # store-cascade-fk-coverage.test.ts (schema.ts のメタデータ走査) が schema.ts と
+      # DELETE_IMPACT_CATEGORIES の一致を守るが、同テストは verify-store-cascade-fks.mjs
+      # の EXPECTED を検査しないため等価な防御ではない。両方へ正しく登録し EXPECTED
+      # だけ忘れた変更を捕まえられるのは、適用後に走る本ステップだけである。
       - name: Verify FK policy against production schema
         run: set -o pipefail; pnpm db:verify-fks 2>&1 | cat
         env:
