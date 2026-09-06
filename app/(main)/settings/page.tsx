@@ -4,6 +4,10 @@ import { cacheLife, cacheTag } from "next/cache";
 import { Card } from "@/components/ui/card";
 import { Stat } from "@/components/ui/stat";
 import { Heading, Text } from "@/components/ui/typography";
+import {
+  COUNTS_GRID_CLASS,
+  CountsGridSkeleton,
+} from "./_components/counts-grid";
 import { DataActions } from "./_components/data-actions";
 import { ThemeToggleCard } from "./_components/theme-toggle-card";
 import { UserManagementCard } from "./_components/user-management-card";
@@ -47,23 +51,10 @@ async function loadCounts() {
   };
 }
 
-function CountsGridSkeleton() {
-  return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-      {Array.from({ length: 4 }).map((_, i) => (
-        <div
-          key={i}
-          className="h-[88px] rounded-lg bg-card border border-border animate-pulse"
-        />
-      ))}
-    </div>
-  );
-}
-
 async function CountsGrid() {
   const counts = await loadCounts();
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+    <div className={COUNTS_GRID_CLASS}>
       <Stat label="店舗" value={counts.stores} icon={<StoreIcon />} />
       <Stat label="AI調査" value={counts.researchRuns} icon={<Search />} />
       <Stat label="商談" value={counts.deals} icon={<Handshake />} />
