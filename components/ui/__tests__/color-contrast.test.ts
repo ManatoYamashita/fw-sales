@@ -2,6 +2,7 @@ import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { buildCss } from "./support/build-css";
+import { hidden } from "./support/scanner-hidden";
 
 const ROOT = path.resolve(import.meta.dirname, "../../..");
 const AA_CONTRAST = 4.5;
@@ -139,12 +140,15 @@ describe("色トークンのコントラストガード (#249)", () => {
   });
 
   it("新しい色ユーティリティがTailwindの実CSSへ展開される", async () => {
+    // 本番では `hover:` 修飾を通してしか使われないため、修飾なしの形を逐語で
+    // 書くと走査対象外の設定が外れた日に候補として拾われる (#277)。
+    const linkHoverClass = hidden("text-link-", "hover");
     const candidates = [
       "text-success-on-soft",
       "text-warning-on-soft",
       "text-destructive-on-soft",
       "text-link",
-      "text-link-hover",
+      linkHoverClass,
       "text-confidence-foreground",
       "text-chart-1-foreground",
       "text-chart-5-foreground",

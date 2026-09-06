@@ -9,16 +9,16 @@
 | 成功 | `bg-success-soft` | `text-success-on-soft` |
 | 注意 | `bg-warning-soft` | `text-warning-on-soft` |
 | 破壊的状態 | `bg-destructive-soft` | `text-destructive-on-soft` |
-| リンク | surface token | `text-link` / `text-link-hover` |
+| リンク | surface token | `text-link` とそのホバー時トークン |
 | 信頼度の動的な薄背景 | `confidenceToBg()` | `text-confidence-foreground` |
 
 同じセマンティック色でも、載る面が変わればコントラスト比は変わります。新しい組み合わせを追加するときは、light / dark 両テーマで WCAG AA の 4.5:1 以上を確認し、`components/ui/__tests__/color-contrast.test.ts` の宣言的なペアへ追加してください。
 
 ## 生パレットの禁止
 
-画面コンポーネントで `text-blue-700` や `bg-emerald-50` のような Tailwind 生パレットを直接指定しません。テーマ切替に追従できず、同じ色名でも載る面によってコントラストが壊れるためです。用途に対応するセマンティックトークンが無い場合は、まず `app/globals.css` に役割トークンを追加します。
+画面コンポーネントで青系の文字色や緑系の背景色のような、Tailwind 生パレットの色・濃淡番号を直接指定しません。テーマ切替に追従できず、同じ色名でも載る面によってコントラストが壊れるためです。用途に対応するセマンティックトークンが無い場合は、まず `app/globals.css` に役割トークンを追加します。
 
-`text-white` も背景が複数のチャート色へ変わる箇所では使用せず、`text-chart-N-foreground` のように背景と対になるトークンを定義します。
+白色の文字指定も背景が複数のチャート色へ変わる箇所では使用せず、`text-chart-N-foreground` のように背景と対になるトークンを定義します。
 
 ## 検証
 

@@ -165,14 +165,14 @@ Tailwind v4 のクラス生成はソースの静的走査で、**走査された
 | **値が不正な `transition-property` 宣言** | `components/layout/__tests__/sidebar-drawer-css.test.ts` の説明文 |
 | リンクの hover 色（基底の 1 語） | `components/ui/__tests__/color-contrast.test.ts`（#273） |
 | 色 3 種（emerald の背景・blue の文字・white の文字） | `docs/architecture/color-tokens.md` の散文 |
-| 英文の中の "collapse" | `.claude/` 配下のスキル文書 |
-| 英文の中の "lowercase" | `.agents/` `.claude/` `.kiro/` 配下の文書 |
+| 英文の中の「折りたたむ」を意味する語 | `.claude/` 配下のスキル文書 |
+| 英文の中の「小文字にする」を意味する語 | `.agents/` `.claude/` `.kiro/` 配下の文書 |
 
 つまり **CSS プロパティの対応表を持つガード自身**と、**ごく普通の英文**が、本番 CSS を太らせていた。#265 で `hidden()` を入れたのは同じ機構の 1 例に過ぎず、既知のクラスにしか効いていなかった。
 
 #### なぜ規律ではなく走査範囲で解いたか
 
-"collapse" や "lowercase" は英文散文にごく普通に現れる。これを禁止語として運用すると、**文書で英語を書くたびに Tailwind のユーティリティ名を避ける**ことになり、規律として成立しない。そこで `app/globals.css` で `source(none)` を指定して自動ソース検出を止め、実行時にマークアップを生み得る `app/` `components/` `lib/` だけを `@source` で許可し、その中のテストと Markdown を `@source not` で外した。
+上の2語は英文散文にごく普通に現れる。これを禁止語として運用すると、**文書で英語を書くたびに Tailwind のユーティリティ名を避ける**ことになり、規律として成立しない。そこで `app/globals.css` で `source(none)` を指定して自動ソース検出を止め、実行時にマークアップを生み得る `app/` `components/` `lib/` だけを `@source` で許可し、その中のテストと Markdown を `@source not` で外した。
 
 実測（本番パイプライン / base `d0412eb` のクリーンな checkout）: 走査 **743 → 304 ファイル**（Markdown 182 → 0 件）、生成 CSS **89,184 → 87,018 バイト（−2,166）**。**消えたのは上表の 27 セレクタと、それらが引き込んでいたテーマ変数 5 個だけで、増えたセレクタ 0・正当な規則の欠落 0。** 設定が効いていること（と絞りすぎていないこと）は `__tests__/tailwind-source-scope.test.ts` が固定する。
 
@@ -273,7 +273,7 @@ UI プリミティブのサイズ、幅、余白、色を利用側の `className
 
 `__tests__/flex-wrap-right-align.test.ts` が `app` / `components` / `lib` 配下の TSX を走査し、**同じ要素の class 列**に `flex-wrap` と `justify-between` が揃っていて `[&>*+*]:ml-auto` が無い箇所を落とす。#270 で撤去した走査ガードは「開始タグから閉じタグまでのブロック」を単位にしていたため分岐の片方が欠けても素通りしたが、こちらは**単一の `className` 属性**で完結するので、その失敗モードが存在しない。式で分割して書かれても取り出せるリテラルを合併して拾う（`components/ui/__tests__/support/jsx-class-scan.ts`）。
 
-読めない部分があって判定できない場合は `unprovable` として別に落とす（fail-closed）。ただし対象は「両方が揃っているのに手当てが読めない」場合に限る。`cn(base, className)` で利用側のクラスを受け渡すプリミティブは構造上つねに読めない部分を持つので、「片方だけ + 読めない」まで拾うと `Card.Footer` のような**規則を満たしている側**が毎回引っかかる。その方向のリスク（利用側が `justify-between` や `flex-nowrap` を後から渡す）は `class-conflicts.test.ts` が別途落とす。**2 つのガードは合成して効く。**
+読めない部分があって判定できない場合は `unprovable` として別に落とす（fail-closed）。ただし対象は「両方が揃っているのに手当てが読めない」場合に限る。`cn(base, className)` で利用側のクラスを受け渡すプリミティブは構造上つねに読めない部分を持つので、「片方だけ + 読めない」まで拾うと `Card.Footer` のような**規則を満たしている側**が毎回引っかかる。その方向のリスク（利用側が `justify-between` や折り返しを止めるクラスを後から渡す）は `class-conflicts.test.ts` が別途落とす。**2 つのガードは合成して効く。**
 
 ### 4.6 `Card` の内側で sticky を使う
 
