@@ -10,11 +10,11 @@ import { cn } from "@/lib/utils/cn";
 export const metadata: Metadata = { title: "KPI分析" };
 
 const FUNNEL_BAR_TONE = [
-  "bg-chart-1",
-  "bg-chart-2",
-  "bg-chart-3",
-  "bg-chart-4",
-  "bg-chart-5",
+  "bg-chart-1 text-chart-1-foreground",
+  "bg-chart-2 text-chart-2-foreground",
+  "bg-chart-3 text-chart-3-foreground",
+  "bg-chart-4 text-chart-4-foreground",
+  "bg-chart-5 text-chart-5-foreground",
 ];
 
 export default async function KpiPage() {
@@ -71,7 +71,7 @@ export default async function KpiPage() {
                   <div className="flex-1 h-7 rounded-md bg-muted overflow-hidden">
                     <div
                       className={cn(
-                        "h-full flex items-center px-2 text-xs font-semibold text-white",
+                        "h-full flex items-center px-2 text-xs font-semibold",
                         tone,
                       )}
                       style={{

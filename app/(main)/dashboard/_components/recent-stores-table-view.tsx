@@ -54,7 +54,7 @@ export function buildColumns(): ColumnDef<Store>[] {
       cell: (s) => (
         <Link
           href={`/stores/${s.id}`}
-          className="font-semibold text-foreground hover:text-blue-700"
+          className="font-semibold text-foreground hover:text-link"
         >
           {s.name}
         </Link>
@@ -137,7 +137,7 @@ export function RecentStoresTableView({ rows }: RecentStoresTableViewProps) {
         <Card.Title>最近登録した店舗</Card.Title>
         <Link
           href="/stores"
-          className="text-sm font-medium text-blue-700 hover:text-blue-800"
+          className="text-sm font-medium text-link hover:text-link-hover"
         >
           すべて見る →
         </Link>

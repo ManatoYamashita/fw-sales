@@ -35,7 +35,7 @@ export function ServiceCheckboxGroup({
               aria-pressed={checked}
               className={
                 checked
-                  ? "px-3 py-1.5 rounded-full border text-xs font-medium border-blue-600 bg-blue-600 text-white"
+                  ? "px-3 py-1.5 rounded-full border text-xs font-medium border-primary bg-primary text-primary-foreground"
                   : "px-3 py-1.5 rounded-full border text-xs font-medium border-input bg-card text-foreground hover:border-ring/50"
               }
             >

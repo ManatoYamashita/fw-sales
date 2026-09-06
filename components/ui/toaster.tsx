@@ -9,19 +9,19 @@ const toneStyle: Record<
   { wrap: string; icon: React.ElementType; iconWrap: string }
 > = {
   success: {
-    wrap: "border-success/30 bg-success-soft text-success",
+    wrap: "border-success/30 bg-success-soft text-success-on-soft",
     icon: CheckCircle2,
-    iconWrap: "text-success",
+    iconWrap: "text-success-on-soft",
   },
   error: {
-    wrap: "border-destructive/30 bg-destructive-soft text-destructive",
+    wrap: "border-destructive/30 bg-destructive-soft text-destructive-on-soft",
     icon: XCircle,
-    iconWrap: "text-destructive",
+    iconWrap: "text-destructive-on-soft",
   },
   warning: {
-    wrap: "border-warning/30 bg-warning-soft text-warning",
+    wrap: "border-warning/30 bg-warning-soft text-warning-on-soft",
     icon: AlertTriangle,
-    iconWrap: "text-warning",
+    iconWrap: "text-warning-on-soft",
   },
   info: {
     wrap: "border-border bg-card text-card-foreground",

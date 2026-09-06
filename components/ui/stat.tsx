@@ -7,9 +7,9 @@ type StatTone = "default" | "primary" | "success" | "warning" | "danger";
 const toneIconClass: Record<StatTone, string> = {
   default: "text-muted-foreground bg-muted",
   primary: "text-info bg-info-soft",
-  success: "text-success bg-success-soft",
-  warning: "text-warning bg-warning-soft",
-  danger: "text-destructive bg-destructive-soft",
+  success: "text-success-on-soft bg-success-soft",
+  warning: "text-warning-on-soft bg-warning-soft",
+  danger: "text-destructive-on-soft bg-destructive-soft",
 };
 
 export interface StatDelta {
@@ -35,8 +35,8 @@ const TREND_GLYPH: Record<NonNullable<StatDelta["trend"]>, string> = {
 };
 
 const TREND_CLASS: Record<NonNullable<StatDelta["trend"]>, string> = {
-  up: "bg-success-soft text-success",
-  down: "bg-destructive-soft text-destructive",
+  up: "bg-success-soft text-success-on-soft",
+  down: "bg-destructive-soft text-destructive-on-soft",
   flat: "bg-muted text-muted-foreground",
 };
 

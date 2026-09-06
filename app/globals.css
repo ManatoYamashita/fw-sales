@@ -34,12 +34,27 @@
   --color-success: var(--success);
   --color-success-foreground: var(--success-foreground);
   --color-success-soft: var(--success-soft);
+  --color-success-on-soft: var(--success-on-soft);
   --color-warning: var(--warning);
   --color-warning-foreground: var(--warning-foreground);
   --color-warning-soft: var(--warning-soft);
+  --color-warning-on-soft: var(--warning-on-soft);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-destructive-soft: var(--destructive-soft);
+  --color-destructive-on-soft: var(--destructive-on-soft);
+
+  /* Contextual text */
+  --color-link: var(--link);
+  --color-link-hover: var(--link-hover);
+  --color-confidence-foreground: var(--confidence-foreground);
+
+  /* Chart foregrounds: each bar has a paired readable foreground. */
+  --color-chart-1-foreground: var(--chart-1-foreground);
+  --color-chart-2-foreground: var(--chart-2-foreground);
+  --color-chart-3-foreground: var(--chart-3-foreground);
+  --color-chart-4-foreground: var(--chart-4-foreground);
+  --color-chart-5-foreground: var(--chart-5-foreground);
 
   /* Component */
   /*
@@ -128,7 +143,7 @@
 
   /* Tier ⊥ — muted (slate-100 = body と同色: card 内側の inset 用) */
   --muted: #f1f5f9;
-  --muted-foreground: #64748b; /* slate-500 */
+  --muted-foreground: #475569; /* slate-600: AA on body and muted surfaces */
 
   /* accent (hover/focus) */
   --accent: #e2e8f0;           /* slate-200 */
@@ -147,12 +162,20 @@
   --success: oklch(0.58 0.16 145);
   --success-foreground: oklch(0.985 0 0);
   --success-soft: oklch(0.95 0.06 145);
+  --success-on-soft: #166534; /* green-800: AA on success-soft */
   --warning: #475569;          /* slate-600 (中性化) */
   --warning-foreground: #f8fafc;
   --warning-soft: #e2e8f0;     /* slate-200 */
+  --warning-on-soft: #475569;  /* slate-600: AA on warning-soft */
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.985 0 0);
   --destructive-soft: oklch(0.96 0.04 27.325);
+  --destructive-on-soft: #991b1b; /* red-800: AA on destructive-soft */
+
+  /* Contextual text */
+  --link: #1d4ed8;              /* blue-700: AA on light surfaces */
+  --link-hover: #1e40af;       /* blue-800 */
+  --confidence-foreground: #0f172a;
 
   /* borders & rings (slate-200/300/400) */
   --border: #e2e8f0;           /* slate-200 */
@@ -175,6 +198,11 @@
   --chart-3: #64748b;          /* slate-500 */
   --chart-4: #94a3b8;          /* slate-400 */
   --chart-5: #cbd5e1;          /* slate-300 (最淡) */
+  --chart-1-foreground: #f8fafc;
+  --chart-2-foreground: #f8fafc;
+  --chart-3-foreground: #f8fafc;
+  --chart-4-foreground: #0f172a;
+  --chart-5-foreground: #0f172a;
 
   /* Stage デフォルト */
   --stage: var(--muted);
@@ -229,15 +257,23 @@
   --info: #cbd5e1;             /* slate-300 (中性化) */
   --info-foreground: #0f172a;
   --info-soft: #334155;        /* slate-700 */
-  --success: oklch(0.74 0.16 145);
+  --success: #86efac;          /* green-300: readable on dark surfaces */
   --success-foreground: oklch(0.205 0 0);
   --success-soft: oklch(0.3 0.06 145);
+  --success-on-soft: #86efac; /* green-300: AA on success-soft */
   --warning: #94a3b8;          /* slate-400 (中性化) */
   --warning-foreground: #0f172a;
   --warning-soft: #334155;     /* slate-700 */
+  --warning-on-soft: #e2e8f0;  /* slate-200: AA on warning-soft */
   --destructive: oklch(0.704 0.191 22.216);
   --destructive-foreground: oklch(0.985 0 0);
   --destructive-soft: oklch(0.32 0.08 27.325);
+  --destructive-on-soft: #fca5a5; /* red-300: AA on destructive-soft */
+
+  /* Contextual text */
+  --link: #93c5fd;              /* blue-300: AA on dark surfaces */
+  --link-hover: #bfdbfe;       /* blue-200 */
+  --confidence-foreground: #0f172a;
 
   /* borders & rings */
   --border: rgba(241, 245, 249, 0.10);  /* slate-100/10 */
@@ -260,6 +296,11 @@
   --chart-3: #94a3b8;          /* slate-400 */
   --chart-4: #64748b;          /* slate-500 */
   --chart-5: #475569;          /* slate-600 (最淡) */
+  --chart-1-foreground: #0f172a;
+  --chart-2-foreground: #0f172a;
+  --chart-3-foreground: #0f172a;
+  --chart-4-foreground: #f1f5f9;
+  --chart-5-foreground: #f1f5f9;
 
   /* Stage デフォルト */
   --stage: var(--muted);

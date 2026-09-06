@@ -103,7 +103,7 @@ function MetricPill({
     default: "bg-muted/40 text-foreground",
     primary: "bg-info-soft text-info",
     muted: "bg-muted/40 text-muted-foreground",
-    success: "bg-success-soft text-success",
+    success: "bg-success-soft text-success-on-soft",
   }[tone];
   return (
     <div className="flex flex-col gap-0.5 rounded-md border border-border px-3 py-1.5">

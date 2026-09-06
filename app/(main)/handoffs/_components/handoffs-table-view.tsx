@@ -43,7 +43,7 @@ export function buildColumns(): ColumnDef<Handoff>[] {
       cell: (h) => (
         <Link
           href={`/handoffs/${h.id}`}
-          className="font-semibold text-foreground hover:text-blue-700"
+          className="font-semibold text-foreground hover:text-link"
         >
           {h.store_name}
         </Link>

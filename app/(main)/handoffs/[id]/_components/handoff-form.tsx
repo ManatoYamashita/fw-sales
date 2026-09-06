@@ -72,9 +72,9 @@ export function HandoffForm({ handoff }: { handoff: Handoff }) {
       {handoff.status === "完了" ? (
         <Card>
           <Card.Body className="flex items-center gap-3">
-            <CheckCircle2 className="h-6 w-6 text-green-600" />
+            <CheckCircle2 className="h-6 w-6 text-success" />
             <div>
-              <p className="text-sm font-semibold text-green-700">
+              <p className="text-sm font-semibold text-success">
                 運用への引き継ぎが完了しました
               </p>
               <p className="text-xs text-muted-foreground mt-0.5">

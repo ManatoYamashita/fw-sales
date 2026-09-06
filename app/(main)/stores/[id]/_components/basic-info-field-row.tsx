@@ -34,9 +34,9 @@ const TIER_LABEL: Record<DifficultyTier, string> = {
 };
 
 const TIER_CLASS: Record<DifficultyTier, string> = {
-  A: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  B: "bg-amber-50 text-amber-700 border-amber-200",
-  C: "bg-rose-50 text-rose-700 border-rose-200",
+  A: "bg-info-soft text-info border-info/30",
+  B: "bg-warning-soft text-warning-on-soft border-warning/30",
+  C: "bg-destructive-soft text-destructive-on-soft border-destructive/30",
 };
 
 const SOURCE_LABEL: Record<FillSource, string> = {
