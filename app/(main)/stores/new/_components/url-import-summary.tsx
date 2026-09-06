@@ -100,27 +100,23 @@ export function UrlImportSummary({
               return (
                 <li
                   key={f.key}
-                  className="flex items-center gap-2 px-2 py-1 rounded text-[11px]"
-                  // confidenceToBg は lightness 92% の薄背景。ダークモード下でも
-                  // 濃い文字色 (slate-900 相当) を強制してコントラストを確保。
-                  style={
-                    bg
-                      ? { backgroundColor: bg, color: "hsl(222 47% 11%)" }
-                      : undefined
-                  }
+                  className="flex items-center gap-2 px-2 py-1 rounded text-[11px] text-confidence-foreground"
+                  // confidenceToBg は lightness 92% の薄背景。テーマに依存しない
+                  // confidence-foreground を使い、ダークテーマでも可読性を保つ。
+                  style={bg ? { backgroundColor: bg } : undefined}
                 >
                   {icon === "high" || icon === "medium" || icon === "low" ? (
-                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-green-700" />
+                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-confidence-foreground" />
                   ) : (
-                    <XCircle className="h-3.5 w-3.5 shrink-0 text-gray-400" />
+                    <XCircle className="h-3.5 w-3.5 shrink-0 text-confidence-foreground/70" />
                   )}
                   <span className="font-medium shrink-0">{f.label}:</span>
                   <span className="truncate">
                     {f.value || (
-                      <span className="text-gray-500">(取得失敗)</span>
+                      <span className="text-confidence-foreground/70">(取得失敗)</span>
                     )}
                   </span>
-                  <span className="ml-auto text-[10px] text-muted-foreground shrink-0">
+                  <span className="ml-auto text-[10px] text-confidence-foreground/70 shrink-0">
                     {tierLabel(tier)}
                     {typeof f.confidence === "number" ? ` ${f.confidence}` : ""}
                   </span>

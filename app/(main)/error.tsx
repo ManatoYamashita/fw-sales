@@ -17,7 +17,7 @@ export default function MainError({
 
   return (
     <div className="flex flex-col items-center justify-center py-24 px-6 text-center gap-3">
-      <AlertTriangle className="h-10 w-10 text-amber-500" aria-hidden />
+      <AlertTriangle className="h-10 w-10 text-warning" aria-hidden />
       <p className="text-base font-semibold text-foreground">
         エラーが発生しました
       </p>

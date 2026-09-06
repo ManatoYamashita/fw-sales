@@ -27,7 +27,7 @@ function LinkRow({ label, url }: { label: string; url: string }) {
         href={url}
         target="_blank"
         rel="noopener noreferrer"
-        className="inline-flex items-center gap-1 text-sm text-blue-700 hover:text-blue-800 max-w-[280px] truncate"
+        className="inline-flex items-center gap-1 text-sm text-link hover:text-link-hover max-w-[280px] truncate"
       >
         {url} <ExternalLink className="h-3 w-3 shrink-0" />
       </a>
@@ -152,7 +152,7 @@ export function WebAssetCard({ store }: { store: Store }) {
               {store.phone ? (
                 <a
                   href={`tel:${store.phone}`}
-                  className="inline-flex items-center gap-1 text-sm text-blue-700 hover:text-blue-800"
+                  className="inline-flex items-center gap-1 text-sm text-link hover:text-link-hover"
                 >
                   <Phone className="h-3 w-3" />
                   {store.phone}

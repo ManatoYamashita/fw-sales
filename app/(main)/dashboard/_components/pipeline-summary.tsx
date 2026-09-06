@@ -21,7 +21,7 @@ export async function PipelineSummary() {
         <Card.Title>パイプライン</Card.Title>
         <Link
           href="/pipeline"
-          className="text-sm font-medium text-blue-700 hover:text-blue-800"
+          className="text-sm font-medium text-link hover:text-link-hover"
         >
           ボードを見る →
         </Link>
