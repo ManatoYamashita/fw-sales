@@ -16,27 +16,41 @@ import { compile } from "tailwindcss";
  *
  * ソースファイルの走査は行わず候補クラスを直接渡すので、「そのクラスがソースに
  * リテラルで書かれているか」は各テストのソース逐語検査が担当する (分業)。
+ * **走査そのもの**を検査したい場合は `tailwind-sources.ts` を使う。
  */
-const ROOT = path.resolve(import.meta.dirname, "../../../..");
+export const REPO_ROOT = path.resolve(import.meta.dirname, "../../../..");
+
+/** Tailwind の entry CSS。走査設定 (`@source`) もここが持つ。 */
+export const ENTRY_CSS = path.join(REPO_ROOT, "app/globals.css");
+
+/**
+ * `@import` を解決する。bundler を通さずに `compile()` を直接呼ぶため、
+ * パッケージ名は `node_modules` へ、相対パスは呼び出し元からの相対で引く。
+ */
+export async function loadStylesheet(id: string, base: string) {
+  const resolved =
+    id === "tailwindcss"
+      ? path.join(REPO_ROOT, "node_modules/tailwindcss/index.css")
+      : id.startsWith(".")
+        ? path.resolve(base, id)
+        : path.join(REPO_ROOT, "node_modules", id);
+  return {
+    path: resolved,
+    base: path.dirname(resolved),
+    content: await readFile(resolved, "utf8"),
+  };
+}
+
+/** `app/globals.css` をコンパイルする。走査設定を読みたい場合は戻り値の `root` / `sources` を使う。 */
+export async function compileEntry() {
+  return compile(await readFile(ENTRY_CSS, "utf8"), {
+    base: path.dirname(ENTRY_CSS),
+    loadStylesheet,
+  });
+}
 
 export async function buildCss(candidates: string[]): Promise<string> {
-  const entry = path.join(ROOT, "app/globals.css");
-  const compiler = await compile(await readFile(entry, "utf8"), {
-    base: path.dirname(entry),
-    loadStylesheet: async (id: string, base: string) => {
-      const resolved =
-        id === "tailwindcss"
-          ? path.join(ROOT, "node_modules/tailwindcss/index.css")
-          : id.startsWith(".")
-            ? path.resolve(base, id)
-            : path.join(ROOT, "node_modules", id);
-      return {
-        path: resolved,
-        base: path.dirname(resolved),
-        content: await readFile(resolved, "utf8"),
-      };
-    },
-  });
+  const compiler = await compileEntry();
   return compiler.build(candidates);
 }
 
