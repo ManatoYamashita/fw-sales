@@ -89,11 +89,15 @@ const TEXT_ALIGNS = new Set(["left", "center", "right", "justify", "start", "end
  *
  * このファイルは模型の対応表と negative control の needle として、本番 JSX に 1 度も
  * 出てこないクラス名を大量に持つ。逐語で書くと Tailwind の静的走査が候補として拾い、
- * **使っていないクラスの規則が本番 CSS に生まれる**。実測で 16 語 997 バイトあった
+ * **使っていないクラスの規則が本番 CSS に生まれる**。実測で 17 語 1278 バイトあった
  * (`support/scanner-hidden.ts` / `docs/architecture/responsive.md` §4.2)。
  *
  * 分割位置は「どの断片も単独ではクラスとして解決しないこと」で選んでいる。
  * 全断片が 0 バイトであることを実測で確認済み。
+ *
+ * **`hidden()` が隠すのは値だけで、キー名はソースに逐語で残る。** キーにクラスとして
+ * 解決する語を使うと、そのキーが候補になり隠したはずの規則が本番 CSS へ戻る。
+ * 下の「走査から隠したクラス名が実在する」テストが両方向を固定する (#276)。
  */
 const ROUNDED = {
   tl: hidden("round", "ed-tl"),
@@ -113,10 +117,10 @@ const NEEDLE = {
   contentCenter: hidden("content-", "center"),
   widthAuto: hidden("w-", "auto"),
   /** 模型が名指しで見るクラス。単独 +284 バイトと、この群で最も高い。 */
-  shadow: hidden("sha", "dow"),
-  inline: hidden("inl", "ine"),
+  boxShadow: hidden("sha", "dow"),
+  displayInline: hidden("inl", "ine"),
   /** `border-collapse` の値。正規表現の中でも走査は拾う。 */
-  collapse: hidden("colla", "pse"),
+  borderCollapse: hidden("colla", "pse"),
 } as const;
 
 const BG_NON_COLOR =
@@ -130,7 +134,7 @@ const BG_NON_COLOR =
  */
 const BORDER_NON_COLOR_VALUES = [
   "solid", "dashed", "dotted", "double", "hidden", "none",
-  NEEDLE.collapse, "separate", "spacing",
+  NEEDLE.borderCollapse, "separate", "spacing",
 ];
 const BORDER_NON_COLOR = new RegExp(
   `^(\\d+|${BORDER_NON_COLOR_VALUES.join("|")})$`,
@@ -176,7 +180,7 @@ const SIMPLE_PREFIXES: ReadonlyArray<readonly [string, string]> = [
 ];
 
 const DISPLAY_TOKENS = new Set([
-  "block", "inline-block", NEEDLE.inline, "flex", "inline-flex", "grid", "contents", "hidden",
+  "block", "inline-block", NEEDLE.displayInline, "flex", "inline-flex", "grid", "contents", "hidden",
   // 本番に出てこない 3 語は走査へ拾わせない (上の ROUNDED と同じ理由)。
   hidden("inline-g", "rid"), hidden("flow-r", "oot"), hidden("list-i", "tem"),
 ]);
@@ -212,7 +216,7 @@ export function cssProperties(token: string): string[] {
   for (const [pattern, property] of FLEX_CONTAINER_TOKENS) {
     if (pattern.test(token)) return [property];
   }
-  if (token === NEEDLE.shadow) return ["box-shadow"];
+  if (token === NEEDLE.boxShadow) return ["box-shadow"];
   if (token === "rounded") {
     return ["tl", "tr", "br", "bl"].map((c) => `border-radius-${c}`);
   }
@@ -636,6 +640,14 @@ describe("UI primitive class conflict guard", () => {
     for (const token of [...Object.values(ROUNDED), ...Object.values(NEEDLE)]) {
       const size = Buffer.byteLength(await buildCss([token]));
       expect(size, `隠したクラス名が CSS を生まない: ${token}`).toBeGreaterThan(empty);
+    }
+    // 逆向き。**`hidden()` が隠すのは値だけで、キー名は逐語で走査される。** 走査は
+    // ハイフンを跨いで切らないので `box-shadow` のような散文は安全だが、キーを 1 語で
+    // 書くとそれ自体が候補になる。#276 のレビューで、影のユーティリティと同名のキー
+    // 1 つだけで 284 バイトが本番 CSS に残っていたことが実測で分かった。
+    for (const key of [...Object.keys(ROUNDED), ...Object.keys(NEEDLE)]) {
+      const size = Buffer.byteLength(await buildCss([key]));
+      expect(size, `キー名がクラスとして解決する: ${key}`).toBe(empty);
     }
   });
 
