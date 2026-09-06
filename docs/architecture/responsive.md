@@ -329,7 +329,7 @@ CI は typecheck / lint / vitest の 3 ジョブで、**`next build` を持た�
 | `components/ui/data-table-responsive.ts` | 閾値表そのもの、テーブル別の予算内訳、閾値を足すときの制約 |
 | `components/ui/modal-classes.ts` | モーダルのクラス契約と、そう書いた理由 |
 | `components/ui/overlay-anchor-classes.ts` | トリガ基準で開くパネルの位置基準。狭幅で viewport 基準へ切り替える理由 (#264) |
-| `components/ui/card.tsx` | `Card.Header` / `Card.Footer` の折り返し契約。`flex-wrap` を入れた理由、`min-w-0` を入れない理由、2 行目の寄せを消費者が `ml-auto` で決める分担 (#270) |
+| `components/ui/card.tsx` | `Card.Header` / `Card.Footer` の折り返し契約。`flex-wrap` を入れた理由、`min-w-0` を入れない理由、2 行目の寄せを基底の `[&>*+*]:ml-auto` が持ち**消費者へ配らない**理由 (#270) |
 | 各ビューの `_components/__tests__/*-table-columns.test.tsx` | そのビューの決定表 (`EXPECTED`) と列単体予算 (`BUDGET`)、予算の実測値の採り方。**always 列の予算も含め `BUDGET` が唯一の出所**で、直値の定数を別に置かない (#244) |
 | `components/ui/__tests__/support/column-budget.ts` | 予算→閾値の検証ロジック (`expectBudgetLadder` / `expectCapsMatchBudget` / `NARROWEST_CONTAINER`) と、空洞化しないための作り。3 ビュー共通 (#244) |
 
@@ -346,12 +346,12 @@ Epic #225 の進行に伴って更新する。
 | 項目 | 状態 |
 |---|---|
 | `tabs.tsx` の `TabsList` が狭幅で溢れる | **解決済み**（#252 / PR #255）。`overflow-x-auto` + `max-w-full` + `scrollbar-none` へ退避し、矢印キー移動も同時に実装した |
-| `Card.Header` / `Card.Footer` の折り返し | **解決済み**（#270）。双方に `flex-wrap`、消費者は操作側に `ml-auto`（§4.5） |
+| `Card.Header` / `Card.Footer` の折り返し | **解決済み**（#270）。双方に `flex-wrap`、2 行目の右寄せは `Card.Header` の基底 `[&>*+*]:ml-auto` が持つ（**消費者へは配らない**。§4.5） |
 | `sidebar.tsx` のドロワーにフォーカストラップ / スクロールロック / Escape が無い | **解決済み**（#253 / PR #256）。ただし**開いた状態の自動テストは無い**（§5「この土台で検知できないもの」） |
 | タッチターゲットの全画面 44px 化 | **方針決定済み**（#225 Phase 1 / PR #258）。md 未満で全ボタン `min-h-11`、デスクトップは据え置き。残余（入力欄との 8px 段差、独自ピルの方式二重化）は **#257** |
 | 入力系の高さ 36px・文字サイズ 14px | **要再評価**（**#257**）。iOS Safari は focus 時にフォントが 16px 未満だとオートズームする |
 | `CopyButton`（`copy-button.tsx`）が `<Button>` を使わない独自ピル | **未対応。** `h-8` 固定で 44px 下限を持たない。#257 が挙げる `store-quick-filters.tsx` と同型 |
-| `Card` 本体のクラス列を写した placeholder | **一部未対応。** `TableSkeleton` は #270 で `Card` を呼ぶ形へ寄せたが、`FormSkeleton` / `KanbanSkeleton` / `Stat` はまだ `bg-card … rounded-lg shadow-card` を手書きしている（§4.5.1） |
+| `Card` 本体のクラス列を写した placeholder | **一部未対応。** `TableSkeleton` は #270 で `Card` を呼ぶ形へ寄せたが、`FormSkeleton` (`skeleton.tsx`) / `Stat` (`stat.tsx`) / `pipeline-filters.tsx` はまだ `bg-card … rounded-lg shadow-card` を手書きしている（§4.5.1）。`KanbanSkeleton` は `bg-muted/40` の別物で、この群には入らない |
 | `/dashboard` `/pipeline` `/actions` `/handoffs` `/kpi` | **ルート無効化中**（`lib/domain/nav-routes.ts`）。これらの閾値・レイアウトは無効化状態での暫定値で、**再有効化時に列構成ごと再測定する** |
 
 ---
