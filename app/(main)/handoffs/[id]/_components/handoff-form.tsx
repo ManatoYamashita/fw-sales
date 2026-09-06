@@ -85,7 +85,12 @@ export function HandoffForm({ handoff }: { handoff: Handoff }) {
         </Card>
       ) : (
         <Card>
-          <Card.Body className="flex flex-wrap items-center justify-between gap-3">
+          {/* justify-content は行ごとに効くので、折り返した 2 行目は justify-between
+              だけでは左寄せになる (#270 §4.5)。Card.Header と同じく 2 番目以降の子へ
+              auto マージンを与えて右寄せを保つ。実測 (Card 幅 260-900px を 1px 刻み):
+              折り返すのは 546px 以下で、その 287 帯域すべてでボタンが左端に落ちていた。
+              547px 以上では折り返さず、この指定を足しても位置は 1px も変わらない。 */}
+          <Card.Body className="flex flex-wrap items-center justify-between gap-3 [&>*+*]:ml-auto">
             <div>
               <Badge tone="amber">運用確認待ち</Badge>
               <p className="text-sm text-foreground mt-2">
