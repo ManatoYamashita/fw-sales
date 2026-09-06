@@ -140,6 +140,8 @@ open https://github.com/ManatoYamashita/fw-sales/pull/30
 - ~~[ ] 8. 認証バイパス系の防御 (CRON_SECRET 不一致 401 / mode クエリ不正 400 / RESEND_API_KEY 未設定でも 200)~~ — 削除済
 - [ ] 9. 全体品質ゲート (`pnpm typecheck && pnpm lint && pnpm build && pnpm test`)
 
+2026-09-07時点で、ステージングPreview（dpl_91cUcFs8N7FDHpXbAp3TWyiT388u）におけるGoogle OAuth後の`/stores`復帰、Profile表示、ヘッダーアバター、UserMenu、サインアウト、サインアウト後の`/stores`・`/dashboard`・`/deals`・`/pipeline`保護リダイレクトを確認済みです。詳細は[手動E2Eチェックリストの実機検証記録](auth-and-notifications-e2e.md#ステージング実機検証記録-2026-09-07)を参照してください。
+
 ### Step 4: 本番 DB に 0004 適用
 
 ```bash

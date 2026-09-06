@@ -27,6 +27,21 @@ export interface CurrentSession {
 
 let _missingEnvWarned = false;
 
+const E2E_SESSION_COOKIE = "__fw_e2e_session";
+
+function isE2eMode(): boolean {
+  return process.env.NODE_ENV === "development" && process.env.E2E_TEST_MODE === "1";
+}
+
+async function getE2eSession(): Promise<CurrentSession | null> {
+  const configuredSecret = process.env.E2E_TEST_SECRET;
+  const userId = process.env.E2E_TEST_USER_ID;
+  const email = process.env.E2E_TEST_EMAIL;
+  const cookie = (await cookies()).get(E2E_SESSION_COOKIE)?.value;
+  if (!configuredSecret || !userId || !email || cookie !== configuredSecret) return null;
+  return { userId, email };
+}
+
 function readSupabaseEnv(): { url: string; anonKey: string } | null {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -81,6 +96,8 @@ export async function getSupabaseServerClient(): Promise<SupabaseClient> {
  * 現在のセッション (認証済ユーザー) を取得する。未認証なら null。
  */
 export async function getCurrentSession(): Promise<CurrentSession | null> {
+  if (isE2eMode()) return getE2eSession();
+
   const env = readSupabaseEnv();
   if (!env) return null;
   try {

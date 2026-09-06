@@ -7,6 +7,22 @@
 
 > **2026-05-17 更新**: 商談リマインダー Cron + Resend メール通知関連 (項目 7 / 8 の全項目 / 9 の `pnpm test` 件数) は削除されました。当該セクションは取り消し線で履歴を残しています。
 
+## ステージング実機検証記録 (2026-09-07)
+
+対象: [Vercel Preview (dpl_91cUcFs8N7FDHpXbAp3TWyiT388u)](https://fw-sales-gaymv8o9t-shinsotsu-gourmet.vercel.app)
+
+- [x] `/login` からGoogle OAuthのアカウント選択画面へ遷移
+- [x] Google認証後に`/auth/callback`を経由して`/stores`へ復帰
+- [x] サイドバーのProfile名 `山本元` とロール `管理者` を表示
+- [x] ユーザーメニューからサインアウトし、`/login`へ復帰
+- [x] サインアウト後に`/stores`へアクセスすると`/login?redirect=%2Fstores`へリダイレクト
+- [x] 未ログイン状態で`/dashboard`・`/deals`・`/pipeline`へアクセスすると、各`/login?redirect=...`へリダイレクト
+- [x] ヘッダー右上のアバター・Profile名・ロールを表示
+
+- [x] ヘッダーアバターをクリックするとUserMenuが開き、サインアウトで`/login`へ戻る
+
+---
+
 ## 前提セットアップ
 
 - [ ] `.env.local` に 5 件の環境変数が設定済 (`NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` / `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET`)
@@ -24,19 +40,19 @@
 > 項目 7 (商談リマインダー Cron) / 項目 8 (認証バイパス系の防御) は削除済機能のため取り消し線扱い。
 
 ### 1. 未ログイン保護リダイレクト
-- [ ] 未ログイン状態で `/dashboard` にアクセス → `/login?redirect=/dashboard` にリダイレクトされる
-- [ ] 未ログイン状態で `/stores` / `/deals` / `/pipeline` 等にアクセス → 同様に `/login?redirect=...` にリダイレクト
+- [x] 未ログイン状態で `/dashboard` にアクセス → `/login?redirect=/dashboard` にリダイレクトされる (2026-09-07)
+- [x] 未ログイン状態で `/stores` / `/deals` / `/pipeline` 等にアクセス → 同様に `/login?redirect=...` にリダイレクト (2026-09-07 `/stores`・`/deals`・`/pipeline`で確認)
 - [ ] `/login` / `/auth/callback` / `/api/cron/*` は proxy を通り抜けて到達可能
 
 ### 2. Google サインインフロー
-- [ ] `/login` で「Google でサインイン」ボタンを押下 → Google 同意画面に遷移
-- [ ] 同意後 `/auth/callback` 経由で `?redirect` クエリの戻り先 (デフォルト `/dashboard`) に着地
-- [ ] ヘッダー右上のアバター + 表示名が現ユーザーの Profile を反映している
-- [ ] サイドバー下部にも現ユーザー名 / ロールが表示されている
+- [x] `/login` で「Google でサインイン」ボタンを押下 → Google アカウント選択画面に遷移 (2026-09-07)
+- [x] 同意後 `/auth/callback` 経由で `?redirect` クエリの戻り先 (デフォルト `/dashboard`) に着地 (2026-09-07 `/stores`で確認)
+- [x] ヘッダー右上のアバター + 表示名が現ユーザーの Profile を反映している (2026-09-07 新Previewで確認)
+- [x] サイドバー下部にも現ユーザー名 / ロールが表示されている (2026-09-07)
 
 ### 3. サインアウト
-- [ ] ヘッダーのアバターをクリック → UserMenu が開く
-- [ ] 「サインアウト」を選択 → セッションが破棄され `/login` に戻る
+- [x] ヘッダーのアバターをクリック → UserMenu が開く (2026-09-07 新Previewで確認)
+- [x] 「サインアウト」を選択 → セッションが破棄され `/login` に戻る (2026-09-07 新Previewで確認)
 
 ### 4. 担当者選択 UI (user 参照化)
 - [ ] `/stores/new` の「プランナー」「営業担当」が text input ではなく **profile 名の Select** になっている

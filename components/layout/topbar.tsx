@@ -8,9 +8,11 @@ import { Breadcrumb, type BreadcrumbItem } from "@/components/ui/breadcrumb";
 import { buttonVariants } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { NotificationBell } from "@/components/layout/notification-bell";
+import { UserMenu } from "@/components/layout/user-menu";
 import { useMounted } from "@/lib/hooks/use-mounted";
 import { cn } from "@/lib/utils/cn";
 import type { Notification } from "@/types/notification";
+import type { Profile } from "@/types/profile";
 
 function deriveBreadcrumb(pathname: string): BreadcrumbItem[] {
   if (pathname === "/" || pathname === "/dashboard") {
@@ -43,9 +45,10 @@ export interface TopbarProps {
    * で解決した最新通知配列。deep-research-pipeline spec #43 で追加。
    */
   notifications?: readonly Notification[];
+  currentProfile?: Profile | null;
 }
 
-export function Topbar({ notifications = [] }: TopbarProps) {
+export function Topbar({ notifications = [], currentProfile }: TopbarProps) {
   const pathname = usePathname();
   const mounted = useMounted();
 
@@ -64,6 +67,7 @@ export function Topbar({ notifications = [] }: TopbarProps) {
       <div className="flex items-center gap-1.5">
         <ThemeToggle />
         <NotificationBell notifications={notifications} />
+        <UserMenu profile={currentProfile} />
         {isOnStoreNew ? (
           <button
             type="button"

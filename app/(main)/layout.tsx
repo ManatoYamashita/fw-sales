@@ -45,7 +45,7 @@ async function TopbarShell() {
     redirect("/login");
   }
   const notifications = await getRecentNotifications(profile.id, 10);
-  return <Topbar notifications={notifications} />;
+  return <Topbar currentProfile={profile} notifications={notifications} />;
 }
 
 function SidebarFallback({ collapsed }: { collapsed: boolean }) {

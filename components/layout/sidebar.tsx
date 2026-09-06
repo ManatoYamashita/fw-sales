@@ -1,24 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { LogOut, Menu, PanelLeft, PanelLeftClose, X, Zap } from "lucide-react";
-import { useEffect, useRef, useState, useTransition } from "react";
+import { usePathname } from "next/navigation";
+import { Menu, PanelLeft, PanelLeftClose, X, Zap } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { NAV_ITEMS } from "@/lib/domain/nav";
 import {
   FOCUSABLE_SELECTOR,
   resolveDrawerFocusWrap,
 } from "@/components/layout/sidebar-focus";
 import { cn } from "@/lib/utils/cn";
-import { signOutAction } from "@/lib/actions/auth-actions";
+import { UserMenu } from "@/components/layout/user-menu";
 import type { NavBadgeCounts } from "@/lib/queries/stats";
 import type { Profile } from "@/types/profile";
-
-function getInitial(displayName: string): string {
-  const trimmed = displayName.trim();
-  if (!trimmed) return "?";
-  return trimmed.charAt(0).toUpperCase();
-}
 
 export interface SidebarProps {
   counts?: Partial<NavBadgeCounts>;
@@ -45,16 +39,7 @@ export function Sidebar({
   currentProfile,
   defaultCollapsed = false,
 }: SidebarProps) {
-  const displayName = currentProfile?.display_name ?? "ゲスト";
-  // ロール表示ラベル (#155): placeholder=未登録 / admin=管理者 / それ以外=メンバー。
-  const role =
-    currentProfile?.role === "placeholder"
-      ? "未登録"
-      : currentProfile?.role === "admin"
-        ? "管理者"
-        : "メンバー";
   const pathname = usePathname();
-  const router = useRouter();
   const [open, setOpen] = useState(false);
   const close = () => setOpen(false);
   const asideRef = useRef<HTMLElement>(null);
@@ -139,46 +124,6 @@ export function Sidebar({
       persistCollapsed(next);
       return next;
     });
-
-  const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const [signOutError, setSignOutError] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
-  const userMenuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!userMenuOpen) return;
-    function handlePointerDown(event: MouseEvent) {
-      if (
-        userMenuRef.current &&
-        !userMenuRef.current.contains(event.target as Node)
-      ) {
-        setUserMenuOpen(false);
-      }
-    }
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setUserMenuOpen(false);
-    }
-    document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [userMenuOpen]);
-
-  function handleSignOut() {
-    setSignOutError(null);
-    startTransition(async () => {
-      const result = await signOutAction();
-      if (!result.ok) {
-        setSignOutError(result.error);
-        return;
-      }
-      setUserMenuOpen(false);
-      router.push(result.data.redirectTo);
-      router.refresh();
-    });
-  }
 
   return (
     <>
@@ -352,101 +297,11 @@ export function Sidebar({
           </button>
         </div>
 
-        {/* User block — Topbar の UserMenu を統合 */}
-        <div
-          ref={userMenuRef}
-          className="relative px-3 py-3 border-t border-sidebar-border"
-        >
-          <button
-            type="button"
-            aria-haspopup="menu"
-            aria-expanded={userMenuOpen}
-            aria-label={`ユーザーメニュー: ${displayName}`}
-            onClick={() => setUserMenuOpen((v) => !v)}
-            title={collapsed ? displayName : undefined}
-            className={cn(
-              "flex w-full items-center gap-3 px-1 py-1 rounded-md text-left",
-              "hover:bg-sidebar-accent/60 transition-colors",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
-              collapsed && "md:justify-center",
-            )}
-          >
-            <span
-              className="h-9 w-9 rounded-full bg-secondary text-secondary-foreground flex items-center justify-center text-sm font-semibold shrink-0 ring-1 ring-border overflow-hidden"
-              aria-hidden
-            >
-              {currentProfile?.avatar_url ? (
-                /* eslint-disable-next-line @next/next/no-img-element */
-                <img
-                  src={currentProfile.avatar_url}
-                  alt=""
-                  className="h-full w-full object-cover"
-                  referrerPolicy="no-referrer"
-                />
-              ) : (
-                <span>{getInitial(displayName)}</span>
-              )}
-            </span>
-            <div
-              className={cn(
-                "min-w-0 flex-1 leading-tight",
-                collapsed && "md:hidden",
-              )}
-            >
-              <p className="text-sm font-semibold text-sidebar-foreground truncate">
-                {displayName}
-              </p>
-              <p className="text-[11px] text-muted-foreground truncate">
-                {role}
-              </p>
-            </div>
-          </button>
-
-          {userMenuOpen ? (
-            <div
-              role="menu"
-              className={cn(
-                "absolute left-3 right-3 bottom-full mb-2 z-30",
-                // 折りたたみ時はレール幅が狭いため、デスクトップのみ右に展開して幅を確保
-                collapsed && "md:left-2 md:right-auto md:w-56",
-                "rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md",
-              )}
-            >
-              {currentProfile?.email ? (
-                <div className="px-3 py-2 border-b border-border mb-1">
-                  <p className="text-xs text-muted-foreground truncate">
-                    {currentProfile.email}
-                  </p>
-                </div>
-              ) : null}
-              <button
-                type="button"
-                role="menuitem"
-                disabled={isPending}
-                onClick={handleSignOut}
-                className={cn(
-                  "flex items-center gap-2 px-3 py-2 text-sm rounded-sm w-full text-left",
-                  "hover:bg-accent hover:text-accent-foreground",
-                  "focus:bg-accent focus:text-accent-foreground focus:outline-none",
-                  "disabled:cursor-not-allowed disabled:opacity-60",
-                )}
-              >
-                <LogOut className="h-4 w-4" />
-                <span>
-                  {isPending ? "サインアウト中..." : "サインアウト"}
-                </span>
-              </button>
-              {signOutError ? (
-                <p
-                  role="alert"
-                  className="px-3 py-2 text-xs text-destructive border-t border-border mt-1"
-                >
-                  {signOutError}
-                </p>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
+        <UserMenu
+          profile={currentProfile}
+          variant="sidebar"
+          collapsed={collapsed}
+        />
       </aside>
 
       {/* Mobile menu trigger ─ サイドバー閉時のみ表示。開時は内側 X ボタンで閉じる */}

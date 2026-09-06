@@ -26,7 +26,13 @@ pnpm dev          # http://localhost:3000 (Turbopack)
 pnpm typecheck    # tsc --noEmit (strict + noUncheckedIndexedAccess)
 pnpm lint         # ESLint (next/core-web-vitals + typescript-eslint)
 pnpm build
+
+# E2E (Apple Containerが必要)
+pnpm e2e:install
+pnpm e2e
 ```
+
+E2E環境の詳細は [`docs/e2e-local.md`](docs/e2e-local.md) を参照してください。
 
 ## ディレクトリ構造(抜粋)
 
