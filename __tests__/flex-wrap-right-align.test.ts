@@ -46,6 +46,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { readClassAttribute } from "@/components/ui/__tests__/support/jsx-class-scan";
+import { buildCss } from "@/components/ui/__tests__/support/build-css";
 import { hidden } from "@/components/ui/__tests__/support/scanner-hidden";
 
 const ROOT = process.cwd();
@@ -72,6 +73,10 @@ const REMEDY = "[&>*+*]:ml-auto";
  * Tailwind の走査が拾って使っていない規則が本番 CSS に生まれる** (#265)。
  * 実行時に連結して外す (`support/scanner-hidden.ts`)。断片はどちらも単独では
  * クラスとして解決しない (実測で 0 バイトを確認済み)。
+ *
+ * **実行時連結なので、断片を打ち間違えても型もリンタも気づかない。** 壊れた値は
+ * `WRAP` と前方一致しなくなるだけなので `violatesTag` は素通りし、下の
+ * negative control が無言で空回りする。それを下のテストが固定する (#276)。
  */
 const WRAP_REVERSE = hidden("flex-", "wrap-reverse");
 
@@ -223,6 +228,21 @@ describe("flex-wrap + justify-between は折り返した行の右寄せを持つ
     expect(
       violatesTag(`<div className="flex ${WRAP_REVERSE} justify-between">`),
     ).toBe(false);
+  });
+
+  it("前方一致の needle が実在するクラスで、かつ基底そのものではない (#276)", async () => {
+    // `hidden()` の断片を打ち間違えると、`WRAP` と前方一致しない別の文字列になる。
+    // `violatesTag` は "n/a" を返して `toBe(false)` が通るため、上の「前方一致で
+    // 誤爆しない」が**検査になっていないまま緑**になる (実測: 断片を壊しても全件
+    // green だった)。実在の判定は模型ではなく Tailwind 自身に任せる。
+    const empty = Buffer.byteLength(await buildCss([]));
+    expect(
+      Buffer.byteLength(await buildCss([WRAP_REVERSE])),
+      "needle が実在するクラスではない",
+    ).toBeGreaterThan(empty);
+    // 前方一致の検査として成立していること。`WRAP` で始まり `WRAP` ではない。
+    expect(WRAP_REVERSE.startsWith(WRAP)).toBe(true);
+    expect(WRAP_REVERSE).not.toBe(WRAP);
   });
 
   it("式で分割して書かれても合併して拾う", () => {
