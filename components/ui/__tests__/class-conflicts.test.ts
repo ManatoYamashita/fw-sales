@@ -492,6 +492,42 @@ describe("UI primitive class conflict guard", () => {
         "Select",
       ),
     ).toEqual({ component: "Select", classes: ["h-11", "text-destructive"] });
+    // #270 の flex コンテナ軸。この 3 例が無いと `FLEX_CONTAINER_TOKENS` を丸ごと
+    // 削除しても 141 files / 3840 tests が緑のままで、模型が消えたことに CI が
+    // 気づけなかった (PR #271 のレビューで実測)。利用側が上書きすると折り返しが
+    // 無言で消え、症状は #270 と同じ「操作が押せない」に戻る。
+    expect(
+      findClassConflicts('<Card.Header className="flex-nowrap" />', "Card.Header"),
+    ).toEqual({ component: "Card.Header", classes: ["flex-nowrap"] });
+    expect(
+      findClassConflicts('<Card.Header className="items-start" />', "Card.Header"),
+    ).toEqual({ component: "Card.Header", classes: ["items-start"] });
+    expect(
+      findClassConflicts('<Card.Footer className="justify-start" />', "Card.Footer"),
+    ).toEqual({ component: "Card.Footer", classes: ["justify-start"] });
+    // 検知力と引き換えの既知コスト: リポジトリに無かった 3 語を literal で持ち込むため
+    // 生成 CSS が実測 +151 バイト増える (`flex-nowrap` 44 / `justify-start` 56 /
+    // `content-center` 51。§4.2 の手順で、母集合をコード側に置いて計測)。
+    // 基底が争わない軸は緑に転じる (弁別性)。「何を書いても落ちる」ではない。
+    expect(
+      findClassConflicts('<Card.Header className="rounded-md" />', "Card.Header"),
+    ).toBeNull();
+  });
+
+  it("flex コンテナ軸をプロパティへ写像する (#270)", () => {
+    // 上の negative control は**基底が実際に持つ軸**しか通せない。`flex-direction` と
+    // `align-content` はどのプリミティブの基底にも無いため経路が無く、模型から
+    // その 2 行を消しても衝突は 1 件も増減しない。だから模型を直接測る。
+    expect(cssProperties("flex-wrap")).toEqual(["flex-wrap"]);
+    expect(cssProperties("flex-nowrap")).toEqual(["flex-wrap"]);
+    expect(cssProperties("flex-col")).toEqual(["flex-direction"]);
+    expect(cssProperties("justify-between")).toEqual(["justify-content"]);
+    expect(cssProperties("items-center")).toEqual(["align-items"]);
+    expect(cssProperties("content-center")).toEqual(["align-content"]);
+    // 境界。`flex` は display、`flex-1` は flex **アイテム**側の指定なので、
+    // ここへ吸わせると `<Button className="flex-1">` のような正当な指定を誤検出する。
+    expect(cssProperties("flex")).toEqual(["display"]);
+    expect(cssProperties("flex-1")).toEqual([]);
   });
 
   it("事故の原文 (式で書いた className) を negative control で検知する", () => {
