@@ -7,7 +7,7 @@ import { configDefaults, defineConfig } from "vitest/config";
  *   (本番ビルドでは Next.js が `react-server` condition で `empty.js` に解決するが、
  *    Vitest 環境では condition 解決が効かないため明示的に向ける)
  * - `@/*` パスエイリアスをプロジェクトルートに合わせる
- * - `.claude/**` を test 対象から除外する
+ * - `.claude/**` と `e2e/**` を test 対象から除外する
  *   (Claude Code の worktree 機能が `.claude/worktrees/<name>/` に別ブランチの
  *    ファイルツリーを展開するため、デフォルト exclude のままだと他ブランチの
  *    test/source が拾われて誤検知エラーになる。CI では `.claude/` が repo に
@@ -22,6 +22,6 @@ export default defineConfig({
     conditions: ["react-server", "import", "node", "default"],
   },
   test: {
-    exclude: [...configDefaults.exclude, ".claude/**"],
+    exclude: [...configDefaults.exclude, ".claude/**", "e2e/**"],
   },
 });

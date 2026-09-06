@@ -40,8 +40,22 @@ export interface UpdateSessionResult {
  * 構造自体は変わらない**ので、この防御は runtime を問わず必要。
  */
 const AUTH_FETCH_TIMEOUT_MS = 4_000;
+const E2E_SESSION_COOKIE = "__fw_e2e_session";
 
 let _missingEnvWarned = false;
+
+function isE2eMode(): boolean {
+  return process.env.NODE_ENV === "development" && process.env.E2E_TEST_MODE === "1";
+}
+
+function isE2eAuthenticated(request: NextRequest): boolean {
+  const configuredSecret = process.env.E2E_TEST_SECRET;
+  return Boolean(
+    configuredSecret &&
+      process.env.E2E_TEST_USER_ID &&
+      request.cookies.get(E2E_SESSION_COOKIE)?.value === configuredSecret,
+  );
+}
 
 function readSupabaseEnv(): { url: string; anonKey: string } | null {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -69,6 +83,15 @@ function readSupabaseEnv(): { url: string; anonKey: string } | null {
 export async function updateSession(
   request: NextRequest,
 ): Promise<UpdateSessionResult> {
+  if (isE2eMode()) {
+    const isAuthenticated = isE2eAuthenticated(request);
+    return {
+      response: NextResponse.next({ request }),
+      isAuthenticated,
+      userId: isAuthenticated ? process.env.E2E_TEST_USER_ID ?? null : null,
+    };
+  }
+
   const env = readSupabaseEnv();
   if (!env) {
     return {
