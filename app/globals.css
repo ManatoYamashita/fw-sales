@@ -483,12 +483,14 @@
   }
 }
 
-::view-transition-old(.fade-out) {
-  animation: var(--vt-duration-exit) ease-in vt-fade reverse;
-}
-::view-transition-new(.fade-in) {
-  animation: var(--vt-duration-enter) cubic-bezier(0.22, 1, 0.36, 1)
-    var(--vt-duration-exit) both vt-fade;
+@media (prefers-reduced-motion: no-preference) {
+  ::view-transition-old(.fade-out) {
+    animation: var(--vt-duration-exit) ease-in vt-fade reverse;
+  }
+  ::view-transition-new(.fade-in) {
+    animation: var(--vt-duration-enter) cubic-bezier(0.22, 1, 0.36, 1)
+      var(--vt-duration-exit) both vt-fade;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
