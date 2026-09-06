@@ -55,6 +55,8 @@ import {
   readClassAttribute,
   readStringAttribute,
 } from "./support/jsx-class-scan";
+import { buildCss } from "./support/build-css";
+import { hidden } from "./support/scanner-hidden";
 
 type ComponentName =
   | "Button"
@@ -82,11 +84,61 @@ const FONT_SIZES = new Set([
 ]);
 const TEXT_ALIGNS = new Set(["left", "center", "right", "justify", "start", "end"]);
 /** `bg-*` のうち色ではないもの (repeat / position / size / attachment / clip)。 */
+/**
+ * **リポジトリが使っていないクラスは、走査へ拾わせないため実行時に組み立てる (#265)。**
+ *
+ * このファイルは模型の対応表と negative control の needle として、本番 JSX に 1 度も
+ * 出てこないクラス名を大量に持つ。逐語で書くと Tailwind の静的走査が候補として拾い、
+ * **使っていないクラスの規則が本番 CSS に生まれる**。実測で 17 語 1278 バイトあった
+ * (`support/scanner-hidden.ts` / `docs/architecture/responsive.md` §4.2)。
+ *
+ * 分割位置は「どの断片も単独ではクラスとして解決しないこと」で選んでいる。
+ * 全断片が 0 バイトであることを実測で確認済み。
+ *
+ * **`hidden()` が隠すのは値だけで、キー名はソースに逐語で残る。** キーにクラスとして
+ * 解決する語を使うと、そのキーが候補になり隠したはずの規則が本番 CSS へ戻る。
+ * 下の「走査から隠したクラス名が実在する」テストが両方向を固定する (#276)。
+ */
+const ROUNDED = {
+  tl: hidden("round", "ed-tl"),
+  tr: hidden("round", "ed-tr"),
+  br: hidden("round", "ed-br"),
+  bl: hidden("round", "ed-bl"),
+  t: hidden("round", "ed-t"),
+  r: hidden("round", "ed-r"),
+  b: hidden("round", "ed-b"),
+  l: hidden("round", "ed-l"),
+} as const;
+
+/** negative control とモデル検査で使う、本番に無いクラス。 */
+const NEEDLE = {
+  nowrap: hidden("flex-", "nowrap"),
+  justifyStart: hidden("justify-", "start"),
+  contentCenter: hidden("content-", "center"),
+  widthAuto: hidden("w-", "auto"),
+  /** 模型が名指しで見るクラス。単独 +284 バイトと、この群で最も高い。 */
+  boxShadow: hidden("sha", "dow"),
+  displayInline: hidden("inl", "ine"),
+  /** `border-collapse` の値。正規表現の中でも走査は拾う。 */
+  borderCollapse: hidden("colla", "pse"),
+} as const;
+
 const BG_NON_COLOR =
   /^(no-repeat|repeat|repeat-x|repeat-y|repeat-round|repeat-space|cover|contain|auto|center|top|bottom|left|right|fixed|local|scroll|clip|origin|none|blend|gradient)/;
-/** `border-*` のうち色ではないもの (幅 / スタイル)。 */
-const BORDER_NON_COLOR =
-  /^(\d+|solid|dashed|dotted|double|hidden|none|collapse|separate|spacing)$/;
+/**
+ * `border-*` のうち色ではないもの (幅 / スタイル)。
+ *
+ * 値を配列へ出しているのは、`border-collapse` の値のひとつが**単独で Tailwind の
+ * クラスとして解決し、正規表現リテラルの中に書いても走査が拾ってしまう**ため (#265)。
+ * `NEEDLE` 経由で実行時に組み立てる。クラス名を逐語で書くとこの対処が無意味になる。
+ */
+const BORDER_NON_COLOR_VALUES = [
+  "solid", "dashed", "dotted", "double", "hidden", "none",
+  NEEDLE.borderCollapse, "separate", "spacing",
+];
+const BORDER_NON_COLOR = new RegExp(
+  `^(\\d+|${BORDER_NON_COLOR_VALUES.join("|")})$`,
+);
 
 const PADDING_EDGES: ReadonlyArray<readonly [string, readonly string[]]> = [
   ["px-", ["pl", "pr"]],
@@ -101,14 +153,14 @@ const PADDING_EDGES: ReadonlyArray<readonly [string, readonly string[]]> = [
 ];
 
 const ROUNDED_CORNERS: ReadonlyArray<readonly [string, readonly string[]]> = [
-  ["rounded-tl", ["tl"]],
-  ["rounded-tr", ["tr"]],
-  ["rounded-br", ["br"]],
-  ["rounded-bl", ["bl"]],
-  ["rounded-t", ["tl", "tr"]],
-  ["rounded-r", ["tr", "br"]],
-  ["rounded-b", ["br", "bl"]],
-  ["rounded-l", ["tl", "bl"]],
+  [ROUNDED.tl, ["tl"]],
+  [ROUNDED.tr, ["tr"]],
+  [ROUNDED.br, ["br"]],
+  [ROUNDED.bl, ["bl"]],
+  [ROUNDED.t, ["tl", "tr"]],
+  [ROUNDED.r, ["tr", "br"]],
+  [ROUNDED.b, ["br", "bl"]],
+  [ROUNDED.l, ["tl", "bl"]],
 ];
 
 /** 単純な `prefix -> プロパティ` の対応。長い prefix から順に見る。 */
@@ -128,8 +180,9 @@ const SIMPLE_PREFIXES: ReadonlyArray<readonly [string, string]> = [
 ];
 
 const DISPLAY_TOKENS = new Set([
-  "block", "inline-block", "inline", "flex", "inline-flex", "grid",
-  "inline-grid", "contents", "hidden", "flow-root", "list-item",
+  "block", "inline-block", NEEDLE.displayInline, "flex", "inline-flex", "grid", "contents", "hidden",
+  // 本番に出てこない 3 語は走査へ拾わせない (上の ROUNDED と同じ理由)。
+  hidden("inline-g", "rid"), hidden("flow-r", "oot"), hidden("list-i", "tem"),
 ]);
 
 /**
@@ -137,8 +190,9 @@ const DISPLAY_TOKENS = new Set([
  *
  * `Card.Header` / `Card.Footer` の契約はここに集中している (`flex-wrap` で折り返し、
  * `justify-*` で寄せ、`items-*` で交差軸)。モデル化しないと、利用側が
- * `className="flex-nowrap"` と書いても衝突として検出されず、**折り返しが無言で
- * 消える**。`flex-1` / `flex-none` は flex アイテム側の指定なので別プロパティ。
+ * `flex-wrap: nowrap` 側の値を渡しても衝突として検出されず、**折り返しが無言で
+ * 消える**。`flex-1` などの flex **アイテム**側の指定は別プロパティなので混ぜない。
+ * (クラス名を逐語で書かないのは、この散文も走査対象だから。`NEEDLE` を参照。)
  */
 const FLEX_CONTAINER_TOKENS: ReadonlyArray<readonly [RegExp, string]> = [
   [/^flex-(wrap|nowrap|wrap-reverse)$/, "flex-wrap"],
@@ -155,14 +209,14 @@ const FLEX_CONTAINER_TOKENS: ReadonlyArray<readonly [RegExp, string]> = [
 export function cssProperties(token: string): string[] {
   // `md:` `hover:` `[&>option]:` などは適用条件が違うので基底とは争わない。
   if (token.includes(":")) return [];
-  // `bg-[right_0.6rem_center]` `[background-size:12px]` のような任意値は解釈しない。
+  // 角括弧を含む任意値は解釈しない (例は §4.2 の規則により散文へ書かない)。
   if (token.includes("[")) return [];
 
   if (DISPLAY_TOKENS.has(token)) return ["display"];
   for (const [pattern, property] of FLEX_CONTAINER_TOKENS) {
     if (pattern.test(token)) return [property];
   }
-  if (token === "shadow") return ["box-shadow"];
+  if (token === NEEDLE.boxShadow) return ["box-shadow"];
   if (token === "rounded") {
     return ["tl", "tr", "br", "bl"].map((c) => `border-radius-${c}`);
   }
@@ -449,12 +503,12 @@ describe("UI primitive class conflict guard", () => {
     // #250 group 1: Select の色。
     expect(
       findClassConflicts(
-        '<Select width="full" className="w-auto text-muted-foreground/70" />',
+        `<Select width="full" className="${NEEDLE.widthAuto} text-muted-foreground/70" />`,
         "Select",
       ),
     ).toEqual({
       component: "Select",
-      classes: ["w-auto", "text-muted-foreground/70"],
+      classes: [NEEDLE.widthAuto, "text-muted-foreground/70"],
     });
     // #250 group 4: インラインスピナーの寸法。
     expect(
@@ -497,17 +551,14 @@ describe("UI primitive class conflict guard", () => {
     // 気づけなかった (PR #271 のレビューで実測)。利用側が上書きすると折り返しが
     // 無言で消え、症状は #270 と同じ「操作が押せない」に戻る。
     expect(
-      findClassConflicts('<Card.Header className="flex-nowrap" />', "Card.Header"),
-    ).toEqual({ component: "Card.Header", classes: ["flex-nowrap"] });
+      findClassConflicts(`<Card.Header className="${NEEDLE.nowrap}" />`, "Card.Header"),
+    ).toEqual({ component: "Card.Header", classes: [NEEDLE.nowrap] });
     expect(
       findClassConflicts('<Card.Header className="items-start" />', "Card.Header"),
     ).toEqual({ component: "Card.Header", classes: ["items-start"] });
     expect(
-      findClassConflicts('<Card.Footer className="justify-start" />', "Card.Footer"),
-    ).toEqual({ component: "Card.Footer", classes: ["justify-start"] });
-    // 検知力と引き換えの既知コスト: リポジトリに無かった 3 語を literal で持ち込むため
-    // 生成 CSS が実測 +151 バイト増える (`flex-nowrap` 44 / `justify-start` 56 /
-    // `content-center` 51。§4.2 の手順で、母集合をコード側に置いて計測)。
+      findClassConflicts(`<Card.Footer className="${NEEDLE.justifyStart}" />`, "Card.Footer"),
+    ).toEqual({ component: "Card.Footer", classes: [NEEDLE.justifyStart] });
     // 基底が争わない軸は緑に転じる (弁別性)。「何を書いても落ちる」ではない。
     expect(
       findClassConflicts('<Card.Header className="rounded-md" />', "Card.Header"),
@@ -519,11 +570,11 @@ describe("UI primitive class conflict guard", () => {
     // `align-content` はどのプリミティブの基底にも無いため経路が無く、模型から
     // その 2 行を消しても衝突は 1 件も増減しない。だから模型を直接測る。
     expect(cssProperties("flex-wrap")).toEqual(["flex-wrap"]);
-    expect(cssProperties("flex-nowrap")).toEqual(["flex-wrap"]);
+    expect(cssProperties(NEEDLE.nowrap)).toEqual(["flex-wrap"]);
     expect(cssProperties("flex-col")).toEqual(["flex-direction"]);
     expect(cssProperties("justify-between")).toEqual(["justify-content"]);
     expect(cssProperties("items-center")).toEqual(["align-items"]);
-    expect(cssProperties("content-center")).toEqual(["align-content"]);
+    expect(cssProperties(NEEDLE.contentCenter)).toEqual(["align-content"]);
     // 境界。`flex` は display、`flex-1` は flex **アイテム**側の指定なので、
     // ここへ吸わせると `<Button className="flex-1">` のような正当な指定を誤検出する。
     expect(cssProperties("flex")).toEqual(["display"]);
@@ -576,6 +627,28 @@ describe("UI primitive class conflict guard", () => {
     expect(
       findClassConflicts(`<Button size='sm' className="h-7" />`, "Button"),
     ).toEqual({ component: "Button", classes: ["h-7"] });
+  });
+
+  it("走査から隠したクラス名が実在する (#265)", async () => {
+    // `hidden()` は**実行時連結**なので、断片を打ち間違えても型もリンタも気づかない。
+    // 模型が「存在しないクラス名」を見張り続けても全テストが緑のまま通る
+    // (実測: `ROUNDED.tl` の断片を壊しても 266 件すべて green だった)。
+    //
+    // 実在の判定は**Tailwind 自身**に任せる。`cssProperties()` で往復させると、
+    // 壊れた名前が模型の表にも入っているため**循環して必ず通る**ので使えない。
+    const empty = Buffer.byteLength(await buildCss([]));
+    for (const token of [...Object.values(ROUNDED), ...Object.values(NEEDLE)]) {
+      const size = Buffer.byteLength(await buildCss([token]));
+      expect(size, `隠したクラス名が CSS を生まない: ${token}`).toBeGreaterThan(empty);
+    }
+    // 逆向き。**`hidden()` が隠すのは値だけで、キー名は逐語で走査される。** 走査は
+    // ハイフンを跨いで切らないので `box-shadow` のような散文は安全だが、キーを 1 語で
+    // 書くとそれ自体が候補になる。#276 のレビューで、影のユーティリティと同名のキー
+    // 1 つだけで 284 バイトが本番 CSS に残っていたことが実測で分かった。
+    for (const key of [...Object.keys(ROUNDED), ...Object.keys(NEEDLE)]) {
+      const size = Buffer.byteLength(await buildCss([key]));
+      expect(size, `キー名がクラスとして解決する: ${key}`).toBe(empty);
+    }
   });
 
   it("variant 付きクラスと同一トークンは衝突扱いしない", () => {
