@@ -85,7 +85,9 @@ export function HandoffForm({ handoff }: { handoff: Handoff }) {
         </Card>
       ) : (
         <Card>
-          <Card.Body className="flex items-center justify-between gap-3">
+          {/* flex-wrap + justify-between には [&>*+*]:ml-auto を添える (§4.5)。
+              折り返した 2 行目は justify-between だけでは左寄せになる。 */}
+          <Card.Body className="flex flex-wrap items-center justify-between gap-3 [&>*+*]:ml-auto">
             <div>
               <Badge tone="amber">運用確認待ち</Badge>
               <p className="text-sm text-foreground mt-2">

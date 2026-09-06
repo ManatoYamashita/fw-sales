@@ -617,7 +617,7 @@ export function AreaSearchResults({
           <Card.Body className="space-y-3">
           {nextPageToken && (
             <div className="space-y-2">
-              <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2 [&>*+*]:ml-auto">
                 <div className="space-y-0.5">
                   <p className="text-sm font-medium text-foreground">結果の続き</p>
                   <p className="text-xs text-muted-foreground">
@@ -811,7 +811,7 @@ export function AreaSearchResults({
         {/* 一覧 + 操作系: スマホでは地図の下、PCでは左側 */}
         <div className="order-2 lg:order-1 space-y-4">
           {allResults.length > 0 && (
-            <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2 [&>*+*]:ml-auto">
               <Tabs
                 value={resultFilter}
                 onValueChange={(next) => setResultFilter(next as ResultFilter)}

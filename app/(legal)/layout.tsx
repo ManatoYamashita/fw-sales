@@ -32,7 +32,7 @@ export default function LegalLayout({
         <main>{children}</main>
 
         <footer className="mt-16 border-t border-border pt-6 text-xs text-muted-foreground">
-          <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-3 [&>*+*]:ml-auto">
             <span>FirstWeb - Reserch AI for Sales</span>
             <nav className="flex items-center gap-4">
               <Link

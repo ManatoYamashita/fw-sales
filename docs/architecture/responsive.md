@@ -160,7 +160,16 @@ Tailwind v4 のクラス生成は**ソースの静的走査**。テンプレー�
 
 **したがって、この文書を含むあらゆる散文で「角括弧を含む任意値クラス」を例示に使わない。** **角括弧は中身を伏せても駄目で、形ごと外す。** 伏せ字を入れた任意値も候補として拾われ、`width: …` のような**不正な宣言がそのまま出力される**（実測で確認）。説明が必要なときは角括弧を使わない散文にするか、数値だけで書く。既にコードで使われているクラスを書くぶんには新たな dead CSS は増えないが、プレースホルダと架空の閾値は必ず増やす。
 
-**変更したときの確かめ方は「候補集合の差」ではなく「生成 CSS の差」で決める。** 候補集合は篩であって判定ではない。散文に書いた語はクラスでなくても候補として拾われるが、**解決先を持たないトークンは CSS を 1 バイトも生まない**（#262 のガード拡張で §4.3 に例を 1 つ足したとき、候補は 3 つ増えたが生成 CSS はバイト単位で完全一致だった）。手順は、変更前後の文書**だけ**を Tailwind の Scanner に通して候補を採り、その 2 つの候補集合をそれぞれ `components/ui/__tests__/support/build-css.ts` に食わせて本文を比べる。**対照に実在するクラスを 1 つ単独で当て、増えるはずのものが増えることを同時に示す**（`p-0` 単独なら +79 バイト）。これをやらないと、壊れたハーネスでも「差分 0 バイト」は出る（§5 の「是正値と誤値の両方で掃引して差分を示す」と同じ理由）。なお `build-css.ts` は `import.meta.dirname` を使うので `tsx` で直接走らせると落ちる。vitest 経由で回すこと。
+**変更したときの確かめ方は「候補集合の差」ではなく「生成 CSS の差」で決める。** 候補集合は篩であって判定ではない。散文に書いた語はクラスでなくても候補として拾われるが、**解決先を持たないトークンは CSS を 1 バイトも生まない**（#262 のガード拡張で §4.3 に例を 1 つ足したとき、候補は 3 つ増えたが生成 CSS はバイト単位で完全一致だった）。手順は次のとおり。**母集合はコード側の候補で、そこへ変更前後の文書の候補をそれぞれ足して比べる。**
+
+1. `app` / `components` / `lib` を Tailwind の Scanner に通してコード側の候補を採る
+2. 変更前の文書と変更後の文書を別々に Scanner へ通す
+3. 「コード ∪ 変更前」と「コード ∪ 変更後」を `components/ui/__tests__/support/build-css.ts` に食わせ、生成 CSS のバイト数を比べる
+4. **対照に、リポジトリのどこにも無い実在クラスを 1 つ当て、増えるはずのものが増えることを同時に示す。** 候補集合に無いことを先に `expect` で確かめてから当てる
+
+**文書だけを候補にして比べてはいけない。** 文書に書いたクラスの大半はコードが既に使っているので、文書単独の差にはコードが生成するぶんが丸ごと乗る。#270 で §4.5 を書き直したとき、文書単独では **+2563 バイト**と出たが、コードを母集合に置くと **0 バイト**だった。**対照も文書単独では成立しない** — §4.3 が `p-0` に言及しているため `p-0` は既に候補にあり、足しても 1 バイトも増えない（実測）。
+
+**対照に使ったクラス名をこの文書に書かないこと。** 書いた瞬間その語が候補集合へ入り、**次に同じ対照を使おうとした人のところで対照が死ぬ**。#270 で実際に踏んだ（一度書いた名前が、その直後の再計測で「既に候補にある」と弾かれた）。対照は毎回、候補集合に無いことを確かめてから選ぶ。#270 時点の実測は 100 バイト台の増加だった。これをやらないと、壊れたハーネスでも「差分 0 バイト」は出る（§5 の「是正値と誤値の両方で掃引して差分を示す」と同じ理由）。なお `build-css.ts` は `import.meta.dirname` を使うので `tsx` で直接走らせると落ちる。vitest 経由で回すこと。
 
 ### 4.3 `cn` に tailwind-merge が無い前提を忘れる
 
@@ -171,7 +180,7 @@ Tailwind v4 のクラス生成は**ソースの静的走査**。テンプレー�
 
 必要なら**variant を追加する**（`button.tsx` の `touch` / `icon-touch` がその例）。既存 variant の値は変えない（波及範囲は `button.tsx` の JSDoc にある。回帰面が読めなくなる）。**正方形のアイコンボタンは `size="icon"` / `icon-sm` / `icon-lg` / `icon-touch` を使う。** `size="sm"` に `h-9 w-9 p-0` を重ねると、`p-0` が `sm` の `px-3` に負けて左右 padding が 12px 残り、中のアイコンが潰れる。
 
-UI プリミティブのサイズ、幅、余白、色を利用側の `className` で上書きしない。`Select` は `width` と `density`、`Spinner` は `size` と `tone`、`Card.Body` は `padding`、`Skeleton` は `tone`、`Button` は `size` / `variant` / `gap` を使い、意図を props で表現する。`cn` は `tailwind-merge` を持たないため、基底クラスと同じ CSS プロパティを `className` に書くと、どちらが勝つかは生成 CSS の順序次第になる。この 5 つのプリミティブについては `components/ui/__tests__/class-conflicts.test.ts` が `app/` と `components/` の JSX を走査して落とす（ガードは実装の基底クラスを直接読むので、プリミティブ側を変えれば検査範囲も自動で追従する）。`className` は**リテラルでも式でも読む**。式は取り出せた文字列リテラルを合併して検査するので、`className={editing ? undefined : "p-0"}` のように片方の枝だけが衝突する形も落ちる。変数参照のように**クラスを供給しうるのに中身を読めない部分があれば fail-closed で落とす**（#262）。落ちたらクラスを文字列リテラルで書くか、意図を props へ移すこと。新しい例外が必要なら、先にプリミティブへ軸を追加する（`gap-1.5` を通すために `Button` へ `gap` 軸を足したのがその例）。軸を足すときは**基底から同じプロパティのクラスを外す**こと。基底に残すと軸の値と基底が争い、同じ事故が起きる。
+UI プリミティブのサイズ、幅、余白、色を利用側の `className` で上書きしない。`Select` は `width` と `density`、`Spinner` は `size` と `tone`、`Card.Body` は `padding`、`Skeleton` は `tone`、`Button` は `size` / `variant` / `gap` を使い、意図を props で表現する。`Card.Header` / `Card.Footer` は props を持たないので、**行の並べ方 (`flex-wrap` / 寄せ / 交差軸) を利用側から書き換えない** — 変えたいレイアウトは子側で組む (§4.5.1)。`cn` は `tailwind-merge` を持たないため、基底クラスと同じ CSS プロパティを `className` に書くと、どちらが勝つかは生成 CSS の順序次第になる。この 7 つのプリミティブについては `components/ui/__tests__/class-conflicts.test.ts` が `app/` と `components/` の JSX を走査して落とす（ガードは実装の基底クラスを直接読むので、プリミティブ側を変えれば検査範囲も自動で追従する）。`className` は**リテラルでも式でも読む**。式は取り出せた文字列リテラルを合併して検査するので、`className={editing ? undefined : "p-0"}` のように片方の枝だけが衝突する形も落ちる。変数参照のように**クラスを供給しうるのに中身を読めない部分があれば fail-closed で落とす**（#262）。落ちたらクラスを文字列リテラルで書くか、意図を props へ移すこと。新しい例外が必要なら、先にプリミティブへ軸を追加する（`gap-1.5` を通すために `Button` へ `gap` 軸を足したのがその例）。軸を足すときは**基底から同じプロパティのクラスを外す**こと。基底に残すと軸の値と基底が争い、同じ事故が起きる。
 
 ### 4.4 flex の子への `min-w-0` 付け忘れ
 
@@ -179,7 +188,53 @@ UI プリミティブのサイズ、幅、余白、色を利用側の `className
 
 ### 4.5 `Card.Header` / `Card.Footer` に折り返しが無いまま操作を足す
 
-`Card.Header` は `flex items-center justify-between`、`Card.Footer` は `flex items-center justify-end` で、**どちらも `flex-wrap` も `min-w-0` も持たない**。右側に操作ボタンを 2 つ置くとタイトルと潰し合い、`overflow-x: clip`（§6）と相まって**ボタンが切り取られて押せなくなる**。狭幅では overflow メニューへ畳む（`store-detail-tabs.tsx` の `MoreActionsMenu` が依存ゼロの実装例）。
+**#270 で `Card.Header` / `Card.Footer` の双方に `flex-wrap` を入れて解消済み。** 以下は再発させないための背景。
+
+`Card` は `overflow-hidden` を持ち、`Button` の基底は `whitespace-nowrap` を持つ。**縮まないものが、逃げ場のない箱に入っている**構造なので、折り返しが無いと右側の操作は狭幅で切り取られる。`overflow-x: clip`（§6）があるため横スクロールバーすら出ず、症状は「はみ出す」ではなく**「押せない」**として現れる。
+
+**ただし、症状は幅の帯によって 2 段階に分かれる。** #270 の実測（Card 幅 260–900px を 1px 刻み）では、切り取りが起きるのは Card 幅 **294px 以下**（viewport 326px 相当、375px の下限より下）だった。**下限内で起きるのは切り取りではなく「潰し合い」** — `Card.Title` は `h3` で日本語の min-content が文字単位まで小さいため、折り返しが無いとタイトル側が縮んで 2 行になり、ボタンは元の幅を保つ。375px で見出しが 109 → 87px、`WEB資産・連絡先` が 129 → 91px、`action-record` の Footer の 3 リンクが 102 → 91.5px に潰れていた。
+
+**「ボタンが `whitespace-nowrap` だから行が溢れる」と短絡しないこと。** 行の中に縮む余地を持つ子が 1 つでもあれば、溢れずにそちらが潰れる。**どちらが起きるかは足し算では決まらない**ので、§5 の掃引で確かめる。
+
+`flex-wrap: wrap` は各アイテムの**縮小前の寸法**で行を決めるので、`whitespace-nowrap` のボタン群はタイトルと同居できないとき丸ごと 2 行目へ落ちる。タイトルだけが極端に縮む、という中途半端な潰れ方にはならない。
+
+**`justify-content` は行ごとに効く。** 操作群だけが落ちた 2 行目は `justify-between` だけでは左寄せになる。`Card.Header` は**2 番目以降の子へ `margin-left: auto` を与える任意バリアント**を基底に持ってこれを埋める（実物は `components/ui/card.tsx`）。`Card.Footer` は `justify-end` なので不要。
+
+**この規則は消費者へ配らない。** 当初は「操作ラッパへ `ml-auto` を書き、`Card.Header` ブロックを走査するガードで強制する」設計にしたが、`{editing ? 保存群 : 編集}` のように**分岐を持つヘッダでは、ブロック内に 1 つでもあれば通る**ため、negative control（編集モード側だけを外す）が素通りした。**直したはずの回帰そのものを検出できないガード**だった。分岐まで読む走査は壊れやすく、壊れたことも分からない。CSS で構造的に効かせれば検知の問題ごと消える。
+
+「最後の子を右へ」ではなく「2 番目以降」を選んだのは、見出しだけのヘッダで見出しが右へ飛ばないようにするため。子が 3 つ以上のときは auto マージンが余白を等分するので `justify-between` と同じ配置になる。
+
+**`min-w-0` は入れていない。** どちらの子にも `truncate` は無く、`min-w-0` は min-content を割ることを許す指定なので、折り返し先がある構成では要素どうしの重なりを招くだけになる。`truncate` を持つ子を足すときに一緒に入れる。
+
+**overflow メニューへ畳む案は採らなかった。** 編集モードの「キャンセル / 保存」は主操作であり、隠すのは後退になる。操作が副次的で、かつ 3 つ以上並ぶ場合は選択肢に残る（`store-detail-tabs.tsx` の `MoreActionsMenu` が依存ゼロの実装例。ただしパネルを広げるなら位置基準を `components/ui/overlay-anchor-classes.ts` へ寄せること — 狭幅で `absolute right-0` は画面の**左外**へ出る）。
+
+### 4.5.1 プリミティブのクラス列を手書きでコピーする
+
+同じ見た目が要るからといって `flex items-center justify-end gap-2 px-5 py-3 border-t …` のように基底クラス列を写すと、**プリミティブ側の修正が届かない**。#270 の時点で `Card.Footer` のコピーが 2 箇所（フォーム末尾の送信バー）、`Card.Header` 相当のコピーが 2 箇所（`TableSkeleton` / `research-review-section`）あり、いずれも折り返しの修正から取り残される寸前だった。`Card.Footer` は素の `div` なので **`Card` の外でも呼べる**。レイアウトだけ変えたい場合は、プリミティブを呼んだうえで子側で組む（`research-review-section` は `w-full` の子 1 枚に縦積みを閉じ込めている）。
+
+### 4.5.2 `flex-wrap` を `justify-between` の行へ足して、寄せを直さない
+
+**`Card.Header` に限った話ではない。** `justify-content` は行ごとに効くので、`justify-between` の行へ `flex-wrap` を足すと、**操作だけが落ちた 2 行目はその行に要素が 1 つしかない**ため `space-between` が `flex-start` と同義になり、左端へ飛ぶ。1 行に収まっているうちは正しく右端にいるので、広い画面で見ている限り気づけない。
+
+対処は `Card.Header` と同じで、**2 番目以降の子へ `margin-left: auto`** を与える。子が 1 つのときは `* + *` に当たらず、折り返していないときは auto マージンが余白を等分して `justify-between` と同じ配置になるので、**足しても既存の見た目は 1px も変わらない**（下表の「折り返さない幅」の列）。
+
+左端へ飛ぶのは `space-between` だけである。`flex-end` は右、`center` / `space-around` / `space-evenly` は中央になり、どれも事故にならない。
+
+#### 実測（実 CSS を headless Chrome で描画し 1px 刻みに掃引）
+
+| 箇所 | 操作が左端へ落ちる幅 | 帯域数 | 折り返さない幅での是正前後の差 |
+|---|---|---|---|
+| `handoff-form` の `Card.Body` | Card 幅 260–546px | 287 | 0px |
+| `/stores` ヘッダの「店舗を登録」 | viewport 320–488px | 169 | 0px |
+| `(legal)` フッタのナビ | viewport 320–553px | 234 | 0px |
+
+いずれも 375 / 390 / 430px を含む。`handoff-form` の閾値 546px は `lg` 2 カラムの 478px より上で、**狭幅だけの問題ではなかった**。媒体クエリを効かせるため、ページ直下の行は iframe を viewport にして測ること（§5）。
+
+#### ガードは成立する（#270 で撤去したものとは検査単位が違う）
+
+`__tests__/flex-wrap-right-align.test.ts` が `app` / `components` / `lib` 配下の TSX を走査し、**同じ要素の class 列**に `flex-wrap` と `justify-between` が揃っていて `[&>*+*]:ml-auto` が無い箇所を落とす。#270 で撤去した走査ガードは「開始タグから閉じタグまでのブロック」を単位にしていたため分岐の片方が欠けても素通りしたが、こちらは**単一の `className` 属性**で完結するので、その失敗モードが存在しない。式で分割して書かれても取り出せるリテラルを合併して拾う（`components/ui/__tests__/support/jsx-class-scan.ts`）。
+
+読めない部分があって判定できない場合は `unprovable` として別に落とす（fail-closed）。ただし対象は「両方が揃っているのに手当てが読めない」場合に限る。`cn(base, className)` で利用側のクラスを受け渡すプリミティブは構造上つねに読めない部分を持つので、「片方だけ + 読めない」まで拾うと `Card.Footer` のような**規則を満たしている側**が毎回引っかかる。その方向のリスク（利用側が `justify-between` や `flex-nowrap` を後から渡す）は `class-conflicts.test.ts` が別途落とす。**2 つのガードは合成して効く。**
 
 ### 4.6 `Card` の内側で sticky を使う
 
@@ -299,7 +354,10 @@ CI は typecheck / lint / vitest の 3 ジョブで、**`next build` を持た�
 | この文書 | 横断規約、判断基準、事故から導いた原則、検証手順 |
 | `components/ui/data-table-responsive.ts` | 閾値表そのもの、テーブル別の予算内訳、閾値を足すときの制約 |
 | `components/ui/modal-classes.ts` | モーダルのクラス契約と、そう書いた理由 |
+| `components/ui/overlay-anchor-classes.ts` | トリガ基準で開くパネルの位置基準。狭幅で viewport 基準へ切り替える理由 (#264) |
+| `components/ui/card.tsx` | `Card.Header` / `Card.Footer` の折り返し契約。`flex-wrap` を入れた理由、`min-w-0` を入れない理由、2 行目の寄せを基底の `[&>*+*]:ml-auto` が持ち**消費者へ配らない**理由 (#270) |
 | 各ビューの `_components/__tests__/*-table-columns.test.tsx` | そのビューの決定表 (`EXPECTED`) と列単体予算 (`BUDGET`)、予算の実測値の採り方。**always 列の予算も含め `BUDGET` が唯一の出所**で、直値の定数を別に置かない (#244) |
+| `__tests__/flex-wrap-right-align.test.ts` | `flex-wrap` + `justify-between` に `[&>*+*]:ml-auto` を要求する走査。ブロック単位でなく単一の `className` を単位にする理由と、fail-closed の範囲 (#270) |
 | `components/ui/__tests__/support/column-budget.ts` | 予算→閾値の検証ロジック (`expectBudgetLadder` / `expectCapsMatchBudget` / `NARROWEST_CONTAINER`) と、空洞化しないための作り。3 ビュー共通 (#244) |
 | `components/ui/stat.tsx` | `Stat` と `StatSkeleton` が共有する箱のクラス (`STAT_BOX_CLASS`) と、144px の内訳がどこから来るか。placeholder に高さを数値で持たせない理由 (#265) |
 | `app/(main)/settings/_components/counts-grid.tsx` | 件数カードの列ラダーと枚数。4 列化が `lg:` である理由 (#265) |
@@ -313,13 +371,17 @@ CI は typecheck / lint / vitest の 3 ジョブで、**`next build` を持た�
 
 Epic #225 の進行に伴って更新する。
 
+**この表は各 PR で同時に更新する。** 初版 (#247) 以降、解決した項目が 3 つ「未対応」のまま残り、#225 の再オープン時にまとめて是正することになった。フェーズが進むほど無言で腐るのがこの表で、腐った表は「まだ壊れている」という誤った印象だけを残す。
+
 | 項目 | 状態 |
 |---|---|
-| `tabs.tsx` の `TabsList` が狭幅で溢れる | **未対応。** 折り返しも横スクロールも持たず、呼び出し 5 箇所すべてが救済なし。§6 により「押せない」として現れる |
-| `Card.Header` / `Card.Footer` の折り返し | **未対応**（§4.5） |
-| `sidebar.tsx` のドロワーにフォーカストラップ / スクロールロック / Escape が無い | **未対応** |
-| タッチターゲットの全画面 44px 化 | **方針未決。** `button.tsx` に `touch` / `icon-touch` を追加済みだが、適用はモバイル主要導線に限定している |
-| 入力系の高さ 36px・文字サイズ 14px | **要再評価。** iOS Safari は focus 時にフォントが 16px 未満だとオートズームする |
+| `tabs.tsx` の `TabsList` が狭幅で溢れる | **解決済み**（#252 / PR #255）。`overflow-x-auto` + `max-w-full` + `scrollbar-none` へ退避し、矢印キー移動も同時に実装した |
+| `Card.Header` / `Card.Footer` の折り返し | **解決済み**（#270）。双方に `flex-wrap`、2 行目の右寄せは `Card.Header` の基底 `[&>*+*]:ml-auto` が持つ（**消費者へは配らない**。§4.5）。プリミティブ外で同じ組を書いた 5 箇所も同時に是正し、走査ガードを入れた（§4.5.2） |
+| `sidebar.tsx` のドロワーにフォーカストラップ / スクロールロック / Escape が無い | **解決済み**（#253 / PR #256）。ただし**開いた状態の自動テストは無い**（§5「この土台で検知できないもの」） |
+| タッチターゲットの全画面 44px 化 | **方針決定済み**（#225 Phase 1 / PR #258）。md 未満で全ボタン `min-h-11`、デスクトップは据え置き。残余（入力欄との 8px 段差、独自ピルの方式二重化）は **#257** |
+| 入力系の高さ 36px・文字サイズ 14px | **要再評価**（**#257**）。iOS Safari は focus 時にフォントが 16px 未満だとオートズームする |
+| `CopyButton`（`copy-button.tsx`）が `<Button>` を使わない独自ピル | **未対応。** `h-8` 固定で 44px 下限を持たない。#257 が挙げる `store-quick-filters.tsx` と同型 |
+| `Card` 本体のクラス列を写した placeholder | **一部未対応。** `TableSkeleton` は #270 で `Card` を呼ぶ形へ寄せたが、`FormSkeleton` (`skeleton.tsx`) / `Stat` (`stat.tsx`) / `pipeline-filters.tsx` はまだ `bg-card … rounded-lg shadow-card` を手書きしている（§4.5.1）。`KanbanSkeleton` は `bg-muted/40` の別物で、この群には入らない |
 | `/dashboard` `/pipeline` `/actions` `/handoffs` `/kpi` | **ルート無効化中**（`lib/domain/nav-routes.ts`）。これらの閾値・レイアウトは無効化状態での暫定値で、**再有効化時に列構成ごと再測定する** |
 
 ---

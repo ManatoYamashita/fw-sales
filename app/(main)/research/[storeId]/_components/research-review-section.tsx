@@ -391,23 +391,28 @@ export function ResearchReviewSection({ store, run, onUpdate, onRestart, restart
   return (
     <>
       <Card>
-        <div className="flex flex-col items-start gap-2 px-5 py-4 border-b border-border">
-          <div className="flex items-center gap-2 w-full justify-between">
-            <h3 className="text-base font-semibold leading-none tracking-tight">
-              AI店舗調査結果({formatDateTime(run.started_at)} 実施)
-            </h3>
-            <Badge tone={reviewCompleted ? "success" : "warning"}>
-              {reviewCompleted ? "調査済み" : "要確認"}
-            </Badge>
+        {/* 見出しは 2 段組みだが、箱 (padding / 区切り線) は Card.Header を呼ぶ。
+            クラスを逐語コピーするとプリミティブの修正が届かなくなる (#270)。
+            縦積みは w-full の子 1 枚に閉じ込め、Card.Header 側の行レイアウトは触らない。 */}
+        <Card.Header>
+          <div className="flex flex-col items-start gap-2 w-full">
+            <div className="flex items-center gap-2 w-full justify-between">
+              <Card.Title>
+                AI店舗調査結果({formatDateTime(run.started_at)} 実施)
+              </Card.Title>
+              <Badge tone={reviewCompleted ? "success" : "warning"}>
+                {reviewCompleted ? "調査済み" : "要確認"}
+              </Badge>
+            </div>
+            <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+              {Object.entries(statusCounts).map(([status, count]) => (
+                <span key={status}>
+                  {STATUS_COUNT_LABELS[status] ?? status} {count}
+                </span>
+              ))}
+            </div>
           </div>
-          <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-            {Object.entries(statusCounts).map(([status, count]) => (
-              <span key={status}>
-                {STATUS_COUNT_LABELS[status] ?? status} {count}
-              </span>
-            ))}
-          </div>
-        </div>
+        </Card.Header>
         <Card.Body className="space-y-4">
           {run.warnings.length > 0 && (
             <div className="space-y-1 rounded-md border border-warning/40 bg-warning/10 p-3">

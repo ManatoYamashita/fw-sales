@@ -41,7 +41,7 @@ export default async function ActionDetailPage({
 
   return (
     <div className="space-y-4 max-w-5xl mx-auto">
-      <div className="flex items-start justify-between gap-3 flex-wrap">
+      <div className="flex items-start justify-between gap-3 flex-wrap [&>*+*]:ml-auto">
         <div>
           <Link
             href="/actions"

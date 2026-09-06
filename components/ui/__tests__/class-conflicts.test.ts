@@ -46,7 +46,7 @@ import {
   BUTTON_VARIANT_CLASSES,
   buttonClasses,
 } from "../button";
-import { CardBody } from "../card";
+import { CardBody, CardFooter, CardHeader } from "../card";
 import { Select } from "../select";
 import { Skeleton } from "../skeleton";
 import { Spinner } from "../spinner";
@@ -56,7 +56,14 @@ import {
   readStringAttribute,
 } from "./support/jsx-class-scan";
 
-type ComponentName = "Button" | "Card.Body" | "Select" | "Skeleton" | "Spinner";
+type ComponentName =
+  | "Button"
+  | "Card.Body"
+  | "Card.Header"
+  | "Card.Footer"
+  | "Select"
+  | "Skeleton"
+  | "Spinner";
 
 type ClassConflict = {
   component: ComponentName;
@@ -126,6 +133,22 @@ const DISPLAY_TOKENS = new Set([
 ]);
 
 /**
+ * flex コンテナの並べ方を決めるトークン (#270)。
+ *
+ * `Card.Header` / `Card.Footer` の契約はここに集中している (`flex-wrap` で折り返し、
+ * `justify-*` で寄せ、`items-*` で交差軸)。モデル化しないと、利用側が
+ * `className="flex-nowrap"` と書いても衝突として検出されず、**折り返しが無言で
+ * 消える**。`flex-1` / `flex-none` は flex アイテム側の指定なので別プロパティ。
+ */
+const FLEX_CONTAINER_TOKENS: ReadonlyArray<readonly [RegExp, string]> = [
+  [/^flex-(wrap|nowrap|wrap-reverse)$/, "flex-wrap"],
+  [/^flex-(row|row-reverse|col|col-reverse)$/, "flex-direction"],
+  [/^justify-/, "justify-content"],
+  [/^items-/, "align-items"],
+  [/^content-/, "align-content"],
+];
+
+/**
  * そのクラスが設定する CSS プロパティ。同じ値を返す 2 つは記述順で争う。
  * 判定できないもの (任意値、variant 付き、色以外の複合ユーティリティ) は空を返す。
  */
@@ -136,6 +159,9 @@ export function cssProperties(token: string): string[] {
   if (token.includes("[")) return [];
 
   if (DISPLAY_TOKENS.has(token)) return ["display"];
+  for (const [pattern, property] of FLEX_CONTAINER_TOKENS) {
+    if (pattern.test(token)) return [property];
+  }
   if (token === "shadow") return ["box-shadow"];
   if (token === "rounded") {
     return ["tl", "tr", "br", "bl"].map((c) => `border-radius-${c}`);
@@ -270,6 +296,12 @@ function baseClasses(
       }
       return collect(out);
     }
+    case "Card.Header": {
+      return renderedClassName(CardHeader({})).split(/\s+/);
+    }
+    case "Card.Footer": {
+      return renderedClassName(CardFooter({})).split(/\s+/);
+    }
     case "Card.Body": {
       return collect(
         pick("padding", "Card.Body.padding").map((padding) =>
@@ -334,6 +366,8 @@ async function collectTsxFiles(directory: string): Promise<string[]> {
 const COMPONENTS: ComponentName[] = [
   "Button",
   "Card.Body",
+  "Card.Header",
+  "Card.Footer",
   "Select",
   "Skeleton",
   "Spinner",
@@ -458,6 +492,42 @@ describe("UI primitive class conflict guard", () => {
         "Select",
       ),
     ).toEqual({ component: "Select", classes: ["h-11", "text-destructive"] });
+    // #270 の flex コンテナ軸。この 3 例が無いと `FLEX_CONTAINER_TOKENS` を丸ごと
+    // 削除しても 141 files / 3840 tests が緑のままで、模型が消えたことに CI が
+    // 気づけなかった (PR #271 のレビューで実測)。利用側が上書きすると折り返しが
+    // 無言で消え、症状は #270 と同じ「操作が押せない」に戻る。
+    expect(
+      findClassConflicts('<Card.Header className="flex-nowrap" />', "Card.Header"),
+    ).toEqual({ component: "Card.Header", classes: ["flex-nowrap"] });
+    expect(
+      findClassConflicts('<Card.Header className="items-start" />', "Card.Header"),
+    ).toEqual({ component: "Card.Header", classes: ["items-start"] });
+    expect(
+      findClassConflicts('<Card.Footer className="justify-start" />', "Card.Footer"),
+    ).toEqual({ component: "Card.Footer", classes: ["justify-start"] });
+    // 検知力と引き換えの既知コスト: リポジトリに無かった 3 語を literal で持ち込むため
+    // 生成 CSS が実測 +151 バイト増える (`flex-nowrap` 44 / `justify-start` 56 /
+    // `content-center` 51。§4.2 の手順で、母集合をコード側に置いて計測)。
+    // 基底が争わない軸は緑に転じる (弁別性)。「何を書いても落ちる」ではない。
+    expect(
+      findClassConflicts('<Card.Header className="rounded-md" />', "Card.Header"),
+    ).toBeNull();
+  });
+
+  it("flex コンテナ軸をプロパティへ写像する (#270)", () => {
+    // 上の negative control は**基底が実際に持つ軸**しか通せない。`flex-direction` と
+    // `align-content` はどのプリミティブの基底にも無いため経路が無く、模型から
+    // その 2 行を消しても衝突は 1 件も増減しない。だから模型を直接測る。
+    expect(cssProperties("flex-wrap")).toEqual(["flex-wrap"]);
+    expect(cssProperties("flex-nowrap")).toEqual(["flex-wrap"]);
+    expect(cssProperties("flex-col")).toEqual(["flex-direction"]);
+    expect(cssProperties("justify-between")).toEqual(["justify-content"]);
+    expect(cssProperties("items-center")).toEqual(["align-items"]);
+    expect(cssProperties("content-center")).toEqual(["align-content"]);
+    // 境界。`flex` は display、`flex-1` は flex **アイテム**側の指定なので、
+    // ここへ吸わせると `<Button className="flex-1">` のような正当な指定を誤検出する。
+    expect(cssProperties("flex")).toEqual(["display"]);
+    expect(cssProperties("flex-1")).toEqual([]);
   });
 
   it("事故の原文 (式で書いた className) を negative control で検知する", () => {

@@ -1,3 +1,4 @@
+import { Card } from "./card";
 import { cn } from "@/lib/utils/cn";
 
 export function Skeleton({
@@ -19,12 +20,19 @@ export function Skeleton({
   );
 }
 
+/**
+ * テーブルを載せたカードの placeholder。
+ *
+ * 外枠と見出し行は `Card` / `Card.Header` を**呼ぶ**。以前はどちらもクラス列を
+ * 逐語コピーしていたため、プリミティブ側の修正 (#270 の `flex-wrap` など) が
+ * 届かず、実体と placeholder が無言でずれていく状態だった。
+ */
 export function TableSkeleton({ rows = 5 }: { rows?: number }) {
   return (
-    <div className="bg-card text-card-foreground border border-border rounded-lg shadow-card overflow-hidden">
-      <div className="px-5 py-4 border-b border-border">
+    <Card>
+      <Card.Header>
         <Skeleton className="h-5 w-32" />
-      </div>
+      </Card.Header>
       <div className="divide-y divide-border/60">
         {Array.from({ length: rows }).map((_, i) => (
           <div key={i} className="px-5 py-3 flex items-center gap-4">
@@ -35,7 +43,7 @@ export function TableSkeleton({ rows = 5 }: { rows?: number }) {
           </div>
         ))}
       </div>
-    </div>
+    </Card>
   );
 }
 
