@@ -4,8 +4,8 @@
  *
  * ## 変更前は何が壊れていたか
  *
- * placeholder は高さを数値で持っていた。settings が `h-[88px]`、dashboard / kpi が
- * `h-[112px]`。**実体はいずれも 144px** で、データ到着時に 56px / 32px 跳ねていた。
+ * placeholder は高さを数値で持っていた。settings が 88px、dashboard / kpi が 112px を
+ * 任意値で固定。**実体はいずれも 144px** で、データ到着時に 56px / 32px 跳ねていた。
  *
  * 144px は独立した定数ではなく「border 2 + padding 40 + gap 16 + 行1 36 + 行2 30 +
  * 行3 20」の合計で、行 1 は**アイコン枠 (`h-9`) がラベル (16px) を上回って支配**する。
@@ -46,7 +46,7 @@ describe("StatSkeleton は Stat と同じ箱を使う", () => {
   });
 
   it("箱に高さを固定するクラスを持たない", () => {
-    // 事故: placeholder 側で h-[88px] のような数値を持つと、Stat の内訳を
+    // 事故: placeholder 側で 88px のような数値を持つと、Stat の内訳を
     // 変えた瞬間に無言でずれる。高さは内容と padding から出る。
     for (const token of [...rootClasses(statHtml()), ...rootClasses(skeletonHtml())]) {
       expect(token, `高さを固定するクラス ${token} がある`).not.toMatch(/^h-/);

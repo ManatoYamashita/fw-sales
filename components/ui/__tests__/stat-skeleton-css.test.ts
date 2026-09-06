@@ -6,8 +6,18 @@
  * 症状は「768px で潰れたまま」「placeholder の高さが 0」= 変更前と同じ壊れ方に戻る。
  */
 
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { buildCss, normalize } from "./support/build-css";
+import { hidden } from "./support/scanner-hidden";
+
+const ROOT = path.resolve(import.meta.dirname, "../../..");
+
+/** 走査に拾わせないための分割 (`support/scanner-hidden.ts`)。断片はどれも解決しない。 */
+const MD_FOUR_COLUMNS = hidden("md:grid-", "cols-4");
+const STALE_HEIGHT = hidden("h-[", "88px]");
+const BAD_UNIT_HEIGHT = hidden("h-[", "1notaunit]");
 
 describe("件数カードのクラスの CSS 生成", () => {
   it("4 列化が lg (64rem = 1024px) から効く", async () => {
@@ -24,7 +34,8 @@ describe("件数カードのクラスの CSS 生成", () => {
 
     expect(css).not.toMatch(md);
     // 対照: md 版を渡せば出ることを示す (この検査が空振りしていないことの確認)。
-    expect(normalize(await buildCss(["md:grid-cols-4"]))).toMatch(md);
+    // クラス名を逐語で書くと走査に拾われ、使っていない md 版が本番 CSS へ残る (#265)。
+    expect(normalize(await buildCss([MD_FOUR_COLUMNS]))).toMatch(md);
   });
 
   it("行2 の placeholder が em で高さを取る", async () => {
@@ -56,8 +67,40 @@ describe("件数カードのクラスの CSS 生成", () => {
     // `docs/architecture/responsive.md` §4.2 の裏付け。空振り検出に任意値を使うと、
     // **不正な宣言が生成されるせいで「生成されない」の確認が成立しない**。
     // 角括弧を散文へ書いてはいけない理由でもある (dead CSS がそのまま焼き込まれる)。
-    const css = normalize(await buildCss(["h-[1notaunit]"]));
+    const css = normalize(await buildCss([BAD_UNIT_HEIGHT]));
 
     expect(css).toContain("height: 1notaunit");
+  });
+});
+
+/**
+ * 上の 3 つを**ソースへ逐語で書かない**こと自体を固定する (#265)。
+ *
+ * 走査はソースコードも読むので、逐語で書いた瞬間に本番 CSS へ規則が生まれる。
+ * 不正な単位の高さは `height: 1notaunit` という不正宣言が、88px の高さと md 版の
+ * 4 列化は**このリファクタで消したはずの旧クラス**が焼き込まれる。
+ *
+ * negative control は、下の needle のいずれかを対象ファイルへ逐語で書き戻すこと。
+ */
+describe("禁止クラスをソースへ逐語で残さない", () => {
+  const GUARDED = [
+    "components/ui/__tests__/stat-skeleton-css.test.ts",
+    "components/ui/__tests__/stat-skeleton.test.tsx",
+    "app/(main)/settings/_components/__tests__/counts-grid.test.tsx",
+  ];
+
+  it("走査対象のファイルを読めている", async () => {
+    for (const file of GUARDED) {
+      const source = await readFile(path.join(ROOT, file), "utf8");
+      expect(source.length, `${file} を読めていない`).toBeGreaterThan(500);
+    }
+  });
+
+  it.each(GUARDED)("%s に禁止クラスが逐語で現れない", async (file) => {
+    const source = await readFile(path.join(ROOT, file), "utf8");
+
+    for (const needle of [BAD_UNIT_HEIGHT, STALE_HEIGHT, MD_FOUR_COLUMNS]) {
+      expect(source.includes(needle), `${needle} が逐語で残っている`).toBe(false);
+    }
   });
 });

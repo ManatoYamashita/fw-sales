@@ -4,8 +4,8 @@
  *
  * ## 変更前は何が壊れていたか
  *
- * 3 箇所が `grid grid-cols-2 md:grid-cols-4 gap-3` を逐語コピーし、placeholder だけ
- * `h-[88px]` を持っていた。実体は 144px なので、データ到着時に **56px 跳ねていた**。
+ * 3 箇所が同じ列ラダー (4 列化が md) を逐語コピーし、placeholder だけ高さ 88px を
+ * 任意値で固定していた。実体は 144px なので、データ到着時に **56px 跳ねていた**。
  * さらに 768px で 4 列にすると 1 列 111px しか無く、ラベルが折り返してカード高が
  * 172px へ伸びていた。
  *
@@ -20,6 +20,7 @@ import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { hidden } from "@/components/ui/__tests__/support/scanner-hidden";
 import {
   COUNTS_GRID_CELLS,
   COUNTS_GRID_CLASS,
@@ -29,13 +30,20 @@ import {
 const SETTINGS = path.resolve(import.meta.dirname, "../..");
 const read = (file: string) => readFile(path.join(SETTINGS, file), "utf8");
 
+/**
+ * 旧リテラルの needle。**走査に拾わせないため実行時に連結する** (#265)。
+ * 逐語で書くと、消したはずのクラスをこのガード自身が本番 CSS へ延命させる
+ * (`components/ui/__tests__/support/scanner-hidden.ts`)。
+ */
+const STALE = [hidden("md:grid-", "cols-4"), hidden("h-[", "88px]")];
+
 describe("列ラダー", () => {
   it("768px では 4 列にしない", () => {
     // md (768px) はサイドバー出現でコンテンツが 528px へ落ちる帯。
     // ここで 4 列にすると 1 列 111px しか無く、ラベルが折り返して高さが伸びる。
     const tokens = COUNTS_GRID_CLASS.split(/\s+/);
 
-    expect(tokens).not.toContain("md:grid-cols-4");
+    expect(tokens).not.toContain(STALE[0]);
     expect(tokens).toContain("lg:grid-cols-4");
   });
 
@@ -66,7 +74,8 @@ describe("placeholder と本体が同じものを見る", () => {
 
   it("placeholder が高さを px で持たない", () => {
     // 高さは StatSkeleton が Stat と同じ構造で作る。px の任意値が現れたら、
-    // また 2 つの真実ができたということ (h-[88px] / h-[112px] がまさにそれだった)。
+    // また 2 つの真実ができたということ (settings の 88px / dashboard の 112px が
+    // まさにそれだった)。
     const html = renderToStaticMarkup(<CountsGridSkeleton />);
 
     expect(html).not.toMatch(/\bh-\[\d+(px|rem)\]/);
@@ -115,7 +124,7 @@ describe("配線", () => {
     const stale: string[] = [];
     for (const file of files) {
       const source = await readFile(file, "utf8");
-      if (source.includes("md:grid-cols-4") || source.includes("h-[88px]")) {
+      if (STALE.some((needle) => source.includes(needle))) {
         stale.push(path.relative(SETTINGS, file));
       }
     }
