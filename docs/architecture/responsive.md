@@ -210,6 +210,30 @@ UI プリミティブのサイズ、幅、余白、色を利用側の `className
 
 同じ見た目が要るからといって `flex items-center justify-end gap-2 px-5 py-3 border-t …` のように基底クラス列を写すと、**プリミティブ側の修正が届かない**。#270 の時点で `Card.Footer` のコピーが 2 箇所（フォーム末尾の送信バー）、`Card.Header` 相当のコピーが 2 箇所（`TableSkeleton` / `research-review-section`）あり、いずれも折り返しの修正から取り残される寸前だった。`Card.Footer` は素の `div` なので **`Card` の外でも呼べる**。レイアウトだけ変えたい場合は、プリミティブを呼んだうえで子側で組む（`research-review-section` は `w-full` の子 1 枚に縦積みを閉じ込めている）。
 
+### 4.5.2 `flex-wrap` を `justify-between` の行へ足して、寄せを直さない
+
+**`Card.Header` に限った話ではない。** `justify-content` は行ごとに効くので、`justify-between` の行へ `flex-wrap` を足すと、**操作だけが落ちた 2 行目はその行に要素が 1 つしかない**ため `space-between` が `flex-start` と同義になり、左端へ飛ぶ。1 行に収まっているうちは正しく右端にいるので、広い画面で見ている限り気づけない。
+
+対処は `Card.Header` と同じで、**2 番目以降の子へ `margin-left: auto`** を与える。子が 1 つのときは `* + *` に当たらず、折り返していないときは auto マージンが余白を等分して `justify-between` と同じ配置になるので、**足しても既存の見た目は 1px も変わらない**（下表の「折り返さない幅」の列）。
+
+左端へ飛ぶのは `space-between` だけである。`flex-end` は右、`center` / `space-around` / `space-evenly` は中央になり、どれも事故にならない。
+
+#### 実測（実 CSS を headless Chrome で描画し 1px 刻みに掃引）
+
+| 箇所 | 操作が左端へ落ちる幅 | 帯域数 | 折り返さない幅での是正前後の差 |
+|---|---|---|---|
+| `handoff-form` の `Card.Body` | Card 幅 260–546px | 287 | 0px |
+| `/stores` ヘッダの「店舗を登録」 | viewport 320–488px | 169 | 0px |
+| `(legal)` フッタのナビ | viewport 320–553px | 234 | 0px |
+
+いずれも 375 / 390 / 430px を含む。`handoff-form` の閾値 546px は `lg` 2 カラムの 478px より上で、**狭幅だけの問題ではなかった**。媒体クエリを効かせるため、ページ直下の行は iframe を viewport にして測ること（§5）。
+
+#### ガードは成立する（#270 で撤去したものとは検査単位が違う）
+
+`__tests__/flex-wrap-right-align.test.ts` が `app` / `components` / `lib` 配下の TSX を走査し、**同じ要素の class 列**に `flex-wrap` と `justify-between` が揃っていて `[&>*+*]:ml-auto` が無い箇所を落とす。#270 で撤去した走査ガードは「開始タグから閉じタグまでのブロック」を単位にしていたため分岐の片方が欠けても素通りしたが、こちらは**単一の `className` 属性**で完結するので、その失敗モードが存在しない。式で分割して書かれても取り出せるリテラルを合併して拾う（`components/ui/__tests__/support/jsx-class-scan.ts`）。
+
+読めない部分があって判定できない場合は `unprovable` として別に落とす（fail-closed）。ただし対象は「両方が揃っているのに手当てが読めない」場合に限る。`cn(base, className)` で利用側のクラスを受け渡すプリミティブは構造上つねに読めない部分を持つので、「片方だけ + 読めない」まで拾うと `Card.Footer` のような**規則を満たしている側**が毎回引っかかる。その方向のリスク（利用側が `justify-between` や `flex-nowrap` を後から渡す）は `class-conflicts.test.ts` が別途落とす。**2 つのガードは合成して効く。**
+
 ### 4.6 `Card` の内側で sticky を使う
 
 `Card` は `overflow-hidden` を持つので内側の sticky は効かない。画面下部固定 UI は Card の外へ出す。また **sticky の位置はスクロールポートの padding box 基準**なので、負マージンで下端に密着させた要素を下端 0 で貼ると非スクロール時に浮く。
@@ -331,6 +355,7 @@ CI は typecheck / lint / vitest の 3 ジョブで、**`next build` を持た�
 | `components/ui/overlay-anchor-classes.ts` | トリガ基準で開くパネルの位置基準。狭幅で viewport 基準へ切り替える理由 (#264) |
 | `components/ui/card.tsx` | `Card.Header` / `Card.Footer` の折り返し契約。`flex-wrap` を入れた理由、`min-w-0` を入れない理由、2 行目の寄せを基底の `[&>*+*]:ml-auto` が持ち**消費者へ配らない**理由 (#270) |
 | 各ビューの `_components/__tests__/*-table-columns.test.tsx` | そのビューの決定表 (`EXPECTED`) と列単体予算 (`BUDGET`)、予算の実測値の採り方。**always 列の予算も含め `BUDGET` が唯一の出所**で、直値の定数を別に置かない (#244) |
+| `__tests__/flex-wrap-right-align.test.ts` | `flex-wrap` + `justify-between` に `[&>*+*]:ml-auto` を要求する走査。ブロック単位でなく単一の `className` を単位にする理由と、fail-closed の範囲 (#270) |
 | `components/ui/__tests__/support/column-budget.ts` | 予算→閾値の検証ロジック (`expectBudgetLadder` / `expectCapsMatchBudget` / `NARROWEST_CONTAINER`) と、空洞化しないための作り。3 ビュー共通 (#244) |
 
 **数値と機構固有の契約はソース側が単一の真実。** ここに写経すると必ず片方が古くなる。この文書からは「どこを見ればよいか」だけを指す。
@@ -346,7 +371,7 @@ Epic #225 の進行に伴って更新する。
 | 項目 | 状態 |
 |---|---|
 | `tabs.tsx` の `TabsList` が狭幅で溢れる | **解決済み**（#252 / PR #255）。`overflow-x-auto` + `max-w-full` + `scrollbar-none` へ退避し、矢印キー移動も同時に実装した |
-| `Card.Header` / `Card.Footer` の折り返し | **解決済み**（#270）。双方に `flex-wrap`、2 行目の右寄せは `Card.Header` の基底 `[&>*+*]:ml-auto` が持つ（**消費者へは配らない**。§4.5） |
+| `Card.Header` / `Card.Footer` の折り返し | **解決済み**（#270）。双方に `flex-wrap`、2 行目の右寄せは `Card.Header` の基底 `[&>*+*]:ml-auto` が持つ（**消費者へは配らない**。§4.5）。プリミティブ外で同じ組を書いた 5 箇所も同時に是正し、走査ガードを入れた（§4.5.2） |
 | `sidebar.tsx` のドロワーにフォーカストラップ / スクロールロック / Escape が無い | **解決済み**（#253 / PR #256）。ただし**開いた状態の自動テストは無い**（§5「この土台で検知できないもの」） |
 | タッチターゲットの全画面 44px 化 | **方針決定済み**（#225 Phase 1 / PR #258）。md 未満で全ボタン `min-h-11`、デスクトップは据え置き。残余（入力欄との 8px 段差、独自ピルの方式二重化）は **#257** |
 | 入力系の高さ 36px・文字サイズ 14px | **要再評価**（**#257**）。iOS Safari は focus 時にフォントが 16px 未満だとオートズームする |
