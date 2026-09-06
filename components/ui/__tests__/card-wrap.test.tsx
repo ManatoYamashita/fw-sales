@@ -33,9 +33,11 @@
 
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
+import { load } from "cheerio";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { Card } from "../card";
+import { buildCss, normalize } from "./support/build-css";
 
 const ROOT = path.resolve(import.meta.dirname, "../../..");
 
@@ -181,18 +183,46 @@ describe("Card.Header に置いた操作は折り返しても右寄せを保つ"
     expect(header().split(" ")).toContain("[&>*+*]:ml-auto");
   });
 
-  it("子が 1 つのヘッダでも同じ基底クラスで、見出しを右へ寄せない", () => {
-    // `* + *` は 2 番目以降にしか当たらないので、見出しだけのヘッダには効かない。
-    // これが「last-child を右寄せ」ではなく「2 番目以降」を選んだ理由。
-    const only = rootClasses(
+  it("見出しだけのヘッダでは誰にも当たらない", async () => {
+    // 旧版は「子が 1 つでも 2 つでも基底クラス列は同じ」を見ていたが、`CardHeader` の
+    // className は children に依存しないので**恒真**だった。last-child 版へ差し替えても
+    // 落ちない (PR #271 のレビューで実測)。テスト名が主張していた「見出しを右へ寄せない」を
+    // 1 バイトも検証していなかった。
+    //
+    // 実装が出したクラスを Tailwind へ通し、返ってきた入れ子セレクタを**実際のマークアップへ
+    // 当てて誰に効くかを数える**。これが「2 番目以降」と「last-child」を分ける唯一の検査。
+    const token = header()
+      .split(" ")
+      .find((c) => c.endsWith(":ml-auto"));
+    expect(token, "Card.Header に auto マージンの任意バリアントが無い").toBeTypeOf("string");
+
+    const css = normalize(await buildCss([token!]));
+    const nested = /\{ (&[^{]*?) \{ margin-left: auto/.exec(css)?.[1];
+    expect(nested, "入れ子セレクタを取り出せていない").toBeTypeOf("string");
+    // `&` を「そのクラスを持つ要素」へ置換する。属性セレクタで指すのは、任意バリアントの
+    // クラス名がそのままでは CSS セレクタとして書けない (要エスケープ) ため。
+    const selector = nested!.replace("&", `[class~="${token}"]`);
+
+    const only = load(
       renderToStaticMarkup(
         <Card.Header>
           <Card.Title>AI店舗調査結果</Card.Title>
         </Card.Header>,
       ),
     );
+    const withOps = load(
+      renderToStaticMarkup(
+        <Card.Header>
+          <Card.Title>現在の営業状況</Card.Title>
+          <div id="ops" />
+        </Card.Header>,
+      ),
+    );
 
-    expect(only).toBe(header());
+    // 事故: last-child 版だと、見出しだけのヘッダで見出しが右へ飛ぶ。
+    expect(only(selector), "子が 1 つのヘッダで当たってはいけない").toHaveLength(0);
+    expect(withOps(selector), "2 番目の子にだけ当たる").toHaveLength(1);
+    expect(withOps(selector).attr("id")).toBe("ops");
   });
 
   it("Card.Footer は justify-end なので同じ指定を持たない", () => {
