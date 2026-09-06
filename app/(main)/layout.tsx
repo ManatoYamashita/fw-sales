@@ -1,4 +1,5 @@
-import { Suspense, type ReactNode } from "react";
+/// <reference types="react/canary" />
+import { Suspense, ViewTransition, type ReactNode } from "react";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { cn } from "@/lib/utils/cn";
@@ -105,10 +106,12 @@ export default function MainLayout({
         <Suspense fallback={<TopbarFallback />}>
           <TopbarShell />
         </Suspense>
-        <main className="flex-1 px-4 md:px-6 py-6 md:py-8 max-w-screen-2xl 4xl:max-w-screen-4xl mx-auto w-full">
+        <main className="motion-safe:animate-slide-up flex-1 px-4 md:px-6 py-6 md:py-8 max-w-screen-2xl 4xl:max-w-screen-4xl mx-auto w-full">
           {/* #155: 破壊的操作ボタンの権限判定を配送する。Client Provider が RSC
               children を prop 通過するため静的 PPR シェルには影響しない。 */}
-          <CurrentUserProvider>{children}</CurrentUserProvider>
+          <ViewTransition default="none" enter="fade-in" exit="fade-out">
+            <CurrentUserProvider>{children}</CurrentUserProvider>
+          </ViewTransition>
         </main>
       </div>
     </div>
