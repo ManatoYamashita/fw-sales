@@ -36,14 +36,17 @@ function makeProfile(role: "member" | "placeholder" | "admin") {
 
 describe("requireAdmin", () => {
   let warnSpy: MockInstance;
+  let errorSpy: MockInstance;
 
   beforeEach(() => {
     mockGetCurrentProfile.mockReset();
     warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
   });
 
   afterEach(() => {
     warnSpy.mockRestore();
+    errorSpy.mockRestore();
   });
 
   it("未認証 (profile なし) は失敗し、ログインを促す文言 + unauthenticated ログ", async () => {
@@ -114,5 +117,27 @@ describe("requireAdmin", () => {
       expect(result.profile).toBe(admin);
     }
     expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { profile: null, reason: "unauthenticated", message: "ログインが必要です" },
+    { profile: makeProfile("member"), reason: "not_admin", message: "この操作には管理者権限が必要です" },
+  ])("observer rejectを隔離して$reasonの拒否結果を維持する", async ({ profile, reason, message }) => {
+    mockGetCurrentProfile.mockResolvedValueOnce(profile);
+    const observer = vi.fn().mockRejectedValue(new Error("PRIVATE observer error"));
+
+    const result = await requireAdmin("stores.delete", observer);
+
+    expect(result).toEqual({ ok: false, denied: { ok: false, error: message } });
+    expect(observer).toHaveBeenCalledExactlyOnceWith({ profile, reason });
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledOnce();
+    const fallback = JSON.parse(errorSpy.mock.calls[0]![0]);
+    expect(fallback).toEqual({
+      level: "error",
+      event: "authz.denial_observer_failed",
+      reason,
+    });
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain("PRIVATE");
   });
 });

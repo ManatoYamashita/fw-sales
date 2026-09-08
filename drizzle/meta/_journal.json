@@ -197,6 +197,13 @@
       "when": 1788430812435,
       "tag": "0027_remove_legacy_research_table",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1788835868385,
+      "tag": "0028_event_log_foundation",
+      "breakpoints": true
     }
   ]
 }

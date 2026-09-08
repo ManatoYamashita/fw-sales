@@ -29,11 +29,23 @@ const { mockUpdate, mockRevalidateTag, mockUpdateTag, mockRedirect, mockGetCurre
   mockFindProfileById: vi.fn(),
 }));
 
+const { mockGetForUpdate, mockInsert } = vi.hoisted(() => ({
+  mockGetForUpdate: vi.fn(), mockInsert: vi.fn(),
+}));
+beforeEach(() => {
+  mockGetForUpdate.mockReset().mockResolvedValue({
+    appointment_acquired_date: "2020-01-01", memo: "previous memo", assigned_sales_user_id: "previous-user",
+  });
+  mockInsert.mockReset().mockResolvedValue(undefined);
+});
+
 // repos に deal を生やさない。本 Action が deals へ触れたら TypeError で落ちるため、
 // 「Deal.assigned_sales_user_id を変更しない」ことの機械的な担保にもなる。
 vi.mock("@/lib/repositories", () => ({
   repos: {
     store: { update: mockUpdate },
+    eventLog: { insert: mockInsert },
+    transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn({ store: { getForUpdate: mockGetForUpdate, update: mockUpdate } }),
     profile: { findById: mockFindProfileById },
   },
 }));
@@ -52,7 +64,7 @@ vi.mock("@/lib/supabase/server", () => ({
 }));
 
 const { updateSalesProgressAction } = await import("../store-actions");
-const profile = { id: "user-1", display_name: "担当", email: "a@example.com", role: "member" };
+const profile = { id: "11111111-1111-4111-8111-111111111111", display_name: "担当", email: "a@example.com", role: "member" };
 /** profiles.id は uuid 列なので、担当者テストでは実在しうる形式の値を使う。 */
 const VALID_USER_ID = "11111111-2222-4333-8444-555555555555";
 

@@ -23,6 +23,7 @@
 import "server-only";
 
 import type { DealRepository } from "./deal-repository";
+import type { EventLogRepository } from "./event-log-repository";
 import type { StoreRepository } from "./store-repository";
 import type { HandoffRepository } from "./handoff-repository";
 import type { ProfileRepository } from "./profile-repository";
@@ -75,6 +76,7 @@ export interface TxRepos {
  * アプリ全体で参照される repository 集約 + transaction API。
  */
 export interface Repos {
+  eventLog: EventLogRepository;
   store: StoreRepository;
   deal: DealRepository;
   handoff: HandoffRepository;
@@ -100,6 +102,7 @@ async function buildRepos(): Promise<Repos> {
   const dbModule = await import("@/lib/db");
   const {
     db,
+    dbEventLogRepo,
     dbDealRepo,
     dbStoreRepo,
     dbHandoffRepo,
@@ -121,6 +124,7 @@ async function buildRepos(): Promise<Repos> {
   } = dbModule;
 
   return Object.freeze({
+    eventLog: dbEventLogRepo,
     store: dbStoreRepo,
     deal: dbDealRepo,
     handoff: dbHandoffRepo,
