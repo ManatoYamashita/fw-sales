@@ -7,28 +7,56 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import {
   PLACES_USER_MESSAGES,
-  PLACES_USER_MESSAGE_OVERRIDES,
   PlacesApiError,
   PlacesApiKeyMissingError,
   PlacesIncompleteDataError,
   classifyPlacesError,
   getPlacesErrorStatus,
-  resolvePlacesUserMessage,
   toPlacesDiagnosticKind,
   toUserFacingPlacesMessage,
 } from "../errors";
 import type { PlacesErrorKind, PlacesMessageContext } from "../errors";
 
-/** `toUserFacingPlacesMessage` / `resolvePlacesUserMessage` が受け付ける全導線。 */
+/** `toUserFacingPlacesMessage` が受け付ける全導線。 */
 const CONTEXTS: readonly PlacesMessageContext[] = ["search", "details", "add"];
-
-/** 既定文言テーブルの全 kind。kind を足したらここへ自動で載る。 */
-const KINDS = Object.keys(PLACES_USER_MESSAGES) as PlacesErrorKind[];
 
 /** 詳細取得・追加の導線。「その店舗だけ」の失敗なので検索条件の変更では解決しない。 */
 const PLACE_SCOPED_CONTEXTS: readonly PlacesMessageContext[] = ["details", "add"];
+
+/**
+ * 各 kind を代表するエラー。導線別文言のテストは内部のマージ規則へ触らず、
+ * **公開 API `toUserFacingPlacesMessage` の入出力だけ**を見る (Codex review)。
+ *
+ * `Record<Exclude<PlacesErrorKind, "unknown">, ...>` なので、kind を足すと
+ * ここへ代表エラーを足すまで typecheck が通らない = 検査漏れが起きない。
+ * `"unknown"` は「分類できなかった」状態そのものなので代表エラーを持たず、
+ * fallback 委譲として別に検証する。
+ */
+const ERROR_BY_KIND: Record<Exclude<PlacesErrorKind, "unknown">, () => unknown> = {
+  missing_api_key: () => new PlacesApiKeyMissingError(),
+  timeout: () => timeoutError("TimeoutError"),
+  rate_limited: () => new PlacesApiError(429),
+  permission_denied: () => new PlacesApiError(403),
+  not_found: () => new PlacesApiError(404),
+  invalid_request: () => new PlacesApiError(400),
+  server_error: () => new PlacesApiError(500),
+  incomplete_data: () => new PlacesIncompleteDataError(),
+};
+
+const CLASSIFIED_KINDS = Object.keys(ERROR_BY_KIND) as Exclude<PlacesErrorKind, "unknown">[];
+
+/** 指定導線で実際に UI へ出る文言。`fallback` は呼び出し元が渡す定型文言に相当する。 */
+function userMessage(
+  kind: Exclude<PlacesErrorKind, "unknown">,
+  context: PlacesMessageContext,
+  fallback: string,
+): string {
+  return toUserFacingPlacesMessage(ERROR_BY_KIND[kind](), fallback, context);
+}
 
 const SECRET_BODY =
   '{"error":{"code":403,"message":"The caller does not have permission","details":["internal-project-42"]}}';
@@ -221,10 +249,12 @@ describe("toUserFacingPlacesMessage", () => {
     const details = toUserFacingPlacesMessage(invalid, FALLBACK, "details");
     const add = toUserFacingPlacesMessage(invalid, FALLBACK, "add");
 
+    // 3 導線とも互いに異なり、かつ fallback にも導線非依存の既定文言にも落ちていない
     expect(new Set([search, details, add]).size).toBe(3);
-    expect(search).toBe(PLACES_USER_MESSAGE_OVERRIDES.search.invalid_request);
-    expect(details).toBe(PLACES_USER_MESSAGE_OVERRIDES.details.invalid_request);
-    expect(add).toBe(PLACES_USER_MESSAGE_OVERRIDES.add.invalid_request);
+    for (const message of [search, details, add]) {
+      expect(message).not.toBe(FALLBACK);
+      expect(message).not.toBe(PLACES_USER_MESSAGES.invalid_request);
+    }
   });
 
   it("context は必須引数で、渡し忘れは typecheck で落ちる (#222)", () => {
@@ -275,51 +305,32 @@ describe("PLACES_USER_MESSAGES", () => {
   });
 });
 
-describe("PLACES_USER_MESSAGE_OVERRIDES (#222)", () => {
-  it("全 context のエントリを持つ (override 無しは空オブジェクトで明示する)", () => {
-    expect(Object.keys(PLACES_USER_MESSAGE_OVERRIDES).sort()).toEqual([...CONTEXTS].sort());
-  });
+describe("導線別のユーザー向け文言 (#222)", () => {
+  // 内部のマージ規則 (override 表 / resolver) は module private。ここでは
+  // 「その導線でユーザーが実際に読む文字列」だけを固定する (Codex review)。
+  const FALLBACK = "検索に失敗しました。時間をおいて再度お試しください。";
 
-  it("既定値と同一の文言を重複させない", () => {
-    for (const context of CONTEXTS) {
-      for (const [kind, message] of Object.entries(PLACES_USER_MESSAGE_OVERRIDES[context])) {
-        expect(message).toBeTruthy();
-        expect(
-          message,
-          `${context}.${kind}: 既定値と同じ文言の override は不要です`,
-        ).not.toBe(PLACES_USER_MESSAGES[kind as PlacesErrorKind]);
-      }
+  it.each(CONTEXTS)("%s: 分類できた kind は必ず fallback 以外の文言になる", (context) => {
+    for (const kind of CLASSIFIED_KINDS) {
+      const message = userMessage(kind, context, FALLBACK);
+      expect(message, `${context}.${kind}`).toBeTruthy();
+      expect(message, `${context}.${kind} が fallback へ落ちています`).not.toBe(FALLBACK);
     }
   });
 
-  it("unknown を override しない (fallback 委譲を壊さない)", () => {
-    // 型でも `Exclude<PlacesErrorKind, "unknown">` により禁じているが、
-    // Issue #201 の中核設計なので実行時にも固定する。
-    for (const context of CONTEXTS) {
-      expect(PLACES_USER_MESSAGE_OVERRIDES[context]).not.toHaveProperty("unknown");
-    }
-  });
-});
-
-describe("resolvePlacesUserMessage (#222)", () => {
-  it.each(CONTEXTS)("%s: unknown だけが null で、他の kind は必ず文言を返す", (context) => {
-    for (const kind of KINDS) {
-      const message = resolvePlacesUserMessage(kind, context);
-      if (kind === "unknown") {
-        expect(message).toBeNull();
-      } else {
-        expect(message, `${context}.${kind}`).toBeTruthy();
-      }
-    }
+  it.each(CONTEXTS)("%s: 分類できない場合だけ fallback へ委譲する", (context) => {
+    // `PLACES_USER_MESSAGES` の「`unknown` だけが `null`」を、観測可能な振る舞い
+    // (fallback がそのまま返る) として固定する。
+    expect(PLACES_USER_MESSAGES.unknown).toBeNull();
+    expect(toUserFacingPlacesMessage(new Error("boom"), FALLBACK, context)).toBe(FALLBACK);
   });
 
-  it("解決後の全文言に技術用語 (HTTP status / API / Google) を出さない", () => {
-    // 既定値だけでなく override も含めた**実際に UI へ出る値**を検査する。
+  it("全導線・全 kind の文言に技術用語 (HTTP status / API / Google) を出さない", () => {
+    // 既定値だけでなく導線別の文言も含めた**実際に UI へ出る値**を検査する。
     const forbidden = ["HTTP", "API", "Google", "status", "GOOGLE_PLACES", "4", "5"];
     for (const context of CONTEXTS) {
-      for (const kind of KINDS) {
-        const message = resolvePlacesUserMessage(kind, context);
-        if (message === null) continue;
+      for (const kind of CLASSIFIED_KINDS) {
+        const message = userMessage(kind, context, FALLBACK);
         for (const word of forbidden) {
           expect(message, `${context}.${kind} に "${word}" が含まれています`).not.toContain(word);
         }
@@ -330,9 +341,8 @@ describe("resolvePlacesUserMessage (#222)", () => {
   it.each(PLACE_SCOPED_CONTEXTS)("%s: 検索条件の変更を促さない (#222 受け入れ条件)", (context) => {
     // 詳細取得・追加が失敗するのは「その店舗だけ」。検索条件を変えても解決しないので、
     // 案内してはならない。一覧を取り直す「検索し直す」は有効な行動なので禁じない。
-    for (const kind of KINDS) {
-      const message = resolvePlacesUserMessage(kind, context);
-      if (message === null) continue;
+    for (const kind of CLASSIFIED_KINDS) {
+      const message = userMessage(kind, context, FALLBACK);
       for (const phrase of ["検索条件", "条件を変え"]) {
         expect(
           message,
@@ -342,19 +352,13 @@ describe("resolvePlacesUserMessage (#222)", () => {
     }
   });
 
-  it("search: 検索条件が原因になりうる kind では条件変更を案内する (#222 受け入れ条件)", () => {
+  it("search: 検索条件が原因になりうる kind では条件の見直しを案内する (#222 受け入れ条件)", () => {
     // 既定文言 (どの導線でも取れる行動しか書けない) より的確であることの確認。
     for (const kind of ["invalid_request", "not_found"] as const) {
-      const message = resolvePlacesUserMessage(kind, "search");
+      const message = userMessage(kind, "search", FALLBACK);
       expect(message, `search.${kind}`).toContain("条件");
       expect(message).not.toBe(PLACES_USER_MESSAGES[kind]);
     }
-  });
-
-  it("search: not_found が検索結果 0 件と紛らわしい既定文言のままにならない (#222)", () => {
-    // 検索そのものが失敗した状態なので、「候補一覧が既にある」前提の案内は出さない。
-    const message = resolvePlacesUserMessage("not_found", "search");
-    expect(message).not.toContain("別の候補");
   });
 
   it("導線を跨いで同じ案内で足りる kind は既定文言のままにする (表を 27 項目へ膨らませない)", () => {
@@ -368,9 +372,63 @@ describe("resolvePlacesUserMessage (#222)", () => {
     ] as const;
     for (const kind of sharedKinds) {
       for (const context of CONTEXTS) {
-        expect(resolvePlacesUserMessage(kind, context), `${context}.${kind}`).toBe(
+        expect(userMessage(kind, context, FALLBACK), `${context}.${kind}`).toBe(
           PLACES_USER_MESSAGES[kind],
         );
+      }
+    }
+  });
+});
+
+/**
+ * 検索の失敗文言が、正常系の「検索結果 0 件」表示と読み分けられることのガード
+ * (Codex review)。
+ *
+ * 0 件は失敗ではなく正常系で、ユーザーが次に取る行動 (条件を変えて再検索) も似る。
+ * 文言まで同義になると「0 件だったのか、検索自体が失敗したのか」が判別できない。
+ * 巨大な Client Component を import せず、ソースの文言だけを読んで突き合わせる
+ * (`area-search-no-raw-error-leak.test.ts` と同じ手法)。
+ */
+describe("search の失敗文言と正常な 0 件表示の区別 (Codex review)", () => {
+  const AREA_SEARCH_RESULTS = "app/(main)/stores/new/_components/area-search-results.tsx";
+  /** 正常系 0 件の見出し。UI 側を書き換えたらこのテストが落ちて気付ける。 */
+  const NORMAL_EMPTY_TITLE = "該当する店舗が見つかりませんでした";
+  const FALLBACK = "検索に失敗しました。時間をおいて再度お試しください。";
+
+  async function readAreaSearchResultsSource(): Promise<string> {
+    return readFile(path.join(process.cwd(), AREA_SEARCH_RESULTS), "utf8");
+  }
+
+  it("突き合わせ対象の正常 0 件文言が UI 側に実在する", async () => {
+    const source = await readAreaSearchResultsSource();
+    expect(
+      source,
+      `${AREA_SEARCH_RESULTS} の 0 件文言が変わりました。下のガードの前提を更新してください。`,
+    ).toContain(NORMAL_EMPTY_TITLE);
+  });
+
+  it("取得に失敗したことが分かり、0 件の言い回しへ戻らない", async () => {
+    const message = userMessage("not_found", "search", FALLBACK);
+
+    // 「失敗した」と読める (0 件の「見つかりませんでした」ではない)
+    expect(message).toContain("取得できませんでした");
+    expect(
+      message,
+      "正常系 0 件と同じ「見つかりませんでした」型の言い回しは使わない",
+    ).not.toContain("見つかりませんでした");
+    // 次の行動 (検索条件の見直し) は維持する
+    expect(message).toContain("条件");
+  });
+
+  it("UI の定型文言と一致する文字列を返さない", async () => {
+    const source = await readAreaSearchResultsSource();
+    for (const context of CONTEXTS) {
+      for (const kind of CLASSIFIED_KINDS) {
+        const message = userMessage(kind, context, FALLBACK);
+        expect(
+          source.includes(message),
+          `${context}.${kind} の文言が ${AREA_SEARCH_RESULTS} の定型文言と一致しています`,
+        ).toBe(false);
       }
     }
   });

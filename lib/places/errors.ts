@@ -267,22 +267,24 @@ export const PLACES_USER_MESSAGES: Record<PlacesErrorKind, string | null> = {
  *
  * - `invalid_request` (4xx): 検索では「検索条件が悪い」、詳細取得・追加では
  *   「その店舗の識別子が古い」がそれぞれ最有力なので、取るべき行動が導線で割れる。
- * - `not_found` (404): 検索では既定文言の「別の候補を」が、検索結果 0 件
- *   (= 失敗ではなく正常系) と紛らわしい。詳細取得・追加では候補一覧が目の前に
- *   あるため既定文言のままで的確。
+ * - `not_found` (404): 検索では「見つからなかった」という言い回し自体が、検索結果
+ *   0 件 (= 失敗ではなく正常系) と区別できない。正常系の 0 件は
+ *   `area-search-results.tsx` が「該当する店舗が見つかりませんでした」と表示するため、
+ *   検索導線では**取得そのものに失敗した**と分かる言い回しにする (Codex review)。
+ *   詳細取得・追加では 0 件表示と競合しないので既定文言のままで的確。
  *
  * `timeout` / `server_error` / `rate_limited` / `permission_denied` /
  * `missing_api_key` / `incomplete_data` は取るべき行動が導線で変わらないので
  * 差し替えない。
  */
-export const PLACES_USER_MESSAGE_OVERRIDES: Record<
+const PLACES_USER_MESSAGE_OVERRIDES: Record<
   PlacesMessageContext,
   Partial<Record<Exclude<PlacesErrorKind, "unknown">, string>>
 > = {
   search: {
     invalid_request:
       "この検索条件では店舗情報を取得できませんでした。条件を変えて、もう一度お試しください。",
-    not_found: "該当する店舗情報が見つかりませんでした。検索条件を変えて、もう一度お試しください。",
+    not_found: "検索結果を取得できませんでした。検索条件を確認して、もう一度お試しください。",
   },
   details: {
     invalid_request:
@@ -296,10 +298,11 @@ export const PLACES_USER_MESSAGE_OVERRIDES: Record<
 /**
  * kind と導線から表示文言を引く。`null` は「呼び出し側の fallback へ委譲」。
  *
- * 既定値と override のマージ規則をここ 1 箇所に閉じ込める。テストが
- * 全 kind × 全 context の文言を列挙してガードできるよう export する。
+ * 既定値と override のマージ規則をここ 1 箇所に閉じ込める。**module private**。
+ * 内部のマージ規則は公開 API にしない (テストは `toUserFacingPlacesMessage` 越しに
+ * 観測可能な振る舞いだけを固定する。Codex review)。
  */
-export function resolvePlacesUserMessage(
+function resolvePlacesUserMessage(
   kind: PlacesErrorKind,
   context: PlacesMessageContext,
 ): string | null {

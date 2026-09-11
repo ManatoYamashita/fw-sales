@@ -15,7 +15,7 @@ import {
   PlacesApiError,
   PlacesApiKeyMissingError,
   PlacesIncompleteDataError,
-  resolvePlacesUserMessage,
+  toUserFacingPlacesMessage,
 } from "@/lib/places/errors";
 import { LOG_FIELD_MAX_CHARS } from "@/lib/utils/log-sanitize";
 import type { PlaceResult, PlaceSearchPage, SearchCenter } from "@/lib/places/types";
@@ -82,6 +82,15 @@ const {
 } = await import("../area-search-actions");
 
 const CENTER: SearchCenter = { lat: 35.658, lng: 139.7016 };
+
+/**
+ * 各アクションが `toUserFacingPlacesMessage` へ渡す fallback 文言 (実装と同じもの)。
+ * 期待値は内部の文言表ではなく公開 API 越しに引き、「このアクションがどの導線として
+ * 文言を解決しているか」だけを検証する (#222 / Codex review)。
+ */
+const SEARCH_FALLBACK = "検索に失敗しました。時間をおいて再度お試しください。";
+const DETAILS_FALLBACK = "詳細情報の取得に失敗しました。時間をおいて再度お試しください。";
+const ADD_FALLBACK = "追加に失敗しました。時間をおいて再度お試しください。";
 
 function makePlace(overrides: Partial<PlaceResult> = {}): PlaceResult {
   return {
@@ -399,25 +408,24 @@ describe("searchPlacesWithMatchesAction", () => {
       consoleSpy.mockRestore();
     });
 
-    // 期待値は `resolvePlacesUserMessage(kind, "search")` から引く。文言リテラルを
-    // 写経せず、「このアクションが `"search"` 導線として文言を引いていること」を検証する
-    // 形にしておく (#222)。context の配線を取り違えれば別導線の文言になり落ちる。
-    it.each([
-      [400, "invalid_request"],
-      [403, "permission_denied"],
-      [404, "not_found"],
-      [429, "rate_limited"],
-      [500, "server_error"],
-      [503, "server_error"],
-    ] as const)("HTTP %i は status 別の安全な文言になる", async (status, kind) => {
-      mockResolveSearchCenter.mockResolvedValue(CENTER);
-      mockSearchPlacesPage.mockRejectedValue(new PlacesApiError(status));
+    // 文言リテラルを写経せず、「このアクションが `"search"` 導線として文言を解決して
+    // いること」を検証する (#222)。context の配線を取り違えれば別導線の文言になり落ちる。
+    it.each([400, 403, 404, 429, 500, 503] as const)(
+      "HTTP %i は status 別の安全な文言になる",
+      async (status) => {
+        mockResolveSearchCenter.mockResolvedValue(CENTER);
+        mockSearchPlacesPage.mockRejectedValue(new PlacesApiError(status));
 
-      const result = await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", 1000);
+        const result = await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", 1000);
 
-      expect(result.ok).toBe(false);
-      if (!result.ok) expect(result.error).toBe(resolvePlacesUserMessage(kind, "search"));
-    });
+        expect(result.ok).toBe(false);
+        if (!result.ok) {
+          expect(result.error).toBe(
+            toUserFacingPlacesMessage(new PlacesApiError(status), SEARCH_FALLBACK, "search"),
+          );
+        }
+      },
+    );
 
     it("検索導線では検索条件の変更を案内する (#222)", async () => {
       mockResolveSearchCenter.mockResolvedValue(CENTER);
@@ -1093,12 +1101,16 @@ describe("Places エラー文言の導線出し分け (#222)", () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error).toBe(resolvePlacesUserMessage("invalid_request", "details"));
+      expect(result.error).toBe(
+        toUserFacingPlacesMessage(new PlacesApiError(400), DETAILS_FALLBACK, "details"),
+      );
       // 受け入れ条件: その画面で実行できない / 無意味な行動を促さない
       expect(result.error).not.toContain("検索条件");
       expect(result.error).not.toContain("条件を変え");
       // 検索導線の文言を取り違えて配線していない
-      expect(result.error).not.toBe(resolvePlacesUserMessage("invalid_request", "search"));
+      expect(result.error).not.toBe(
+        toUserFacingPlacesMessage(new PlacesApiError(400), SEARCH_FALLBACK, "search"),
+      );
     }
   });
 
@@ -1109,10 +1121,14 @@ describe("Places エラー文言の導線出し分け (#222)", () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error).toBe(resolvePlacesUserMessage("invalid_request", "add"));
+      expect(result.error).toBe(
+        toUserFacingPlacesMessage(new PlacesApiError(400), ADD_FALLBACK, "add"),
+      );
       expect(result.error).not.toContain("検索条件");
       expect(result.error).not.toContain("条件を変え");
-      expect(result.error).not.toBe(resolvePlacesUserMessage("invalid_request", "details"));
+      expect(result.error).not.toBe(
+        toUserFacingPlacesMessage(new PlacesApiError(400), DETAILS_FALLBACK, "details"),
+      );
     }
   });
 
@@ -1127,7 +1143,7 @@ describe("Places エラー文言の導線出し分け (#222)", () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error).toBe("追加に失敗しました。時間をおいて再度お試しください。");
+      expect(result.error).toBe(ADD_FALLBACK);
       expect(result.error).not.toContain("stores");
     }
   });
