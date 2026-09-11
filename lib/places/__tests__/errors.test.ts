@@ -9,14 +9,26 @@
 import { describe, expect, it } from "vitest";
 import {
   PLACES_USER_MESSAGES,
+  PLACES_USER_MESSAGE_OVERRIDES,
   PlacesApiError,
   PlacesApiKeyMissingError,
   PlacesIncompleteDataError,
   classifyPlacesError,
   getPlacesErrorStatus,
+  resolvePlacesUserMessage,
   toPlacesDiagnosticKind,
   toUserFacingPlacesMessage,
 } from "../errors";
+import type { PlacesErrorKind, PlacesMessageContext } from "../errors";
+
+/** `toUserFacingPlacesMessage` / `resolvePlacesUserMessage` が受け付ける全導線。 */
+const CONTEXTS: readonly PlacesMessageContext[] = ["search", "details", "add"];
+
+/** 既定文言テーブルの全 kind。kind を足したらここへ自動で載る。 */
+const KINDS = Object.keys(PLACES_USER_MESSAGES) as PlacesErrorKind[];
+
+/** 詳細取得・追加の導線。「その店舗だけ」の失敗なので検索条件の変更では解決しない。 */
+const PLACE_SCOPED_CONTEXTS: readonly PlacesMessageContext[] = ["details", "add"];
 
 const SECRET_BODY =
   '{"error":{"code":403,"message":"The caller does not have permission","details":["internal-project-42"]}}';
@@ -68,7 +80,7 @@ describe("PlacesIncompleteDataError", () => {
 
   it("再試行を促さない専用文言になり、fallback へ落ちない", () => {
     const fallback = "詳細情報の取得に失敗しました。時間をおいて再度お試しください。";
-    const message = toUserFacingPlacesMessage(new PlacesIncompleteDataError(), fallback);
+    const message = toUserFacingPlacesMessage(new PlacesIncompleteDataError(), fallback, "details");
 
     expect(message).toBe(PLACES_USER_MESSAGES.incomplete_data);
     expect(message).not.toBe(fallback);
@@ -179,28 +191,51 @@ describe("toUserFacingPlacesMessage", () => {
   const FALLBACK = "検索に失敗しました。時間をおいて再度お試しください。";
 
   it("分類できた場合は kind 別の文言を返す", () => {
-    expect(toUserFacingPlacesMessage(new PlacesApiError(429), FALLBACK)).toBe(
+    expect(toUserFacingPlacesMessage(new PlacesApiError(429), FALLBACK, "search")).toBe(
       PLACES_USER_MESSAGES.rate_limited,
     );
-    expect(toUserFacingPlacesMessage(new PlacesApiError(500), FALLBACK)).toBe(
+    expect(toUserFacingPlacesMessage(new PlacesApiError(500), FALLBACK, "search")).toBe(
       PLACES_USER_MESSAGES.server_error,
     );
   });
 
-  it("分類できない場合は fallback を返し、元の message を含めない", () => {
+  it.each(CONTEXTS)("%s: 分類できない場合は fallback を返し、元の message を含めない", (context) => {
     const err = new Error('relation "stores" does not exist');
-    expect(toUserFacingPlacesMessage(err, FALLBACK)).toBe(FALLBACK);
-    expect(toUserFacingPlacesMessage(err, FALLBACK)).not.toContain("stores");
+    expect(toUserFacingPlacesMessage(err, FALLBACK, context)).toBe(FALLBACK);
+    expect(toUserFacingPlacesMessage(err, FALLBACK, context)).not.toContain("stores");
   });
 
-  it("生レスポンス本文・API キーを一切返さない", () => {
+  it.each(CONTEXTS)("%s: 生レスポンス本文・API キーを一切返さない", (context) => {
     const key = "AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q";
     const err = new Error(`Places API エラー (403): ${SECRET_BODY} key=${key}`);
-    const message = toUserFacingPlacesMessage(err, FALLBACK);
+    const message = toUserFacingPlacesMessage(err, FALLBACK, context);
     expect(message).toBe(PLACES_USER_MESSAGES.permission_denied);
     expect(message).not.toContain("internal-project-42");
     expect(message).not.toContain("AIzaSy");
     expect(message).not.toContain(SECRET_BODY);
+  });
+
+  it("導線ごとに文言を出し分ける (#222)", () => {
+    const invalid = new PlacesApiError(400);
+    const search = toUserFacingPlacesMessage(invalid, FALLBACK, "search");
+    const details = toUserFacingPlacesMessage(invalid, FALLBACK, "details");
+    const add = toUserFacingPlacesMessage(invalid, FALLBACK, "add");
+
+    expect(new Set([search, details, add]).size).toBe(3);
+    expect(search).toBe(PLACES_USER_MESSAGE_OVERRIDES.search.invalid_request);
+    expect(details).toBe(PLACES_USER_MESSAGE_OVERRIDES.details.invalid_request);
+    expect(add).toBe(PLACES_USER_MESSAGE_OVERRIDES.add.invalid_request);
+  });
+
+  it("context は必須引数で、渡し忘れは typecheck で落ちる (#222)", () => {
+    // 4 アクションの配線漏れを型で検出する設計。optional / デフォルト値へ緩めると
+    // この `@ts-expect-error` が「未使用の抑制」になり `pnpm typecheck` が失敗する。
+    // 実行はしない (context 無しの呼び出しは実行時にも成立しないため)。
+    const callWithoutContext = () =>
+      // @ts-expect-error context を省略した呼び出しは型エラーであること
+      toUserFacingPlacesMessage(new PlacesApiError(500), FALLBACK);
+
+    expect(callWithoutContext).toBeTypeOf("function");
   });
 });
 
@@ -217,33 +252,125 @@ describe("PLACES_USER_MESSAGES", () => {
     }
   });
 
-  it("文言が特定アクションの文脈に依存しない (#221 review)", () => {
-    // このテーブルは検索 / 詳細取得 / 追加の 4 アクションで共用する。
-    // 「店舗検索」を主語に固定したり「条件を変えて」のようにその画面に存在しない
-    // 操作を促したりすると、詳細取得・追加の導線で取りようのない行動へ誘導する。
+  it("既定文言が特定アクションの文脈に依存しない (#221 review)", () => {
+    // この表は全導線で共用する既定値。override が無い kind / context ではこれが
+    // そのまま出るため、「店舗検索」を主語に固定したり「条件を変えて」のように
+    // その導線で無意味な操作を促したりしてはならない。導線固有の言い回しは
+    // `PLACES_USER_MESSAGE_OVERRIDES` 側の責務 (#222)。
     //
     // 語幹ではなく語そのものを禁じる。「条件を変えて」だけを禁止していた版は
     // 「検索条件を変えるか」を素通りさせており、テスト名が掲げる不変条件を
-    // 実際には守れていなかった (#221 review)。「候補」は 4 アクションすべてが
-    // 同じエリア検索結果の一覧を指すため許容する。
+    // 実際には守れていなかった (#221 review)。「候補」は全導線が同じエリア検索
+    // 結果の一覧を指すため許容する。
     const contextBound = ["検索", "条件"];
     for (const [kind, message] of Object.entries(PLACES_USER_MESSAGES)) {
       if (message === null) continue;
       for (const phrase of contextBound) {
         expect(
           message,
-          `${kind}: "${phrase}" は検索導線を前提にした表現です。詳細取得・追加でも成立する文言にしてください。`,
+          `${kind}: "${phrase}" は検索導線を前提にした表現です。既定文言はどの導線でも成立する表現にしてください。`,
+        ).not.toContain(phrase);
+      }
+    }
+  });
+});
+
+describe("PLACES_USER_MESSAGE_OVERRIDES (#222)", () => {
+  it("全 context のエントリを持つ (override 無しは空オブジェクトで明示する)", () => {
+    expect(Object.keys(PLACES_USER_MESSAGE_OVERRIDES).sort()).toEqual([...CONTEXTS].sort());
+  });
+
+  it("既定値と同一の文言を重複させない", () => {
+    for (const context of CONTEXTS) {
+      for (const [kind, message] of Object.entries(PLACES_USER_MESSAGE_OVERRIDES[context])) {
+        expect(message).toBeTruthy();
+        expect(
+          message,
+          `${context}.${kind}: 既定値と同じ文言の override は不要です`,
+        ).not.toBe(PLACES_USER_MESSAGES[kind as PlacesErrorKind]);
+      }
+    }
+  });
+
+  it("unknown を override しない (fallback 委譲を壊さない)", () => {
+    // 型でも `Exclude<PlacesErrorKind, "unknown">` により禁じているが、
+    // Issue #201 の中核設計なので実行時にも固定する。
+    for (const context of CONTEXTS) {
+      expect(PLACES_USER_MESSAGE_OVERRIDES[context]).not.toHaveProperty("unknown");
+    }
+  });
+});
+
+describe("resolvePlacesUserMessage (#222)", () => {
+  it.each(CONTEXTS)("%s: unknown だけが null で、他の kind は必ず文言を返す", (context) => {
+    for (const kind of KINDS) {
+      const message = resolvePlacesUserMessage(kind, context);
+      if (kind === "unknown") {
+        expect(message).toBeNull();
+      } else {
+        expect(message, `${context}.${kind}`).toBeTruthy();
+      }
+    }
+  });
+
+  it("解決後の全文言に技術用語 (HTTP status / API / Google) を出さない", () => {
+    // 既定値だけでなく override も含めた**実際に UI へ出る値**を検査する。
+    const forbidden = ["HTTP", "API", "Google", "status", "GOOGLE_PLACES", "4", "5"];
+    for (const context of CONTEXTS) {
+      for (const kind of KINDS) {
+        const message = resolvePlacesUserMessage(kind, context);
+        if (message === null) continue;
+        for (const word of forbidden) {
+          expect(message, `${context}.${kind} に "${word}" が含まれています`).not.toContain(word);
+        }
+      }
+    }
+  });
+
+  it.each(PLACE_SCOPED_CONTEXTS)("%s: 検索条件の変更を促さない (#222 受け入れ条件)", (context) => {
+    // 詳細取得・追加が失敗するのは「その店舗だけ」。検索条件を変えても解決しないので、
+    // 案内してはならない。一覧を取り直す「検索し直す」は有効な行動なので禁じない。
+    for (const kind of KINDS) {
+      const message = resolvePlacesUserMessage(kind, context);
+      if (message === null) continue;
+      for (const phrase of ["検索条件", "条件を変え"]) {
+        expect(
+          message,
+          `${context}.${kind}: "${phrase}" はその店舗の失敗に対して無意味な行動です`,
         ).not.toContain(phrase);
       }
     }
   });
 
-  it("ユーザー向け文言に技術用語 (HTTP status / API / Google) を出さない", () => {
-    const forbidden = ["HTTP", "API", "Google", "status", "GOOGLE_PLACES", "4", "5"];
-    for (const [kind, message] of Object.entries(PLACES_USER_MESSAGES)) {
-      if (message === null) continue;
-      for (const word of forbidden) {
-        expect(message, `${kind} に "${word}" が含まれています`).not.toContain(word);
+  it("search: 検索条件が原因になりうる kind では条件変更を案内する (#222 受け入れ条件)", () => {
+    // 既定文言 (どの導線でも取れる行動しか書けない) より的確であることの確認。
+    for (const kind of ["invalid_request", "not_found"] as const) {
+      const message = resolvePlacesUserMessage(kind, "search");
+      expect(message, `search.${kind}`).toContain("条件");
+      expect(message).not.toBe(PLACES_USER_MESSAGES[kind]);
+    }
+  });
+
+  it("search: not_found が検索結果 0 件と紛らわしい既定文言のままにならない (#222)", () => {
+    // 検索そのものが失敗した状態なので、「候補一覧が既にある」前提の案内は出さない。
+    const message = resolvePlacesUserMessage("not_found", "search");
+    expect(message).not.toContain("別の候補");
+  });
+
+  it("導線を跨いで同じ案内で足りる kind は既定文言のままにする (表を 27 項目へ膨らませない)", () => {
+    const sharedKinds = [
+      "missing_api_key",
+      "timeout",
+      "rate_limited",
+      "permission_denied",
+      "server_error",
+      "incomplete_data",
+    ] as const;
+    for (const kind of sharedKinds) {
+      for (const context of CONTEXTS) {
+        expect(resolvePlacesUserMessage(kind, context), `${context}.${kind}`).toBe(
+          PLACES_USER_MESSAGES[kind],
+        );
       }
     }
   });

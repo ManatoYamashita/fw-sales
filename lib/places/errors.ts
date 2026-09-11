@@ -197,25 +197,43 @@ export function toPlacesDiagnosticKind(err: unknown): string {
 }
 
 /**
- * `PlacesErrorKind` に対応するユーザー向け文言。
+ * Places エラー文言を引く呼び出し文脈 (Issue #222)。
+ *
+ * `toUserFacingPlacesMessage` の**必須**引数。optional やデフォルト値にしないのは、
+ * 新しい呼び出し元が文脈を渡し忘れたときに typecheck で落とすため。
+ *
+ * - `"search"`: 検索そのものの失敗 (`searchPlacesWithMatchesAction` / `searchPlacesAction`)。
+ *   検索条件はまだユーザーの手元にあるので、条件変更を促せる。
+ * - `"details"`: 一覧の 1 件に対する詳細取得 (`getPlaceDetailsForAreaSearchAction`)。
+ * - `"add"`: 一覧の 1 件の店舗追加 (`addStoreFromPlaceAction`)。
+ *
+ * `"details"` / `"add"` は「その店舗だけ」が失敗した状態なので、検索条件を変えても
+ * 解決しない。条件変更を促してはならない導線としてまとめて扱う。
+ */
+export type PlacesMessageContext = "search" | "details" | "add";
+
+/**
+ * `PlacesErrorKind` に対応するユーザー向け文言の**既定値**。
  *
  * 技術用語 (HTTP status / Google / API キー / エンドポイント名) は出さない。
  * ユーザーが知りたいのは内部詳細ではなく「次に何をすればよいか」なので、すべて
  * 次の行動を含む文にする (`registration-mode-card.tsx` の `REJECT_MESSAGE` と同じ規約)。
  * 診断情報はサーバー側の構造化ログが担う。
  *
- * ## 文脈非依存であること (#221 review)
+ * ## 文脈非依存であること (#221 review, #222)
  *
- * このテーブルは検索 (`searchPlacesWithMatchesAction` / `searchPlacesAction`)・詳細取得
- * (`getPlaceDetailsForAreaSearchAction`)・追加 (`addStoreFromPlaceAction`) の
- * **4 アクションで共用**する。したがって主語を「店舗検索」に固定せず、どの導線から
- * 出ても成立する表現にする。特に「条件を変えて」のような**その画面に存在しない操作**を
- * 促す文言は、ユーザーが取りようのない行動へ誘導するため置かない。
- * アクション固有の文脈は、呼び出し側が渡す `fallback` 文言が担う。
+ * この表は全 `PlacesMessageContext` で共用する既定値なので、主語を「店舗検索」に
+ * 固定せず、どの導線から出ても成立する表現にする。特に「条件を変えて」のような
+ * **その導線に存在しない / その導線では無意味な操作**を促す文言はここへ置かない。
+ * 導線固有の言い回しは `PLACES_USER_MESSAGE_OVERRIDES` が担う。
+ *
+ * 現在すべての context が override する kind (`invalid_request`) についても既定値は
+ * 残す。context を 1 つ足したときに「override を書き忘れたら文脈依存文言が出る」
+ * のではなく「文脈非依存の既定値が出る」状態を保つための安全側の設計。
  *
  * `"unknown"` だけは `null` = 「呼び出し側が指定した fallback 文言を使う」。
  * 分類できないエラー (Postgres エラーや想定外の例外) の message を UI へ流さないための
- * 明示的な穴埋めであり、ここが本 Issue の中核。
+ * 明示的な穴埋めであり、Issue #201 の中核。
  */
 export const PLACES_USER_MESSAGES: Record<PlacesErrorKind, string | null> = {
   missing_api_key: "店舗情報サービスの設定に問題があります。管理者にお問い合わせください。",
@@ -223,7 +241,6 @@ export const PLACES_USER_MESSAGES: Record<PlacesErrorKind, string | null> = {
   rate_limited: "店舗情報サービスの利用が集中しています。少し時間をおいて再度お試しください。",
   permission_denied: "店舗情報サービスを利用できませんでした。管理者にお問い合わせください。",
   not_found: "対象の店舗情報が見つかりませんでした。別の候補をお試しください。",
-  // 検索・詳細取得・追加のどこから出ても取れる行動だけを示す (#221 review)。
   // 4xx は決定的な失敗なので「時間をおいて」は促さず、やり直しでも直らない場合の
   // エスカレーション先だけを示す。「検索条件」のような特定導線の語彙は使わない。
   invalid_request:
@@ -236,13 +253,76 @@ export const PLACES_USER_MESSAGES: Record<PlacesErrorKind, string | null> = {
 };
 
 /**
+ * 導線ごとに既定文言を差し替える kind だけを並べた表 (Issue #222)。
+ *
+ * `Record<PlacesMessageContext, Record<PlacesErrorKind, string>>` にすると
+ * 3 × 9 = 27 項目の巨大な表になり、ほとんどが既定値のコピーになって保守できない。
+ * **既定値で成立しない kind だけ**をここへ置き、それ以外は `PLACES_USER_MESSAGES`
+ * をそのまま使う。
+ *
+ * `"unknown"` を型で除いてあるのは、`"unknown"` の `null` = fallback 委譲という
+ * Issue #201 の中核設計を override で壊せないようにするため。
+ *
+ * ## どの kind を差し替えるか
+ *
+ * - `invalid_request` (4xx): 検索では「検索条件が悪い」、詳細取得・追加では
+ *   「その店舗の識別子が古い」がそれぞれ最有力なので、取るべき行動が導線で割れる。
+ * - `not_found` (404): 検索では既定文言の「別の候補を」が、検索結果 0 件
+ *   (= 失敗ではなく正常系) と紛らわしい。詳細取得・追加では候補一覧が目の前に
+ *   あるため既定文言のままで的確。
+ *
+ * `timeout` / `server_error` / `rate_limited` / `permission_denied` /
+ * `missing_api_key` / `incomplete_data` は取るべき行動が導線で変わらないので
+ * 差し替えない。
+ */
+export const PLACES_USER_MESSAGE_OVERRIDES: Record<
+  PlacesMessageContext,
+  Partial<Record<Exclude<PlacesErrorKind, "unknown">, string>>
+> = {
+  search: {
+    invalid_request:
+      "この検索条件では店舗情報を取得できませんでした。条件を変えて、もう一度お試しください。",
+    not_found: "該当する店舗情報が見つかりませんでした。検索条件を変えて、もう一度お試しください。",
+  },
+  details: {
+    invalid_request:
+      "この店舗の詳細情報を取得できませんでした。検索し直してからもう一度お試しください。",
+  },
+  add: {
+    invalid_request: "この店舗を追加できませんでした。検索し直してからもう一度お試しください。",
+  },
+};
+
+/**
+ * kind と導線から表示文言を引く。`null` は「呼び出し側の fallback へ委譲」。
+ *
+ * 既定値と override のマージ規則をここ 1 箇所に閉じ込める。テストが
+ * 全 kind × 全 context の文言を列挙してガードできるよう export する。
+ */
+export function resolvePlacesUserMessage(
+  kind: PlacesErrorKind,
+  context: PlacesMessageContext,
+): string | null {
+  const base = PLACES_USER_MESSAGES[kind];
+  // `"unknown"` は型レベルで override 不可。fallback 委譲を必ず維持する。
+  if (kind === "unknown") return base;
+  return PLACES_USER_MESSAGE_OVERRIDES[context][kind] ?? base;
+}
+
+/**
  * エラーをユーザー向け文言へ変換する。`lib/db/postgres-error.ts` の
- * `formatUserMessage(parsed, fallback)` と同型のシグネチャ。
+ * `formatUserMessage(parsed, fallback)` と同型のシグネチャに、呼び出し文脈を足したもの。
  *
  * **`err` の message は決して戻り値に含めない。** 分類できない場合は必ず `fallback`
  * を返す。`formatUserMessage` は未知 SQLSTATE のとき `[code] message` と生 message を
  * 返すため、この経路では併用しない (Issue #201 の趣旨と衝突する)。
+ *
+ * `context` は必須。渡し忘れを typecheck で検出するため optional にしない (#222)。
  */
-export function toUserFacingPlacesMessage(err: unknown, fallback: string): string {
-  return PLACES_USER_MESSAGES[classifyPlacesError(err)] ?? fallback;
+export function toUserFacingPlacesMessage(
+  err: unknown,
+  fallback: string,
+  context: PlacesMessageContext,
+): string {
+  return resolvePlacesUserMessage(classifyPlacesError(err), context) ?? fallback;
 }
