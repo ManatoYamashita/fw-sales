@@ -15,6 +15,7 @@ import {
   PlacesApiError,
   PlacesApiKeyMissingError,
   PlacesIncompleteDataError,
+  toUserFacingPlacesMessage,
 } from "@/lib/places/errors";
 import { LOG_FIELD_MAX_CHARS } from "@/lib/utils/log-sanitize";
 import type { PlaceResult, PlaceSearchPage, SearchCenter } from "@/lib/places/types";
@@ -77,9 +78,19 @@ const {
   searchPlacesWithMatchesAction,
   bulkAddStoresFromPlacesAction,
   getPlaceDetailsForAreaSearchAction,
+  addStoreFromPlaceAction,
 } = await import("../area-search-actions");
 
 const CENTER: SearchCenter = { lat: 35.658, lng: 139.7016 };
+
+/**
+ * 各アクションが `toUserFacingPlacesMessage` へ渡す fallback 文言 (実装と同じもの)。
+ * 期待値は内部の文言表ではなく公開 API 越しに引き、「このアクションがどの導線として
+ * 文言を解決しているか」だけを検証する (#222 / Codex review)。
+ */
+const SEARCH_FALLBACK = "検索に失敗しました。時間をおいて再度お試しください。";
+const DETAILS_FALLBACK = "詳細情報の取得に失敗しました。時間をおいて再度お試しください。";
+const ADD_FALLBACK = "追加に失敗しました。時間をおいて再度お試しください。";
 
 function makePlace(overrides: Partial<PlaceResult> = {}): PlaceResult {
   return {
@@ -397,21 +408,37 @@ describe("searchPlacesWithMatchesAction", () => {
       consoleSpy.mockRestore();
     });
 
-    it.each([
-      [400, PLACES_USER_MESSAGES.invalid_request],
-      [403, PLACES_USER_MESSAGES.permission_denied],
-      [404, PLACES_USER_MESSAGES.not_found],
-      [429, PLACES_USER_MESSAGES.rate_limited],
-      [500, PLACES_USER_MESSAGES.server_error],
-      [503, PLACES_USER_MESSAGES.server_error],
-    ])("HTTP %i は status 別の安全な文言になる", async (status, expected) => {
+    // 文言リテラルを写経せず、「このアクションが `"search"` 導線として文言を解決して
+    // いること」を検証する (#222)。context の配線を取り違えれば別導線の文言になり落ちる。
+    it.each([400, 403, 404, 429, 500, 503] as const)(
+      "HTTP %i は status 別の安全な文言になる",
+      async (status) => {
+        mockResolveSearchCenter.mockResolvedValue(CENTER);
+        mockSearchPlacesPage.mockRejectedValue(new PlacesApiError(status));
+
+        const result = await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", 1000);
+
+        expect(result.ok).toBe(false);
+        if (!result.ok) {
+          expect(result.error).toBe(
+            toUserFacingPlacesMessage(new PlacesApiError(status), SEARCH_FALLBACK, "search"),
+          );
+        }
+      },
+    );
+
+    it("検索導線では検索条件の変更を案内する (#222)", async () => {
       mockResolveSearchCenter.mockResolvedValue(CENTER);
-      mockSearchPlacesPage.mockRejectedValue(new PlacesApiError(status));
+      mockSearchPlacesPage.mockRejectedValue(new PlacesApiError(400));
 
       const result = await searchPlacesWithMatchesAction("居酒屋", "渋谷駅", 1000);
 
       expect(result.ok).toBe(false);
-      if (!result.ok) expect(result.error).toBe(expected);
+      if (!result.ok) {
+        expect(result.error).toContain("条件");
+        // 導線非依存の既定文言のままではない = context が配線されている
+        expect(result.error).not.toBe(PLACES_USER_MESSAGES.invalid_request);
+      }
     });
 
     it("timeout は専用文言になる", async () => {
@@ -1053,5 +1080,71 @@ describe("getPlaceDetailsForAreaSearchAction", () => {
     const [, diagnostics] = consoleSpy.mock.calls[0] as [string, { stack?: string }];
     expect(diagnostics.stack).toBeTruthy();
     consoleSpy.mockRestore();
+  });
+});
+
+describe("Places エラー文言の導線出し分け (#222)", () => {
+  let consoleSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    consoleSpy.mockRestore();
+  });
+
+  it("詳細取得は details 導線の文言になり、検索条件の変更を促さない", async () => {
+    mockGetPlaceDetails.mockRejectedValue(new PlacesApiError(400));
+
+    const result = await getPlaceDetailsForAreaSearchAction("ChIJdetail");
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBe(
+        toUserFacingPlacesMessage(new PlacesApiError(400), DETAILS_FALLBACK, "details"),
+      );
+      // 受け入れ条件: その画面で実行できない / 無意味な行動を促さない
+      expect(result.error).not.toContain("検索条件");
+      expect(result.error).not.toContain("条件を変え");
+      // 検索導線の文言を取り違えて配線していない
+      expect(result.error).not.toBe(
+        toUserFacingPlacesMessage(new PlacesApiError(400), SEARCH_FALLBACK, "search"),
+      );
+    }
+  });
+
+  it("店舗追加は add 導線の文言になり、検索条件の変更を促さない", async () => {
+    mockGetPlaceById.mockRejectedValue(new PlacesApiError(400));
+
+    const result = await addStoreFromPlaceAction("ChIJadd");
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBe(
+        toUserFacingPlacesMessage(new PlacesApiError(400), ADD_FALLBACK, "add"),
+      );
+      expect(result.error).not.toContain("検索条件");
+      expect(result.error).not.toContain("条件を変え");
+      expect(result.error).not.toBe(
+        toUserFacingPlacesMessage(new PlacesApiError(400), DETAILS_FALLBACK, "details"),
+      );
+    }
+  });
+
+  it("分類できないエラーは導線ごとの fallback 文言のままで、生 message を漏らさない", async () => {
+    const pgError = Object.assign(new Error('relation "stores" does not exist'), {
+      name: "PostgresError",
+      code: "42P01",
+    });
+    mockGetPlaceById.mockRejectedValue(pgError);
+
+    const result = await addStoreFromPlaceAction("ChIJadd");
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBe(ADD_FALLBACK);
+      expect(result.error).not.toContain("stores");
+    }
   });
 });

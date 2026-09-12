@@ -339,7 +339,7 @@ export async function searchPlacesWithMatchesAction(
   } catch (e) {
     logAreaSearchFailure("searchPlacesWithMatchesAction", e); // L3
     return failure(
-      toUserFacingPlacesMessage(e, "検索に失敗しました。時間をおいて再度お試しください。"),
+      toUserFacingPlacesMessage(e, "検索に失敗しました。時間をおいて再度お試しください。", "search"),
     );
   }
 }
@@ -366,6 +366,7 @@ export async function getPlaceDetailsForAreaSearchAction(
       toUserFacingPlacesMessage(
         e,
         "詳細情報の取得に失敗しました。時間をおいて再度お試しください。",
+        "details",
       ),
     );
   }
@@ -384,7 +385,7 @@ export async function searchPlacesAction(
   } catch (e) {
     logAreaSearchFailure("searchPlacesAction", e);
     return failure(
-      toUserFacingPlacesMessage(e, "検索に失敗しました。時間をおいて再度お試しください。"),
+      toUserFacingPlacesMessage(e, "検索に失敗しました。時間をおいて再度お試しください。", "search"),
     );
   }
 }
@@ -415,7 +416,7 @@ export async function addStoreFromPlaceAction(
   } catch (e) {
     logAreaSearchFailure("addStoreFromPlaceAction", e, { placeId });
     return failure(
-      toUserFacingPlacesMessage(e, "追加に失敗しました。時間をおいて再度お試しください。"),
+      toUserFacingPlacesMessage(e, "追加に失敗しました。時間をおいて再度お試しください。", "add"),
     );
   }
 }
