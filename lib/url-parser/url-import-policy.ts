@@ -27,7 +27,7 @@
  * | `…/maps/place/<店名>` | 受付。名前を読み取り、後段で Places 照合 |
  * | `…/maps/**?query_place_id=<ID>` | 受付。Place ID で一意特定 |
  * | `…/maps/**?q=place_id:<ID>` (legacy) | 受付。同上 |
- * | `maps.app.goo.gl/<id>`・`goo.gl/maps/<id>`・`share.google/<id>` | 受付。展開後 URL を**再検証** |
+ * | `maps.app.goo.gl/<id>`・`goo.gl/maps/<id>` | 受付。展開後 URL を**再検証** |
  * | `/maps/search/<キーワード>`・`?q=<キーワード>` | 拒否。検索結果であり 1 店舗を指さない |
  * | `?cid=<数値>` | 拒否。Place ID とは別体系で、現行実装に変換経路が無い |
  * | `/maps/dir/…`・`/search?q=…`・Maps トップ | 拒否 |
@@ -71,7 +71,7 @@ export type UrlImportKind =
    */
   | "google_maps_place_id"
   /**
-   * `maps.app.goo.gl` / `goo.gl/maps` / `share.google` の共有リンク。
+   * `maps.app.goo.gl` / `goo.gl/maps` の短縮共有 URL。
    * URL 単体では転送先が分からないため redirect 解決と再検証が必要。
    */
   | "google_maps_short";
@@ -156,17 +156,6 @@ const MAPS_HOSTS: ReadonlySet<string> = new Set([
 /** 短縮共有 URL のホスト名。`goo.gl` は `/maps/` 配下のみ許可する(下記参照)。 */
 const SHORT_HOST_MAPS_APP = "maps.app.goo.gl";
 const SHORT_HOST_GOO_GL = "goo.gl";
-
-/**
- * Google の共有リンク (`https://share.google/<id>`)。
- *
- * Google マップの「共有 → リンクをコピー」で実際に発行されることを確認した形式。
- * ただし **`share.google` は Maps 専用ドメインではない**ため、この URL 自体を
- * 「Google マップの店舗 URL」として信用しない。`maps.app.goo.gl` と同じく
- * 「redirect を解決しないと転送先が分からない共有リンク」として扱い、
- * 展開後の URL を `evaluateUrlImportPolicy` へ再通過させて初めて店舗と認める。
- */
-const SHORT_HOST_SHARE_GOOGLE = "share.google";
 
 /** 食べログの apex ドメイン。サブドメインも同一サイトとして扱う。 */
 const TABELOG_APEX = "tabelog.com";
@@ -370,15 +359,6 @@ export function evaluateUrlImportPolicy(raw: string): UrlImportPolicyResult {
     // 共有 ID(`/abc123`)を必ず要求する。hostname 一致だけで通すと
     // `https://maps.app.goo.gl/` のような ID 無し URL でも policy を通過し、
     // 店舗を特定できないと分かっているのに redirect 解決の外部 fetch が発生する。
-    const segs = pathSegments(parsed.pathname);
-    if ((segs[0] ?? "") !== "") {
-      return { ok: true, kind: "google_maps_short", url: trimmed };
-    }
-    return { ok: false, reason: "not_place_url" };
-  }
-  if (host === SHORT_HOST_SHARE_GOOGLE) {
-    // 共有 ID (`/abc123`) を必須にする。ID 無しでは店舗を特定できないと分かっているのに
-    // redirect 解決の外部 fetch が発生してしまう (`maps.app.goo.gl` と同じ理由)。
     const segs = pathSegments(parsed.pathname);
     if ((segs[0] ?? "") !== "") {
       return { ok: true, kind: "google_maps_short", url: trimmed };

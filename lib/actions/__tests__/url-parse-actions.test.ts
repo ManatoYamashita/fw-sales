@@ -695,97 +695,28 @@ describe("importFromUrlAction — Place Details の timeout", () => {
 });
 
 /**
- * `share.google` の共有リンク (実際に Google マップの「共有 → リンクをコピー」で
- * 発行される形式)。URL 単体では転送先が分からないため、`maps.app.goo.gl` と同じく
- * redirect 解決 → 展開後 URL の再検証を経て初めて店舗と認める。
+ * `share.google` は **対応しない** (PR #285 の実 URL 検証で撤回)。
+ *
+ * 実測した転送先は Google マップではなく Google 検索結果ページで、最終 URL に
+ * Place ID が含まれない (詳細は `url-import-policy.test.ts` の同名 describe)。
+ * policy 段階で `unsupported_source` として弾くため、**外部リクエストを 1 回も
+ * 発生させない**ことをここで固定する。
+ *
+ * 以前あった「share.google を mock して /maps/place へ転送させ成功する」テストは、
+ * 実サービスで成立しない仮定を対応根拠にしていたため削除した。
  */
-describe("importFromUrlAction — share.google 共有リンク", () => {
-  const SHARE_URL = "https://share.google/abc123";
-  const PLACE_ID = "ChIJN1t_tDeuEmsRUsoyG83frY4";
-  const PLACE_ID_FINAL = `https://www.google.com/maps/search/?api=1&query=%E5%B0%8E%E6%A5%BD&query_place_id=${PLACE_ID}`;
-
-  it("展開先が place URL なら成功する", async () => {
-    mockedFetchOgp.mockResolvedValue({ ok: true, final_url: PLACE_URL });
-    mockedSearchPlaces.mockResolvedValue([makePlace()]);
-
-    const result = await importFromUrlAction(SHARE_URL);
-
-    expect(result.status).toBe("success");
-    // ユーザーが実際に貼った URL を source として保持する。
-    expect(result.status === "success" && result.parsed.source_url).toBe(SHARE_URL);
-  });
-
-  it("展開先が Place ID URL なら Place Details を直接引いて成功する", async () => {
-    mockedFetchOgp.mockResolvedValue({ ok: true, final_url: PLACE_ID_FINAL });
-    mockedGetPlaceById.mockResolvedValue(makePlace({ placeId: PLACE_ID, name: "導楽" }));
-
-    const result = await importFromUrlAction(SHARE_URL);
-
-    expect(result.status).toBe("success");
-    if (result.status !== "success") return;
-    expect(mockedGetPlaceById).toHaveBeenCalledExactlyOnceWith(PLACE_ID, {
-      timeoutMs: 15_000,
-    });
-    expect(mockedSearchPlaces).not.toHaveBeenCalled();
-    expect(result.parsed.source_url).toBe(SHARE_URL);
-    // 成功後の map_url は canonical かつ再 import 可能。
-    const params = new URL(result.suggested.map_url).searchParams;
-    expect(params.get("query")).toBe("導楽");
-    expect(params.get("query_place_id")).toBe(PLACE_ID);
-    expect(evaluateUrlImportPolicy(result.suggested.map_url).ok).toBe(true);
-  });
-
-  it("展開先が generic な検索 URL なら拒否する", async () => {
-    mockedFetchOgp.mockResolvedValue({
-      ok: true,
-      final_url: "https://www.google.com/maps/search/居酒屋+渋谷",
-    });
-
-    expect(await importFromUrlAction(SHARE_URL)).toEqual({
-      status: "rejected",
-      reason: "not_place_url",
-    });
-    expect(mockedGetPlaceById).not.toHaveBeenCalled();
-  });
-
-  it("展開先が別ドメインなら拒否する", async () => {
-    mockedFetchOgp.mockResolvedValue({ ok: true, final_url: "https://evil.example/maps/place/foo" });
-
-    expect(await importFromUrlAction(SHARE_URL)).toEqual({
+describe("importFromUrlAction — share.google は未対応", () => {
+  it.each([
+    "https://share.google/uV5iEBj8sOdbBJO2v",
+    "https://share.google/abc123",
+    "https://share.google/",
+  ])("unsupported_source で拒否し、外部リクエストを行わない: %s", async (url) => {
+    expect(await importFromUrlAction(url)).toEqual({
       status: "rejected",
       reason: "unsupported_source",
     });
-    expect(mockedGetPlaceById).not.toHaveBeenCalled();
-  });
-
-  it("展開先が短縮 URL のままなら拒否する (連鎖を追わない)", async () => {
-    mockedFetchOgp.mockResolvedValue({
-      ok: true,
-      final_url: "https://maps.app.goo.gl/another",
-    });
-
-    expect(await importFromUrlAction(SHARE_URL)).toEqual({
-      status: "rejected",
-      reason: "not_place_url",
-    });
-  });
-
-  it("共有 ID の無い share.google では外部リクエストを発生させない", async () => {
-    expect(await importFromUrlAction("https://share.google/")).toEqual({
-      status: "rejected",
-      reason: "not_place_url",
-    });
     expect(mockedFetchOgp).not.toHaveBeenCalled();
     expect(mockedGetPlaceById).not.toHaveBeenCalled();
-  });
-
-  it("redirect 解決に失敗したら short_url_resolve_failed", async () => {
-    mockedFetchOgp.mockResolvedValue({ ok: false, error: "タイムアウトしました" });
-
-    const result = await importFromUrlAction(SHARE_URL);
-
-    expect(result).toEqual({ status: "rejected", reason: "short_url_resolve_failed" });
-    // ogp.error を UI へ運ばない。
-    expect(JSON.stringify(result)).not.toContain("タイムアウト");
+    expect(mockedSearchPlaces).not.toHaveBeenCalled();
   });
 });

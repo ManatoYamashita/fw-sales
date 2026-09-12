@@ -40,12 +40,12 @@ describe("UrlSearchPanel の案内文 (Google マップ専用)", () => {
   });
 
   /**
-   * 共有リンクは `maps.app.goo.gl` だけでなく `share.google` 等も発行されるため、
-   * 特定ホスト名を挙げず「共有リンク」という一般表現で案内する。
+   * 「Google の共有リンクなら何でも使える」と読める表現にしない。
+   * 実際に読めるのは `maps.app.goo.gl` 形式で、`share.google` 形式は
+   * Google 検索へ転送され Place ID が得られないため未対応 (PR #285 実 URL 検証)。
    */
-  it("共有リンクにも対応していることを、特定ホスト名に限定せず案内する", () => {
-    expect(html).toContain("共有リンク");
-    expect(html).not.toContain("maps.app.goo.gl");
+  it("対応する共有リンクの形式を明示する", () => {
+    expect(html).toContain("maps.app.goo.gl");
   });
 
   it("食べログを案内しない (stale copy 回帰)", () => {
@@ -56,8 +56,6 @@ describe("UrlSearchPanel の案内文 (Google マップ専用)", () => {
   it("placeholder が Google マップ URL になっている", () => {
     expect(html).toContain("https://www.google.com/maps/place/");
     expect(html).not.toContain("https://tabelog.com/");
-    // 共有リンクのホスト名を列挙しない (増えるたびに stale になるため)。
-    expect(html).not.toContain("maps.app.goo.gl/...");
   });
 
   it("入力欄の aria-label が GoogleマップURL になっている", () => {
@@ -141,9 +139,18 @@ describe("UrlImportSummary の表示", () => {
 describe("UrlSearchPanel の案内文 (対応形式の拡張)", () => {
   const html = markup(<UrlSearchPanel onLoaded={() => {}} />);
 
-  it("店舗を開いた状態の共有リンクにも対応すると案内する", () => {
-    expect(html).toContain("共有");
-    expect(html).toContain("共有リンク");
+  /**
+   * 読み込めない共有リンクを貼ったユーザーが次に取れる行動を示す
+   * (「対応していません」だけで終わらせない)。
+   */
+  it("読み込めない共有リンクの代替手順を案内する", () => {
+    expect(html).toContain("share.google");
+    expect(html).toContain("アドレスバー");
+  });
+
+  it("Googleの共有リンクなら何でも使えるとは書かない", () => {
+    expect(html).not.toContain("共有リンクなら");
+    expect(html).not.toContain("共有リンクすべて");
   });
 
   it("検索結果一覧のURLが使えないことを案内する", () => {

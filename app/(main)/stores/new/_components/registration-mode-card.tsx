@@ -221,7 +221,9 @@ export function UrlSearchPanel({ onLoaded }: UrlSearchPanelProps) {
       <p className="text-xs text-muted-foreground">
         Googleマップの店舗ページURLを貼り付けて「読込」を押すと、
         店舗名・住所・電話番号・口コミ情報などを自動入力します。
-        店舗を開いた状態で「共有」からコピーした共有リンクにも対応しています。
+        maps.app.goo.gl形式の共有リンクにも対応しています。
+        share.google形式など読み込めない共有リンクの場合は、
+        店舗ページをブラウザで開き、アドレスバーのURLをご利用ください。
         検索結果一覧のURLは、店舗が特定できないため読み込めません。
       </p>
       <div className="flex flex-col sm:flex-row gap-2">
@@ -229,7 +231,7 @@ export function UrlSearchPanel({ onLoaded }: UrlSearchPanelProps) {
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="https://www.google.com/maps/place/... または共有リンク"
+          placeholder="https://www.google.com/maps/place/... または https://maps.app.goo.gl/..."
           className="flex-1"
           aria-label="GoogleマップURL"
         />

@@ -461,11 +461,6 @@ describe("evaluateUrlImportPolicy — URL 形式 corpus", () => {
       expected: "google_maps_short",
     },
     {
-      label: "share.google の共有リンク (実 UI の「共有 → リンクをコピー」で発行)",
-      url: "https://share.google/abc123",
-      expected: "google_maps_short",
-    },
-    {
       label: "Maps URL API の query_place_id 形式",
       url: `https://www.google.com/maps/search/?api=1&query=%E5%B0%8E%E6%A5%BD&query_place_id=${PLACE_ID}`,
       expected: "google_maps_place_id",
@@ -671,38 +666,38 @@ describe("evaluateUrlImportPolicy — 複数 Place ID の競合", () => {
 });
 
 /**
- * `share.google` の共有リンク (実際に Google マップの「共有 → リンクをコピー」で
- * 発行されることを確認した形式)。
+ * `share.google` は **対応しない** (PR #285 の実 URL 検証で撤回)。
  *
- * `share.google` は Maps 専用ドメインではないため、この URL 自体を店舗 URL として
- * 信用しない。`maps.app.goo.gl` と同じ「redirect 解決が必要な共有リンク」として扱う。
+ * 実際に Google マップの「共有 → リンクをコピー」で発行される
+ * `https://share.google/<id>` を実測したところ、転送先は Google マップではなく
+ * **Google 検索結果ページ**だった:
+ *
+ *   share.google/<id>
+ *     -> 302 www.google.com/share.google?q=<id>
+ *     -> 301 www.google.com/search?...&q=<店舗名>&kgmid=<Knowledge Graph MID>
+ *     -> 200 Google Search
+ *
+ * 最終 URL に `query_place_id` / Place ID / CID / `/maps/place/` は含まれず、
+ * 得られるのは店舗名テキストと Knowledge Graph MID だけ。店舗名で Text Search へ
+ * 落とすと同名店舗で別店舗を引く余地が生まれ、Issue #207 で守った
+ * wrong-store prevention の境界を弱めるため、対応しない。
+ *
+ * したがって `share.google` は他の未対応サイトと同じ `unsupported_source` になる。
+ * Google 所有ドメインだからといって特別扱いしない。
  */
-describe("evaluateUrlImportPolicy — share.google 共有リンク", () => {
+describe("evaluateUrlImportPolicy — share.google は未対応", () => {
   it.each([
+    // 実際に「共有 → リンクをコピー」で得られた形式
+    "https://share.google/uV5iEBj8sOdbBJO2v",
     "https://share.google/abc123",
     "https://share.google/abc123?utm_source=ios",
-  ])("共有 ID があれば google_maps_short として受け付ける: %s", (url) => {
-    expect(evaluateUrlImportPolicy(url)).toEqual({
-      ok: true,
-      kind: "google_maps_short",
-      url,
-    });
-  });
-
-  it.each([
     "https://share.google/",
     "https://share.google",
-    "https://share.google/?utm_source=ios",
-  ])("共有 ID 無しは not_place_url: %s", (url) => {
-    expect(evaluateUrlImportPolicy(url)).toEqual({ ok: false, reason: "not_place_url" });
-  });
-
-  it.each([
-    "http://share.google/abc123",
-    "https://share.google:444/abc123",
-    "https://user:pass@share.google/abc123",
-  ])("http / 非標準ポート / credentials は拒否する: %s", (url) => {
-    expect(evaluateUrlImportPolicy(url)).toEqual({ ok: false, reason: "invalid_url" });
+  ])("対応済み扱いにせず unsupported_source として拒否する: %s", (url) => {
+    expect(evaluateUrlImportPolicy(url)).toEqual({
+      ok: false,
+      reason: "unsupported_source",
+    });
   });
 
   it.each([
@@ -710,7 +705,15 @@ describe("evaluateUrlImportPolicy — share.google 共有リンク", () => {
     "https://evil-share.google.example/abc123",
     "https://notshare.google/abc123",
     "https://sub.share.google/abc123",
-  ])("hostname 完全一致でなければ受け付けない: %s", (url) => {
+  ])("lookalike も当然拒否する: %s", (url) => {
     expect(evaluateUrlImportPolicy(url).ok).toBe(false);
+  });
+
+  it("クエリに Maps URL を含めても受理しない", () => {
+    expect(
+      evaluateUrlImportPolicy(
+        "https://share.google/abc123?next=https://www.google.com/maps/place/foo",
+      ),
+    ).toEqual({ ok: false, reason: "unsupported_source" });
   });
 });

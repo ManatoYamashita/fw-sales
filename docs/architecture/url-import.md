@@ -22,7 +22,8 @@
 | `…/maps/**?query=<店名>&query_place_id=<PLACE_ID>`（公式の Search 形式） | ✅ 対応（`google_maps_place_id`）。Place Details を直接引く |
 | `…/maps/**?query_place_id=<PLACE_ID>`（`query` 無し） | ✅ **入力としては**対応。過去に保存された URL の後方互換（下記） |
 | `…/maps/**?q=place_id:<PLACE_ID>`（legacy 形式） | ✅ 対応（`google_maps_place_id`） |
-| `maps.app.goo.gl/<id>` / `goo.gl/maps/<id>` / `share.google/<id>`（共有リンク） | ✅ 対応（redirect 後の URL を**再検証**） |
+| `maps.app.goo.gl/<id>` / `goo.gl/maps/<id>`（短縮共有 URL） | ✅ 対応（redirect 後の URL を**再検証**） |
+| `share.google/<id>`（Google の共有リンク） | ❌ `unsupported_source`（下記「share.google を対応しない理由」） |
 | 食べログ | ❌ **UI では非対応**。`tabelog_unsupported` として拒否 |
 | Instagram | ❌ URL Import では非対応 |
 | `…/maps/search/<キーワード>` / `?q=<キーワード>`（Place ID 無し） | ❌ `not_place_url`。検索結果であり 1 店舗を指さない |
@@ -255,7 +256,7 @@ Server Action は実行時失敗を足した `UrlImportRejectReason`（6 種）�
 
 ### 3.2 短縮 URL の再検証
 
-共有リンク（`maps.app.goo.gl` / `goo.gl/maps` / `share.google`）は貼り付け時点では
+短縮共有 URL（`maps.app.goo.gl` / `goo.gl/maps`）は貼り付け時点では
 転送先が分からないため、`short link → redirect → evil.example` を店舗 URL として
 採用しないよう、展開後の URL を必ず再検証する。
 
@@ -275,30 +276,31 @@ redirect の扱いは次のとおり。
 同じ再検証を通ったうえで §3.4 の経路に入る。**再検証は緩めていない** —
 lookalike ドメイン上の Place ID URL へ転送された場合も従来どおり拒否される。
 
-### `share.google` を直接信用しない理由
+### `share.google` を対応しない理由（実 URL で検証）
 
-`share.google` は Google マップの「共有 → リンクをコピー」で実際に発行される形式だが、
-**Maps 専用ドメインではない**。したがってこの URL 自体を「Google マップの店舗 URL」
-として信用せず、`maps.app.goo.gl` と同じ「redirect 解決が必要な共有リンク」
-（`google_maps_short`）として扱う。受付条件は hostname 完全一致 `share.google` /
-HTTPS のみ / non-empty path 必須 / credentials 拒否 / 非標準ポート拒否。
-共有 ID の無い `share.google/` では外部 fetch を発生させない。
+Google マップの「共有 → リンクをコピー」が `https://share.google/<id>` を発行する場合が
+あるが、**この形式は対応していない**（`unsupported_source`）。
 
-redirect 追跡そのものは `fetchOgp` → `safeFetchHtml` が担い、
-**SSRF 防御（DNS pinning / per-hop deadline / body cap / content-type allowlist）は
-一切変更していない**。
+実際に発行された URL を実測した結果、転送先は Google マップではなく
+**Google 検索結果ページ**だった。
 
-失敗の切り分けは 3 段階で、**取得失敗と「転送先が店舗ページでない」を混ぜない**:
+```
+share.google/<id>
+  -> 302 www.google.com/share.google?q=<id>
+  -> 301 www.google.com/search?...&q=<店舗名>&kgmid=<Knowledge Graph MID>
+  -> 200 Google Search
+```
 
-| `fetchOgp` の結果 | 意味 | `reason` |
-|---|---|---|
-| `ok: false` | timeout / DNS 解決失敗 / network error / 非 2xx。**転送先が何だったか分かっていない** | `short_url_resolve_failed` |
-| `ok: true` / `final_url` 無し | 取得できたが転送されなかった。短縮 URL 単体では店舗を特定できない | `not_place_url` |
-| `ok: true` / `final_url` あり | 展開後 URL を policy へ再通過させた判定に従う | policy の `reason` |
+最終 URL に `query_place_id` / Place ID / CID / `/maps/place/` は含まれず、得られるのは
+**店舗名テキストと Knowledge Graph MID だけ**。店舗名で Text Search へ落とすと同名店舗で
+別店舗を引く余地が生まれ、Issue #207 で守った wrong-store prevention の境界を弱めるため
+対応しない（Knowledge Graph MID → Place ID の変換経路も現行実装には無い）。
 
-両者を `not_place_url` に潰すと、有効な共有 URL を貼ったユーザーへ
-「店舗ページの URL を貼り付けてください」と案内してしまい、貼り直しを繰り返させる。
-`ogp.error`（`"タイムアウトしました"` / `"HTTP 500"` 等）は UI へ運ばない。
+policy 段階で弾くため、この形式では**外部リクエストを 1 回も発生させない**。
+UI では代替手順（店舗ページをブラウザで開きアドレスバーの URL を使う）を案内している。
+
+> 「Google の共有リンクすべてに対応」ではない。対応するのは `maps.app.goo.gl` /
+> `goo.gl/maps` 形式で、いずれも展開後 URL の再検証を経て初めて店舗と認める。
 
 ### 3.3 full place URL で OGP を取得しない理由
 
