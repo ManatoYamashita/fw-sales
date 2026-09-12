@@ -27,7 +27,7 @@
  * | `…/maps/place/<店名>` | 受付。名前を読み取り、後段で Places 照合 |
  * | `…/maps/**?query_place_id=<ID>` | 受付。Place ID で一意特定 |
  * | `…/maps/**?q=place_id:<ID>` (legacy) | 受付。同上 |
- * | `maps.app.goo.gl/<id>`・`goo.gl/maps/<id>` | 受付。展開後 URL を**再検証** |
+ * | `maps.app.goo.gl/<id>`・`goo.gl/maps/<id>`・`share.google/<id>` | 受付。展開後 URL を**再検証** |
  * | `/maps/search/<キーワード>`・`?q=<キーワード>` | 拒否。検索結果であり 1 店舗を指さない |
  * | `?cid=<数値>` | 拒否。Place ID とは別体系で、現行実装に変換経路が無い |
  * | `/maps/dir/…`・`/search?q=…`・Maps トップ | 拒否 |
@@ -70,7 +70,10 @@ export type UrlImportKind =
    * 使わず Place Details を直接引く。
    */
   | "google_maps_place_id"
-  /** `maps.app.goo.gl` / `goo.gl/maps` の短縮共有 URL。redirect 解決が必要。 */
+  /**
+   * `maps.app.goo.gl` / `goo.gl/maps` / `share.google` の共有リンク。
+   * URL 単体では転送先が分からないため redirect 解決と再検証が必要。
+   */
   | "google_maps_short";
 
 /**
@@ -154,6 +157,17 @@ const MAPS_HOSTS: ReadonlySet<string> = new Set([
 const SHORT_HOST_MAPS_APP = "maps.app.goo.gl";
 const SHORT_HOST_GOO_GL = "goo.gl";
 
+/**
+ * Google の共有リンク (`https://share.google/<id>`)。
+ *
+ * Google マップの「共有 → リンクをコピー」で実際に発行されることを確認した形式。
+ * ただし **`share.google` は Maps 専用ドメインではない**ため、この URL 自体を
+ * 「Google マップの店舗 URL」として信用しない。`maps.app.goo.gl` と同じく
+ * 「redirect を解決しないと転送先が分からない共有リンク」として扱い、
+ * 展開後の URL を `evaluateUrlImportPolicy` へ再通過させて初めて店舗と認める。
+ */
+const SHORT_HOST_SHARE_GOOGLE = "share.google";
+
 /** 食べログの apex ドメイン。サブドメインも同一サイトとして扱う。 */
 const TABELOG_APEX = "tabelog.com";
 
@@ -228,12 +242,24 @@ const PLACE_ID_Q_PREFIX = "place_id:";
  * **どう解釈しても識別子になり得ないもの**だけを落とす最小限の検査に留める。
  * 解決できない ID は Places API 側が失敗を返し、`place_lookup_failed` になる。
  */
-const PLACE_ID_INVALID_CHAR = /[\s --]/;
+const PLACE_ID_INVALID_CHAR = /[\s\u0000-\u001F\u007F-\u009F]/;
 
 /** URL から取り出した文字列が Place ID として成立し得るかを判定する。 */
 function isValidPlaceId(value: string): boolean {
   return value !== "" && !PLACE_ID_INVALID_CHAR.test(value);
 }
+
+/**
+ * Place ID 抽出の結果。
+ *
+ * `conflict` を `none` と混ぜないこと。`none` は「Place ID が書かれていないので
+ * 通常判定へ委ねる」、`conflict` は「複数の identity が書かれていて解釈が定まらない
+ * ので**受け付けてはいけない**」で、扱いが正反対になる。
+ */
+type PlaceIdExtraction =
+  | { kind: "none" }
+  | { kind: "conflict" }
+  | { kind: "id"; placeId: string };
 
 /**
  * Maps URL から **明示的に指定された** Place ID を取り出す。
@@ -246,26 +272,42 @@ function isValidPlaceId(value: string): boolean {
  * 「その地域の検索結果」であって 1 店舗を指さないため、先頭候補を店舗扱いすると
  * 別店舗を登録する事故になる。
  *
- * 取り出せない / 形が不正な場合は `null` を返し、呼び出し側の通常判定へ委ねる。
+ * ## 競合する Place ID を先頭採用しない (wrong-store prevention)
+ *
+ * `?query_place_id=A&query_place_id=B` や `?query_place_id=A&q=place_id:B` のように
+ * **異なる identity が併記された URL** を先頭値だけ見て受理すると、ユーザーが意図した
+ * のと別の店舗を登録しうる。`getAll` で全候補を集め、
+ *
+ * - 候補がすべて valid
+ * - かつ すべて同一 ID
+ *
+ * のときだけ受理する。同じ ID の重複は曖昧さが無いので受理してよい。
+ *
+ * 候補が 1 つも valid でない場合は「使える identity が無い」だけなので `none` を返し、
+ * 通常判定へ委ねる (`/maps/place/<店名>?query_place_id=` を壊さないため)。
  */
-function extractExplicitPlaceId(url: URL): string | null {
-  // `URLSearchParams.get` は percent-encoding を解決して返す。
-  const direct = url.searchParams.get(PLACE_ID_PARAM);
-  if (direct !== null) {
-    const trimmed = direct.trim();
-    return isValidPlaceId(trimmed) ? trimmed : null;
-  }
+function extractExplicitPlaceId(url: URL): PlaceIdExtraction {
+  // `URLSearchParams.getAll` は percent-encoding を解決して全値を返す。
+  const candidates = [
+    ...url.searchParams.getAll(PLACE_ID_PARAM),
+    ...url.searchParams
+      .getAll("q")
+      .map((value) => value.trim())
+      .filter((value) => value.startsWith(PLACE_ID_Q_PREFIX))
+      .map((value) => value.slice(PLACE_ID_Q_PREFIX.length)),
+  ].map((value) => value.trim());
 
-  const q = url.searchParams.get("q");
-  if (q !== null) {
-    const trimmed = q.trim();
-    if (trimmed.startsWith(PLACE_ID_Q_PREFIX)) {
-      const id = trimmed.slice(PLACE_ID_Q_PREFIX.length).trim();
-      return isValidPlaceId(id) ? id : null;
-    }
-  }
+  if (candidates.length === 0) return { kind: "none" };
 
-  return null;
+  const valid = candidates.filter(isValidPlaceId);
+  // どれも識別子として成立しない = Place ID は書かれていないのと同じ扱い。
+  if (valid.length === 0) return { kind: "none" };
+  // valid と invalid が混在している URL は、どれを信じるべきか決められない。
+  if (valid.length !== candidates.length) return { kind: "conflict" };
+  // 異なる ID が併記されている。先頭を採ると別店舗を登録しうる。
+  if (new Set(valid).size !== 1) return { kind: "conflict" };
+
+  return { kind: "id", placeId: valid[0]! };
 }
 
 /**
@@ -334,6 +376,15 @@ export function evaluateUrlImportPolicy(raw: string): UrlImportPolicyResult {
     }
     return { ok: false, reason: "not_place_url" };
   }
+  if (host === SHORT_HOST_SHARE_GOOGLE) {
+    // 共有 ID (`/abc123`) を必須にする。ID 無しでは店舗を特定できないと分かっているのに
+    // redirect 解決の外部 fetch が発生してしまう (`maps.app.goo.gl` と同じ理由)。
+    const segs = pathSegments(parsed.pathname);
+    if ((segs[0] ?? "") !== "") {
+      return { ok: true, kind: "google_maps_short", url: trimmed };
+    }
+    return { ok: false, reason: "not_place_url" };
+  }
   if (host === SHORT_HOST_GOO_GL) {
     // `goo.gl` は Google の汎用短縮ドメインで Maps 以外にも使われるため、
     // `/maps/<id>` 配下のみ許可する。
@@ -349,9 +400,19 @@ export function evaluateUrlImportPolicy(raw: string): UrlImportPolicyResult {
     // 強い identity(名前の曖昧照合ではなく ID による一意特定)が得られるため、
     // 両方を満たす URL では ID 側を採用する。
     if (isMapsPath(parsed.pathname)) {
-      const placeId = extractExplicitPlaceId(parsed);
-      if (placeId !== null) {
-        return { ok: true, kind: "google_maps_place_id", url: trimmed, placeId };
+      const extracted = extractExplicitPlaceId(parsed);
+      // 競合は `/maps/place/<店名>` を満たしていても受け付けない。名前で照合し直すと
+      // 「URL に書かれた 2 つの ID のどちらでもない店舗」を登録しうる。
+      if (extracted.kind === "conflict") {
+        return { ok: false, reason: "not_place_url" };
+      }
+      if (extracted.kind === "id") {
+        return {
+          ok: true,
+          kind: "google_maps_place_id",
+          url: trimmed,
+          placeId: extracted.placeId,
+        };
       }
     }
     if (isPlacePath(parsed.pathname)) {

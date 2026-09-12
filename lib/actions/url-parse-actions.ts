@@ -16,6 +16,16 @@ import {
 import { getPlaceById } from "@/lib/places/google";
 import { toPlacesDiagnosticKind } from "@/lib/places/errors";
 import { buildPlaceIdMapsUrl } from "@/lib/places/maps-url";
+
+/**
+ * URL Import から引く Place Details の上限時間。
+ *
+ * URL Import は Server Action としてユーザーの操作を待たせるため、Places 側が
+ * 応答しないときに無制限に待たない。既存の Places 呼び出し
+ * (`STAGE0_PLACES_TIMEOUT_MS`) と同じ 15 秒に揃えている。
+ * timeout / AbortError は `place_lookup_failed` へ正規化する。
+ */
+const URL_IMPORT_PLACE_DETAILS_TIMEOUT_MS = 15_000;
 import type {
   AppliedField,
   ApplyResult,
@@ -206,9 +216,14 @@ async function resolveShortUrl(
  *
  * ## 失敗時に raw error を UI へ出さない
  *
- * Places の例外は `reason` へ載せず `place_lookup_failed` に潰す。
- * サーバログにも message ではなく `toPlacesDiagnosticKind` の分類値だけを出す
- * (API キー・レスポンス本文・SQL 等を構造的に混入させないため)。
+ * Places の例外は `reason` へ載せず `place_lookup_failed` に潰す。timeout /
+ * AbortError / TimeoutError も同じ reason へ正規化する。
+ * **この層の**ログには message ではなく `toPlacesDiagnosticKind` の分類値だけを出す。
+ *
+ * なお下層の Places client (`lib/places/google.ts`) は、非 2xx 応答時に status と
+ * redact / clip 済みの body 先頭をサーバーの構造化ログへ記録する既存の observability
+ * 設計を持つ。UI / Action の戻り値へ raw body や status が出ないことと、
+ * サーバログに診断情報が残ることは両立している。
  *
  * ## `map_url` に `googleMapsUri` を採用しない理由
  *
@@ -236,7 +251,9 @@ async function importFromPlaceId(
 ): Promise<UrlImportResult> {
   let place;
   try {
-    place = await getPlaceById(placeId);
+    place = await getPlaceById(placeId, {
+      timeoutMs: URL_IMPORT_PLACE_DETAILS_TIMEOUT_MS,
+    });
   } catch (e) {
     console.warn(`[url-import] place details failed: ${toPlacesDiagnosticKind(e)}`);
     return { status: "rejected", reason: "place_lookup_failed" };

@@ -60,9 +60,16 @@ export function mapGenre(types: string[]): string {
 }
 
 export function placeResultToStoreInput(place: PlaceResult): StoreInput {
-  // fallback URL は URL Import (`lib/url-parser/url-import-policy.ts`) が
-  // 受け付ける形式でなければならない。文字列を直書きせず共有ビルダを通す。
-  const map_url = place.googleMapsUri ?? buildPlaceIdMapsUrl(place.placeId, place.name);
+  // `map_url` は常に canonical な Maps URL を生成する。`googleMapsUri` を優先しない。
+  //
+  // 保存された map_url はユーザーがコピーして URL Import へ貼り直す値なので、
+  // 「保存 → 再 import で受理される」という round-trip invariant を満たす必要がある。
+  // ところが `googleMapsUri` は `https://maps.google.com/?cid=<数値>` 形式を返し得る
+  // (CID は Place ID とは別体系で URL Import が受け付けない) うえ、空文字が入ることもある。
+  // どちらも保存すると再 import できない値になるため、placeId + name から
+  // Google Maps URLs の公式 Search 形式を常に組み立てる
+  // (`lib/url-parser/url-import-policy.ts` が受理する形式)。
+  const map_url = buildPlaceIdMapsUrl(place.placeId, place.name);
 
   // formattedAddress を正規化してから prefecture/city を抽出する。
   // address には prefecture/city を除いた残差 (番地 + 建物名) のみを保存し、

@@ -461,6 +461,11 @@ describe("evaluateUrlImportPolicy — URL 形式 corpus", () => {
       expected: "google_maps_short",
     },
     {
+      label: "share.google の共有リンク (実 UI の「共有 → リンクをコピー」で発行)",
+      url: "https://share.google/abc123",
+      expected: "google_maps_short",
+    },
+    {
       label: "Maps URL API の query_place_id 形式",
       url: `https://www.google.com/maps/search/?api=1&query=%E5%B0%8E%E6%A5%BD&query_place_id=${PLACE_ID}`,
       expected: "google_maps_place_id",
@@ -532,17 +537,6 @@ describe("evaluateUrlImportPolicy — Place ID 抽出の境界", () => {
       ),
     ).toEqual({ ok: false, reason: "not_place_url" });
   });
-
-  it("同名パラメータが複数あっても先頭の検証済み値だけを使う", () => {
-    const url =
-      "https://www.google.com/maps/search/?api=1&query_place_id=ChIJvalid&query_place_id=ChIJother";
-    expect(evaluateUrlImportPolicy(url)).toEqual({
-      ok: true,
-      kind: "google_maps_place_id",
-      url,
-      placeId: "ChIJvalid",
-    });
-  });
 });
 
 /**
@@ -585,5 +579,138 @@ describe("evaluateUrlImportPolicy — Place ID に独自の形式制約を置か
       kind: "google_maps_place_id",
       placeId: "ChIJabc",
     });
+  });
+});
+
+/**
+ * 競合する Place ID を先頭採用しない (wrong-store prevention)。
+ *
+ * 異なる identity が併記された URL を先頭値だけ見て受理すると、ユーザーが意図した
+ * のと別の店舗を登録しうる。同じ ID の重複だけは曖昧さが無いので受理する。
+ */
+describe("evaluateUrlImportPolicy — 複数 Place ID の競合", () => {
+  const A = "ChIJ_A_aaaaaaaaaaaaaaaaaaaa";
+  const B = "ChIJ_B_bbbbbbbbbbbbbbbbbbbb";
+
+  it("query_place_id に異なる ID が複数あれば拒否する", () => {
+    expect(
+      evaluateUrlImportPolicy(
+        `https://www.google.com/maps/search/?api=1&query_place_id=${A}&query_place_id=${B}`,
+      ),
+    ).toEqual({ ok: false, reason: "not_place_url" });
+  });
+
+  it("query_place_id が同一 ID の重複なら受け付ける", () => {
+    const url = `https://www.google.com/maps/search/?api=1&query_place_id=${A}&query_place_id=${A}`;
+    expect(evaluateUrlImportPolicy(url)).toEqual({
+      ok: true,
+      kind: "google_maps_place_id",
+      url,
+      placeId: A,
+    });
+  });
+
+  it("query_place_id と q=place_id: が異なる ID なら拒否する", () => {
+    expect(
+      evaluateUrlImportPolicy(
+        `https://www.google.com/maps/search/?api=1&query_place_id=${A}&q=place_id:${B}`,
+      ),
+    ).toEqual({ ok: false, reason: "not_place_url" });
+  });
+
+  it("query_place_id と q=place_id: が同一 ID なら受け付ける", () => {
+    const url = `https://www.google.com/maps/search/?api=1&query_place_id=${A}&q=place_id:${A}`;
+    expect(evaluateUrlImportPolicy(url)).toEqual({
+      ok: true,
+      kind: "google_maps_place_id",
+      url,
+      placeId: A,
+    });
+  });
+
+  it("valid と invalid が混在していれば拒否する", () => {
+    // どちらを信じるべきか決められない URL を「片方が正しいから」で通さない。
+    expect(
+      evaluateUrlImportPolicy(
+        `https://www.google.com/maps/search/?api=1&query_place_id=${A}&query_place_id=`,
+      ),
+    ).toEqual({ ok: false, reason: "not_place_url" });
+    expect(
+      evaluateUrlImportPolicy(
+        `https://www.google.com/maps/search/?api=1&query_place_id=%20&query_place_id=${A}`,
+      ),
+    ).toEqual({ ok: false, reason: "not_place_url" });
+  });
+
+  it("legacy q=place_id: が複数あり異なる ID なら拒否する", () => {
+    expect(
+      evaluateUrlImportPolicy(
+        `https://www.google.com/maps/place/?q=place_id:${A}&q=place_id:${B}`,
+      ),
+    ).toEqual({ ok: false, reason: "not_place_url" });
+  });
+
+  it("競合は place URL であっても受け付けない", () => {
+    // 名前で照合し直すと「URL に書かれたどちらの ID でもない店舗」を登録しうる。
+    expect(
+      evaluateUrlImportPolicy(
+        `https://www.google.com/maps/place/%E5%B0%8E%E6%A5%BD/?query_place_id=${A}&query_place_id=${B}`,
+      ),
+    ).toEqual({ ok: false, reason: "not_place_url" });
+  });
+
+  it("Place ID を持たない q が併記されていても競合にはしない", () => {
+    // `place_id:` 接頭辞の無い q は identity 候補ではない (generic search)。
+    const url = `https://www.google.com/maps/search/?api=1&query=%E5%B0%8E%E6%A5%BD&query_place_id=${A}`;
+    expect(evaluateUrlImportPolicy(url)).toMatchObject({
+      ok: true,
+      kind: "google_maps_place_id",
+      placeId: A,
+    });
+  });
+});
+
+/**
+ * `share.google` の共有リンク (実際に Google マップの「共有 → リンクをコピー」で
+ * 発行されることを確認した形式)。
+ *
+ * `share.google` は Maps 専用ドメインではないため、この URL 自体を店舗 URL として
+ * 信用しない。`maps.app.goo.gl` と同じ「redirect 解決が必要な共有リンク」として扱う。
+ */
+describe("evaluateUrlImportPolicy — share.google 共有リンク", () => {
+  it.each([
+    "https://share.google/abc123",
+    "https://share.google/abc123?utm_source=ios",
+  ])("共有 ID があれば google_maps_short として受け付ける: %s", (url) => {
+    expect(evaluateUrlImportPolicy(url)).toEqual({
+      ok: true,
+      kind: "google_maps_short",
+      url,
+    });
+  });
+
+  it.each([
+    "https://share.google/",
+    "https://share.google",
+    "https://share.google/?utm_source=ios",
+  ])("共有 ID 無しは not_place_url: %s", (url) => {
+    expect(evaluateUrlImportPolicy(url)).toEqual({ ok: false, reason: "not_place_url" });
+  });
+
+  it.each([
+    "http://share.google/abc123",
+    "https://share.google:444/abc123",
+    "https://user:pass@share.google/abc123",
+  ])("http / 非標準ポート / credentials は拒否する: %s", (url) => {
+    expect(evaluateUrlImportPolicy(url)).toEqual({ ok: false, reason: "invalid_url" });
+  });
+
+  it.each([
+    "https://share.google.evil.example/abc123",
+    "https://evil-share.google.example/abc123",
+    "https://notshare.google/abc123",
+    "https://sub.share.google/abc123",
+  ])("hostname 完全一致でなければ受け付けない: %s", (url) => {
+    expect(evaluateUrlImportPolicy(url).ok).toBe(false);
   });
 });

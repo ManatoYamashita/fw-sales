@@ -2,7 +2,7 @@
 
 店舗新規登録画面（`/stores/new`）の「GoogleマップURL」タブで、URL から店舗情報を自動入力する仕組みのリファレンス。
 
-- **対象機能**: **Google マップの店舗ページ URL**（および短縮共有 URL）を貼り付けると、フォームの各フィールドを自動補完する。
+- **対象機能**: **Google マップの店舗ページ URL**（および共有リンク）を貼り付けると、フォームの各フィールドを自動補完する。
 - **ユースケース**: 営業担当が Google マップで見つけた店舗を、最小入力で社内 DB に登録するための一次入力支援。
 
 ---
@@ -22,7 +22,7 @@
 | `…/maps/**?query=<店名>&query_place_id=<PLACE_ID>`（公式の Search 形式） | ✅ 対応（`google_maps_place_id`）。Place Details を直接引く |
 | `…/maps/**?query_place_id=<PLACE_ID>`（`query` 無し） | ✅ **入力としては**対応。過去に保存された URL の後方互換（下記） |
 | `…/maps/**?q=place_id:<PLACE_ID>`（legacy 形式） | ✅ 対応（`google_maps_place_id`） |
-| `maps.app.goo.gl/<id>` / `goo.gl/maps/<id>`（短縮共有 URL） | ✅ 対応（redirect 後の URL を**再検証**） |
+| `maps.app.goo.gl/<id>` / `goo.gl/maps/<id>` / `share.google/<id>`（共有リンク） | ✅ 対応（redirect 後の URL を**再検証**） |
 | 食べログ | ❌ **UI では非対応**。`tabelog_unsupported` として拒否 |
 | Instagram | ❌ URL Import では非対応 |
 | `…/maps/search/<キーワード>` / `?q=<キーワード>`（Place ID 無し） | ❌ `not_place_url`。検索結果であり 1 店舗を指さない |
@@ -50,6 +50,21 @@
   allowlist 済みホスト / `/maps/…` 配下 / `query_place_id`・`q=place_id:` の明示形式 /
   `URLSearchParams` による取り出し（クエリ全体を ID として採らない） /
   Place Details 組み立て時の `encodeURIComponent`。
+
+### 競合する Place ID は受け付けない
+
+`?query_place_id=A&query_place_id=B` や `?query_place_id=A&q=place_id:B` のように
+**異なる identity が併記された URL** を先頭値だけ見て受理すると、ユーザーが意図したのと
+別の店舗を登録しうる。`getAll` で全候補を集め、次を満たす場合のみ受理する。
+
+- 候補がすべて valid
+- かつ すべて同一 ID
+
+同じ ID の重複は曖昧さが無いので受理する。候補が 1 つも valid でない場合は
+「使える identity が無い」だけなので通常判定へ委ねる
+（`/maps/place/<店名>?query_place_id=` を壊さないため）。
+競合は `/maps/place/<店名>` を満たしていても受け付けない — 名前で照合し直すと
+「URL に書かれたどちらの ID でもない店舗」を登録しうるため。
 
 ### 入力として受理する形式と、新規生成する形式を分ける
 
@@ -240,15 +255,34 @@ Server Action は実行時失敗を足した `UrlImportRejectReason`（6 種）�
 
 ### 3.2 短縮 URL の再検証
 
-短縮 URL は貼り付け時点では転送先が分からないため、
-`short link → redirect → evil.example` を店舗 URL として採用しないよう、
-`final_url` を必ず `evaluateUrlImportPolicy` へ再通過させ、
-**`google_maps_place` または `google_maps_place_id` であること**を要求する
-（`google_maps_short` は拒否 = 短縮 URL の連鎖は追わない）。
+共有リンク（`maps.app.goo.gl` / `goo.gl/maps` / `share.google`）は貼り付け時点では
+転送先が分からないため、`short link → redirect → evil.example` を店舗 URL として
+採用しないよう、展開後の URL を必ず再検証する。
+
+redirect の扱いは次のとおり。
+
+1. `safeFetchHtml` が **`maxRedirects`（既定 5）の範囲内で中間 redirect を追跡**する。
+   各 hop で DNS pinning・接続先 IP・scheme/port 等の SSRF 検証を**毎回**やり直す
+   （hop ごとに再検証するのが `safe-http-fetch` の設計）。上限超過は `too_many_redirects`。
+2. Server Action は最終的な `final_url` を `evaluateUrlImportPolicy` へ再通過させる。
+3. 受理するのは **`google_maps_place` または `google_maps_place_id`** のみ。
+   `final_url` が共有リンクのままなら拒否する（policy 側の再入ループは行わない）。
+
+> 「redirect を一切追わない」のではない。追跡は `safeFetchHtml` が担い、
+> **policy を再帰的に再入しない**という意味である。
 
 展開先が Place ID 形式（`query_place_id` / `q=place_id:`）の場合も、
 同じ再検証を通ったうえで §3.4 の経路に入る。**再検証は緩めていない** —
 lookalike ドメイン上の Place ID URL へ転送された場合も従来どおり拒否される。
+
+### `share.google` を直接信用しない理由
+
+`share.google` は Google マップの「共有 → リンクをコピー」で実際に発行される形式だが、
+**Maps 専用ドメインではない**。したがってこの URL 自体を「Google マップの店舗 URL」
+として信用せず、`maps.app.goo.gl` と同じ「redirect 解決が必要な共有リンク」
+（`google_maps_short`）として扱う。受付条件は hostname 完全一致 `share.google` /
+HTTPS のみ / non-empty path 必須 / credentials 拒否 / 非標準ポート拒否。
+共有 ID の無い `share.google/` では外部 fetch を発生させない。
 
 redirect 追跡そのものは `fetchOgp` → `safeFetchHtml` が担い、
 **SSRF 防御（DNS pinning / per-hop deadline / body cap / content-type allowlist）は
@@ -292,8 +326,24 @@ policy (google_maps_place_id, placeId)
 - API 呼び出しは **Place Details 1 回だけ**。Text Search との二重呼び出しはしない。
 - 店舗名は **URL から一切読み取らない**。`?q=place_id:…` の文字列や
   `?query=<名前>` を店舗名として採用しない（Places の値を正とする）。
-- 失敗時は `place_lookup_failed`。Places の例外 message・HTTP status・レスポンス本文は
-  `reason` にもサーバログにも載せず、`toPlacesDiagnosticKind` の分類値のみを記録する。
+- 失敗時は `place_lookup_failed`（timeout / AbortError も同じ reason へ正規化）。
+  Place Details には `URL_IMPORT_PLACE_DETAILS_TIMEOUT_MS`（15 秒）を渡し、
+  Places が応答しないときに Server Action が無制限に待たないようにする。
+
+#### ログの責務分担
+
+「UI へ出さない」ことと「サーバログに一切残さない」ことは**別**である。混同しない。
+
+| 層 | 出力先 | 内容 |
+|---|---|---|
+| Action の戻り値（UI） | クライアント | `reason` のみ。raw message / HTTP status / レスポンス本文は載せない |
+| URL Import 層のログ | サーバ | `toPlacesDiagnosticKind` の分類値のみ |
+| Places client（`lib/places/google.ts`） | サーバ | 非 2xx 時に **status と redact / clip 済みの body 先頭**を構造化ログへ記録 |
+
+最下層の Places client が診断情報をサーバログへ残すのは**既存の意図的な observability
+設計**であり、本 PR では変更していない。API キー等は `redactSecrets` で除去され、
+長さは `clipForLog` で制限される。したがって「サーバログにもレスポンス本文を一切出さない」
+のではなく、**ユーザーへ到達する経路には出さない**が正しい。
 - 結果は `placesFallback: { used: true, reason: "place_id_url", matched_place_id }`
   として報告する（照合の失敗理由ではないので UI の警告文言は持たない）。
 
