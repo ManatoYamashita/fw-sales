@@ -7,6 +7,12 @@ import type { EventLogInsert } from "@/lib/repositories/event-log-repository";
 // Audit is best-effort after the business commit. Waiting 1.5 seconds gives a
 // normal DB INSERT time to finish without letting a stuck audit connection hold
 // a user-visible Server Action until the platform timeout.
+//
+// This is the OUTER boundary only. The audit INSERT runs on a dedicated pool
+// (`lib/db/audit-client.ts`) whose connection carries a shorter DB-side
+// `statement_timeout`, so PostgreSQL normally aborts a stalled INSERT and frees
+// the connection before this deadline is reached. Keep
+// AUDIT_DB_STATEMENT_TIMEOUT_MS < AUDIT_WRITE_WAIT_MS.
 export const AUDIT_WRITE_WAIT_MS = 1_500;
 
 type WriteOutcome =
@@ -35,10 +41,17 @@ function consoleFallback(
 
 /**
  * Await only AFTER business commit, before cache invalidation/redirect.
- * Uses the existing business DB client. This is not an instrumentation logger:
- * its import-time health check / process.exit behavior is deliberately unchanged.
- * No retry, cancellation, or delivery guarantee across a process crash. A
- * timed-out INSERT may settle after the caller has continued.
+ *
+ * The INSERT runs on the dedicated audit pool, never on the business pool, so a
+ * stalled audit write cannot consume the business connection budget
+ * (`DATABASE_POOL_MAX`). That pool's connection also carries a DB-side
+ * `statement_timeout`, which bounds the query itself rather than only this
+ * caller's wait.
+ *
+ * Still best-effort: no retry, no outbox, and no delivery guarantee across a
+ * process crash. If the DB-side bound is disabled or not honoured by an
+ * intermediary, a timed-out INSERT may still settle after the caller continued;
+ * the timed_out fallback therefore reports an unknown outcome.
  */
 export async function writeAudit(input: AuditInput): Promise<void> {
   let row: EventLogInsert | undefined;
@@ -61,9 +74,10 @@ export async function writeAudit(input: AuditInput): Promise<void> {
     };
 
     // Attach both fulfillment and rejection handlers before racing the timer.
-    // If timeout wins, the INSERT is not cancelled and may still commit later;
-    // this settled Promise consumes a late rejection and prevents it from
-    // becoming an unhandled rejection. There is deliberately no retry.
+    // The DB-side statement_timeout normally settles this first (57014), but if
+    // it is disabled the outer race can still win; this already-settled Promise
+    // consumes the late rejection either way and prevents an unhandled
+    // rejection. There is deliberately no retry.
     const settledWrite: Promise<WriteOutcome> = (async () => {
       const { repos } = await import("@/lib/repositories");
       await repos.eventLog.insert(row!);

@@ -95,3 +95,61 @@ jobs:
 
       - name: Run tests
         run: pnpm test
+
+  # 監査書込みの隔離 (PR #282 friend review P1) は mock DB では証明できない。
+  # 上の Vitest job は `USE_MOCK_DB=true` で実 DB に触れないため、実 PostgreSQL と
+  # `DATABASE_POOL_MAX=1` を使う小さな独立 job をここだけ分離して用意する。
+  # 既存の全 Vitest を実 DB 化はしない。
+  audit-db-integration:
+    name: Audit DB integration
+    runs-on: ubuntu-latest
+    # 監査が詰まる状況を意図的に作るテストのため、CI 側にも上限を置く。
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: audit_integration
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/audit_integration"
+      # Vercel / serverless 想定の最小プール。これが 1 でないと本テストは無意味になる
+      # (テスト側でも 1 であることを assert している)。
+      DATABASE_POOL_MAX: "1"
+      AUDIT_DB_INTEGRATION: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # 既存 Drizzle migration をそのまま実 Postgres へ適用する (scripts/e2e-setup.mjs と同じ思想)。
+      # Supabase 管理スキーマはローカル Postgres に無いため、auth のみ先に用意する。
+      - name: Prepare database
+        run: |
+          psql "$DATABASE_URL" -c 'CREATE SCHEMA IF NOT EXISTS auth;'
+          psql "$DATABASE_URL" -c 'CREATE TABLE IF NOT EXISTS auth.users (id uuid PRIMARY KEY, email text, raw_user_meta_data jsonb);'
+          pnpm db:migrate
+
+      - name: Run audit DB integration tests
+        run: pnpm vitest run lib/db/__tests__/audit-pool-isolation.integration.test.ts

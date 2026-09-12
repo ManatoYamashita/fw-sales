@@ -1,6 +1,7 @@
 import "server-only";
-import { db, type DbClient } from "./client";
+import { auditDb } from "./audit-client";
 import { eventLogs } from "./schema";
+import type { DbClient } from "./client";
 import type { EventLogRepository } from "@/lib/repositories/event-log-repository";
 
 export function makeEventLogRepo(executor: DbClient): EventLogRepository {
@@ -11,4 +12,9 @@ export function makeEventLogRepo(executor: DbClient): EventLogRepository {
   };
 }
 
-export const dbEventLogRepo = makeEventLogRepo(db);
+/**
+ * 監査書込みは業務プールではなく専用プール (`auditDb`) 上で行う。
+ * 停滞した監査 INSERT が業務 query の接続を奪わないようにするため
+ * (PR #282 friend review P1 / `lib/db/audit-client.ts` 参照)。
+ */
+export const dbEventLogRepo = makeEventLogRepo(auditDb);

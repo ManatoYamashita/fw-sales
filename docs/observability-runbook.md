@@ -28,14 +28,39 @@ Store/profile/targetへFKを張らないため、Storeやprofileの削除後も�
 - cache失敗時は業務変更と監査が既に成立している場合があります。UIエラーだけでrollback済みと判断しないでください。
 
 writerはinsert失敗をcatchし、業務結果へthrowしません。reject時はconsoleにJSONの`event: "audit.write_failed"`を1回出します。
-1.5秒以内に完了しない場合は`event: "audit.write_timed_out"`, `outcome: "unknown"`を1回出して業務応答を継続します。これはINSERT失敗確定やquery cancellationを意味しません。queryは後から成功または失敗し得ますが、自動retryは行いません。
+1.5秒以内に完了しない場合は`event: "audit.write_timed_out"`, `outcome: "unknown"`を1回出して業務応答を継続します。自動retryは行いません。
 どちらの場合も**console fallbackのみとなり、DB監査は欠落し得ます**。`audit`には検証済みイベントのみを含め、検証自体に失敗した場合はnullです。
 エラーのraw message・SQL・params・detail・causeは出しません。固定message、限定したname、redact後にclipしたstack frameのみです。
 通常成功時はDBのみへ保存します。単体削除の旧`[audit] stores.delete` consoleは置換済みで、二重出力しません。
 
-レスポンス前に最大1.5秒awaitしますが、業務commitと監査insertは同一transactionではありません。process停止・実行時間切れ・接続障害による欠落を完全には防げません。
-timeoutはcallerの待機だけを打ち切る小さな境界であり、DB queryをcancelしません。retry、outboxはありません。
+レスポンス前に最大1.5秒awaitしますが、業務commitと監査insertは同一transactionではありません。process停止・実行時間切れ・接続障害による欠落を完全には防げません。retry、outboxはありません。
 既存`lib/db/client.ts`のhealth check / `process.exit(1)`は変更していません。このwriterをDB非依存のerror pathへ展開する前に別設計が必要です。
+
+## 監査書込みの接続分離とtimeout
+
+監査INSERTは業務DBプールではなく**専用プール**(`lib/db/audit-client.ts`)で実行します。業務プールと同じ`DATABASE_URL`を使い、監査専用のcredentialは増やしていません。
+
+| 境界 | 値 | 役割 |
+|---|---|---|
+| `AUDIT_DB_STATEMENT_TIMEOUT_MS` (`lib/db/audit-client.ts`) | 1000ms | 監査**接続**のDB側`statement_timeout`。lock待ちを含むquery全体をDBが中断する |
+| `AUDIT_WRITE_WAIT_MS` (`lib/observability/audit.ts`) | 1500ms | callerの待機上限。最後の防御として残す外側の境界 |
+
+DB側を短くしてあるため、通常はPostgreSQLが先に`57014`でqueryを中断し、接続が解放されてからwriterがfallbackします。
+
+分離の理由は、監査障害が業務障害へ昇格するのを防ぐためです。共有プールでは「監査INSERTがlock待ち → callerは1.5秒で離脱 → しかし接続は監査INSERTが保持 → `DATABASE_POOL_MAX=1`では次の業務queryが詰まる」という波及が起き得ました。
+
+**実PostgreSQL + `DATABASE_POOL_MAX=1`で検証済みの範囲**(`lib/db/__tests__/audit-pool-isolation.integration.test.ts`, CI job `Audit DB integration`):
+
+- 監査INSERTをtable lockでブロックした状態でも、業務プールのqueryが2秒以内に完了する
+- 中断後、監査プールの接続が解放され再利用できる
+- ブロック解除後の次の監査書込みが永続化される
+- 監査失敗がcallerへthrowされない
+
+**保証しない範囲**: DB側boundは`statement_timeout`をstartup connection parameterとして送る方式です。この設定をSupabase Transaction Pooler経由で実測はしていません。poolerがこのparameterを拒否/無視する構成に当たった場合は`AUDIT_DB_STATEMENT_TIMEOUT_MS=0`で無効化できます。その場合もDB側boundが無くなるだけで、**専用プールによる業務プールからの隔離と1.5秒の外側境界は残ります**。無効時やpoolerが無視した場合は、timeoutしたINSERTが後から成功または失敗し得ます(`outcome: "unknown"`はこのための表現です)。
+
+postgres.jsの`PendingQuery.cancel()`は採用していません。3.4.9の実装は内部promiseを捨てるためrejectionをconsumeできず、cancel用socketが`ECONNRESET`になるとunhandled rejectionでプロセスを落とし得ることを実測で確認したためです。監査の保険で業務プロセスを止めては本末転倒になります。
+
+`SET LOCAL` + 明示transactionは使いません。`lib/db/store-repository.ts`に記録のとおり、Transaction Pooler (pgbouncer transaction mode) と非互換で`UNSAFE_TRANSACTION`を誘発した経緯があります。`prepare: false`は業務プールと同じく維持しています。
 
 ## DB保護とmigration
 
@@ -102,4 +127,6 @@ Sentry、instrumentation/onRequestError、digest UI、correlation ID、Workflow/
 自動削除もまだありません。90日で消えるとは想定しないでください。
 
 Vitestで実writer＋mock DBを通したAction挙動、Drizzle metadata/snapshot/SQLでFK・index・timestamptz・RLS・REVOKEを検証します。
-これはlive DBのcascade・rollback・role権限を実測したテストではありません。既存隔離DB基盤はApple Container用で、このWindows環境では利用していません。
+これはlive DBのcascade・rollback・role権限を実測したテストではありません。既存のApple Container隔離DB基盤はこのWindows環境では利用していません。
+
+例外として監査書込みの接続分離だけは実PostgreSQLで検証します。CI job `Audit DB integration` が `postgres:15-alpine` service へ既存Drizzle migrationを適用し、`DATABASE_POOL_MAX=1` で回帰テストを実行します。既存のVitest jobは`USE_MOCK_DB=true`のままで、実DB化していません。

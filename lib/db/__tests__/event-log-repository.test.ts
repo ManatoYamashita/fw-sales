@@ -6,7 +6,8 @@ import { makeEventLogRepo } from "../event-log-repository";
 import type { DbClient } from "../client";
 import type { EventLogInsert } from "@/lib/repositories/event-log-repository";
 
-vi.mock("@/lib/db/client", () => ({ db: {} }));
+// 監査書込みは業務プールではなく専用プールの executor を既定に取る。
+vi.mock("@/lib/db/audit-client", () => ({ auditDb: {} }));
 
 const row: EventLogInsert = {
   id: "evt_test", event: "stores.delete", kind: "mutation", level: "info",
