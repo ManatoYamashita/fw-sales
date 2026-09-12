@@ -126,3 +126,42 @@ describe("UrlImportSummary の表示", () => {
     expect(html).not.toContain("HTTP");
   });
 });
+
+/**
+ * 対応 URL 形式を広げたときに案内文が古いままだと、
+ * 「店舗を開いた状態のリンクは使えない」と誤解したまま使われ続ける。
+ */
+describe("UrlSearchPanel の案内文 (対応形式の拡張)", () => {
+  const html = markup(<UrlSearchPanel onLoaded={() => {}} />);
+
+  it("店舗を開いた状態でコピーしたリンクにも対応すると案内する", () => {
+    expect(html).toContain("コピーしたリンク");
+  });
+
+  it("検索結果一覧のURLが使えないことを案内する", () => {
+    expect(html).toContain("検索結果");
+  });
+
+  it("技術用語を一般ユーザー向けに出さない", () => {
+    for (const term of ["query_place_id", "Place ID", "placeId", "Places API", "cid="]) {
+      expect(html).not.toContain(term);
+    }
+  });
+});
+
+describe("REJECT_MESSAGE (取得失敗の文言)", () => {
+  it("place_lookup_failed は貼り直しを第一に促さない", () => {
+    const message = REJECT_MESSAGE.place_lookup_failed;
+    // URL 自体は 1 店舗を指しているため、`not_place_url` の文言と同一にしない。
+    expect(message).not.toBe(REJECT_MESSAGE.not_place_url);
+    expect(message).toContain("時間をおいて");
+  });
+
+  it("全 reason の文言に技術用語を出さない", () => {
+    for (const message of Object.values(REJECT_MESSAGE)) {
+      for (const term of ["Place ID", "query_place_id", "Places API", "HTTP", "API"]) {
+        expect(message).not.toContain(term);
+      }
+    }
+  });
+});

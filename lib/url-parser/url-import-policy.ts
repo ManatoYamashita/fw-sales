@@ -16,8 +16,25 @@
  *
  * ## 決定した product boundary
  *
- * この導線が受け付けるのは **Google マップの店舗ページ URL と、その短縮共有 URL のみ**。
+ * この導線が受け付けるのは **Google マップで 1 店舗を一意特定できる URL のみ**。
  * 食べログの Cloudflare を回避する実装は行わない(#207 の対応方針)。
+ *
+ * 「Google マップの URL なら何でも受け付ける」ようにはしない。判定軸は
+ * ドメインではなく **その URL が 1 店舗を曖昧さなく指しているか**である。
+ *
+ * | 形式 | 扱い |
+ * | --- | --- |
+ * | `…/maps/place/<店名>` | 受付。名前を読み取り、後段で Places 照合 |
+ * | `…/maps/**?query_place_id=<ID>` | 受付。Place ID で一意特定 |
+ * | `…/maps/**?q=place_id:<ID>` (legacy) | 受付。同上 |
+ * | `maps.app.goo.gl/<id>`・`goo.gl/maps/<id>` | 受付。展開後 URL を**再検証** |
+ * | `/maps/search/<キーワード>`・`?q=<キーワード>` | 拒否。検索結果であり 1 店舗を指さない |
+ * | `?cid=<数値>` | 拒否。Place ID とは別体系で、現行実装に変換経路が無い |
+ * | `/maps/dir/…`・`/search?q=…`・Maps トップ | 拒否 |
+ *
+ * generic な検索 URL を受け付けて「先頭候補」を店舗として採用すると、
+ * **別の店舗を登録する**事故になる。これは Issue #207 で Places 照合から
+ * 口コミ件数ベースの自動採用を撤去したのと同じ理由による。
  *
  * ## trust boundary 上の注意
  *
@@ -46,6 +63,13 @@
 export type UrlImportKind =
   /** `…/maps/place/<name>` 形式。パーサが直接 name を読み取れる。 */
   | "google_maps_place"
+  /**
+   * Maps URL 上に **Place ID が明示されている**形式
+   * (`?query_place_id=<ID>` / `?q=place_id:<ID>`)。
+   * 店舗名ではなく ID で 1 店舗を一意特定できるため、後段は曖昧な Text Search を
+   * 使わず Place Details を直接引く。
+   */
+  | "google_maps_place_id"
   /** `maps.app.goo.gl` / `goo.gl/maps` の短縮共有 URL。redirect 解決が必要。 */
   | "google_maps_short";
 
@@ -78,10 +102,36 @@ export type UrlImportRejectReason =
    * (timeout / DNS 解決失敗 / network error / 非 2xx 応答)。
    * 転送先が店舗ページだったかどうかは**判定できていない**。
    */
-  | "short_url_resolve_failed";
+  | "short_url_resolve_failed"
+  /**
+   * URL から Place ID は取り出せたが、その ID で店舗情報を取得できなかった
+   * (Places API のエラー / ID が解決できない / 必須フィールド欠落)。
+   *
+   * `not_place_url` と混ぜないこと。URL の形式自体は正しく 1 店舗を指しているため、
+   * 「店舗ページの URL を貼り付けてください」という案内は誤誘導になる。
+   * 一方 `short_url_resolve_failed` とも分けている。あちらは転送先が不明な取得失敗、
+   * こちらは対象店舗が確定したうえでの取得失敗で、原因の説明が異なる。
+   */
+  | "place_lookup_failed";
 
+/**
+ * policy の判定結果。
+ *
+ * `google_maps_place_id` だけが `placeId` を持つ discriminated union にしてある。
+ * 「受付可否 (policy)」と「URL から安全に取り出せた店舗 identity」は別概念であり、
+ * identity が取れた種別でのみ型レベルで `placeId` を参照できるようにすることで、
+ * 他の種別で `placeId` を期待するコードを compile time で落とす。
+ */
 export type UrlImportPolicyResult =
-  | { ok: true; kind: UrlImportKind; url: string }
+  | { ok: true; kind: "google_maps_place"; url: string }
+  | { ok: true; kind: "google_maps_short"; url: string }
+  | {
+      ok: true;
+      kind: "google_maps_place_id";
+      url: string;
+      /** URL から取り出した Google Place ID。検証済み ({@link isValidPlaceId})。 */
+      placeId: string;
+    }
   | { ok: false; reason: UrlImportPolicyRejectReason };
 
 /**
@@ -137,6 +187,81 @@ function pathSegments(pathname: string): string[] {
 function isPlacePath(pathname: string): boolean {
   const segs = pathSegments(pathname);
   return segs[0] === "maps" && segs[1] === "place" && (segs[2] ?? "") !== "";
+}
+
+/**
+ * Google マップ配下 (`/maps/...`) のパスかどうか。
+ *
+ * Place ID を読み取る対象をここに限定する。これが無いと
+ * `https://www.google.com/search?q=place_id:ChIJ…`(Google **検索**結果)まで
+ * 店舗 URL として通ってしまい、Issue #207 で塞いだ経路が復活する。
+ */
+function isMapsPath(pathname: string): boolean {
+  return pathSegments(pathname)[0] === "maps";
+}
+
+/** Maps URL API が Place ID を載せるクエリパラメータ。 */
+const PLACE_ID_PARAM = "query_place_id";
+/** legacy 形式 `?q=place_id:<ID>` の接頭辞。 */
+const PLACE_ID_Q_PREFIX = "place_id:";
+
+/**
+ * Place ID の長さ上限。Google は「最大 255 文字程度の不透明な文字列」とし、
+ * 正確な最大長を保証していないため、**正しい ID を弾かないよう余裕を持たせた**
+ * 安全弁として置く(URL 全体を ID として誤採用する事故を防ぐのが目的)。
+ */
+const PLACE_ID_MAX_LENGTH = 512;
+
+/**
+ * Place ID として受け付ける文字集合。
+ *
+ * Google は Place ID を「不透明な識別子」と定義しており内部構造に依存してはいけないが、
+ * 実際に発行される ID は URL-safe base64 の文字集合 (`A-Za-z0-9_-`) に収まる。
+ * ここを過度に狭めると正しい ID を弾くため、**構造は一切仮定せず**
+ * 「制御文字・空白・区切り記号を含まない不透明トークンであること」だけを要求する。
+ *
+ * なお Place Details の URL 組み立て側 (`buildPlaceDetailsUrl`) は
+ * `encodeURIComponent` を通すため、ここは URL injection 対策ではなく
+ * 「明らかに Place ID でないもの(クエリ全体・空文字・改行入り)を弾く」ための検査。
+ */
+const PLACE_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
+
+/** URL から取り出した文字列が Place ID として現実的な形かを判定する。 */
+function isValidPlaceId(value: string): boolean {
+  return value.length <= PLACE_ID_MAX_LENGTH && PLACE_ID_PATTERN.test(value);
+}
+
+/**
+ * Maps URL から **明示的に指定された** Place ID を取り出す。
+ *
+ * 対応する 2 形式:
+ * - `?query_place_id=<ID>` — Maps URL API の公式形式。`?query=<店名>` の併記も可。
+ * - `?q=place_id:<ID>` — legacy 形式。`place_id:` という接頭辞が付いている場合**のみ**。
+ *
+ * `?q=<キーワード>` のような generic search は絶対に採用しない。接頭辞が無い `q` は
+ * 「その地域の検索結果」であって 1 店舗を指さないため、先頭候補を店舗扱いすると
+ * 別店舗を登録する事故になる。
+ *
+ * 取り出せない / 形が不正な場合は `null` を返し、呼び出し側の通常判定へ委ねる。
+ */
+function extractExplicitPlaceId(url: URL): string | null {
+  // `URLSearchParams.get` は percent-encoding を解決して返す。
+  const direct = url.searchParams.get(PLACE_ID_PARAM);
+  if (direct !== null) {
+    const trimmed = direct.trim();
+    return isValidPlaceId(trimmed) ? trimmed : null;
+  }
+
+  const q = url.searchParams.get("q");
+  if (q !== null) {
+    const trimmed = q.trim();
+    if (trimmed.startsWith(PLACE_ID_Q_PREFIX)) {
+      const id = trimmed.slice(PLACE_ID_Q_PREFIX.length).trim();
+      return isValidPlaceId(id) ? id : null;
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -216,11 +341,22 @@ export function evaluateUrlImportPolicy(raw: string): UrlImportPolicyResult {
   }
 
   if (MAPS_HOSTS.has(host)) {
+    // Place ID が明示された URL を最優先で判定する。`/maps/place/<名前>` より
+    // 強い identity(名前の曖昧照合ではなく ID による一意特定)が得られるため、
+    // 両方を満たす URL では ID 側を採用する。
+    if (isMapsPath(parsed.pathname)) {
+      const placeId = extractExplicitPlaceId(parsed);
+      if (placeId !== null) {
+        return { ok: true, kind: "google_maps_place_id", url: trimmed, placeId };
+      }
+    }
     if (isPlacePath(parsed.pathname)) {
       return { ok: true, kind: "google_maps_place", url: trimmed };
     }
-    // `/search`(Google 検索)・`/maps`(トップ)・`/maps/search`・`/maps/dir` 等。
-    // 「Google の URL」ではなく「Google マップの**店舗**URL」だけを受け付ける。
+    // `/search`(Google 検索)・`/maps`(トップ)・`/maps/dir`、および Place ID を
+    // 持たない `/maps/search/<キーワード>`・`?q=<キーワード>`・`?cid=<数値>` 等。
+    // 「Google の URL」ではなく「Google マップで**1 店舗を一意特定できる** URL」
+    // だけを受け付ける。
     return { ok: false, reason: "not_place_url" };
   }
 

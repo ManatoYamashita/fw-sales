@@ -7,6 +7,8 @@
 
 import { describe, expect, it } from "vitest";
 import { evaluateUrlImportPolicy } from "../url-import-policy";
+import { buildPlaceIdMapsUrl } from "@/lib/places/maps-url";
+import { placeResultToStoreInput } from "@/lib/places/to-store-input";
 
 describe("evaluateUrlImportPolicy — 受け付ける URL", () => {
   it.each([
@@ -82,8 +84,9 @@ describe("evaluateUrlImportPolicy — Google だが店舗ページでない", ()
     "https://www.google.com/maps/dir/A/B",
     "https://www.google.com/maps?q=導楽+新丸子",
     "https://maps.google.com/?q=test",
-    // Places API の googleMapsUri 形式。1 店舗を指すが店舗名を読み取れず、
-    // 現行実装では Places 照合の検索語を作れないため受け付けない。
+    // Places API の googleMapsUri 形式。1 店舗を指してはいるが、CID は Place ID とは
+    // 別体系の識別子で、現行の Places API コードに CID → Place ID の変換経路が無い。
+    // 「1 店舗を指す」ことと「この実装で一意に解決できる」ことは別なので受け付けない。
     "https://maps.google.com/?cid=123",
   ])("not_place_url として拒否する: %s", (url) => {
     expect(evaluateUrlImportPolicy(url)).toEqual({ ok: false, reason: "not_place_url" });
@@ -263,6 +266,276 @@ describe("evaluateUrlImportPolicy — その他のサイト", () => {
     expect(evaluateUrlImportPolicy(url)).toEqual({
       ok: false,
       reason: "unsupported_source",
+    });
+  });
+});
+
+/**
+ * Place ID を明示する Maps URL の受付 (Issue #207 follow-up)。
+ *
+ * これらは 1 店舗を **ID で** 一意特定できるため、店舗名の曖昧照合を経ずに
+ * Place Details を直接引ける。`/maps/place/<名前>` より強い identity なので、
+ * 両方を満たす URL では Place ID 側を採用する。
+ */
+describe("evaluateUrlImportPolicy — Place ID を明示する URL", () => {
+  const PLACE_ID = "ChIJN1t_tDeuEmsRUsoyG83frY4";
+
+  it.each([
+    `https://www.google.com/maps/search/?api=1&query_place_id=${PLACE_ID}`,
+    `https://www.google.com/maps/search/?api=1&query=%E5%B0%8E%E6%A5%BD&query_place_id=${PLACE_ID}`,
+    `https://www.google.co.jp/maps/search/?api=1&query_place_id=${PLACE_ID}`,
+    `https://maps.google.com/maps/search/?api=1&query_place_id=${PLACE_ID}`,
+    `https://www.google.com/maps/search/?query_place_id=${PLACE_ID}&api=1`,
+    `https://www.google.com/maps/place/?q=place_id:${PLACE_ID}`,
+  ])("query_place_id / place_id: を google_maps_place_id として受け付ける: %s", (url) => {
+    expect(evaluateUrlImportPolicy(url)).toEqual({
+      ok: true,
+      kind: "google_maps_place_id",
+      url,
+      placeId: PLACE_ID,
+    });
+  });
+
+  it("place URL と Place ID を両方満たす場合は Place ID を優先する", () => {
+    const url = `https://www.google.com/maps/place/%E5%B0%8E%E6%A5%BD/?query_place_id=${PLACE_ID}`;
+    expect(evaluateUrlImportPolicy(url)).toEqual({
+      ok: true,
+      kind: "google_maps_place_id",
+      url,
+      placeId: PLACE_ID,
+    });
+  });
+
+  it.each([
+    "https://www.google.com/maps/search/?api=1&query=%E5%B1%85%E9%85%92%E5%B1%8B+%E6%B8%8B%E8%B0%B7",
+    "https://www.google.com/maps/search/居酒屋+渋谷",
+    "https://www.google.com/maps?q=居酒屋",
+    "https://www.google.com/maps/search/?q=居酒屋+渋谷",
+  ])("Place ID を持たない検索 URL は not_place_url のまま: %s", (url) => {
+    expect(evaluateUrlImportPolicy(url)).toEqual({ ok: false, reason: "not_place_url" });
+  });
+
+  it.each([
+    "https://www.google.com/maps/search/?api=1&query_place_id=",
+    "https://www.google.com/maps/search/?api=1&query_place_id=%20",
+    "https://www.google.com/maps/place/?q=place_id:",
+    "https://www.google.com/maps/search/?api=1&query_place_id=ChIJ%2Ffoo%3Dbar",
+    "https://www.google.com/maps/search/?api=1&query_place_id=ChIJ%20abc",
+    "https://www.google.com/maps/search/?api=1&query_place_id=ChIJ%0Aabc",
+  ])("不正な Place ID は受け付けない: %s", (url) => {
+    expect(evaluateUrlImportPolicy(url)).toEqual({ ok: false, reason: "not_place_url" });
+  });
+
+  it("極端に長い Place ID は受け付けない (URL 全体の誤採用を防ぐ)", () => {
+    const tooLong = "C".repeat(513);
+    expect(
+      evaluateUrlImportPolicy(
+        `https://www.google.com/maps/search/?api=1&query_place_id=${tooLong}`,
+      ),
+    ).toEqual({ ok: false, reason: "not_place_url" });
+  });
+
+  it.each([
+    `https://www.google.com/search?q=place_id:${PLACE_ID}`,
+    `https://www.google.com/search?query_place_id=${PLACE_ID}`,
+    `https://www.google.com/?query_place_id=${PLACE_ID}`,
+    `https://maps.google.com/?query_place_id=${PLACE_ID}`,
+  ])("Google マップ配下でない URL からは Place ID を読まない: %s", (url) => {
+    expect(evaluateUrlImportPolicy(url).ok).toBe(false);
+  });
+
+  it("lookalike ホスト上の Place ID URL は受け付けない", () => {
+    for (const host of [
+      "maps.google.com.evil.example",
+      "www.google.com.evil.example",
+      "evil-google.com",
+      "google.de",
+    ]) {
+      expect(
+        evaluateUrlImportPolicy(
+          `https://${host}/maps/search/?api=1&query_place_id=${PLACE_ID}`,
+        ).ok,
+      ).toBe(false);
+    }
+  });
+
+  it("クエリに Place ID URL を含むだけの別ドメインは受け付けない", () => {
+    const url = `https://evil.example/?next=https://www.google.com/maps/search/%3Fapi%3D1%26query_place_id%3D${PLACE_ID}`;
+    expect(evaluateUrlImportPolicy(url)).toEqual({
+      ok: false,
+      reason: "unsupported_source",
+    });
+  });
+
+  it("http / 非標準ポート / credentials は Place ID URL でも拒否する", () => {
+    expect(
+      evaluateUrlImportPolicy(
+        `http://www.google.com/maps/search/?api=1&query_place_id=${PLACE_ID}`,
+      ),
+    ).toEqual({ ok: false, reason: "invalid_url" });
+    expect(
+      evaluateUrlImportPolicy(
+        `https://www.google.com:444/maps/search/?api=1&query_place_id=${PLACE_ID}`,
+      ),
+    ).toEqual({ ok: false, reason: "invalid_url" });
+    expect(
+      evaluateUrlImportPolicy(
+        `https://u:p@www.google.com/maps/search/?api=1&query_place_id=${PLACE_ID}`,
+      ),
+    ).toEqual({ ok: false, reason: "invalid_url" });
+  });
+});
+
+/**
+ * repo 自身が生成する Google マップ URL を、URL Import が受け付けられること。
+ *
+ * `placeResultToStoreInput` は `googleMapsUri` を持たない Place に対し
+ * `buildPlaceIdMapsUrl` の URL を `stores.map_url` として保存する。
+ * ユーザーはその URL をコピーして URL Import へ貼り直しうるため、
+ * 「repo が生成した URL を repo が拒否する」不整合を回帰テストで塞ぐ。
+ */
+describe("evaluateUrlImportPolicy — repo 自身が生成する map_url の round-trip", () => {
+  const PLACE_ID = "ChIJN1t_tDeuEmsRUsoyG83frY4";
+
+  it("buildPlaceIdMapsUrl の出力を受け付ける", () => {
+    const url = buildPlaceIdMapsUrl(PLACE_ID);
+    expect(evaluateUrlImportPolicy(url)).toEqual({
+      ok: true,
+      kind: "google_maps_place_id",
+      url,
+      placeId: PLACE_ID,
+    });
+  });
+
+  it("placeResultToStoreInput の map_url が URL Import を通る", () => {
+    const input = placeResultToStoreInput({
+      placeId: PLACE_ID,
+      name: "導楽",
+      formattedAddress: "日本、〒211-0005 神奈川県川崎市中原区新丸子東1-983",
+      lat: 35.5,
+      lng: 139.6,
+      phone: "044-750-9977",
+      rating: 3.4,
+      userRatingsTotal: 12,
+      types: ["restaurant"],
+      // `toPlaceResult` は googleMapsUri を取得できないとき null にする。
+      // この場合だけ `buildPlaceIdMapsUrl` の fallback URL が map_url になる。
+      googleMapsUri: null,
+    });
+
+    expect(evaluateUrlImportPolicy(input.map_url)).toMatchObject({
+      ok: true,
+      kind: "google_maps_place_id",
+      placeId: PLACE_ID,
+    });
+  });
+});
+
+/**
+ * 実在する Google マップ URL 形式の corpus と期待結果。
+ * 形式ごとの扱いを 1 箇所で読めるようにし、将来の変更で
+ * 「どれが通ってどれが通らないか」が暗黙に変わらないよう固定する。
+ */
+describe("evaluateUrlImportPolicy — URL 形式 corpus", () => {
+  const PLACE_ID = "ChIJN1t_tDeuEmsRUsoyG83frY4";
+
+  it.each([
+    {
+      label: "desktop の店舗ページ URL",
+      url: "https://www.google.com/maps/place/neel%E4%B8%AD%E7%9B%AE%E9%BB%92/@35.6474266,139.6929246,16z/data=!3m1!4b1?entry=ttu",
+      expected: "google_maps_place",
+    },
+    {
+      label: "モバイル共有の短縮 URL",
+      url: "https://maps.app.goo.gl/abc123",
+      expected: "google_maps_short",
+    },
+    {
+      label: "legacy 短縮 URL",
+      url: "https://goo.gl/maps/xyz789",
+      expected: "google_maps_short",
+    },
+    {
+      label: "Maps URL API の query_place_id 形式",
+      url: `https://www.google.com/maps/search/?api=1&query=%E5%B0%8E%E6%A5%BD&query_place_id=${PLACE_ID}`,
+      expected: "google_maps_place_id",
+    },
+    {
+      label: "repo 自身が生成する fallback URL",
+      url: `https://www.google.com/maps/search/?api=1&query_place_id=${PLACE_ID}`,
+      expected: "google_maps_place_id",
+    },
+    {
+      label: "legacy の place_id: 形式",
+      url: `https://www.google.com/maps/place/?q=place_id:${PLACE_ID}`,
+      expected: "google_maps_place_id",
+    },
+  ])("受け付ける: $label", ({ url, expected }) => {
+    const result = evaluateUrlImportPolicy(url);
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.kind).toBe(expected);
+  });
+
+  it.each([
+    {
+      label: "generic な検索結果 URL",
+      url: "https://www.google.com/maps/search/居酒屋+渋谷",
+      reason: "not_place_url",
+    },
+    {
+      label: "経路案内 URL",
+      url: "https://www.google.com/maps/dir/A/B",
+      reason: "not_place_url",
+    },
+    {
+      label: "cid 形式 (Place ID とは別体系のため今回は未対応)",
+      url: "https://maps.google.com/?cid=1234567890",
+      reason: "not_place_url",
+    },
+    {
+      label: "Maps トップ",
+      url: "https://www.google.com/maps",
+      reason: "not_place_url",
+    },
+    {
+      label: "Google 検索結果",
+      url: "https://www.google.com/search?q=%E5%B0%8E%E6%A5%BD",
+      reason: "not_place_url",
+    },
+  ])("拒否する: $label", ({ url, reason }) => {
+    expect(evaluateUrlImportPolicy(url)).toEqual({ ok: false, reason });
+  });
+});
+
+describe("evaluateUrlImportPolicy — Place ID 抽出の境界", () => {
+  it("Place ID が不正でも place URL としての受付は壊さない", () => {
+    // `query_place_id` が壊れていても `/maps/place/<名前>` は依然として
+    // 店舗ページなので、従来どおり google_maps_place として受け付ける。
+    const url = "https://www.google.com/maps/place/%E5%B0%8E%E6%A5%BD?query_place_id=";
+    expect(evaluateUrlImportPolicy(url)).toEqual({
+      ok: true,
+      kind: "google_maps_place",
+      url,
+    });
+  });
+
+  it("query だけで query_place_id が無い Maps URL API 形式は受け付けない", () => {
+    // `query` は表示用のヒントでしかなく、1 店舗を確定しない。
+    expect(
+      evaluateUrlImportPolicy(
+        "https://www.google.com/maps/search/?api=1&query=%E5%B0%8E%E6%A5%BD",
+      ),
+    ).toEqual({ ok: false, reason: "not_place_url" });
+  });
+
+  it("同名パラメータが複数あっても先頭の検証済み値だけを使う", () => {
+    const url =
+      "https://www.google.com/maps/search/?api=1&query_place_id=ChIJvalid&query_place_id=ChIJother";
+    expect(evaluateUrlImportPolicy(url)).toEqual({
+      ok: true,
+      kind: "google_maps_place_id",
+      url,
+      placeId: "ChIJvalid",
     });
   });
 });

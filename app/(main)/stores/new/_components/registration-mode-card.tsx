@@ -44,6 +44,11 @@ export const REJECT_MESSAGE: Record<UrlImportRejectReason, string> = {
   // (`not_place_url` と取り違えると、有効な共有 URL で貼り直しを繰り返させる)。
   short_url_resolve_failed:
     "Googleマップの共有URLを読み込めませんでした。時間をおいてもう一度お試しください。",
+  // URL の形式は正しく 1 店舗を指しているため、貼り直しを第一に促さない。
+  // 一時的な取得失敗と、対象店舗が既に存在しない場合の両方がありうるので、
+  // どちらか一方を断定せず両方の行動を示す。
+  place_lookup_failed:
+    "GoogleマップURLから店舗情報を取得できませんでした。時間をおいて再度お試しいただくか、別の店舗URLをご利用ください。",
 };
 
 /**
@@ -216,7 +221,9 @@ export function UrlSearchPanel({ onLoaded }: UrlSearchPanelProps) {
       <p className="text-xs text-muted-foreground">
         Googleマップの店舗ページURLを貼り付けて「読込」を押すと、
         店舗名・住所・電話番号・口コミ情報などを自動入力します。
-        アプリの共有リンク (maps.app.goo.gl/…) も使えます。
+        アプリの共有リンク (maps.app.goo.gl/…) や、店舗を開いた状態で
+        コピーしたリンクにも対応しています。
+        検索結果一覧のURLは、店舗が特定できないため読み込めません。
       </p>
       <div className="flex flex-col sm:flex-row gap-2">
         <Input

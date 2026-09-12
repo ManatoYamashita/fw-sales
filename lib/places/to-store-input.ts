@@ -1,3 +1,4 @@
+import { buildPlaceIdMapsUrl } from "./maps-url";
 import type { PlaceResult } from "./types";
 import type { StoreInput } from "@/types/store";
 
@@ -59,9 +60,9 @@ export function mapGenre(types: string[]): string {
 }
 
 export function placeResultToStoreInput(place: PlaceResult): StoreInput {
-  const map_url =
-    place.googleMapsUri ??
-    `https://www.google.com/maps/search/?api=1&query_place_id=${place.placeId}`;
+  // fallback URL は URL Import (`lib/url-parser/url-import-policy.ts`) が
+  // 受け付ける形式でなければならない。文字列を直書きせず共有ビルダを通す。
+  const map_url = place.googleMapsUri ?? buildPlaceIdMapsUrl(place.placeId);
 
   // formattedAddress を正規化してから prefecture/city を抽出する。
   // address には prefecture/city を除いた残差 (番地 + 建物名) のみを保存し、

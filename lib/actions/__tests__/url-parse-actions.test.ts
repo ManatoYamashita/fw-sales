@@ -27,14 +27,16 @@ vi.mock("@/lib/url-parser/ogp", () => ({
 }));
 vi.mock("@/lib/places/google", () => ({
   searchPlaces: vi.fn(),
+  getPlaceById: vi.fn(),
 }));
 
 const { fetchOgp } = await import("@/lib/url-parser/ogp");
-const { searchPlaces } = await import("@/lib/places/google");
+const { searchPlaces, getPlaceById } = await import("@/lib/places/google");
 const { importFromUrlAction } = await import("../url-parse-actions");
 
 const mockedFetchOgp = vi.mocked(fetchOgp);
 const mockedSearchPlaces = vi.mocked(searchPlaces);
+const mockedGetPlaceById = vi.mocked(getPlaceById);
 
 function makePlace(overrides: Partial<PlaceResult> = {}): PlaceResult {
   return {
@@ -58,6 +60,7 @@ const SHORT_URL = "https://maps.app.goo.gl/abc123";
 beforeEach(() => {
   mockedFetchOgp.mockReset();
   mockedSearchPlaces.mockReset();
+  mockedGetPlaceById.mockReset();
 });
 
 afterEach(() => {
@@ -336,5 +339,143 @@ describe("importFromUrlAction — Google マップ短縮 URL", () => {
     if (result.status === "rejected") expect(result.reason).toBe("not_place_url");
     expect(mockedFetchOgp).not.toHaveBeenCalled();
     expect(mockedSearchPlaces).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Place ID が URL に含まれる場合の取得経路 (Issue #207 follow-up)。
+ *
+ * この経路の要点は「**曖昧な Text Search を経由しない**」こと。URL が Place ID を
+ * 持っている時点で店舗は確定しているため、店舗名の文字列照合へ落とすと
+ * 同名店舗で ambiguous になったり別店舗を引く余地を作ってしまう。
+ */
+describe("importFromUrlAction — Place ID を含む URL", () => {
+  const PLACE_ID = "ChIJN1t_tDeuEmsRUsoyG83frY4";
+  const PLACE_ID_URL = `https://www.google.com/maps/search/?api=1&query_place_id=${PLACE_ID}`;
+
+  it("Place Details を直接引き、Text Search を呼ばない", async () => {
+    mockedGetPlaceById.mockResolvedValue(makePlace({ placeId: PLACE_ID }));
+
+    const result = await importFromUrlAction(PLACE_ID_URL);
+
+    expect(result.status).toBe("success");
+    expect(mockedGetPlaceById).toHaveBeenCalledExactlyOnceWith(PLACE_ID);
+    // 曖昧照合へ落ちていないこと。ここが緩むと別店舗を引く余地が戻る。
+    expect(mockedSearchPlaces).not.toHaveBeenCalled();
+    // full place URL と同じく、外部 HTML の取得もしない。
+    expect(mockedFetchOgp).not.toHaveBeenCalled();
+  });
+
+  it("Places の値をフォームへ反映し、Place ID を報告する", async () => {
+    mockedGetPlaceById.mockResolvedValue(makePlace({ placeId: PLACE_ID }));
+
+    const result = await importFromUrlAction(PLACE_ID_URL);
+
+    expect(result).toMatchObject({
+      status: "success",
+      suggested: {
+        name: "導楽",
+        phone: "044-750-9977",
+        prefecture: "神奈川県",
+        review_avg: 3.4,
+        review_count: 12,
+      },
+      placesFallback: { used: true, reason: "place_id_url", matched_place_id: PLACE_ID },
+    });
+  });
+
+  it("query 付き (店名併記) でも Place ID 側で取得する", async () => {
+    mockedGetPlaceById.mockResolvedValue(makePlace({ placeId: PLACE_ID }));
+
+    const url = `https://www.google.com/maps/search/?api=1&query=%E5%88%A5%E5%BA%97&query_place_id=${PLACE_ID}`;
+    const result = await importFromUrlAction(url);
+
+    expect(result.status).toBe("success");
+    expect(mockedGetPlaceById).toHaveBeenCalledExactlyOnceWith(PLACE_ID);
+    // URL 上の query 文字列ではなく Places の名前を採用する。
+    expect(result.status === "success" && result.suggested.name).toBe("導楽");
+    expect(mockedSearchPlaces).not.toHaveBeenCalled();
+  });
+
+  it("URL の `?q=place_id:` 文字列を店舗名として採用しない", async () => {
+    mockedGetPlaceById.mockResolvedValue(makePlace({ placeId: PLACE_ID }));
+
+    const result = await importFromUrlAction(
+      `https://www.google.com/maps/place/?q=place_id:${PLACE_ID}`,
+    );
+
+    expect(result.status).toBe("success");
+    if (result.status !== "success") return;
+    expect(result.suggested.name).toBe("導楽");
+    expect(result.suggested.name).not.toContain("place_id");
+  });
+
+  it("Places API のエラーを UI へ漏らさず place_lookup_failed にする", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    mockedGetPlaceById.mockRejectedValue(
+      Object.assign(new Error("PlacesApiError: status 403 SECRET_KEY=abc レスポンス本文"), {
+        name: "PlacesApiError",
+        status: 403,
+      }),
+    );
+
+    const result = await importFromUrlAction(PLACE_ID_URL);
+
+    expect(result).toEqual({ status: "rejected", reason: "place_lookup_failed" });
+    // reason 以外に raw なエラー情報を載せない。
+    expect(JSON.stringify(result)).not.toMatch(/SECRET_KEY|レスポンス本文|403/);
+    // サーバログにも message ではなく分類値のみ。
+    for (const call of warn.mock.calls) {
+      expect(JSON.stringify(call)).not.toMatch(/SECRET_KEY|レスポンス本文/);
+    }
+  });
+
+  it("必須フィールドが欠けて取得できない場合も place_lookup_failed", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    mockedGetPlaceById.mockResolvedValue(null);
+
+    expect(await importFromUrlAction(PLACE_ID_URL)).toEqual({
+      status: "rejected",
+      reason: "place_lookup_failed",
+    });
+    expect(mockedSearchPlaces).not.toHaveBeenCalled();
+  });
+
+  it("短縮 URL の展開先が Place ID URL でも読み込める", async () => {
+    mockedFetchOgp.mockResolvedValue({ ok: true, final_url: PLACE_ID_URL });
+    mockedGetPlaceById.mockResolvedValue(makePlace({ placeId: PLACE_ID }));
+
+    const result = await importFromUrlAction(SHORT_URL);
+
+    expect(result.status).toBe("success");
+    expect(mockedGetPlaceById).toHaveBeenCalledExactlyOnceWith(PLACE_ID);
+    expect(mockedSearchPlaces).not.toHaveBeenCalled();
+    // ユーザーが実際に貼った URL を source として保持する。
+    expect(result.status === "success" && result.parsed.source_url).toBe(SHORT_URL);
+  });
+
+  it("短縮 URL の展開先が generic な検索 URL なら拒否する", async () => {
+    mockedFetchOgp.mockResolvedValue({
+      ok: true,
+      final_url: "https://www.google.com/maps/search/居酒屋+渋谷",
+    });
+
+    expect(await importFromUrlAction(SHORT_URL)).toEqual({
+      status: "rejected",
+      reason: "not_place_url",
+    });
+    expect(mockedGetPlaceById).not.toHaveBeenCalled();
+  });
+
+  it("短縮 URL の展開先が別ドメインなら Place ID があっても拒否する", async () => {
+    mockedFetchOgp.mockResolvedValue({
+      ok: true,
+      final_url: `https://maps.google.com.evil.example/maps/search/?api=1&query_place_id=${PLACE_ID}`,
+    });
+
+    const result = await importFromUrlAction(SHORT_URL);
+
+    expect(result.status).toBe("rejected");
+    expect(mockedGetPlaceById).not.toHaveBeenCalled();
   });
 });
