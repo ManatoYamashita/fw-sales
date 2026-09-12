@@ -512,8 +512,9 @@ describe("importFromUrlAction — success の map_url は再 import できる", 
     if (result.status !== "success") return;
     // CID 形式をそのまま保存しない。
     expect(result.suggested.map_url).not.toBe(CID_URI);
-    // policy を通過した URL を保持する。
-    expect(result.suggested.map_url).toBe(PLACE_ID_URL);
+    // Place ID を保持した公式形式へ正規化される。
+    expect(new URL(result.suggested.map_url).searchParams.get("query_place_id"))
+      .toBe(PLACE_ID);
     // round-trip invariant 本体。
     expect(evaluateUrlImportPolicy(result.suggested.map_url).ok).toBe(true);
   });
@@ -540,8 +541,10 @@ describe("importFromUrlAction — success の map_url は再 import できる", 
 
     expect(result.status).toBe("success");
     if (result.status !== "success") return;
-    // 短縮 URL のままでは再 import しても店舗を特定できないため、展開後 URL を保持する。
-    expect(result.suggested.map_url).toBe(PLACE_ID_URL);
+    // 短縮 URL のままでは再 import しても店舗を特定できないため、
+    // 取得結果から組み立てた canonical URL を保持する。
+    expect(new URL(result.suggested.map_url).searchParams.get("query_place_id"))
+      .toBe(PLACE_ID);
     expect(evaluateUrlImportPolicy(result.suggested.map_url).ok).toBe(true);
   });
 
@@ -568,5 +571,80 @@ describe("importFromUrlAction — success の map_url は再 import できる", 
     expect(result.status).toBe("success");
     if (result.status !== "success") return;
     expect(evaluateUrlImportPolicy(result.suggested.map_url).ok).toBe(true);
+  });
+});
+
+/**
+ * Place ID import 成功時に返す map_url は、Google Maps URLs の公式 Search 形式へ
+ * 正規化する (PR #285 独立レビュー)。入力 URL をそのまま保持するのではなく、
+ * 取得した placeId / name から組み立て直す。
+ */
+describe("importFromUrlAction — success の map_url は公式形式へ正規化される", () => {
+  const PLACE_ID = "ChIJN1t_tDeuEmsRUsoyG83frY4";
+  const CID_URI = "https://maps.google.com/?cid=1234567890";
+  /** 過去に保存された query 無しの形式 (入力としては受理し続ける)。 */
+  const LEGACY_URL = `https://www.google.com/maps/search/?api=1&query_place_id=${PLACE_ID}`;
+
+  function mapUrlParams(result: Awaited<ReturnType<typeof importFromUrlAction>>) {
+    if (result.status !== "success") throw new Error("expected success");
+    return new URL(result.suggested.map_url).searchParams;
+  }
+
+  it("query と query_place_id の両方を持つ URL を返す", async () => {
+    mockedGetPlaceById.mockResolvedValue(
+      makePlace({ placeId: PLACE_ID, name: "導楽", googleMapsUri: CID_URI }),
+    );
+
+    const result = await importFromUrlAction(LEGACY_URL);
+
+    const p = mapUrlParams(result);
+    expect(p.get("api")).toBe("1");
+    // 公式仕様で必須の query が入る (入力には無かった)。
+    expect(p.get("query")).toBe("導楽");
+    expect(p.get("query_place_id")).toBe(PLACE_ID);
+    // round-trip invariant は維持。
+    expect(result.status === "success" && evaluateUrlImportPolicy(result.suggested.map_url).ok)
+      .toBe(true);
+  });
+
+  it("入力が legacy 形式でも成功し、canonical な形式へ正規化する", async () => {
+    mockedGetPlaceById.mockResolvedValue(
+      makePlace({ placeId: PLACE_ID, name: "導楽", googleMapsUri: CID_URI }),
+    );
+
+    const result = await importFromUrlAction(LEGACY_URL);
+
+    expect(result.status).toBe("success");
+    // 入力をそのまま保持していないこと (query が足されている)。
+    expect(result.status === "success" && result.suggested.map_url).not.toBe(LEGACY_URL);
+  });
+
+  it("短縮 URL 経由でも canonical な公式形式になり、source_url は貼った URL のまま", async () => {
+    mockedFetchOgp.mockResolvedValue({ ok: true, final_url: LEGACY_URL });
+    mockedGetPlaceById.mockResolvedValue(
+      makePlace({ placeId: PLACE_ID, name: "導楽", googleMapsUri: CID_URI }),
+    );
+
+    const result = await importFromUrlAction(SHORT_URL);
+
+    const p = mapUrlParams(result);
+    expect(p.get("query")).toBe("導楽");
+    expect(p.get("query_place_id")).toBe(PLACE_ID);
+    // ユーザーが実際に貼った URL は保持する。
+    expect(result.status === "success" && result.parsed.source_url).toBe(SHORT_URL);
+  });
+
+  it("店舗名に記号が含まれても map_url が壊れず再 import できる", async () => {
+    mockedGetPlaceById.mockResolvedValue(
+      makePlace({ placeId: PLACE_ID, name: "A&B 食堂 #1", googleMapsUri: CID_URI }),
+    );
+
+    const result = await importFromUrlAction(LEGACY_URL);
+
+    const p = mapUrlParams(result);
+    expect(p.get("query")).toBe("A&B 食堂 #1");
+    expect(p.get("query_place_id")).toBe(PLACE_ID);
+    expect(result.status === "success" && evaluateUrlImportPolicy(result.suggested.map_url).ok)
+      .toBe(true);
   });
 });

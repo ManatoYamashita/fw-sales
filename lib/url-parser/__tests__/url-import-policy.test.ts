@@ -388,11 +388,26 @@ describe("evaluateUrlImportPolicy — repo 自身が生成する map_url の rou
   const PLACE_ID = "ChIJN1t_tDeuEmsRUsoyG83frY4";
 
   it("buildPlaceIdMapsUrl の出力を受け付ける", () => {
-    const url = buildPlaceIdMapsUrl(PLACE_ID);
+    const url = buildPlaceIdMapsUrl(PLACE_ID, "導楽 新丸子");
     expect(evaluateUrlImportPolicy(url)).toEqual({
       ok: true,
       kind: "google_maps_place_id",
       url,
+      placeId: PLACE_ID,
+    });
+  });
+
+  /**
+   * 過去に保存された `query` 無しの形式も入力としては受理し続ける
+   * (backward compatibility)。「今後生成する URL は公式形式」と
+   * 「過去形式を読み込める」は別の話として扱う。
+   */
+  it("過去に生成した query 無しの形式も引き続き受理する", () => {
+    const legacy = `https://www.google.com/maps/search/?api=1&query_place_id=${PLACE_ID}`;
+    expect(evaluateUrlImportPolicy(legacy)).toEqual({
+      ok: true,
+      kind: "google_maps_place_id",
+      url: legacy,
       placeId: PLACE_ID,
     });
   });

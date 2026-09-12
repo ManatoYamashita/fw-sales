@@ -15,6 +15,7 @@ import {
 } from "@/lib/url-parser/url-import-policy";
 import { getPlaceById } from "@/lib/places/google";
 import { toPlacesDiagnosticKind } from "@/lib/places/errors";
+import { buildPlaceIdMapsUrl } from "@/lib/places/maps-url";
 import type {
   AppliedField,
   ApplyResult,
@@ -100,6 +101,33 @@ function buildAppliedFields(suggested: ApplyResult): AppliedField[] {
 }
 
 /**
+ * success で返す `map_url` が URL Import で**再び受理される**ことを保証する
+ * (PR #285 独立確認の指摘)。
+ *
+ * Places の `googleMapsUri` は `https://maps.google.com/?cid=<数値>` 形式を返し得る。
+ * CID は Place ID とは別体系で URL Import が受け付けない形式なので、そのまま
+ * `map_url` に採用すると「保存済みの店舗 URL を貼り直すと `not_place_url`」という
+ * 自己不整合になる。`stores.map_url` はユーザーがコピーして貼り直す値なので、
+ * 受理できない URL を保存しない。
+ *
+ * `googleMapsUri` が受理可能な形式 (`/maps/place/…` 等) の場合はそのまま活かす。
+ * 受理できない場合だけ、policy を通過した URL 由来の値と confidence へ戻す。
+ *
+ * @param merged Places の値をマージした後の結果
+ * @param base URL 由来の値だけで組んだ結果 (map_url は policy 通過済み URL)
+ */
+function withReimportableMapUrl(merged: ApplyResult, base: ApplyResult): ApplyResult {
+  if (merged.map_url !== "" && evaluateUrlImportPolicy(merged.map_url).ok) {
+    return merged;
+  }
+  return {
+    ...merged,
+    map_url: base.map_url,
+    confidence: { ...merged.confidence, map_url: base.confidence.map_url },
+  };
+}
+
+/**
  * 短縮共有 URL (`maps.app.goo.gl` / `goo.gl/maps`) を展開し、
  * 展開後の URL を **もう一度 policy へ通してから** パースする。
  *
@@ -127,33 +155,6 @@ function buildAppliedFields(suggested: ApplyResult): AppliedField[] {
  * サニタイズ済みとはいえ HTTP status を UI へ運ぶ必要が無く、文言は
  * 呼び出し側が `reason` から決める設計を崩さないため。
  */
-/**
- * success で返す `map_url` が URL Import で**再び受理される**ことを保証する
- * (PR #285 独立確認の指摘)。
- *
- * Places の `googleMapsUri` は `https://maps.google.com/?cid=<数値>` 形式を返し得る。
- * CID は Place ID とは別体系で URL Import が受け付けない形式なので、そのまま
- * `map_url` に採用すると「保存済みの店舗 URL を貼り直すと `not_place_url`」という
- * 自己不整合になる。`stores.map_url` はユーザーがコピーして貼り直す値なので、
- * 受理できない URL を保存しない。
- *
- * `googleMapsUri` が受理可能な形式 (`/maps/place/…` 等) の場合はそのまま活かす。
- * 受理できない場合だけ、policy を通過した URL 由来の値と confidence へ戻す。
- *
- * @param merged Places の値をマージした後の結果
- * @param base URL 由来の値だけで組んだ結果 (map_url は policy 通過済み URL)
- */
-function withReimportableMapUrl(merged: ApplyResult, base: ApplyResult): ApplyResult {
-  if (merged.map_url !== "" && evaluateUrlImportPolicy(merged.map_url).ok) {
-    return merged;
-  }
-  return {
-    ...merged,
-    map_url: base.map_url,
-    confidence: { ...merged.confidence, map_url: base.confidence.map_url },
-  };
-}
-
 /** 展開後 URL として受け入れた policy 結果 (短縮 URL の連鎖は含まない)。 */
 type ResolvedPlacePolicy = Extract<
   UrlImportPolicyResult,
@@ -216,17 +217,21 @@ async function resolveShortUrl(
  * `map_url` として保存すると「保存済みの店舗 URL を貼り直すと `not_place_url`」という
  * 自己不整合が生まれる (PR #285 独立確認の指摘)。
  *
- * そこで **policy を通過した URL そのもの**を `map_url` に保持し、
+ * そこで取得できた `placeId` / `name` から **Google Maps URLs の公式 Search 形式**
+ * (`?api=1&query=<店名>&query_place_id=<ID>`) を組み立て直して `map_url` にする。
+ * これで次を同時に満たす:
  *
- *   success で返す `suggested.map_url` は `evaluateUrlImportPolicy` で再び受理される
+ * - 公式仕様の必須項目 `query` を満たす
+ * - Place ID で 1 店舗を一意特定できる
+ * - CID 形式へ戻らない
+ * - `evaluateUrlImportPolicy` で再び受理される (round-trip invariant)
  *
- * という round-trip invariant を満たす。`mergePlaceIntoApply` が Places 由来の値で
- * 上書きしてしまうため、マージ後に URL 由来の値と confidence を明示的に戻す。
+ * 短縮 URL 経由でも同じ canonical URL へ正規化する。
+ * ただし `source_url` は**ユーザーが実際に貼った URL のまま**保持する。
  */
 async function importFromPlaceId(
   placeId: string,
   sourceUrl: string,
-  mapsUrl: string,
   ogp: OgpResult | null,
 ): Promise<UrlImportResult> {
   let place;
@@ -244,11 +249,11 @@ async function importFromPlaceId(
 
   // name / address / phone 等はすべて Places 由来にする。URL 文字列からは
   // 何も読み取らない (`?q=place_id:…` を店舗名として採用しないため)。
-  // ただし `map_url` だけは policy を通過した URL を保持する (上記 round-trip invariant)。
+  // `map_url` は取得結果から公式形式へ正規化する (上記のとおり)。
   const parsed: ParsedUrl = {
     type: "google_maps",
     source_url: sourceUrl,
-    map_url: mapsUrl,
+    map_url: buildPlaceIdMapsUrl(place.placeId, place.name),
     confidence: {},
   };
   const base = applyParsedData(parsed, null);
@@ -323,7 +328,7 @@ export async function importFromUrlAction(url: string): Promise<UrlImportResult>
 
   // Place ID が取れている場合は曖昧な Text Search を挟まず Place Details を直接引く。
   if (effective.kind === "google_maps_place_id") {
-    return importFromPlaceId(effective.placeId, sourceUrl, effective.url, ogp);
+    return importFromPlaceId(effective.placeId, sourceUrl, ogp);
   }
 
   // `map_url` は展開後の URL を採用 — 後で開いたときに直接 Google マップへ行ける。

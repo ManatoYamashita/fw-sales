@@ -19,7 +19,8 @@
 | 入力 | 扱い |
 |---|---|
 | `…/maps/place/<店名>`（`google.com` / `google.co.jp` / `maps.google.*`） | ✅ 対応（`google_maps_place`） |
-| `…/maps/**?query_place_id=<PLACE_ID>`（`?query=<店名>` 併記も可） | ✅ 対応（`google_maps_place_id`）。Place Details を直接引く |
+| `…/maps/**?query=<店名>&query_place_id=<PLACE_ID>`（公式の Search 形式） | ✅ 対応（`google_maps_place_id`）。Place Details を直接引く |
+| `…/maps/**?query_place_id=<PLACE_ID>`（`query` 無し） | ✅ **入力としては**対応。過去に保存された URL の後方互換（下記） |
 | `…/maps/**?q=place_id:<PLACE_ID>`（legacy 形式） | ✅ 対応（`google_maps_place_id`） |
 | `maps.app.goo.gl/<id>` / `goo.gl/maps/<id>`（短縮共有 URL） | ✅ 対応（redirect 後の URL を**再検証**） |
 | 食べログ | ❌ **UI では非対応**。`tabelog_unsupported` として拒否 |
@@ -49,6 +50,27 @@
   allowlist 済みホスト / `/maps/…` 配下 / `query_place_id`・`q=place_id:` の明示形式 /
   `URLSearchParams` による取り出し（クエリ全体を ID として採らない） /
   Place Details 組み立て時の `encodeURIComponent`。
+
+### 入力として受理する形式と、新規生成する形式を分ける
+
+この 2 つは別の話であり、混同しない。
+
+| | 形式 |
+|---|---|
+| **入力として受理** | `query` の有無を問わず `query_place_id` があれば受理する |
+| **新規生成** | 必ず `?api=1&query=<検索語>&query_place_id=<ID>`（公式の Search 形式） |
+
+Google Maps URLs の Search action では **`query` が REQUIRED** であり、
+`query_place_id` を使う場合も `query` との併記が必要。したがって
+**`query_place_id` 単独の形式を「Google 公式の推奨形式」とは扱わない。**
+
+一方で、本 PR 以前に `stores.map_url` へ保存された `query` 無しの URL が存在しうる。
+policy で `query` を必須にすると、それらを貼り直したユーザーが読み込めなくなる。
+**「過去形式を読み込める」ことと「今後生成する URL は公式形式にする」ことを分離**し、
+policy の受理条件は広いまま、生成側 (`buildPlaceIdMapsUrl`) だけを公式形式に揃えている。
+
+生成は `URLSearchParams` で行い、店舗名に空白・日本語・`&`・`#`・`+` 等が含まれても
+query parameter が壊れない。Place ID も内部文字集合を仮定せず同じ経路で encode する。
 
 この形式は **Text Search を経由しない**（§3.4）。
 
@@ -287,14 +309,16 @@ policy (google_maps_place_id, placeId)
 別体系で URL Import が受け付けないため、そのまま `map_url` に採用すると
 「保存済みの店舗 URL を貼り直すと `not_place_url`」という自己不整合になる。
 
-`withReimportableMapUrl`（`url-parse-actions.ts`）が両経路の出口でこれを保証する。
+経路ごとの扱い:
 
-| `googleMapsUri` | `map_url` |
+| 経路 | `map_url` |
 |---|---|
-| 受理可能（`/maps/place/…` 等） | そのまま採用 |
-| 受理不可（`?cid=…`） | policy を通過した URL 由来の値へ戻す |
+| Place ID 経路 | 取得した `placeId` / `name` から **公式形式へ正規化**（`buildPlaceIdMapsUrl`）。入力 URL をそのまま保持しない。短縮 URL 経由でも同じ |
+| 既存の place URL 経路 | `googleMapsUri` が受理可能ならそれを採用。受理不可（`?cid=…`）なら URL 由来の値へ戻す（`withReimportableMapUrl`） |
 
-Place ID 経路・既存の place URL 経路（Places 補完後）の**両方**に適用される。
+Place ID 経路の正規化は、公式仕様の必須項目 `query` を満たしつつ Place ID で一意特定でき、
+CID へ戻らず再 import もできる、という条件を同時に満たす。
+`source_url` は**ユーザーが実際に貼った URL のまま**保持する（正規化するのは `map_url` だけ）。
 
 ---
 

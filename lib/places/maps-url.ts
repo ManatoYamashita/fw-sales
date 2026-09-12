@@ -3,9 +3,8 @@
  *
  * ## なぜ共有するのか
  *
- * `placeResultToStoreInput` は `googleMapsUri` が無い Place のために
- * `…/maps/search/?api=1&query_place_id=<ID>` を fallback として生成し、
- * その値が `stores.map_url` に保存される。ユーザーはその URL をコピーして
+ * `placeResultToStoreInput` は `googleMapsUri` が無い Place のために Maps URL を
+ * 生成し、その値が `stores.map_url` に保存される。ユーザーはその URL をコピーして
  * URL Import へ貼り直しうるため、**repo 自身が生成する URL を URL Import が
  * 拒否する**状態は不整合になる(実際に Issue #207 直後はそうなっていた)。
  *
@@ -17,15 +16,36 @@
  * 純関数。ネットワーク・環境変数に依存しない。
  */
 
+/** Google Maps URLs (Search action) のエンドポイント。 */
+const MAPS_SEARCH_ENDPOINT = "https://www.google.com/maps/search/";
+
 /**
- * Maps URL API の形式で、1 店舗を一意に指す URL を組み立てる。
+ * Google Maps URLs の Search 形式で、1 店舗を一意に指す URL を組み立てる。
  *
- * `api=1` は Maps URL API のバージョン指定。店舗の特定は `query_place_id` が行う。
- * 表示用の `query=<店名>` は**意図的に付けない** — 既存の `stores.map_url` と
- * 1 バイトも変えないため(この関数は既存の文字列リテラルをそのまま関数化したもので、
- * 生成 URL の仕様変更は本 PR のスコープ外)。URL Import 側は `query` 併記の形式も
- * 受け付けるので、将来付けても受付は壊れない。
+ * ## 公式仕様への準拠
+ *
+ * Google Maps URLs の Search action では **`query` が必須**であり、
+ * `query_place_id` を使う場合も `query` と**併記**する必要がある
+ * (`query_place_id` 単独の形式は公式に有効な Search URL として保証されていない)。
+ * そのため本関数は常に両方を出力する。
+ *
+ * - `query` — 表示・fallback 用の検索語 (店舗名 / 住所 / `lat,lng`)
+ * - `query_place_id` — 実際の店舗特定に使う Place ID
+ *
+ * ## encoding
+ *
+ * 手書きの文字列連結はしない。`URLSearchParams` で組み立てることで、店舗名に
+ * 空白・日本語・`&`・`#`・`+` 等が含まれても query parameter が壊れない。
+ * Place ID も内部文字集合を仮定せず、同じ経路で encode する。
+ *
+ * @param placeId Google Place ID
+ * @param query 表示用の検索語。通常は店舗名
  */
-export function buildPlaceIdMapsUrl(placeId: string): string {
-  return `https://www.google.com/maps/search/?api=1&query_place_id=${placeId}`;
+export function buildPlaceIdMapsUrl(placeId: string, query: string): string {
+  const params = new URLSearchParams({ api: "1" });
+  // `query` は必須。店舗名が空の Place でも有効な URL を返せるよう、
+  // 空のときだけ Place ID 自身を検索語に使う (空の `query=` を出さない)。
+  params.set("query", query.trim() || placeId);
+  params.set("query_place_id", placeId);
+  return `${MAPS_SEARCH_ENDPOINT}?${params.toString()}`;
 }

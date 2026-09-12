@@ -200,13 +200,19 @@ describe("placeResultToStoreInput", () => {
       expect(input.map_url).toBe(uri);
     });
 
-    it("googleMapsUri が null の場合は placeId から fallback URL を生成する", () => {
+    /**
+     * Google Maps URLs の Search 形式では `query` が必須で、`query_place_id` を
+     * 使う場合も併記が必要。新しく生成する URL はこの公式形式にする。
+     */
+    it("googleMapsUri が null の場合は公式形式の fallback URL を生成する", () => {
       const input = placeResultToStoreInput(
-        makePlace({ googleMapsUri: null, placeId: "ChIJ_abc123" }),
+        makePlace({ googleMapsUri: null, placeId: "ChIJ_abc123", name: "テスト食堂" }),
       );
-      expect(input.map_url).toBe(
-        "https://www.google.com/maps/search/?api=1&query_place_id=ChIJ_abc123",
-      );
+      const params = new URL(input.map_url).searchParams;
+      expect(new URL(input.map_url).pathname).toBe("/maps/search/");
+      expect(params.get("api")).toBe("1");
+      expect(params.get("query")).toBe("テスト食堂");
+      expect(params.get("query_place_id")).toBe("ChIJ_abc123");
     });
   });
 

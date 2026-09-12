@@ -62,7 +62,7 @@ export function mapGenre(types: string[]): string {
 export function placeResultToStoreInput(place: PlaceResult): StoreInput {
   // fallback URL は URL Import (`lib/url-parser/url-import-policy.ts`) が
   // 受け付ける形式でなければならない。文字列を直書きせず共有ビルダを通す。
-  const map_url = place.googleMapsUri ?? buildPlaceIdMapsUrl(place.placeId);
+  const map_url = place.googleMapsUri ?? buildPlaceIdMapsUrl(place.placeId, place.name);
 
   // formattedAddress を正規化してから prefecture/city を抽出する。
   // address には prefecture/city を除いた残差 (番地 + 建物名) のみを保存し、
