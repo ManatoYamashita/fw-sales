@@ -124,7 +124,6 @@ jobs:
       # Vercel / serverless 想定の最小プール。これが 1 でないと本テストは無意味になる
       # (テスト側でも 1 であることを assert している)。
       DATABASE_POOL_MAX: "1"
-      AUDIT_DB_INTEGRATION: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -151,5 +150,7 @@ jobs:
           psql "$DATABASE_URL" -c 'CREATE TABLE IF NOT EXISTS auth.users (id uuid PRIMARY KEY, email text, raw_user_meta_data jsonb);'
           pnpm db:migrate
 
+      # skip 条件は置いていないため、接続先が未設定ならここで明示的に失敗する
+      # (「0 件 skip で緑」という偽の成功にならない)。
       - name: Run audit DB integration tests
-        run: pnpm vitest run lib/db/__tests__/audit-pool-isolation.integration.test.ts
+        run: pnpm test:integration

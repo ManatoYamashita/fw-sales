@@ -22,6 +22,14 @@ export default defineConfig({
     conditions: ["react-server", "import", "node", "default"],
   },
   test: {
-    exclude: [...configDefaults.exclude, ".claude/**", "e2e/**"],
+    // `*.integration.test.ts` は実 PostgreSQL を要求するため既定の実行対象から外す
+    // (`vitest.integration.config.ts` / `pnpm test:integration` が担当)。
+    // skip 条件で黙って 0 件 PASS になるのを避けるため、設定側で分離している。
+    exclude: [
+      ...configDefaults.exclude,
+      ".claude/**",
+      "e2e/**",
+      "**/*.integration.test.ts",
+    ],
   },
 });

@@ -7,8 +7,12 @@
  * - 監査の失敗は呼び出し元へ throw されない。
  *
  * mock DB では上記のいずれも証明できないため、本ファイルだけは実接続を使う。
- * 既定の Vitest job (`USE_MOCK_DB=true`) では `AUDIT_DB_INTEGRATION` が無く skip され、
- * CI の専用 job `Audit DB integration` (postgres:15-alpine service) でのみ走る。
+ * 既定の `pnpm test` は `vitest.config.ts` の exclude で本ファイルを対象外にし、
+ * CI の専用 job `Audit DB integration` (postgres:15-alpine service) が
+ * `pnpm test:integration` として実行する。
+ *
+ * skip 条件は置かない。環境変数が外れたときに「0 件 skip で緑」という偽の成功に
+ * なるのを防ぐため、接続先が未設定なら `beforeAll` で明示的に失敗させる。
  *
  * 決定論: 待ち時間を祈る sleep ではなく `LOCK TABLE ... IN EXCLUSIVE MODE` で
  * INSERT を確実にブロックする (EXCLUSIVE は INSERT の ROW EXCLUSIVE と競合する)。
@@ -16,8 +20,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import postgres from "postgres";
 import { AUDIT_EVENTS, type AuditInput } from "@/lib/observability/events";
-
-const ENABLED = process.env.AUDIT_DB_INTEGRATION === "1";
 
 /** 監査が停滞した状態でも業務 query はこの時間内に返らなければならない。 */
 const BUSINESS_QUERY_BUDGET_MS = 2_000;
@@ -48,7 +50,7 @@ function withHardTimeout<T>(work: PromiseLike<T>, ms: number, message: string): 
   });
 }
 
-describe.skipIf(!ENABLED)("audit writes against a real PostgreSQL pool", () => {
+describe("audit writes against a real PostgreSQL pool", () => {
   let writeAudit: (input: AuditInput) => Promise<void>;
   let businessSql: ReturnType<typeof postgres>;
   let auditSql: ReturnType<typeof postgres>;
