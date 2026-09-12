@@ -33,6 +33,7 @@ vi.mock("@/lib/places/google", () => ({
 const { fetchOgp } = await import("@/lib/url-parser/ogp");
 const { searchPlaces, getPlaceById } = await import("@/lib/places/google");
 const { importFromUrlAction } = await import("../url-parse-actions");
+const { evaluateUrlImportPolicy } = await import("@/lib/url-parser/url-import-policy");
 
 const mockedFetchOgp = vi.mocked(fetchOgp);
 const mockedSearchPlaces = vi.mocked(searchPlaces);
@@ -477,5 +478,95 @@ describe("importFromUrlAction — Place ID を含む URL", () => {
 
     expect(result.status).toBe("rejected");
     expect(mockedGetPlaceById).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * round-trip invariant (PR #285 独立確認の指摘)。
+ *
+ * Places の `googleMapsUri` は `https://maps.google.com/?cid=<数値>` 形式を返し得るが、
+ * CID は URL Import が受け付けない形式。これを `map_url` として保存すると
+ * 「保存済みの店舗 URL を貼り直すと `not_place_url`」という自己不整合になる。
+ *
+ * success で返した `suggested.map_url` は、必ず policy で再び受理されること。
+ */
+describe("importFromUrlAction — success の map_url は再 import できる", () => {
+  const PLACE_ID = "ChIJN1t_tDeuEmsRUsoyG83frY4";
+  const PLACE_ID_URL = `https://www.google.com/maps/search/?api=1&query_place_id=${PLACE_ID}`;
+  const CID_URI = "https://maps.google.com/?cid=1234567890";
+
+  it("googleMapsUri が CID 形式でも map_url は受理される URL になる", async () => {
+    // 前提: CID URL 単体は URL Import が受け付けない形式であること。
+    expect(evaluateUrlImportPolicy(CID_URI)).toEqual({
+      ok: false,
+      reason: "not_place_url",
+    });
+
+    mockedGetPlaceById.mockResolvedValue(
+      makePlace({ placeId: PLACE_ID, googleMapsUri: CID_URI }),
+    );
+
+    const result = await importFromUrlAction(PLACE_ID_URL);
+
+    expect(result.status).toBe("success");
+    if (result.status !== "success") return;
+    // CID 形式をそのまま保存しない。
+    expect(result.suggested.map_url).not.toBe(CID_URI);
+    // policy を通過した URL を保持する。
+    expect(result.suggested.map_url).toBe(PLACE_ID_URL);
+    // round-trip invariant 本体。
+    expect(evaluateUrlImportPolicy(result.suggested.map_url).ok).toBe(true);
+  });
+
+  it("legacy の place_id: 形式でも round-trip する", async () => {
+    mockedGetPlaceById.mockResolvedValue(
+      makePlace({ placeId: PLACE_ID, googleMapsUri: CID_URI }),
+    );
+
+    const url = `https://www.google.com/maps/place/?q=place_id:${PLACE_ID}`;
+    const result = await importFromUrlAction(url);
+
+    expect(result.status === "success" && evaluateUrlImportPolicy(result.suggested.map_url).ok)
+      .toBe(true);
+  });
+
+  it("短縮 URL 経由でも展開後の Place ID URL を map_url に保持する", async () => {
+    mockedFetchOgp.mockResolvedValue({ ok: true, final_url: PLACE_ID_URL });
+    mockedGetPlaceById.mockResolvedValue(
+      makePlace({ placeId: PLACE_ID, googleMapsUri: CID_URI }),
+    );
+
+    const result = await importFromUrlAction(SHORT_URL);
+
+    expect(result.status).toBe("success");
+    if (result.status !== "success") return;
+    // 短縮 URL のままでは再 import しても店舗を特定できないため、展開後 URL を保持する。
+    expect(result.suggested.map_url).toBe(PLACE_ID_URL);
+    expect(evaluateUrlImportPolicy(result.suggested.map_url).ok).toBe(true);
+  });
+
+  it("googleMapsUri が受理可能な place URL でも round-trip は壊れない", async () => {
+    mockedGetPlaceById.mockResolvedValue(
+      makePlace({
+        placeId: PLACE_ID,
+        googleMapsUri: "https://www.google.com/maps/place/%E5%B0%8E%E6%A5%BD",
+      }),
+    );
+
+    const result = await importFromUrlAction(PLACE_ID_URL);
+
+    expect(result.status === "success" && evaluateUrlImportPolicy(result.suggested.map_url).ok)
+      .toBe(true);
+  });
+
+  it("既存の place URL 経路の map_url も再 import できる", async () => {
+    // Place ID 経路だけでなく、従来経路でも invariant が成り立つことを確認する。
+    mockedSearchPlaces.mockResolvedValue([makePlace({ googleMapsUri: CID_URI })]);
+
+    const result = await importFromUrlAction(PLACE_URL);
+
+    expect(result.status).toBe("success");
+    if (result.status !== "success") return;
+    expect(evaluateUrlImportPolicy(result.suggested.map_url).ok).toBe(true);
   });
 });

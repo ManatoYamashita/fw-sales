@@ -319,20 +319,10 @@ describe("evaluateUrlImportPolicy — Place ID を明示する URL", () => {
     "https://www.google.com/maps/search/?api=1&query_place_id=",
     "https://www.google.com/maps/search/?api=1&query_place_id=%20",
     "https://www.google.com/maps/place/?q=place_id:",
-    "https://www.google.com/maps/search/?api=1&query_place_id=ChIJ%2Ffoo%3Dbar",
     "https://www.google.com/maps/search/?api=1&query_place_id=ChIJ%20abc",
     "https://www.google.com/maps/search/?api=1&query_place_id=ChIJ%0Aabc",
   ])("不正な Place ID は受け付けない: %s", (url) => {
     expect(evaluateUrlImportPolicy(url)).toEqual({ ok: false, reason: "not_place_url" });
-  });
-
-  it("極端に長い Place ID は受け付けない (URL 全体の誤採用を防ぐ)", () => {
-    const tooLong = "C".repeat(513);
-    expect(
-      evaluateUrlImportPolicy(
-        `https://www.google.com/maps/search/?api=1&query_place_id=${tooLong}`,
-      ),
-    ).toEqual({ ok: false, reason: "not_place_url" });
   });
 
   it.each([
@@ -536,6 +526,49 @@ describe("evaluateUrlImportPolicy — Place ID 抽出の境界", () => {
       kind: "google_maps_place_id",
       url,
       placeId: "ChIJvalid",
+    });
+  });
+});
+
+/**
+ * Place ID は「テキスト識別子」であり、Google は**最大長を規定していない**
+ * (公式ドキュメントに "there is no maximum length" と明記)。
+ * 独自の最大長や文字集合を validity 条件にすると、仕様上正しい ID を将来弾く。
+ *
+ * 安全性は allowlist ホスト / `/maps/…` 配下 / 明示形式 / URL parser /
+ * `encodeURIComponent` の層で確保されているため、ここでは形式を推測しない。
+ */
+describe("evaluateUrlImportPolicy — Place ID に独自の形式制約を置かない", () => {
+  it("長い Place ID を長さだけを理由に拒否しない", () => {
+    const longId = `ChIJ${"a".repeat(600)}`;
+    const url = `https://www.google.com/maps/search/?api=1&query_place_id=${longId}`;
+    expect(evaluateUrlImportPolicy(url)).toEqual({
+      ok: true,
+      kind: "google_maps_place_id",
+      url,
+      placeId: longId,
+    });
+  });
+
+  it("URL-safe base64 以外の文字を含んでも、それだけでは拒否しない", () => {
+    // 解決できない ID は Places API 側が失敗を返し `place_lookup_failed` になる。
+    // policy が Google 非公式の内部形式を仮定して弾くことはしない。
+    const url = "https://www.google.com/maps/search/?api=1&query_place_id=ChIJ%2Ffoo%3Dbar";
+    expect(evaluateUrlImportPolicy(url)).toMatchObject({
+      ok: true,
+      kind: "google_maps_place_id",
+      placeId: "ChIJ/foo=bar",
+    });
+  });
+
+  it("クエリ全体を Place ID として採用しない", () => {
+    // 値の取り出しは URLSearchParams が行うため、他パラメータは混入しない。
+    const url =
+      "https://www.google.com/maps/search/?api=1&query_place_id=ChIJabc&foo=bar&query=x";
+    expect(evaluateUrlImportPolicy(url)).toMatchObject({
+      ok: true,
+      kind: "google_maps_place_id",
+      placeId: "ChIJabc",
     });
   });
 });

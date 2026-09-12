@@ -39,10 +39,16 @@
   `https://www.google.com/search?q=place_id:…`（Google **検索**結果）まで通り、
   Issue #207 で塞いだ「`<title>Google Search</title>` を店舗名にする」経路が復活する。
 - `place_id:` 接頭辞の**無い** `?q=` は generic search として扱い、絶対に採用しない。
-- Place ID は不透明な識別子として扱い、構造を仮定しない。検証は
-  「URL-safe な文字集合（`A-Za-z0-9_-`）」＋「512 文字以内」＋「空でない」だけ。
-  クエリ全体・空文字・制御文字入りを弾くのが目的で、URL injection 対策ではない
-  （Place Details の URL 組み立ては `encodeURIComponent` を通している）。
+- Place ID は不透明なテキスト識別子として扱い、**文字集合も最大長も仮定しない**。
+  Google は Place ID の最大長を規定していない（公式に "there is no maximum length"）。
+  独自の上限や文字集合を validity 条件にすると、仕様上正しい ID を将来弾く。
+  検証は「空でない」「空白のみでない」「制御文字を含まない」だけに留める。
+  解決できない ID は Places API 側が失敗を返し `place_lookup_failed` になる。
+
+  安全性は形式推測ではなく次の層で確保している:
+  allowlist 済みホスト / `/maps/…` 配下 / `query_place_id`・`q=place_id:` の明示形式 /
+  `URLSearchParams` による取り出し（クエリ全体を ID として採らない） /
+  Place Details 組み立て時の `encodeURIComponent`。
 
 この形式は **Text Search を経由しない**（§3.4）。
 
@@ -268,6 +274,27 @@ policy (google_maps_place_id, placeId)
   `reason` にもサーバログにも載せず、`toPlacesDiagnosticKind` の分類値のみを記録する。
 - 結果は `placesFallback: { used: true, reason: "place_id_url", matched_place_id }`
   として報告する（照合の失敗理由ではないので UI の警告文言は持たない）。
+
+### 3.5 `map_url` の round-trip invariant
+
+**success で返す `suggested.map_url` は、`evaluateUrlImportPolicy` で再び受理される。**
+
+`stores.map_url` はユーザーがコピーして URL Import へ貼り直す値なので、
+受理できない URL を保存してはいけない。
+
+問題になるのは Places の `googleMapsUri` で、これは
+`https://maps.google.com/?cid=<数値>` 形式を返し得る。CID は Place ID とは
+別体系で URL Import が受け付けないため、そのまま `map_url` に採用すると
+「保存済みの店舗 URL を貼り直すと `not_place_url`」という自己不整合になる。
+
+`withReimportableMapUrl`（`url-parse-actions.ts`）が両経路の出口でこれを保証する。
+
+| `googleMapsUri` | `map_url` |
+|---|---|
+| 受理可能（`/maps/place/…` 等） | そのまま採用 |
+| 受理不可（`?cid=…`） | policy を通過した URL 由来の値へ戻す |
+
+Place ID 経路・既存の place URL 経路（Places 補完後）の**両方**に適用される。
 
 ---
 

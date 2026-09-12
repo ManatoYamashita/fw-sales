@@ -206,29 +206,33 @@ const PLACE_ID_PARAM = "query_place_id";
 const PLACE_ID_Q_PREFIX = "place_id:";
 
 /**
- * Place ID の長さ上限。Google は「最大 255 文字程度の不透明な文字列」とし、
- * 正確な最大長を保証していないため、**正しい ID を弾かないよう余裕を持たせた**
- * 安全弁として置く(URL 全体を ID として誤採用する事故を防ぐのが目的)。
- */
-const PLACE_ID_MAX_LENGTH = 512;
-
-/**
- * Place ID として受け付ける文字集合。
+ * Place ID として**明らかに無効**な文字。空白 (Unicode 空白含む) と制御文字のみ。
  *
- * Google は Place ID を「不透明な識別子」と定義しており内部構造に依存してはいけないが、
- * 実際に発行される ID は URL-safe base64 の文字集合 (`A-Za-z0-9_-`) に収まる。
- * ここを過度に狭めると正しい ID を弾くため、**構造は一切仮定せず**
- * 「制御文字・空白・区切り記号を含まない不透明トークンであること」だけを要求する。
+ * ## なぜ文字集合・最大長で validity を決めないのか
  *
- * なお Place Details の URL 組み立て側 (`buildPlaceDetailsUrl`) は
- * `encodeURIComponent` を通すため、ここは URL injection 対策ではなく
- * 「明らかに Place ID でないもの(クエリ全体・空文字・改行入り)を弾く」ための検査。
+ * Google は Place ID を「テキスト識別子」とだけ定義し、
+ * **最大長を規定していない**(公式ドキュメントに "there is no maximum length" と明記)。
+ * 実際に発行される ID が URL-safe base64 の範囲に収まることが多いのは事実だが、
+ * それは**公式に保証された仕様ではない**。独自の最大長や文字集合を validity 条件に
+ * すると、仕様上正しい ID を将来弾く。
+ *
+ * 安全性は次の層で確保されており、ここで形式を推測する必要はない:
+ *
+ * - allowlist 済みの Google マップホストであること
+ * - `/maps/…` 配下のパスであること
+ * - `query_place_id` / `q=place_id:` という**明示形式**で与えられていること
+ * - 値の取り出しが `URLSearchParams` であること (クエリ全体を ID として採らない)
+ * - Place Details の URL 組み立てが `encodeURIComponent` を通すこと
+ *
+ * したがってここは「空・空白のみ・制御文字入り」という、
+ * **どう解釈しても識別子になり得ないもの**だけを落とす最小限の検査に留める。
+ * 解決できない ID は Places API 側が失敗を返し、`place_lookup_failed` になる。
  */
-const PLACE_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
+const PLACE_ID_INVALID_CHAR = /[\s --]/;
 
-/** URL から取り出した文字列が Place ID として現実的な形かを判定する。 */
+/** URL から取り出した文字列が Place ID として成立し得るかを判定する。 */
 function isValidPlaceId(value: string): boolean {
-  return value.length <= PLACE_ID_MAX_LENGTH && PLACE_ID_PATTERN.test(value);
+  return value !== "" && !PLACE_ID_INVALID_CHAR.test(value);
 }
 
 /**
