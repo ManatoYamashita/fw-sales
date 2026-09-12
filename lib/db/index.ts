@@ -22,6 +22,7 @@
 import "server-only";
 
 export { db, sql } from "./client";
+export { makeEventLogRepo, dbEventLogRepo } from "./event-log-repository";
 export type { DbClient, Tx } from "./client";
 export { makeDealRepo, dbDealRepo } from "./deal-repository";
 export { makeStoreRepo, dbStoreRepo } from "./store-repository";

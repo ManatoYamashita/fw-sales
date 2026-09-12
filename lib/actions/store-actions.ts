@@ -33,7 +33,10 @@ import {
   success,
   type ActionResult,
 } from "./_helpers";
-import { requireAdmin, requireSignedIn } from "./_authz";
+import { requireAdmin, requireSignedInWithProfile } from "./_authz";
+import { AUDIT_EVENTS, SALES_PROGRESS_FIELDS, type SalesProgressField } from "@/lib/observability/events";
+import { snapshotActor } from "@/lib/observability/actor";
+import { writeAudit } from "@/lib/observability/audit";
 
 function asPriority(value: string): Priority {
   return (PRIORITIES as readonly string[]).includes(value)
@@ -339,8 +342,15 @@ export async function updateSalesProgressAction(
   id: string,
   formData: FormData,
 ): Promise<ActionResult> {
-  const denied = await requireSignedIn();
-  if (denied) return denied;
+  const guard = await requireSignedInWithProfile();
+  if (!guard.ok) {
+    await writeAudit({
+      event: AUDIT_EVENTS.authzDenied, actor: null,
+      storeId: null,
+      payload: { operation: AUDIT_EVENTS.salesProgressUpdate, reason: "unauthenticated" },
+    });
+    return guard.denied;
+  }
   if (typeof id !== "string" || id.trim() === "") {
     return failure("店舗が指定されていません");
   }
@@ -384,9 +394,20 @@ export async function updateSalesProgressAction(
   if (hasAppointmentDate) patch.appointment_acquired_date = appointment_acquired_date;
   if (hasMemo) patch.memo = memo ?? "";
 
-  let updated;
+  let receipt: { updated: boolean; changedFields: SalesProgressField[] };
   try {
-    updated = await repos.store.update(id, patch);
+    // Compare under the existing row-lock/transaction API so concurrent edits
+    // cannot make changedFields fictional. No audit I/O while holding the lock.
+    receipt = await repos.transaction(async ({ store }) => {
+      const current = await store.getForUpdate(id);
+      if (!current) return { updated: false, changedFields: [] };
+      const changedFields = SALES_PROGRESS_FIELDS.filter(
+        (field) => patch[field] !== undefined && patch[field] !== current[field],
+      );
+      if (changedFields.length === 0) return { updated: true, changedFields };
+      const updated = await store.update(id, patch);
+      return { updated: Boolean(updated), changedFields };
+    });
   } catch (err) {
     const parsed = parsePostgresError(err);
     console.error("[stores.salesProgress] failed", {
@@ -397,7 +418,14 @@ export async function updateSalesProgressAction(
     });
     return failure("営業進捗の更新に失敗しました");
   }
-  if (!updated) return failure("店舗が見つかりませんでした");
+  if (!receipt.updated) return failure("店舗が見つかりませんでした");
+  if (receipt.changedFields.length > 0) {
+    await writeAudit({
+      event: AUDIT_EVENTS.salesProgressUpdate,
+      actor: snapshotActor(guard.profile), storeId: id,
+      payload: { changedFields: receipt.changedFields },
+    });
+  }
   // 営業担当 / アポ取得日 / 顧客共有メモはいずれも保存直後にこの画面と店舗一覧で
   // 目視される値なので、該当タグだけ即時失効する。
   invalidateStoreScopesImmediate(id);
@@ -448,7 +476,13 @@ export async function getStoreDeleteImpactAction(
 }
 
 export async function deleteStoreAction(id: string): Promise<ActionResult> {
-  const guard = await requireAdmin("stores.delete");
+  const guard = await requireAdmin(AUDIT_EVENTS.storeDelete, async ({ profile, reason }) => {
+    await writeAudit({
+      event: AUDIT_EVENTS.authzDenied, actor: profile ? snapshotActor(profile) : null,
+      storeId: null,
+      payload: { operation: AUDIT_EVENTS.storeDelete, reason },
+    });
+  });
   if (!guard.ok) return guard.denied;
   try {
     const removed = await repos.store.delete(id);
@@ -468,6 +502,10 @@ export async function deleteStoreAction(id: string): Promise<ActionResult> {
     if (parsed === null) dumpUnrecognizedErrorShape("[stores.delete]", err);
     return failure(formatUserMessage(parsed, "店舗の削除に失敗しました"));
   }
+  await writeAudit({
+    event: AUDIT_EVENTS.storeDelete, actor: snapshotActor(guard.profile), storeId: id,
+    payload: { deletionSucceeded: true },
+  });
   // 関連レコード (商談 / 引き継ぎ / AI 調査 run) は FK の ON DELETE CASCADE
   // (migration 0021 で再宣言 / #152) により連鎖削除され、場所候補は SET NULL で
   // 紐付け解除される。
@@ -478,7 +516,7 @@ export async function deleteStoreAction(id: string): Promise<ActionResult> {
   revalidateTag(CACHE_TAGS.dealsByStore(id), "max");
   revalidateTag(CACHE_TAGS.handoffs, "max");
   revalidateTag(CACHE_TAGS.handoffsByStore(id), "max");
-  console.log("[audit] stores.delete", { by: guard.profile.email, id });
+  // Persistent audit above replaces the legacy success console (no duplicate).
   redirect("/stores");
 }
 

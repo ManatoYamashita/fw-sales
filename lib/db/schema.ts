@@ -13,11 +13,38 @@ import {
 import { sql } from "drizzle-orm";
 
 import type { BasicInfo } from "@/types/basic-info";
+import type { AuditPayload, AuditError } from "@/lib/observability/events";
 import type {
   ResearchItem,
   SourceRegistryEntry,
   ReviewDecisions,
 } from "@/types/research-run";
+
+/**
+ * Phase 1 audit trail. No business/actor FKs: deletion must retain evidence.
+ * RLS has NO client policies. Migration also revokes Data API role privileges.
+ * The server DATABASE_URL must use the owner/BYPASSRLS role, as with the existing
+ * direct-postgres repositories; a connection alone does not bypass RLS.
+ * Do not FORCE RLS (the table owner must be able to append). No client grants.
+ */
+export const eventLogs = pgTable("event_logs", {
+  id: text("id").primaryKey(),
+  occurred_at: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
+  level: text("level").$type<"info" | "warn">().notNull(),
+  kind: text("kind").$type<"mutation" | "authz_denied">().notNull(),
+  event: text("event").notNull(),
+  actor_user_id: uuid("actor_user_id"),
+  actor_email: text("actor_email"),
+  target_type: text("target_type").notNull(),
+  target_id: text("target_id"),
+  store_id: text("store_id"),
+  payload: jsonb("payload").$type<AuditPayload>().notNull(),
+  error: jsonb("error").$type<AuditError>(),
+}, (table) => [
+  index("event_logs_occurred_at_idx").on(table.occurred_at.desc()),
+  index("event_logs_store_occurred_at_idx").on(table.store_id, table.occurred_at.desc()),
+  index("event_logs_event_occurred_at_idx").on(table.event, table.occurred_at.desc()),
+]).enableRLS();
 
 /**
  * profiles テーブル (auth-and-notifications spec, Issue #16)

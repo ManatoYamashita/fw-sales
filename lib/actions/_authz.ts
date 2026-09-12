@@ -31,13 +31,42 @@ export type AdminGuard =
   | { ok: true; profile: Profile }
   | { ok: false; denied: ActionResult<never> };
 
+type Denial = { profile: Profile | null; reason: "unauthenticated" | "not_admin" };
+type DenialObserver = (denial: Denial) => Promise<void>;
+
+async function notifyDenial(observer: DenialObserver, denial: Denial): Promise<void> {
+  try {
+    await observer(denial);
+  } catch {
+    // Notification is best-effort and must never change the authorization
+    // decision. Do not recursively persist this observer failure or include
+    // caller-controlled values / raw errors in the console fallback.
+    try {
+      console.error(JSON.stringify({
+        level: "error",
+        event: "authz.denial_observer_failed",
+        reason: denial.reason,
+      }));
+    } catch {
+      // A broken console sink must not change the denial result either.
+    }
+  }
+}
+
+/** Same profile-existence rule as requireSignedIn; exposes the verified actor. */
+export async function requireSignedInWithProfile(): Promise<AdminGuard> {
+  const profile = await getCurrentProfile();
+  return profile ? { ok: true, profile } : { ok: false, denied: failure("ログインが必要です") };
+}
+
 /**
  * 呼び出し元がログイン済みであることを要求する (非破壊 WRITE 用の最小ガード)。
  * `requireAdmin` と異なりロールは問わない。proxy による保護に加え、
  * Server Action 単体でも認証チェックする多層防御として各 action の先頭で呼ぶ。
  */
 export async function requireSignedIn(): Promise<ActionResult<never> | null> {
-  return (await getCurrentProfile()) ? null : failure("ログインが必要です");
+  const guard = await requireSignedInWithProfile();
+  return guard.ok ? null : guard.denied;
 }
 
 /**
@@ -46,14 +75,17 @@ export async function requireSignedIn(): Promise<ActionResult<never> | null> {
  * @param action 監査ログ用のアクション識別子 (既存ログ prefix と統一。例: "stores.delete")
  * @returns 許可時 `{ ok: true, profile }` / 拒否時 `{ ok: false, denied }`(UI 返却用 failure)
  */
-export async function requireAdmin(action: string): Promise<AdminGuard> {
+export async function requireAdmin(action: string, onDenied?: DenialObserver): Promise<AdminGuard> {
   const profile = await getCurrentProfile();
   if (!profile) {
-    console.warn("[authz] denied", { action, reason: "unauthenticated" });
+    // Phase 1 callers opt into persistent recording instead of a second console log.
+    if (onDenied) await notifyDenial(onDenied, { profile: null, reason: "unauthenticated" });
+    else console.warn("[authz] denied", { action, reason: "unauthenticated" });
     return { ok: false, denied: failure("ログインが必要です") };
   }
   if (profile.role !== "admin") {
-    console.warn("[authz] denied", {
+    if (onDenied) await notifyDenial(onDenied, { profile, reason: "not_admin" });
+    else console.warn("[authz] denied", {
       action,
       userId: profile.id,
       email: profile.email,

@@ -9,6 +9,7 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "e2e:setup": "node --env-file-if-exists=.env.e2e scripts/e2e-setup.mjs",
     "e2e:server": "node --env-file-if-exists=.env.e2e scripts/e2e-server.mjs",
     "e2e": "pnpm e2e:setup && node --env-file-if-exists=.env.e2e ./node_modules/@playwright/test/cli.js test",
