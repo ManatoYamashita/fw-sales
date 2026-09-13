@@ -7,6 +7,37 @@ import { safeFetchHtml, type SafeFetchFailureReason } from "@/lib/security/safe-
 const FETCH_TIMEOUT_MS = 8000;
 /** 1リクエストで読み込む本文の最大バイト数(fix/url-import-ssrf-hardening)。 */
 const MAX_OGP_BODY_BYTES = 2_000_000;
+/**
+ * `fetchOgp` が許可する scheme。**HTTPS のみ**(PR #285 review BLOCKER)。
+ *
+ * `safeFetchHtml` の既定は `DEFAULT_ALLOWED_SCHEMES = ["http:", "https:"]` で、これは
+ * 汎用 primitive としての既定値であり変更しない。絞り込みは**呼び出し側の責務**として
+ * `SafeFetchOptions.allowedSchemes` で行う設計になっている。
+ *
+ * URL Import の trust boundary は HTTPS-only である。`evaluateUrlImportPolicy` は
+ * 入力 URL を `https:` に限定しているが、それは**貼り付けられた 1 本目の URL だけ**の
+ * 保証で、既定のままだと
+ *
+ *   https://maps.app.goo.gl/xxxx  →  301  →  http://evil.example/...
+ *
+ * のように**中間 / 最終 hop が平文へ降格**した経路を取得できてしまい、入力だけ
+ * HTTPS-only という不整合になっていた。MITM が平文 hop の応答を差し替えれば
+ * `final_url` を任意に操作できる。
+ *
+ * `allowedSchemes` は `safeFetchHtml` の redirect ループが **hop ごとに**
+ * `validateExternalUrl` へ渡すため、ここで絞ると初回 hop と全 redirect hop の
+ * **すべて**に適用される。しかも scheme 判定は DNS 解決・接続より前に走るので、
+ * `http:` の redirect 先へは**接続そのものが発生しない**(拒否は `disallowed_scheme`)。
+ *
+ * 「各 hop で SSRF 検証する」(IP レンジ / credentials / DNS pinning) と
+ * 「各 hop が HTTPS である」は**別の保証**であり、前者は既定で有効だが後者はこの
+ * オプションでしか得られない。
+ *
+ * `fetchOgp` の本番呼び出し元は URL Import の短縮 URL 解決 1 箇所のみ
+ * (`lib/actions/url-parse-actions.ts` の `resolveShortUrl`) で、そこへ渡る URL は
+ * policy を通過した `https:` 限定のため、この絞り込みで失われる正常系は無い。
+ */
+const ALLOWED_SCHEMES = ["https:"] as const;
 /** 取得失敗の診断ログに残す本文の先頭文字数(#208)。UI へは一切出さない。 */
 const BODY_LOG_HEAD_CHARS = 200;
 
@@ -82,6 +113,8 @@ export async function fetchOgp(url: string): Promise<OgpResult> {
   if (!url) return { ok: false, error: "URL が未指定です" };
 
   const result = await safeFetchHtml(url, {
+    // 全 redirect hop へ HTTPS-only を適用する (上の ALLOWED_SCHEMES を参照)。
+    allowedSchemes: ALLOWED_SCHEMES,
     hopTimeoutMs: 5000,
     totalTimeoutMs: FETCH_TIMEOUT_MS,
     maxBodyBytes: MAX_OGP_BODY_BYTES,

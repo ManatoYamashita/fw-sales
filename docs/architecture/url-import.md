@@ -2,24 +2,101 @@
 
 店舗新規登録画面（`/stores/new`）の「GoogleマップURL」タブで、URL から店舗情報を自動入力する仕組みのリファレンス。
 
-- **対象機能**: **Google マップの店舗ページ URL**（および短縮共有 URL）を貼り付けると、フォームの各フィールドを自動補完する。
+- **対象機能**: **Google マップの店舗ページ URL**（および共有リンク）を貼り付けると、フォームの各フィールドを自動補完する。
 - **ユースケース**: 営業担当が Google マップで見つけた店舗を、最小入力で社内 DB に登録するための一次入力支援。
 
 ---
 
 ## 0. product boundary（Issue #207）
 
-この導線が受け付けるのは **Google マップの店舗 URL のみ**である。
+この導線が受け付けるのは **Google マップで 1 店舗を一意特定できる URL のみ**である。
+
+判定軸はドメインではなく **その URL が 1 店舗を曖昧さなく指しているか**。
+「Google マップの URL なら何でも受け付ける」ようにはしない。generic な検索 URL を
+受け付けて先頭候補を採用すると、**別の店舗を登録する**事故になるためである
+（Issue #207 で Places 照合から口コミ件数ベースの自動採用を撤去したのと同じ理由）。
 
 | 入力 | 扱い |
 |---|---|
-| `…/maps/place/<店名>`（`google.com` / `google.co.jp` / `maps.google.*`） | ✅ 対応 |
+| `…/maps/place/<店名>`（`google.com` / `google.co.jp` / `maps.google.*`） | ✅ 対応（`google_maps_place`） |
+| `…/maps/**?query=<店名>&query_place_id=<PLACE_ID>`（公式の Search 形式） | ✅ 対応（`google_maps_place_id`）。Place Details を直接引く |
+| `…/maps/**?query_place_id=<PLACE_ID>`（`query` 無し） | ✅ **入力としては**対応。過去に保存された URL の後方互換（下記） |
+| `…/maps/**?q=place_id:<PLACE_ID>`（legacy 形式） | ✅ 対応（`google_maps_place_id`） |
 | `maps.app.goo.gl/<id>` / `goo.gl/maps/<id>`（短縮共有 URL） | ✅ 対応（redirect 後の URL を**再検証**） |
+| `share.google/<id>`（Google の共有リンク） | ❌ `unsupported_source`（下記「share.google を対応しない理由」） |
 | 食べログ | ❌ **UI では非対応**。`tabelog_unsupported` として拒否 |
 | Instagram | ❌ URL Import では非対応 |
-| Google 検索結果 / Google マップの検索・経路 URL / Google トップ | ❌ `not_place_url` として拒否 |
+| `…/maps/search/<キーワード>` / `?q=<キーワード>`（Place ID 無し） | ❌ `not_place_url`。検索結果であり 1 店舗を指さない |
+| `?cid=<数値>` | ❌ `not_place_url`（下記「CID を対応しない理由」） |
+| Google 検索結果 / Google マップの経路 URL / Google トップ | ❌ `not_place_url` として拒否 |
 | その他の一般 Web ページ | ❌ `unsupported_source` として拒否 |
 | `http://` / 非標準ポート / credentials 付き | ❌ `invalid_url` として拒否（下記） |
+
+### Place ID を明示する URL（`google_maps_place_id`）
+
+`query_place_id` / `q=place_id:` は **店舗名ではなく ID で 1 店舗を確定**できるため、
+`/maps/place/<店名>` より強い identity を持つ。両方を満たす URL では Place ID 側を採用する。
+
+- Place ID の読み取りは **`/maps/…` 配下のパスに限定**する。これが無いと
+  `https://www.google.com/search?q=place_id:…`（Google **検索**結果）まで通り、
+  Issue #207 で塞いだ「`<title>Google Search</title>` を店舗名にする」経路が復活する。
+- `place_id:` 接頭辞の**無い** `?q=` は generic search として扱い、絶対に採用しない。
+- Place ID は不透明なテキスト識別子として扱い、**文字集合も最大長も仮定しない**。
+  Google は Place ID の最大長を規定していない（公式に "there is no maximum length"）。
+  独自の上限や文字集合を validity 条件にすると、仕様上正しい ID を将来弾く。
+  検証は「空でない」「空白のみでない」「制御文字を含まない」だけに留める。
+  解決できない ID は Places API 側が失敗を返し `place_lookup_failed` になる。
+
+  安全性は形式推測ではなく次の層で確保している:
+  allowlist 済みホスト / `/maps/…` 配下 / `query_place_id`・`q=place_id:` の明示形式 /
+  `URLSearchParams` による取り出し（クエリ全体を ID として採らない） /
+  Place Details 組み立て時の `encodeURIComponent`。
+
+### 競合する Place ID は受け付けない
+
+`?query_place_id=A&query_place_id=B` や `?query_place_id=A&q=place_id:B` のように
+**異なる identity が併記された URL** を先頭値だけ見て受理すると、ユーザーが意図したのと
+別の店舗を登録しうる。`getAll` で全候補を集め、次を満たす場合のみ受理する。
+
+- 候補がすべて valid
+- かつ すべて同一 ID
+
+同じ ID の重複は曖昧さが無いので受理する。候補が 1 つも valid でない場合は
+「使える identity が無い」だけなので通常判定へ委ねる
+（`/maps/place/<店名>?query_place_id=` を壊さないため）。
+競合は `/maps/place/<店名>` を満たしていても受け付けない — 名前で照合し直すと
+「URL に書かれたどちらの ID でもない店舗」を登録しうるため。
+
+### 入力として受理する形式と、新規生成する形式を分ける
+
+この 2 つは別の話であり、混同しない。
+
+| | 形式 |
+|---|---|
+| **入力として受理** | `query` の有無を問わず `query_place_id` があれば受理する |
+| **新規生成** | 必ず `?api=1&query=<検索語>&query_place_id=<ID>`（公式の Search 形式） |
+
+Google Maps URLs の Search action では **`query` が REQUIRED** であり、
+`query_place_id` を使う場合も `query` との併記が必要。したがって
+**`query_place_id` 単独の形式を「Google 公式の推奨形式」とは扱わない。**
+
+一方で、本 PR 以前に `stores.map_url` へ保存された `query` 無しの URL が存在しうる。
+policy で `query` を必須にすると、それらを貼り直したユーザーが読み込めなくなる。
+**「過去形式を読み込める」ことと「今後生成する URL は公式形式にする」ことを分離**し、
+policy の受理条件は広いまま、生成側 (`buildPlaceIdMapsUrl`) だけを公式形式に揃えている。
+
+生成は `URLSearchParams` で行い、店舗名に空白・日本語・`&`・`#`・`+` 等が含まれても
+query parameter が壊れない。Place ID も内部文字集合を仮定せず同じ経路で encode する。
+
+この形式は **Text Search を経由しない**（§3.4）。
+
+### CID を対応しない理由
+
+`?cid=<数値>` は Places API の `googleMapsUri` が返す形式で 1 店舗を指してはいるが、
+**CID は Place ID とは別体系の識別子**であり、現行の Places API 実装に
+CID → Place ID の変換経路が無い。「1 店舗を指す」ことと「この実装で一意に解決できる」
+ことは別なので、確実に解決できない以上は対応済みにしない。対応するなら follow-up で
+変換手段の可否から検討する。
 
 ### scheme / port の方針
 
@@ -30,6 +107,11 @@
   http URL が得られることはない。唯一の互換性懸念だった `goo.gl` 短縮リンクは
   Google 自身が新規発行を終了しており、救う価値は小さいと判断した。
   古い http リンクを貼った場合は `invalid_url`（「URLの形式を確認してください。」）になる。
+- **この HTTPS-only は redirect hop にも及ぶ。** policy が検査できるのは貼り付けられた
+  1 本目の URL だけなので、`fetchOgp` は `safeFetchHtml` へ `allowedSchemes: ["https:"]` を
+  渡し、**初回 hop と全 redirect hop**を HTTPS に限定する（§3.2 / §5）。これが無いと
+  `https://maps.app.goo.gl/… → 301 → http://evil.example/…` のように途中で平文へ
+  降格でき、入力だけ HTTPS-only という不整合になる。
 - **非標準ポートは拒否する。** `URL.hostname` はポートを含まないため、hostname だけで
   allowlist 判定すると `https://www.google.com:444/maps/place/foo` が通ってしまい、
   短縮 URL 経由で任意ポートへ接続しうる。`URL` は既定ポート（https の 443）を
@@ -65,11 +147,12 @@
 ```
 UrlSearchPanel (Client Component)
   └─ importFromUrlAction (Server Action)
-       ├─ evaluateUrlImportPolicy : 受け付けてよい URL かの判定（純粋関数）
+       ├─ evaluateUrlImportPolicy : 受け付けてよい URL かの判定 + Place ID 抽出（純粋関数）
        ├─ fetchOgp                : 短縮 URL の redirect 解決のみ（server-only）
+       ├─ getPlaceById            : Place ID がある場合のみ。Place Details 1 回（§3.4）
        ├─ parseGoogleMapsUrl      : URL構造の文字列解析（純粋関数）
        ├─ applyParsedData         : フォーム値に整形（純粋関数）
-       └─ enrichWithPlacesFallback: Google Places で不足項目を補完
+       └─ enrichWithPlacesFallback: Google Places で不足項目を補完（Place ID 経路では呼ばない）
 ```
 
 パーサは汎用ディスパッチャ `parseStoreUrl` ではなく `parseGoogleMapsUrl` を
@@ -162,33 +245,75 @@ Server Action は `reason`（機械可読）だけを返し、**文言は持た�
 | `not_place_url` | 店舗ページのGoogleマップURLを貼り付けてください。 |
 | `invalid_url` | URLの形式を確認してください。 |
 | `short_url_resolve_failed` | Googleマップの共有URLを読み込めませんでした。時間をおいてもう一度お試しください。 |
+| `place_lookup_failed` | GoogleマップURLから店舗情報を取得できませんでした。時間をおいて再度お試しいただくか、別の店舗URLをご利用ください。 |
 
-`short_url_resolve_failed` だけは **policy が返す理由ではない**。
+`short_url_resolve_failed` / `place_lookup_failed` は **policy が返す理由ではない**。
 型も分かれており、`evaluateUrlImportPolicy` は `UrlImportPolicyRejectReason`（4 種）を返し、
-Server Action は実行時失敗を足した `UrlImportRejectReason`（5 種）を返す。
+Server Action は実行時失敗を足した `UrlImportRejectReason`（6 種）を返す。
+
+3 つの失敗を混ぜないこと。ユーザーが取るべき行動が異なる。
+
+| reason | 何が起きたか | 次の行動 |
+|---|---|---|
+| `not_place_url` | URL が 1 店舗を指していない | **別の URL を貼る** |
+| `short_url_resolve_failed` | 転送先が分からないまま取得失敗 | 時間をおいて再試行 |
+| `place_lookup_failed` | 店舗は確定したが情報を取得できない | 再試行、または別の店舗 URL |
 
 ### 3.2 短縮 URL の再検証
 
-短縮 URL は貼り付け時点では転送先が分からないため、
-`short link → redirect → evil.example` を店舗 URL として採用しないよう、
-`final_url` を必ず `evaluateUrlImportPolicy` へ再通過させ、
-**`google_maps_place` であること**を要求する（短縮 URL の連鎖は追わない）。
+短縮共有 URL（`maps.app.goo.gl` / `goo.gl/maps`）は貼り付け時点では
+転送先が分からないため、`short link → redirect → evil.example` を店舗 URL として
+採用しないよう、展開後の URL を必ず再検証する。
 
-redirect 追跡そのものは `fetchOgp` → `safeFetchHtml` が担い、
-**SSRF 防御（DNS pinning / per-hop deadline / body cap / content-type allowlist）は
-一切変更していない**。
+redirect の扱いは次のとおり。
 
-失敗の切り分けは 3 段階で、**取得失敗と「転送先が店舗ページでない」を混ぜない**:
+1. `safeFetchHtml` が **`maxRedirects`（既定 5）の範囲内で中間 redirect を追跡**する。
+   各 hop で DNS pinning・接続先 IP・credentials・scheme/port 等の SSRF 検証を**毎回**
+   やり直す（hop ごとに再検証するのが `safe-http-fetch` の設計）。上限超過は
+   `too_many_redirects`。
+2. **各 hop は HTTPS に限定される。** 「hop ごとに SSRF 検証する」ことと
+   「hop ごとに HTTPS である」ことは**別の保証**である。前者は `safeFetchHtml` の既定で
+   得られるが、後者は呼び出し側が `allowedSchemes` を絞らないと得られない
+   （`safeFetchHtml` の既定 `DEFAULT_ALLOWED_SCHEMES` は `["http:", "https:"]`）。
+   `fetchOgp` は `allowedSchemes: ["https:"]` を渡すため、`http:` への redirect は
+   `disallowed_scheme` で拒否され、**その転送先へは DNS 解決も接続も行われない**
+   （scheme 判定が `validateExternalUrl` の最初の分岐であるため）。
+3. Server Action は最終的な `final_url` を `evaluateUrlImportPolicy` へ再通過させる。
+4. 受理するのは **`google_maps_place` または `google_maps_place_id`** のみ。
+   `final_url` が共有リンクのままなら拒否する（policy 側の再入ループは行わない）。
 
-| `fetchOgp` の結果 | 意味 | `reason` |
-|---|---|---|
-| `ok: false` | timeout / DNS 解決失敗 / network error / 非 2xx。**転送先が何だったか分かっていない** | `short_url_resolve_failed` |
-| `ok: true` / `final_url` 無し | 取得できたが転送されなかった。短縮 URL 単体では店舗を特定できない | `not_place_url` |
-| `ok: true` / `final_url` あり | 展開後 URL を policy へ再通過させた判定に従う | policy の `reason` |
+> 「redirect を一切追わない」のではない。追跡は `safeFetchHtml` が担い、
+> **policy を再帰的に再入しない**という意味である。
 
-両者を `not_place_url` に潰すと、有効な共有 URL を貼ったユーザーへ
-「店舗ページの URL を貼り付けてください」と案内してしまい、貼り直しを繰り返させる。
-`ogp.error`（`"タイムアウトしました"` / `"HTTP 500"` 等）は UI へ運ばない。
+展開先が Place ID 形式（`query_place_id` / `q=place_id:`）の場合も、
+同じ再検証を通ったうえで §3.4 の経路に入る。**再検証は緩めていない** —
+lookalike ドメイン上の Place ID URL へ転送された場合も従来どおり拒否される。
+
+### `share.google` を対応しない理由（実 URL で検証）
+
+Google マップの「共有 → リンクをコピー」が `https://share.google/<id>` を発行する場合が
+あるが、**この形式は対応していない**（`unsupported_source`）。
+
+実際に発行された URL を実測した結果、転送先は Google マップではなく
+**Google 検索結果ページ**だった。
+
+```
+share.google/<id>
+  -> 302 www.google.com/share.google?q=<id>
+  -> 301 www.google.com/search?...&q=<店舗名>&kgmid=<Knowledge Graph MID>
+  -> 200 Google Search
+```
+
+最終 URL に `query_place_id` / Place ID / CID / `/maps/place/` は含まれず、得られるのは
+**店舗名テキストと Knowledge Graph MID だけ**。店舗名で Text Search へ落とすと同名店舗で
+別店舗を引く余地が生まれ、Issue #207 で守った wrong-store prevention の境界を弱めるため
+対応しない（Knowledge Graph MID → Place ID の変換経路も現行実装には無い）。
+
+policy 段階で弾くため、この形式では**外部リクエストを 1 回も発生させない**。
+UI では代替手順（店舗ページをブラウザで開きアドレスバーの URL を使う）を案内している。
+
+> 「Google の共有リンクすべてに対応」ではない。対応するのは `maps.app.goo.gl` /
+> `goo.gl/maps` 形式で、いずれも展開後 URL の再検証を経て初めて店舗と認める。
 
 ### 3.3 full place URL で OGP を取得しない理由
 
@@ -198,6 +323,67 @@ redirect 追跡そのものは `fetchOgp` → `safeFetchHtml` が担い、
 - `OgpResult.html` の消費者だった `analyzeStoreAction` は既に撤去済みで、
   現在 `html` を読むコードは存在しない（`StoreNewFormInitialImport` からも削除した）。
 - したがって取得コスト・レイテンシ・失敗経路を増やすだけの価値しかない。
+
+### 3.4 Place ID がある場合に Text Search を使わない理由
+
+URL が Place ID を含んでいる時点で、店舗は**一意に確定している**。
+ここで `enrichWithPlacesFallback`（Text Search）を挟むと、確定済みの identity を
+店舗名の文字列照合へ落とすことになり、同名店舗で `ambiguous` になったり
+別店舗を引く余地を作る。**確定している identity をわざわざ曖昧にしない。**
+
+```
+policy (google_maps_place_id, placeId)
+  └─ getPlaceById(placeId)        : Place Details 1 回だけ
+       ├─ applyParsedData          : map_url のみ URL 由来
+       └─ mergePlaceIntoApply      : name/住所/電話/評価/業態は Places 由来
+```
+
+- API 呼び出しは **Place Details 1 回だけ**。Text Search との二重呼び出しはしない。
+- 店舗名は **URL から一切読み取らない**。`?q=place_id:…` の文字列や
+  `?query=<名前>` を店舗名として採用しない（Places の値を正とする）。
+- 失敗時は `place_lookup_failed`（timeout / AbortError も同じ reason へ正規化）。
+  Place Details には `URL_IMPORT_PLACE_DETAILS_TIMEOUT_MS`（15 秒）を渡し、
+  Places が応答しないときに Server Action が無制限に待たないようにする。
+
+#### ログの責務分担
+
+「UI へ出さない」ことと「サーバログに一切残さない」ことは**別**である。混同しない。
+
+| 層 | 出力先 | 内容 |
+|---|---|---|
+| Action の戻り値（UI） | クライアント | `reason` のみ。raw message / HTTP status / レスポンス本文は載せない |
+| URL Import 層のログ | サーバ | `toPlacesDiagnosticKind` の分類値のみ |
+| Places client（`lib/places/google.ts`） | サーバ | 非 2xx 時に **status と redact / clip 済みの body 先頭**を構造化ログへ記録 |
+
+最下層の Places client が診断情報をサーバログへ残すのは**既存の意図的な observability
+設計**であり、本 PR では変更していない。API キー等は `redactSecrets` で除去され、
+長さは `clipForLog` で制限される。したがって「サーバログにもレスポンス本文を一切出さない」
+のではなく、**ユーザーへ到達する経路には出さない**が正しい。
+- 結果は `placesFallback: { used: true, reason: "place_id_url", matched_place_id }`
+  として報告する（照合の失敗理由ではないので UI の警告文言は持たない）。
+
+### 3.5 `map_url` の round-trip invariant
+
+**success で返す `suggested.map_url` は、`evaluateUrlImportPolicy` で再び受理される。**
+
+`stores.map_url` はユーザーがコピーして URL Import へ貼り直す値なので、
+受理できない URL を保存してはいけない。
+
+問題になるのは Places の `googleMapsUri` で、これは
+`https://maps.google.com/?cid=<数値>` 形式を返し得る。CID は Place ID とは
+別体系で URL Import が受け付けないため、そのまま `map_url` に採用すると
+「保存済みの店舗 URL を貼り直すと `not_place_url`」という自己不整合になる。
+
+経路ごとの扱い:
+
+| 経路 | `map_url` |
+|---|---|
+| Place ID 経路 | 取得した `placeId` / `name` から **公式形式へ正規化**（`buildPlaceIdMapsUrl`）。入力 URL をそのまま保持しない。短縮 URL 経由でも同じ |
+| 既存の place URL 経路 | `googleMapsUri` が受理可能ならそれを採用。受理不可（`?cid=…`）なら URL 由来の値へ戻す（`withReimportableMapUrl`） |
+
+Place ID 経路の正規化は、公式仕様の必須項目 `query` を満たしつつ Place ID で一意特定でき、
+CID へ戻らず再 import もできる、という条件を同時に満たす。
+`source_url` は**ユーザーが実際に貼った URL のまま**保持する（正規化するのは `map_url` だけ）。
 
 ---
 
@@ -259,8 +445,23 @@ URL マッチのみ。`type: "instagram"` と `instagram_url` を返す。OGP �
 
 - **短縮共有 URL（`maps.app.goo.gl` / `goo.gl/maps`）の redirect 解決のときだけ呼ばれる。**
   full place URL では呼ばれない（§3.3）。受け付けない URL でも呼ばれない（§3）。
-- `User-Agent` を独自に偽装、`AbortController` で 8 秒タイムアウト、`cache: "no-store"` で常に最新を取得。
-- 外部プロキシ（allorigins 等）は使わず、Next サーバから直 fetch。
+- fetch 自体は行わず、`lib/security/safe-http-fetch.ts` の `safeFetchHtml` へ委譲する。
+  `safeFetchHtml` は `fetch()` ではなく `node:https` / `node:http` の**手動 redirect ループ**で、
+  hop ごとに DNS 解決 → IP レンジ判定 → DNS pinning を行う（`AbortController` /
+  `cache: "no-store"` は使っていない）。
+- `fetchOgp` が渡すオプション:
+
+  | option | 値 | 意味 |
+  |---|---|---|
+  | `allowedSchemes` | `["https:"]` | 初回 hop と全 redirect hop を HTTPS に限定 |
+  | `hopTimeoutMs` | `5000` | 1 hop あたりの idle（無通信）timeout |
+  | `totalTimeoutMs` | `8000` | redirect 込み全体の**絶対デッドライン** |
+  | `maxBodyBytes` | `2_000_000` | 読み込む本文の上限（2MB） |
+
+  `maxRedirects` と Content-Type allowlist（`text/html` / `application/xhtml+xml`）は
+  `safeFetchHtml` の既定に従う。
+- `User-Agent` は `safeFetchHtml` 側の既定ヘッダ。外部プロキシ（allorigins 等）は使わず、
+  Next サーバから直接接続する。
 
 抽出ルール（正規表現ベース）:
 
@@ -276,11 +477,46 @@ URL マッチのみ。`type: "instagram"` と `instagram_url` を返す。OGP �
 
 エラーハンドリング:
 
-- HTTP 非 2xx → `{ ok: false, error: "HTTP {code}" }`
-- AbortError → `{ ok: false, error: "タイムアウトしました" }`
-- その他例外 → `{ ok: false, error: e.message }`
+`safeFetchHtml` は失敗時に**定型の `SafeFetchFailureReason` コードだけ**を返す。Node の生
+エラー文言（`connect ECONNREFUSED <ip>:<port>` 等、接続先 IP を含みうる）は戻り値に載らない。
+`fetchOgp` はその reason を `toSanitizedOgpError`（`SANITIZED_ERROR_MESSAGES` の全件マップ）で
+固定の日本語文言へ正規化する。
 
-UI ではこの `error` がバッジ右側に表示される。
+| `reason` | `OgpResult.error` |
+|---|---|
+| `invalid_url` | URLの形式が正しくありません |
+| `disallowed_scheme` | 対応していないURL形式です |
+| `credentials_in_url` | 認証情報を含むURLは使用できません |
+| `dns_lookup_failed` / `dns_no_records` | 指定されたURLへ接続できませんでした |
+| `dns_timeout` / `timeout` | 接続がタイムアウトしました / タイムアウトしました |
+| `disallowed_ip_range` | 安全上アクセスできないURLです |
+| `too_many_redirects` | リダイレクトが多すぎるため取得できませんでした |
+| `invalid_redirect_location` | リダイレクト先のURLが不正です |
+| `body_too_large` | 取得したページのサイズが大きすぎます |
+| `disallowed_content_type` | 対応していない形式のページです |
+| `http_error` / `network_error` | ページの取得に失敗しました |
+
+非 2xx は失敗ではなく `safeFetchHtml` から `ok: true` で返るため、`fetchOgp` 側で
+`{ ok: false, error: "HTTP {status}" }` へ変換する。
+
+**raw error は UI へ出さない。** 診断情報はサーバログのみ、という二系統設計:
+
+| 層 | 出力先 | 内容 |
+|---|---|---|
+| `safeFetchHtml` の失敗 | サーバログ `[safeFetchHtml] failed` | reason / scheme / host / path（クエリ除去、`clipForLog` で切詰）/ 解決先 IP / hop 番号 / Node の生 message |
+| `fetchOgp` の非 2xx | サーバログ `[fetchOgp] non-2xx` | status / `final_url`（クエリ・フラグメント除去）/ Content-Type / 本文先頭 200 文字 |
+| `fetchOgp` の name 未抽出 | サーバログ `[fetchOgp] no name extracted`（warn） | 上記 + `blacklistedTitle`。戻り値は `ok: true` のまま |
+| Places client (`lib/places/google.ts`) | サーバログ | 非 2xx 時に status と redact / clip 済み bodyHead |
+| Action の戻り値 | クライアント | `reason` のみ |
+
+`fetchOgp` は失敗理由の構造化ログを重ねて出さない（`safeFetchHtml` が host / path 付きで
+既に 1 行出しているため）。
+
+**URL Import ではこの `error` 文言は UI へ届かない。** `resolveShortUrl`
+（`lib/actions/url-parse-actions.ts`）は `fetchOgp` の `{ ok: false }` を理由を問わず
+`short_url_resolve_failed` へ正規化し、`ogp.error`（`"タイムアウトしました"` / `"HTTP 500"` 等）
+は `reason` へ載せない。sanitize 済みとはいえ HTTP status を UI へ運ぶ必要が無く、文言は
+呼び出し側が `reason` から決める設計を崩さないため（§3.1 の reason 表 / §3.2）。
 
 ---
 
@@ -376,7 +612,7 @@ reason を増やしたときに文言の追随漏れを compile time で検出�
 実装上の弱点として認識しておくべき項目。
 
 1. **Google マップは SPA レンダリング** — サーバ fetch では OGP がほぼ空のため、実用上 `parseGoogleMapsUrl` の URL 解析結果しか得られない。これが full place URL で OGP を取得しない理由でもある（§3.3）。
-2. **`?cid=` / `query_place_id=` 形式は未対応** — 1 店舗を一意に指す公式 URL だが店舗名を読み取れず、現行実装では Places 照合の検索語を作れないため `not_place_url` として拒否している。Place Details 経由での対応は follow-up。
+2. **`?cid=` 形式は未対応** — 1 店舗を指す公式 URL だが、CID は Place ID とは別体系で、現行の Places API 実装に変換経路が無いため `not_place_url` として拒否している（§0「CID を対応しない理由」）。`query_place_id` / `q=place_id:` は Place Details 経由で**対応済み**（§0 / §3.4）。
 3. **ホスト allowlist は `.com` / `.co.jp` のみ** — 日本国内向けのツールであり、JP アカウント・地域でサインイン中の PC 版 Chrome ではアドレスバーが `www.google.co.jp/maps/…` になるため `.co.jp` を正式対応に含めている。他の ccTLD（`google.de` 等）の Maps URL は受け付けない。`*.google.*` の全許可はしない方針のため、必要になったら `MAPS_HOSTS` へ 1 件ずつ追加する（追加時は `url-parse-actions.test.ts` の end-to-end 回帰ケースにも足すこと。policy だけ広げても、パーサ側の分類とずれると受理されない）。
 4. **`guessGenre` は辞書順依存の線形探索** — より具体的なキーワードを辞書の上位に置かないと誤判定する。
 5. **legacy: 食べログの正規表現が固定パス前提** — `/A0000/` 系の旧パスや `rstdtl/` 系の詳細パスでは `store_id` を取りこぼす可能性がある（UI からは到達しない）。

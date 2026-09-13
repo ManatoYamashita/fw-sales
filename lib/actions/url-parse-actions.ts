@@ -5,12 +5,27 @@ import { fetchOgp } from "@/lib/url-parser/ogp";
 import { applyParsedData } from "@/lib/url-parser/apply";
 import {
   enrichWithPlacesFallback,
+  mergePlaceIntoApply,
   type PlacesFallbackInfo,
 } from "@/lib/url-parser/places-fallback";
 import {
   evaluateUrlImportPolicy,
+  type UrlImportPolicyResult,
   type UrlImportRejectReason,
 } from "@/lib/url-parser/url-import-policy";
+import { getPlaceById } from "@/lib/places/google";
+import { toPlacesDiagnosticKind } from "@/lib/places/errors";
+import { buildPlaceIdMapsUrl } from "@/lib/places/maps-url";
+
+/**
+ * URL Import から引く Place Details の上限時間。
+ *
+ * URL Import は Server Action としてユーザーの操作を待たせるため、Places 側が
+ * 応答しないときに無制限に待たない。既存の Places 呼び出し
+ * (`STAGE0_PLACES_TIMEOUT_MS`) と同じ 15 秒に揃えている。
+ * timeout / AbortError は `place_lookup_failed` へ正規化する。
+ */
+const URL_IMPORT_PLACE_DETAILS_TIMEOUT_MS = 15_000;
 import type {
   AppliedField,
   ApplyResult,
@@ -96,6 +111,33 @@ function buildAppliedFields(suggested: ApplyResult): AppliedField[] {
 }
 
 /**
+ * success で返す `map_url` が URL Import で**再び受理される**ことを保証する
+ * (PR #285 独立確認の指摘)。
+ *
+ * Places の `googleMapsUri` は `https://maps.google.com/?cid=<数値>` 形式を返し得る。
+ * CID は Place ID とは別体系で URL Import が受け付けない形式なので、そのまま
+ * `map_url` に採用すると「保存済みの店舗 URL を貼り直すと `not_place_url`」という
+ * 自己不整合になる。`stores.map_url` はユーザーがコピーして貼り直す値なので、
+ * 受理できない URL を保存しない。
+ *
+ * `googleMapsUri` が受理可能な形式 (`/maps/place/…` 等) の場合はそのまま活かす。
+ * 受理できない場合だけ、policy を通過した URL 由来の値と confidence へ戻す。
+ *
+ * @param merged Places の値をマージした後の結果
+ * @param base URL 由来の値だけで組んだ結果 (map_url は policy 通過済み URL)
+ */
+function withReimportableMapUrl(merged: ApplyResult, base: ApplyResult): ApplyResult {
+  if (merged.map_url !== "" && evaluateUrlImportPolicy(merged.map_url).ok) {
+    return merged;
+  }
+  return {
+    ...merged,
+    map_url: base.map_url,
+    confidence: { ...merged.confidence, map_url: base.confidence.map_url },
+  };
+}
+
+/**
  * 短縮共有 URL (`maps.app.goo.gl` / `goo.gl/maps`) を展開し、
  * 展開後の URL を **もう一度 policy へ通してから** パースする。
  *
@@ -106,9 +148,12 @@ function buildAppliedFields(suggested: ApplyResult): AppliedField[] {
  * `final_url` は必ず `evaluateUrlImportPolicy` を再通過させ、
  * かつ `google_maps_place`(= 店舗ページ)であることを要求する。
  *
- * redirect 追跡そのものは `fetchOgp` → `safeFetchHtml` が行う。
- * SSRF 防御 (DNS pinning / per-hop deadline / body cap / content-type allowlist) は
- * 一切変更していない。
+ * redirect 追跡そのものは `fetchOgp` → `safeFetchHtml` が行う。中間 redirect は
+ * `maxRedirects` (既定 5) の範囲で**追跡する**。各 hop で SSRF 防御
+ * (DNS pinning / per-hop deadline / body cap / content-type allowlist) を毎回やり直す。
+ * 上限を超えた場合は `too_many_redirects` として取得失敗になる。
+ * ここで再検証するのはその追跡が終わった後の `final_url` 1 点のみで、
+ * SSRF 防御そのものは一切変更していない。
  *
  * ## 「取得失敗」と「転送先が店舗ページでない」を分ける理由
  *
@@ -123,10 +168,16 @@ function buildAppliedFields(suggested: ApplyResult): AppliedField[] {
  * サニタイズ済みとはいえ HTTP status を UI へ運ぶ必要が無く、文言は
  * 呼び出し側が `reason` から決める設計を崩さないため。
  */
+/** 展開後 URL として受け入れた policy 結果 (`final_url` が短縮 URL のままの場合は含まない)。 */
+type ResolvedPlacePolicy = Extract<
+  UrlImportPolicyResult,
+  { ok: true; kind: "google_maps_place" | "google_maps_place_id" }
+>;
+
 async function resolveShortUrl(
   url: string,
 ): Promise<
-  | { ok: true; parsed: ParsedUrl; ogp: OgpResult }
+  | { ok: true; policy: ResolvedPlacePolicy; ogp: OgpResult }
   | { ok: false; reason: UrlImportRejectReason }
 > {
   const ogp = await fetchOgp(url);
@@ -142,14 +193,106 @@ async function resolveShortUrl(
   }
 
   const policy = evaluateUrlImportPolicy(finalUrl);
-  // 短縮 URL の連鎖(short → short)は追わない。最終地点が店舗ページであることを要求する。
-  if (!policy.ok || policy.kind !== "google_maps_place") {
-    return { ok: false, reason: policy.ok ? "not_place_url" : policy.reason };
+  if (!policy.ok) {
+    return { ok: false, reason: policy.reason };
+  }
+  // 中間 redirect は `safeFetchHtml` が追跡済み。ここで見ているのは追跡後の
+  // `final_url` であり、それが短縮 URL のままなら店舗を特定できていない。
+  // policy を再帰的に再入して展開し直すことはせず、最終地点が
+  // 「1 店舗を一意特定できる URL」であることを要求する。
+  if (policy.kind === "google_maps_short") {
+    return { ok: false, reason: "not_place_url" };
   }
 
-  // ソース情報(ユーザーが実際に貼った URL)は保持しつつ、詳細は展開後 URL 由来にする。
-  // `map_url` は展開後の URL を採用 — 後で開いたときに直接 Google マップへ行ける。
-  return { ok: true, parsed: { ...parseGoogleMapsUrl(finalUrl), source_url: url }, ogp };
+  return { ok: true, policy, ogp };
+}
+
+/**
+ * Place ID が URL に明示されている場合の取得経路 (Issue #207 follow-up)。
+ *
+ * ## なぜ Text Search を使わないのか
+ *
+ * URL が Place ID を含んでいる時点で店舗は**一意に確定している**。ここで
+ * `enrichWithPlacesFallback` (Text Search) を挟むと、確定済みの identity を
+ * 店舗名の文字列照合へ落とすことになり、同名店舗で `ambiguous` になったり
+ * 別店舗を引く余地を作る。確定している identity をわざわざ曖昧にしない。
+ *
+ * API 呼び出しも Place Details 1 回だけで、Text Search との二重呼び出しはしない。
+ *
+ * ## 失敗時に raw error を UI へ出さない
+ *
+ * Places の例外は `reason` へ載せず `place_lookup_failed` に潰す。timeout /
+ * AbortError / TimeoutError も同じ reason へ正規化する。
+ * **この層の**ログには message ではなく `toPlacesDiagnosticKind` の分類値だけを出す。
+ *
+ * なお下層の Places client (`lib/places/google.ts`) は、非 2xx 応答時に status と
+ * redact / clip 済みの body 先頭をサーバーの構造化ログへ記録する既存の observability
+ * 設計を持つ。UI / Action の戻り値へ raw body や status が出ないことと、
+ * サーバログに診断情報が残ることは両立している。
+ *
+ * ## `map_url` に `googleMapsUri` を採用しない理由
+ *
+ * Places の `googleMapsUri` は `https://maps.google.com/?cid=<数値>` 形式を返し得る。
+ * CID は Place ID とは別体系で URL Import が受け付けない形式なので、そのまま
+ * `map_url` として保存すると「保存済みの店舗 URL を貼り直すと `not_place_url`」という
+ * 自己不整合が生まれる (PR #285 独立確認の指摘)。
+ *
+ * そこで取得できた `placeId` / `name` から **Google Maps URLs の公式 Search 形式**
+ * (`?api=1&query=<店名>&query_place_id=<ID>`) を組み立て直して `map_url` にする。
+ * これで次を同時に満たす:
+ *
+ * - 公式仕様の必須項目 `query` を満たす
+ * - Place ID で 1 店舗を一意特定できる
+ * - CID 形式へ戻らない
+ * - `evaluateUrlImportPolicy` で再び受理される (round-trip invariant)
+ *
+ * 短縮 URL 経由でも同じ canonical URL へ正規化する。
+ * ただし `source_url` は**ユーザーが実際に貼った URL のまま**保持する。
+ */
+async function importFromPlaceId(
+  placeId: string,
+  sourceUrl: string,
+  ogp: OgpResult | null,
+): Promise<UrlImportResult> {
+  let place;
+  try {
+    place = await getPlaceById(placeId, {
+      timeoutMs: URL_IMPORT_PLACE_DETAILS_TIMEOUT_MS,
+    });
+  } catch (e) {
+    console.warn(`[url-import] place details failed: ${toPlacesDiagnosticKind(e)}`);
+    return { status: "rejected", reason: "place_lookup_failed" };
+  }
+  if (!place) {
+    // 2xx だが必須フィールドが欠けている。店舗として扱える情報が無い。
+    console.warn("[url-import] place details returned no usable place");
+    return { status: "rejected", reason: "place_lookup_failed" };
+  }
+
+  // name / address / phone 等はすべて Places 由来にする。URL 文字列からは
+  // 何も読み取らない (`?q=place_id:…` を店舗名として採用しないため)。
+  // `map_url` は取得結果から公式形式へ正規化する (上記のとおり)。
+  const parsed: ParsedUrl = {
+    type: "google_maps",
+    source_url: sourceUrl,
+    map_url: buildPlaceIdMapsUrl(place.placeId, place.name),
+    confidence: {},
+  };
+  const base = applyParsedData(parsed, null);
+  const suggested = withReimportableMapUrl(mergePlaceIntoApply(base, place), base);
+
+  return {
+    status: "success",
+    parsed,
+    ogp,
+    suggested,
+    applied: buildAppliedFields(suggested),
+    placesFallback: {
+      used: true,
+      reason: "place_id_url",
+      matched_place_id: place.placeId,
+    },
+  };
 }
 
 /**
@@ -190,24 +333,36 @@ export async function importFromUrlAction(url: string): Promise<UrlImportResult>
     return { status: "rejected", reason: policy.reason };
   }
 
-  let parsed: ParsedUrl;
+  // 短縮 URL は展開し、展開後 URL を再検証した結果で以降を分岐する。
+  // ソース情報 (ユーザーが実際に貼った URL) は `sourceUrl` として保持する。
+  const sourceUrl = policy.url;
+  let effective: ResolvedPlacePolicy;
   let ogp: OgpResult | null = null;
 
   if (policy.kind === "google_maps_short") {
     const resolved = await resolveShortUrl(policy.url);
     if (!resolved.ok) return { status: "rejected", reason: resolved.reason };
-    parsed = resolved.parsed;
+    effective = resolved.policy;
     ogp = resolved.ogp;
   } else {
-    parsed = parseGoogleMapsUrl(policy.url);
+    effective = policy;
   }
 
-  let suggested = applyParsedData(parsed, ogp);
+  // Place ID が取れている場合は曖昧な Text Search を挟まず Place Details を直接引く。
+  if (effective.kind === "google_maps_place_id") {
+    return importFromPlaceId(effective.placeId, sourceUrl, ogp);
+  }
+
+  // `map_url` は展開後の URL を採用 — 後で開いたときに直接 Google マップへ行ける。
+  const parsed: ParsedUrl = { ...parseGoogleMapsUrl(effective.url), source_url: sourceUrl };
+
+  const base = applyParsedData(parsed, ogp);
 
   // Places API フォールバック: 低信頼度フィールドが残っている場合に Text Search 1 回で補完。
   // API キー未設定 / ネットワーク例外時は silently skip する。
-  const placesResult = await enrichWithPlacesFallback(parsed, suggested);
-  suggested = placesResult.updated;
+  const placesResult = await enrichWithPlacesFallback(parsed, base);
+  // 補完結果の googleMapsUri が受理できない形式 (CID) でも、再 import できる URL を保つ。
+  const suggested = withReimportableMapUrl(placesResult.updated, base);
   const placesFallback = placesResult.info;
 
   const applied = buildAppliedFields(suggested);

@@ -16,8 +16,25 @@
  *
  * ## 決定した product boundary
  *
- * この導線が受け付けるのは **Google マップの店舗ページ URL と、その短縮共有 URL のみ**。
+ * この導線が受け付けるのは **Google マップで 1 店舗を一意特定できる URL のみ**。
  * 食べログの Cloudflare を回避する実装は行わない(#207 の対応方針)。
+ *
+ * 「Google マップの URL なら何でも受け付ける」ようにはしない。判定軸は
+ * ドメインではなく **その URL が 1 店舗を曖昧さなく指しているか**である。
+ *
+ * | 形式 | 扱い |
+ * | --- | --- |
+ * | `…/maps/place/<店名>` | 受付。名前を読み取り、後段で Places 照合 |
+ * | `…/maps/**?query_place_id=<ID>` | 受付。Place ID で一意特定 |
+ * | `…/maps/**?q=place_id:<ID>` (legacy) | 受付。同上 |
+ * | `maps.app.goo.gl/<id>`・`goo.gl/maps/<id>` | 受付。展開後 URL を**再検証** |
+ * | `/maps/search/<キーワード>`・`?q=<キーワード>` | 拒否。検索結果であり 1 店舗を指さない |
+ * | `?cid=<数値>` | 拒否。Place ID とは別体系で、現行実装に変換経路が無い |
+ * | `/maps/dir/…`・`/search?q=…`・Maps トップ | 拒否 |
+ *
+ * generic な検索 URL を受け付けて「先頭候補」を店舗として採用すると、
+ * **別の店舗を登録する**事故になる。これは Issue #207 で Places 照合から
+ * 口コミ件数ベースの自動採用を撤去したのと同じ理由による。
  *
  * ## trust boundary 上の注意
  *
@@ -46,7 +63,17 @@
 export type UrlImportKind =
   /** `…/maps/place/<name>` 形式。パーサが直接 name を読み取れる。 */
   | "google_maps_place"
-  /** `maps.app.goo.gl` / `goo.gl/maps` の短縮共有 URL。redirect 解決が必要。 */
+  /**
+   * Maps URL 上に **Place ID が明示されている**形式
+   * (`?query_place_id=<ID>` / `?q=place_id:<ID>`)。
+   * 店舗名ではなく ID で 1 店舗を一意特定できるため、後段は曖昧な Text Search を
+   * 使わず Place Details を直接引く。
+   */
+  | "google_maps_place_id"
+  /**
+   * `maps.app.goo.gl` / `goo.gl/maps` の短縮共有 URL。
+   * URL 単体では転送先が分からないため redirect 解決と再検証が必要。
+   */
   | "google_maps_short";
 
 /**
@@ -78,10 +105,36 @@ export type UrlImportRejectReason =
    * (timeout / DNS 解決失敗 / network error / 非 2xx 応答)。
    * 転送先が店舗ページだったかどうかは**判定できていない**。
    */
-  | "short_url_resolve_failed";
+  | "short_url_resolve_failed"
+  /**
+   * URL から Place ID は取り出せたが、その ID で店舗情報を取得できなかった
+   * (Places API のエラー / ID が解決できない / 必須フィールド欠落)。
+   *
+   * `not_place_url` と混ぜないこと。URL の形式自体は正しく 1 店舗を指しているため、
+   * 「店舗ページの URL を貼り付けてください」という案内は誤誘導になる。
+   * 一方 `short_url_resolve_failed` とも分けている。あちらは転送先が不明な取得失敗、
+   * こちらは対象店舗が確定したうえでの取得失敗で、原因の説明が異なる。
+   */
+  | "place_lookup_failed";
 
+/**
+ * policy の判定結果。
+ *
+ * `google_maps_place_id` だけが `placeId` を持つ discriminated union にしてある。
+ * 「受付可否 (policy)」と「URL から安全に取り出せた店舗 identity」は別概念であり、
+ * identity が取れた種別でのみ型レベルで `placeId` を参照できるようにすることで、
+ * 他の種別で `placeId` を期待するコードを compile time で落とす。
+ */
 export type UrlImportPolicyResult =
-  | { ok: true; kind: UrlImportKind; url: string }
+  | { ok: true; kind: "google_maps_place"; url: string }
+  | { ok: true; kind: "google_maps_short"; url: string }
+  | {
+      ok: true;
+      kind: "google_maps_place_id";
+      url: string;
+      /** URL から取り出した Google Place ID。検証済み ({@link isValidPlaceId})。 */
+      placeId: string;
+    }
   | { ok: false; reason: UrlImportPolicyRejectReason };
 
 /**
@@ -137,6 +190,113 @@ function pathSegments(pathname: string): string[] {
 function isPlacePath(pathname: string): boolean {
   const segs = pathSegments(pathname);
   return segs[0] === "maps" && segs[1] === "place" && (segs[2] ?? "") !== "";
+}
+
+/**
+ * Google マップ配下 (`/maps/...`) のパスかどうか。
+ *
+ * Place ID を読み取る対象をここに限定する。これが無いと
+ * `https://www.google.com/search?q=place_id:ChIJ…`(Google **検索**結果)まで
+ * 店舗 URL として通ってしまい、Issue #207 で塞いだ経路が復活する。
+ */
+function isMapsPath(pathname: string): boolean {
+  return pathSegments(pathname)[0] === "maps";
+}
+
+/** Maps URL API が Place ID を載せるクエリパラメータ。 */
+const PLACE_ID_PARAM = "query_place_id";
+/** legacy 形式 `?q=place_id:<ID>` の接頭辞。 */
+const PLACE_ID_Q_PREFIX = "place_id:";
+
+/**
+ * Place ID として**明らかに無効**な文字。空白 (Unicode 空白含む) と制御文字のみ。
+ *
+ * ## なぜ文字集合・最大長で validity を決めないのか
+ *
+ * Google は Place ID を「テキスト識別子」とだけ定義し、
+ * **最大長を規定していない**(公式ドキュメントに "there is no maximum length" と明記)。
+ * 実際に発行される ID が URL-safe base64 の範囲に収まることが多いのは事実だが、
+ * それは**公式に保証された仕様ではない**。独自の最大長や文字集合を validity 条件に
+ * すると、仕様上正しい ID を将来弾く。
+ *
+ * 安全性は次の層で確保されており、ここで形式を推測する必要はない:
+ *
+ * - allowlist 済みの Google マップホストであること
+ * - `/maps/…` 配下のパスであること
+ * - `query_place_id` / `q=place_id:` という**明示形式**で与えられていること
+ * - 値の取り出しが `URLSearchParams` であること (クエリ全体を ID として採らない)
+ * - Place Details の URL 組み立てが `encodeURIComponent` を通すこと
+ *
+ * したがってここは「空・空白のみ・制御文字入り」という、
+ * **どう解釈しても識別子になり得ないもの**だけを落とす最小限の検査に留める。
+ * 解決できない ID は Places API 側が失敗を返し、`place_lookup_failed` になる。
+ */
+const PLACE_ID_INVALID_CHAR = /[\s\u0000-\u001F\u007F-\u009F]/;
+
+/** URL から取り出した文字列が Place ID として成立し得るかを判定する。 */
+function isValidPlaceId(value: string): boolean {
+  return value !== "" && !PLACE_ID_INVALID_CHAR.test(value);
+}
+
+/**
+ * Place ID 抽出の結果。
+ *
+ * `conflict` を `none` と混ぜないこと。`none` は「Place ID が書かれていないので
+ * 通常判定へ委ねる」、`conflict` は「複数の identity が書かれていて解釈が定まらない
+ * ので**受け付けてはいけない**」で、扱いが正反対になる。
+ */
+type PlaceIdExtraction =
+  | { kind: "none" }
+  | { kind: "conflict" }
+  | { kind: "id"; placeId: string };
+
+/**
+ * Maps URL から **明示的に指定された** Place ID を取り出す。
+ *
+ * 対応する 2 形式:
+ * - `?query_place_id=<ID>` — Maps URL API の公式形式。`?query=<店名>` の併記も可。
+ * - `?q=place_id:<ID>` — legacy 形式。`place_id:` という接頭辞が付いている場合**のみ**。
+ *
+ * `?q=<キーワード>` のような generic search は絶対に採用しない。接頭辞が無い `q` は
+ * 「その地域の検索結果」であって 1 店舗を指さないため、先頭候補を店舗扱いすると
+ * 別店舗を登録する事故になる。
+ *
+ * ## 競合する Place ID を先頭採用しない (wrong-store prevention)
+ *
+ * `?query_place_id=A&query_place_id=B` や `?query_place_id=A&q=place_id:B` のように
+ * **異なる identity が併記された URL** を先頭値だけ見て受理すると、ユーザーが意図した
+ * のと別の店舗を登録しうる。`getAll` で全候補を集め、
+ *
+ * - 候補がすべて valid
+ * - かつ すべて同一 ID
+ *
+ * のときだけ受理する。同じ ID の重複は曖昧さが無いので受理してよい。
+ *
+ * 候補が 1 つも valid でない場合は「使える identity が無い」だけなので `none` を返し、
+ * 通常判定へ委ねる (`/maps/place/<店名>?query_place_id=` を壊さないため)。
+ */
+function extractExplicitPlaceId(url: URL): PlaceIdExtraction {
+  // `URLSearchParams.getAll` は percent-encoding を解決して全値を返す。
+  const candidates = [
+    ...url.searchParams.getAll(PLACE_ID_PARAM),
+    ...url.searchParams
+      .getAll("q")
+      .map((value) => value.trim())
+      .filter((value) => value.startsWith(PLACE_ID_Q_PREFIX))
+      .map((value) => value.slice(PLACE_ID_Q_PREFIX.length)),
+  ].map((value) => value.trim());
+
+  if (candidates.length === 0) return { kind: "none" };
+
+  const valid = candidates.filter(isValidPlaceId);
+  // どれも識別子として成立しない = Place ID は書かれていないのと同じ扱い。
+  if (valid.length === 0) return { kind: "none" };
+  // valid と invalid が混在している URL は、どれを信じるべきか決められない。
+  if (valid.length !== candidates.length) return { kind: "conflict" };
+  // 異なる ID が併記されている。先頭を採ると別店舗を登録しうる。
+  if (new Set(valid).size !== 1) return { kind: "conflict" };
+
+  return { kind: "id", placeId: valid[0]! };
 }
 
 /**
@@ -216,11 +376,32 @@ export function evaluateUrlImportPolicy(raw: string): UrlImportPolicyResult {
   }
 
   if (MAPS_HOSTS.has(host)) {
+    // Place ID が明示された URL を最優先で判定する。`/maps/place/<名前>` より
+    // 強い identity(名前の曖昧照合ではなく ID による一意特定)が得られるため、
+    // 両方を満たす URL では ID 側を採用する。
+    if (isMapsPath(parsed.pathname)) {
+      const extracted = extractExplicitPlaceId(parsed);
+      // 競合は `/maps/place/<店名>` を満たしていても受け付けない。名前で照合し直すと
+      // 「URL に書かれた 2 つの ID のどちらでもない店舗」を登録しうる。
+      if (extracted.kind === "conflict") {
+        return { ok: false, reason: "not_place_url" };
+      }
+      if (extracted.kind === "id") {
+        return {
+          ok: true,
+          kind: "google_maps_place_id",
+          url: trimmed,
+          placeId: extracted.placeId,
+        };
+      }
+    }
     if (isPlacePath(parsed.pathname)) {
       return { ok: true, kind: "google_maps_place", url: trimmed };
     }
-    // `/search`(Google 検索)・`/maps`(トップ)・`/maps/search`・`/maps/dir` 等。
-    // 「Google の URL」ではなく「Google マップの**店舗**URL」だけを受け付ける。
+    // `/search`(Google 検索)・`/maps`(トップ)・`/maps/dir`、および Place ID を
+    // 持たない `/maps/search/<キーワード>`・`?q=<キーワード>`・`?cid=<数値>` 等。
+    // 「Google の URL」ではなく「Google マップで**1 店舗を一意特定できる** URL」
+    // だけを受け付ける。
     return { ok: false, reason: "not_place_url" };
   }
 

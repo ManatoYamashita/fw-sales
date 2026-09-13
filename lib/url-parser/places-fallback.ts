@@ -32,7 +32,13 @@ export type PlacesFallbackReason =
   /** 候補 0 件、または名前一致 0 件 */
   | "places_not_found"
   /** 同名候補が複数あり一意に絞れない */
-  | "ambiguous";
+  | "ambiguous"
+  /**
+   * URL に Place ID が含まれていたため、Text Search を経由せず
+   * Place Details で直接取得した (`used: true` でのみ現れる)。
+   * 照合の失敗理由ではないので UI の警告文言は持たない。
+   */
+  | "place_id_url";
 
 /**
  * Places API フォールバックの実行結果サマリ。UI 側で toast 文言の出し分けに使う。

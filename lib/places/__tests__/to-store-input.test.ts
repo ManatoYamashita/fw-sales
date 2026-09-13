@@ -4,6 +4,7 @@ import {
   placeResultToStoreInput,
 } from "../to-store-input";
 import type { PlaceResult } from "../types";
+import { evaluateUrlImportPolicy } from "@/lib/url-parser/url-import-policy";
 
 function makePlace(overrides: Partial<PlaceResult> = {}): PlaceResult {
   return {
@@ -194,19 +195,50 @@ describe("placeResultToStoreInput", () => {
   });
 
   describe("map_url", () => {
-    it("googleMapsUri がある場合はそれを map_url に使う", () => {
-      const uri = "https://maps.google.com/?cid=9999";
-      const input = placeResultToStoreInput(makePlace({ googleMapsUri: uri }));
-      expect(input.map_url).toBe(uri);
+    /**
+     * 保存された map_url はユーザーがコピーして URL Import へ貼り直す値なので、
+     * 「保存 → 再 import で受理される」round-trip invariant を満たす必要がある。
+     *
+     * `googleMapsUri` は `?cid=<数値>` 形式 (URL Import が受け付けない) や空文字を
+     * 返し得るため、それに依存せず常に canonical な公式 Search 形式を生成する。
+     */
+    it.each([
+      { label: "CID 形式", googleMapsUri: "https://maps.google.com/?cid=9999" },
+      { label: "空文字", googleMapsUri: "" },
+      { label: "null", googleMapsUri: null },
+      {
+        label: "通常の Google Maps URI",
+        googleMapsUri: "https://www.google.com/maps/place/%E3%83%86%E3%82%B9%E3%83%88%E9%A3%9F%E5%A0%82",
+      },
+    ])("googleMapsUri が $label でも canonical な map_url になる", ({ googleMapsUri }) => {
+      const input = placeResultToStoreInput(
+        makePlace({ googleMapsUri, placeId: "ChIJ_abc123", name: "テスト食堂" }),
+      );
+
+      const url = new URL(input.map_url);
+      expect(url.origin).toBe("https://www.google.com");
+      expect(url.pathname).toBe("/maps/search/");
+      expect(url.searchParams.get("api")).toBe("1");
+      expect(url.searchParams.get("query")).toBe("テスト食堂");
+      expect(url.searchParams.get("query_place_id")).toBe("ChIJ_abc123");
+      // CID / 空文字を保存しない。
+      expect(input.map_url).not.toContain("cid=");
+      expect(input.map_url).not.toBe("");
     });
 
-    it("googleMapsUri が null の場合は placeId から fallback URL を生成する", () => {
+    it.each([
+      { label: "CID 形式", googleMapsUri: "https://maps.google.com/?cid=9999" },
+      { label: "空文字", googleMapsUri: "" },
+      { label: "null", googleMapsUri: null },
+    ])("$label でも保存した map_url が URL Import で再受理される", ({ googleMapsUri }) => {
       const input = placeResultToStoreInput(
-        makePlace({ googleMapsUri: null, placeId: "ChIJ_abc123" }),
+        makePlace({ googleMapsUri, placeId: "ChIJ_abc123", name: "テスト食堂" }),
       );
-      expect(input.map_url).toBe(
-        "https://www.google.com/maps/search/?api=1&query_place_id=ChIJ_abc123",
-      );
+      expect(evaluateUrlImportPolicy(input.map_url)).toMatchObject({
+        ok: true,
+        kind: "google_maps_place_id",
+        placeId: "ChIJ_abc123",
+      });
     });
   });
 

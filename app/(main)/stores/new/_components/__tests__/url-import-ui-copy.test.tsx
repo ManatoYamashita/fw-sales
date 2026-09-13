@@ -39,7 +39,12 @@ describe("UrlSearchPanel の案内文 (Google マップ専用)", () => {
     expect(html).toContain("店舗名・住所・電話番号・口コミ情報");
   });
 
-  it("短縮共有リンクにも対応していることを案内する", () => {
+  /**
+   * 「Google の共有リンクなら何でも使える」と読める表現にしない。
+   * 実際に読めるのは `maps.app.goo.gl` 形式で、`share.google` 形式は
+   * Google 検索へ転送され Place ID が得られないため未対応 (PR #285 実 URL 検証)。
+   */
+  it("対応する共有リンクの形式を明示する", () => {
     expect(html).toContain("maps.app.goo.gl");
   });
 
@@ -124,5 +129,54 @@ describe("UrlImportSummary の表示", () => {
     );
     expect(html).not.toContain("OGP");
     expect(html).not.toContain("HTTP");
+  });
+});
+
+/**
+ * 対応 URL 形式を広げたときに案内文が古いままだと、
+ * 「店舗を開いた状態のリンクは使えない」と誤解したまま使われ続ける。
+ */
+describe("UrlSearchPanel の案内文 (対応形式の拡張)", () => {
+  const html = markup(<UrlSearchPanel onLoaded={() => {}} />);
+
+  /**
+   * 読み込めない共有リンクを貼ったユーザーが次に取れる行動を示す
+   * (「対応していません」だけで終わらせない)。
+   */
+  it("読み込めない共有リンクの代替手順を案内する", () => {
+    expect(html).toContain("share.google");
+    expect(html).toContain("アドレスバー");
+  });
+
+  it("Googleの共有リンクなら何でも使えるとは書かない", () => {
+    expect(html).not.toContain("共有リンクなら");
+    expect(html).not.toContain("共有リンクすべて");
+  });
+
+  it("検索結果一覧のURLが使えないことを案内する", () => {
+    expect(html).toContain("検索結果");
+  });
+
+  it("技術用語を一般ユーザー向けに出さない", () => {
+    for (const term of ["query_place_id", "Place ID", "placeId", "Places API", "cid="]) {
+      expect(html).not.toContain(term);
+    }
+  });
+});
+
+describe("REJECT_MESSAGE (取得失敗の文言)", () => {
+  it("place_lookup_failed は貼り直しを第一に促さない", () => {
+    const message = REJECT_MESSAGE.place_lookup_failed;
+    // URL 自体は 1 店舗を指しているため、`not_place_url` の文言と同一にしない。
+    expect(message).not.toBe(REJECT_MESSAGE.not_place_url);
+    expect(message).toContain("時間をおいて");
+  });
+
+  it("全 reason の文言に技術用語を出さない", () => {
+    for (const message of Object.values(REJECT_MESSAGE)) {
+      for (const term of ["Place ID", "query_place_id", "Places API", "HTTP", "API"]) {
+        expect(message).not.toContain(term);
+      }
+    }
   });
 });
