@@ -148,9 +148,12 @@ function withReimportableMapUrl(merged: ApplyResult, base: ApplyResult): ApplyRe
  * `final_url` は必ず `evaluateUrlImportPolicy` を再通過させ、
  * かつ `google_maps_place`(= 店舗ページ)であることを要求する。
  *
- * redirect 追跡そのものは `fetchOgp` → `safeFetchHtml` が行う。
- * SSRF 防御 (DNS pinning / per-hop deadline / body cap / content-type allowlist) は
- * 一切変更していない。
+ * redirect 追跡そのものは `fetchOgp` → `safeFetchHtml` が行う。中間 redirect は
+ * `maxRedirects` (既定 5) の範囲で**追跡する**。各 hop で SSRF 防御
+ * (DNS pinning / per-hop deadline / body cap / content-type allowlist) を毎回やり直す。
+ * 上限を超えた場合は `too_many_redirects` として取得失敗になる。
+ * ここで再検証するのはその追跡が終わった後の `final_url` 1 点のみで、
+ * SSRF 防御そのものは一切変更していない。
  *
  * ## 「取得失敗」と「転送先が店舗ページでない」を分ける理由
  *
@@ -165,7 +168,7 @@ function withReimportableMapUrl(merged: ApplyResult, base: ApplyResult): ApplyRe
  * サニタイズ済みとはいえ HTTP status を UI へ運ぶ必要が無く、文言は
  * 呼び出し側が `reason` から決める設計を崩さないため。
  */
-/** 展開後 URL として受け入れた policy 結果 (短縮 URL の連鎖は含まない)。 */
+/** 展開後 URL として受け入れた policy 結果 (`final_url` が短縮 URL のままの場合は含まない)。 */
 type ResolvedPlacePolicy = Extract<
   UrlImportPolicyResult,
   { ok: true; kind: "google_maps_place" | "google_maps_place_id" }
@@ -193,7 +196,9 @@ async function resolveShortUrl(
   if (!policy.ok) {
     return { ok: false, reason: policy.reason };
   }
-  // 短縮 URL の連鎖(short → short)は追わない。最終地点が
+  // 中間 redirect は `safeFetchHtml` が追跡済み。ここで見ているのは追跡後の
+  // `final_url` であり、それが短縮 URL のままなら店舗を特定できていない。
+  // policy を再帰的に再入して展開し直すことはせず、最終地点が
   // 「1 店舗を一意特定できる URL」であることを要求する。
   if (policy.kind === "google_maps_short") {
     return { ok: false, reason: "not_place_url" };
