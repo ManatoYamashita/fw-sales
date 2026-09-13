@@ -346,6 +346,130 @@ describe("safeFetchHtml: DENY", () => {
   });
 });
 
+/**
+ * `allowedSchemes: ["https:"]` は URL Import (`fetchOgp`) が使う絞り込み (PR #285 review
+ * BLOCKER)。**既定 (`DEFAULT_ALLOWED_SCHEMES = ["http:", "https:"]`) は変更していない**ため、
+ * オプション未指定の既存挙動 (http 許可) との両方をここで固定する。
+ *
+ * 「各 hop で SSRF 検証する」(IP レンジ / credentials / DNS pinning) と
+ * 「各 hop が HTTPS である」は別の保証で、後者はこのオプションでしか得られない。
+ */
+describe("safeFetchHtml: allowedSchemes による HTTPS-only 絞り込み (PR #285 review BLOCKER)", () => {
+  it("HTTPS → HTTP redirect を disallowed_scheme で拒否する", async () => {
+    mockDnsResolvesTo("93.184.216.34");
+    mockRequestOnce(https, createMockRes(301, { location: "http://example.com/plain" }), () => {});
+    const result = await safeFetchHtml("https://example.com/redirector", {
+      allowedSchemes: ["https:"],
+    });
+    expect(result).toEqual({ ok: false, reason: "disallowed_scheme" });
+  });
+
+  it("HTTP redirect 先へは接続もDNS解決も行わない(平文hopのrequestが発行されない)", async () => {
+    mockDnsResolvesTo("93.184.216.34");
+    mockRequestOnce(https, createMockRes(302, { location: "http://evil.example/steal" }), () => {});
+    // 2hop目が万一DNSまで進んだ場合に備えて解決結果を用意しておく。scheme判定は
+    // validateExternalUrl の最初の分岐なので、この2件目は消費されないはず。
+    mockDnsResolvesTo("93.184.216.34");
+
+    const result = await safeFetchHtml("https://example.com/redirector", {
+      allowedSchemes: ["https:"],
+    });
+
+    expect(result).toEqual({ ok: false, reason: "disallowed_scheme" });
+    // 平文hopへの接続は一切発行されない。
+    expect(http.request).not.toHaveBeenCalled();
+    // https 側も 1hop 目 (redirector) の 1 回だけ。
+    expect(vi.mocked(https.request).mock.calls).toHaveLength(1);
+    // scheme 判定は DNS 解決より前。2hop 目の lookup は消費されない。
+    expect(vi.mocked(dns.promises.lookup).mock.calls).toHaveLength(1);
+  });
+
+  it("HTTPS → HTTPS redirect は従来どおり成功する(絞り込みで正常系を壊さない)", async () => {
+    mockDnsResolvesTo("93.184.216.34");
+    mockRequestOnce(https, createMockRes(301, { location: "https://example.com/final" }), () => {});
+    mockDnsResolvesTo("93.184.216.34");
+    mockRequestOnce(
+      https,
+      createMockRes(200, { "content-type": "text/html" }),
+      driveNormalBody(["<html><title>ok</title></html>"]),
+    );
+
+    const result = await safeFetchHtml("https://example.com/redirector", {
+      allowedSchemes: ["https:"],
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      status: 200,
+      finalUrl: "https://example.com/final",
+      body: "<html><title>ok</title></html>",
+      contentType: "text/html",
+    });
+    expect(http.request).not.toHaveBeenCalled();
+  });
+
+  it("maps.app.goo.gl → /maps/place の正常経路(HTTPS 2hop)を壊さない", async () => {
+    mockDnsResolvesTo("142.250.196.142");
+    mockRequestOnce(
+      https,
+      createMockRes(302, {
+        location: "https://www.google.com/maps/place/%E5%B0%8E%E6%A5%BD/@35.6,139.7,17z",
+      }),
+      () => {},
+    );
+    mockDnsResolvesTo("142.250.196.142");
+    mockRequestOnce(
+      https,
+      createMockRes(200, { "content-type": "text/html; charset=utf-8" }),
+      driveNormalBody(["<html><head><title>導楽 - Google マップ</title></head></html>"]),
+    );
+
+    const result = await safeFetchHtml("https://maps.app.goo.gl/abc123", {
+      allowedSchemes: ["https:"],
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.finalUrl).toBe(
+        "https://www.google.com/maps/place/%E5%B0%8E%E6%A5%BD/@35.6,139.7,17z",
+      );
+    }
+  });
+
+  it("HTTPS-only でも per-hop の SSRF 検証は維持される(HTTPS の private IP redirect を拒否)", async () => {
+    mockDnsResolvesTo("93.184.216.34");
+    mockRequestOnce(https, createMockRes(302, { location: "https://10.0.0.5/internal" }), () => {});
+    const result = await safeFetchHtml("https://example.com/redirector", {
+      allowedSchemes: ["https:"],
+    });
+    // scheme は許可されるが IP レンジ判定で落ちる = 2 つの保証が独立して効いている。
+    expect(result).toEqual({ ok: false, reason: "disallowed_ip_range" });
+  });
+
+  it("初回 URL が http の場合も disallowed_scheme(fetch を発行しない)", async () => {
+    const result = await safeFetchHtml("http://example.com/", { allowedSchemes: ["https:"] });
+    expect(result).toEqual({ ok: false, reason: "disallowed_scheme" });
+    expect(http.request).not.toHaveBeenCalled();
+    expect(https.request).not.toHaveBeenCalled();
+  });
+
+  it("既定(オプション未指定)の DEFAULT_ALLOWED_SCHEMES は変更されていない: HTTPS → HTTP redirect を追跡する", async () => {
+    mockDnsResolvesTo("93.184.216.34");
+    mockRequestOnce(https, createMockRes(301, { location: "http://example.com/plain" }), () => {});
+    mockDnsResolvesTo("93.184.216.34");
+    mockRequestOnce(
+      http,
+      createMockRes(200, { "content-type": "text/html" }),
+      driveNormalBody(["<html></html>"]),
+    );
+
+    const result = await safeFetchHtml("https://example.com/redirector");
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.finalUrl).toBe("http://example.com/plain");
+  });
+});
+
 describe("safeFetchHtml: 境界値", () => {
   it("Content-Length超過は即座にbody_too_large", async () => {
     mockDnsResolvesTo("93.184.216.34");

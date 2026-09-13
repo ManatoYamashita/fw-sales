@@ -107,6 +107,11 @@ CID → Place ID の変換経路が無い。「1 店舗を指す」ことと「�
   http URL が得られることはない。唯一の互換性懸念だった `goo.gl` 短縮リンクは
   Google 自身が新規発行を終了しており、救う価値は小さいと判断した。
   古い http リンクを貼った場合は `invalid_url`（「URLの形式を確認してください。」）になる。
+- **この HTTPS-only は redirect hop にも及ぶ。** policy が検査できるのは貼り付けられた
+  1 本目の URL だけなので、`fetchOgp` は `safeFetchHtml` へ `allowedSchemes: ["https:"]` を
+  渡し、**初回 hop と全 redirect hop**を HTTPS に限定する（§3.2 / §5）。これが無いと
+  `https://maps.app.goo.gl/… → 301 → http://evil.example/…` のように途中で平文へ
+  降格でき、入力だけ HTTPS-only という不整合になる。
 - **非標準ポートは拒否する。** `URL.hostname` はポートを含まないため、hostname だけで
   allowlist 判定すると `https://www.google.com:444/maps/place/foo` が通ってしまい、
   短縮 URL 経由で任意ポートへ接続しうる。`URL` は既定ポート（https の 443）を
@@ -263,10 +268,18 @@ Server Action は実行時失敗を足した `UrlImportRejectReason`（6 種）�
 redirect の扱いは次のとおり。
 
 1. `safeFetchHtml` が **`maxRedirects`（既定 5）の範囲内で中間 redirect を追跡**する。
-   各 hop で DNS pinning・接続先 IP・scheme/port 等の SSRF 検証を**毎回**やり直す
-   （hop ごとに再検証するのが `safe-http-fetch` の設計）。上限超過は `too_many_redirects`。
-2. Server Action は最終的な `final_url` を `evaluateUrlImportPolicy` へ再通過させる。
-3. 受理するのは **`google_maps_place` または `google_maps_place_id`** のみ。
+   各 hop で DNS pinning・接続先 IP・credentials・scheme/port 等の SSRF 検証を**毎回**
+   やり直す（hop ごとに再検証するのが `safe-http-fetch` の設計）。上限超過は
+   `too_many_redirects`。
+2. **各 hop は HTTPS に限定される。** 「hop ごとに SSRF 検証する」ことと
+   「hop ごとに HTTPS である」ことは**別の保証**である。前者は `safeFetchHtml` の既定で
+   得られるが、後者は呼び出し側が `allowedSchemes` を絞らないと得られない
+   （`safeFetchHtml` の既定 `DEFAULT_ALLOWED_SCHEMES` は `["http:", "https:"]`）。
+   `fetchOgp` は `allowedSchemes: ["https:"]` を渡すため、`http:` への redirect は
+   `disallowed_scheme` で拒否され、**その転送先へは DNS 解決も接続も行われない**
+   （scheme 判定が `validateExternalUrl` の最初の分岐であるため）。
+3. Server Action は最終的な `final_url` を `evaluateUrlImportPolicy` へ再通過させる。
+4. 受理するのは **`google_maps_place` または `google_maps_place_id`** のみ。
    `final_url` が共有リンクのままなら拒否する（policy 側の再入ループは行わない）。
 
 > 「redirect を一切追わない」のではない。追跡は `safeFetchHtml` が担い、
@@ -432,8 +445,23 @@ URL マッチのみ。`type: "instagram"` と `instagram_url` を返す。OGP �
 
 - **短縮共有 URL（`maps.app.goo.gl` / `goo.gl/maps`）の redirect 解決のときだけ呼ばれる。**
   full place URL では呼ばれない（§3.3）。受け付けない URL でも呼ばれない（§3）。
-- `User-Agent` を独自に偽装、`AbortController` で 8 秒タイムアウト、`cache: "no-store"` で常に最新を取得。
-- 外部プロキシ（allorigins 等）は使わず、Next サーバから直 fetch。
+- fetch 自体は行わず、`lib/security/safe-http-fetch.ts` の `safeFetchHtml` へ委譲する。
+  `safeFetchHtml` は `fetch()` ではなく `node:https` / `node:http` の**手動 redirect ループ**で、
+  hop ごとに DNS 解決 → IP レンジ判定 → DNS pinning を行う（`AbortController` /
+  `cache: "no-store"` は使っていない）。
+- `fetchOgp` が渡すオプション:
+
+  | option | 値 | 意味 |
+  |---|---|---|
+  | `allowedSchemes` | `["https:"]` | 初回 hop と全 redirect hop を HTTPS に限定 |
+  | `hopTimeoutMs` | `5000` | 1 hop あたりの idle（無通信）timeout |
+  | `totalTimeoutMs` | `8000` | redirect 込み全体の**絶対デッドライン** |
+  | `maxBodyBytes` | `2_000_000` | 読み込む本文の上限（2MB） |
+
+  `maxRedirects` と Content-Type allowlist（`text/html` / `application/xhtml+xml`）は
+  `safeFetchHtml` の既定に従う。
+- `User-Agent` は `safeFetchHtml` 側の既定ヘッダ。外部プロキシ（allorigins 等）は使わず、
+  Next サーバから直接接続する。
 
 抽出ルール（正規表現ベース）:
 
@@ -449,11 +477,46 @@ URL マッチのみ。`type: "instagram"` と `instagram_url` を返す。OGP �
 
 エラーハンドリング:
 
-- HTTP 非 2xx → `{ ok: false, error: "HTTP {code}" }`
-- AbortError → `{ ok: false, error: "タイムアウトしました" }`
-- その他例外 → `{ ok: false, error: e.message }`
+`safeFetchHtml` は失敗時に**定型の `SafeFetchFailureReason` コードだけ**を返す。Node の生
+エラー文言（`connect ECONNREFUSED <ip>:<port>` 等、接続先 IP を含みうる）は戻り値に載らない。
+`fetchOgp` はその reason を `toSanitizedOgpError`（`SANITIZED_ERROR_MESSAGES` の全件マップ）で
+固定の日本語文言へ正規化する。
 
-UI ではこの `error` がバッジ右側に表示される。
+| `reason` | `OgpResult.error` |
+|---|---|
+| `invalid_url` | URLの形式が正しくありません |
+| `disallowed_scheme` | 対応していないURL形式です |
+| `credentials_in_url` | 認証情報を含むURLは使用できません |
+| `dns_lookup_failed` / `dns_no_records` | 指定されたURLへ接続できませんでした |
+| `dns_timeout` / `timeout` | 接続がタイムアウトしました / タイムアウトしました |
+| `disallowed_ip_range` | 安全上アクセスできないURLです |
+| `too_many_redirects` | リダイレクトが多すぎるため取得できませんでした |
+| `invalid_redirect_location` | リダイレクト先のURLが不正です |
+| `body_too_large` | 取得したページのサイズが大きすぎます |
+| `disallowed_content_type` | 対応していない形式のページです |
+| `http_error` / `network_error` | ページの取得に失敗しました |
+
+非 2xx は失敗ではなく `safeFetchHtml` から `ok: true` で返るため、`fetchOgp` 側で
+`{ ok: false, error: "HTTP {status}" }` へ変換する。
+
+**raw error は UI へ出さない。** 診断情報はサーバログのみ、という二系統設計:
+
+| 層 | 出力先 | 内容 |
+|---|---|---|
+| `safeFetchHtml` の失敗 | サーバログ `[safeFetchHtml] failed` | reason / scheme / host / path（クエリ除去、`clipForLog` で切詰）/ 解決先 IP / hop 番号 / Node の生 message |
+| `fetchOgp` の非 2xx | サーバログ `[fetchOgp] non-2xx` | status / `final_url`（クエリ・フラグメント除去）/ Content-Type / 本文先頭 200 文字 |
+| `fetchOgp` の name 未抽出 | サーバログ `[fetchOgp] no name extracted`（warn） | 上記 + `blacklistedTitle`。戻り値は `ok: true` のまま |
+| Places client (`lib/places/google.ts`) | サーバログ | 非 2xx 時に status と redact / clip 済み bodyHead |
+| Action の戻り値 | クライアント | `reason` のみ |
+
+`fetchOgp` は失敗理由の構造化ログを重ねて出さない（`safeFetchHtml` が host / path 付きで
+既に 1 行出しているため）。
+
+**URL Import ではこの `error` 文言は UI へ届かない。** `resolveShortUrl`
+（`lib/actions/url-parse-actions.ts`）は `fetchOgp` の `{ ok: false }` を理由を問わず
+`short_url_resolve_failed` へ正規化し、`ogp.error`（`"タイムアウトしました"` / `"HTTP 500"` 等）
+は `reason` へ載せない。sanitize 済みとはいえ HTTP status を UI へ運ぶ必要が無く、文言は
+呼び出し側が `reason` から決める設計を崩さないため（§3.1 の reason 表 / §3.2）。
 
 ---
 

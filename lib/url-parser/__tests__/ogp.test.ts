@@ -536,3 +536,67 @@ describe("fetchOgp: 構造化ログ", () => {
     );
   });
 });
+
+/**
+ * URL Import の trust boundary は HTTPS-only。`evaluateUrlImportPolicy` は貼り付けられた
+ * 1 本目の URL しか保証しないため、短縮 URL の redirect 解決を行う `fetchOgp` は
+ * `safeFetchHtml` へ `allowedSchemes: ["https:"]` を渡し、**全 redirect hop**へ
+ * HTTPS-only を適用する必要がある (PR #285 review BLOCKER)。
+ *
+ * `safeFetchHtml` 側の既定は `["http:", "https:"]` のままで、絞り込みは呼び出し側の
+ * 責務。hop ごとの実挙動 (HTTP redirect 先へ接続しない等) は
+ * `lib/security/__tests__/safe-http-fetch.test.ts` で固定している。
+ */
+describe("fetchOgp: safeFetchHtml へ渡す fetch オプション (PR #285 review BLOCKER)", () => {
+  afterEach(() => {
+    vi.mocked(safeFetchHtml).mockReset();
+    consoleError.mockClear();
+    consoleWarn.mockClear();
+  });
+
+  it("allowedSchemes: ['https:'] を渡す(HTTP redirect hop を許可しない)", async () => {
+    vi.mocked(safeFetchHtml).mockResolvedValue({
+      ok: true,
+      status: 200,
+      finalUrl: "https://www.google.com/maps/place/%E5%B0%8E%E6%A5%BD/",
+      body: "<html><head><title>導楽</title></head></html>",
+      contentType: "text/html",
+    });
+
+    await fetchOgp("https://maps.app.goo.gl/abc123");
+
+    expect(safeFetchHtml).toHaveBeenCalledWith(
+      "https://maps.app.goo.gl/abc123",
+      expect.objectContaining({ allowedSchemes: ["https:"] }),
+    );
+  });
+
+  it("timeout / body 上限の既存オプションは維持される", async () => {
+    vi.mocked(safeFetchHtml).mockResolvedValue({
+      ok: true,
+      status: 200,
+      finalUrl: "https://example.com/",
+      body: "<html><head><title>x</title></head></html>",
+      contentType: "text/html",
+    });
+
+    await fetchOgp("https://example.com/");
+
+    expect(safeFetchHtml).toHaveBeenCalledWith(
+      "https://example.com/",
+      expect.objectContaining({
+        hopTimeoutMs: 5000,
+        totalTimeoutMs: 8000,
+        maxBodyBytes: 2_000_000,
+      }),
+    );
+  });
+
+  it("scheme 拒否は sanitize 済み文言になり、生の理由コードを UI へ出さない", async () => {
+    vi.mocked(safeFetchHtml).mockResolvedValue({ ok: false, reason: "disallowed_scheme" });
+
+    const result = await fetchOgp("https://maps.app.goo.gl/abc123");
+
+    expect(result).toEqual({ ok: false, error: "対応していないURL形式です" });
+  });
+});
