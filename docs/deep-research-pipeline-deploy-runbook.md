@@ -38,7 +38,7 @@ Deep Research パイプラインの初期セットアップ + 以降の運用手
 
 ```bash
 gh secret set CRON_SECRET    # openssl rand -hex 32 で生成した値
-gh secret set VERCEL_URL      # https://fw-sales.vercel.app
+gh secret set VERCEL_URL      # https://sales.firstweb-works.com
 gh secret set DATABASE_URL    # Supabase Session Pooler (port 5432) の接続文字列
 ```
 
@@ -143,7 +143,7 @@ gh workflow enable "Poll Deep Research Jobs"
 > **【廃止】** 貼付ワークベンチと店舗詳細の Deep Research セクションは #180 / #125 で
 > 撤去済みです。現行の E2E 手順は AI 店舗調査フローに読み替えてください。
 
-本番 (`https://fw-sales.vercel.app`) にログイン後:
+本番 (`https://sales.firstweb-works.com`) にログイン後:
 
 ### 調査 (/research)
 

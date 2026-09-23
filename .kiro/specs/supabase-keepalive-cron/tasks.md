@@ -25,7 +25,7 @@
 
 - [ ] 2.2 自動スケジュール実行と pause 不再発の運用観測
   - 直近の自動スケジュール起動が green であることを Actions 履歴で確認する。
-  - pause タイマー周期（7 日）を複数回跨ぐ運用期間にわたり、本番 `https://fw-sales.vercel.app/` が無操作起因の自動 pause に陥らず応答し続けることを観測・確認する。
+  - pause タイマー周期（7 日）を複数回跨ぐ運用期間にわたり、本番 `https://sales.firstweb-works.com/` が無操作起因の自動 pause に陥らず応答し続けることを観測・確認する。
   - 万一 pause が再発する兆候があれば、keep-alive クエリ対象を別の実テーブルへ差し替える（design.md Open Questions / Operational Risks 参照）。
   - 観測可能な完了条件: スケジュール実行が緑であり、複数 pause 周期を跨いで本番が pause しなかったことを運用者が確認できる。
   - _Requirements: 7.2, 7.3, 7.4_
