@@ -125,6 +125,28 @@ export default function SettingsPage() {
                 ohisama.shu@gmail.com
               </dd>
             </div>
+            <div>
+              <dt className="inline font-medium text-foreground">コピーライト:</dt>{" "}
+              <dd className="inline text-muted-foreground">
+                ©{" "}
+                <a
+                  href="https://firstweb-works.com"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-medium text-foreground underline underline-offset-2 transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
+                >
+                  Firstweb
+                </a>{" "}/{" "}
+                <a
+                  href="https://www.instagram.com/syokufun_gen/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-medium text-foreground underline underline-offset-2 transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
+                >
+                  新卒グルメ
+                </a>
+              </dd>
+            </div>
           </dl>
         </Card.Body>
       </Card>

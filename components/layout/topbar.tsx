@@ -36,7 +36,7 @@ function deriveBreadcrumb(pathname: string): BreadcrumbItem[] {
       ];
     }
   }
-  return [{ label: "FirstWeb - Reserch AI for Sales" }];
+  return [{ label: "Firstweb 営業ツールズ" }];
 }
 
 export interface TopbarProps {

@@ -11,8 +11,7 @@ import { LegalArticle, LegalSection } from "../_components/legal";
 
 export const metadata: Metadata = {
   title: "利用規約",
-  description:
-    "FirstWeb - Reserch AI for Sales の利用規約。",
+  description: "Firstweb 営業ツールズの利用規約。",
 };
 
 export default function TermsOfServicePage() {
@@ -23,8 +22,8 @@ export default function TermsOfServicePage() {
       lead={
         <>
           本利用規約(以下「本規約」といいます。)は、〔事業者名〕(以下「当社」と
-          いいます。)が提供する社内向け営業支援ツール「FirstWeb - Reserch AI
-          for Sales」(以下「本サービス」といいます。)の利用条件を定めるものです。
+          いいます。)が提供する社内向け営業支援ツール「Firstweb 営業ツールズ」
+          (以下「本サービス」といいます。)の利用条件を定めるものです。
           利用者は、本規約に同意のうえ本サービスを利用するものとします。
         </>
       }
