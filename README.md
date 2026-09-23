@@ -1,4 +1,4 @@
-# FirstWeb - Reserch AI for Sales（新卒グルメ）
+# Firstweb 営業ツールズ（新卒グルメ）
 
 <img width="500" height="auto" alt="firstweb-loados" src="https://github.com/user-attachments/assets/c7dedfb1-607a-4675-a183-0f7332523b8c" />
 

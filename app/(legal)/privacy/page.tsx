@@ -12,7 +12,7 @@ import { LegalArticle, LegalSection } from "../_components/legal";
 export const metadata: Metadata = {
   title: "プライバシーポリシー",
   description:
-    "FirstWeb - Reserch AI for Sales における個人情報の取り扱いについて。",
+    "Firstweb 営業ツールズにおける個人情報の取り扱いについて。",
 };
 
 export default function PrivacyPolicyPage() {
@@ -23,8 +23,8 @@ export default function PrivacyPolicyPage() {
       lead={
         <>
           〔事業者名〕(以下「当社」といいます。)は、当社が提供する社内向け
-          営業支援ツール「FirstWeb - Reserch AI for Sales」(以下「本サービス」と
-          いいます。)における利用者の個人情報の取り扱いについて、以下のとおり
+          営業支援ツール「Firstweb 営業ツールズ」(以下「本サービス」といいます。)
+          における利用者の個人情報の取り扱いについて、以下のとおり
           プライバシーポリシー(以下「本ポリシー」といいます。)を定めます。
         </>
       }

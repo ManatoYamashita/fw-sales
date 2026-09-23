@@ -178,10 +178,7 @@ export function Sidebar({
             )}
           >
             <p className="text-sm font-semibold tracking-tight text-sidebar-foreground truncate">
-              FirstWeb
-            </p>
-            <p className="text-xs text-muted-foreground -mt-0.5">
-              Reserch AI for Sales
+              Firstweb 営業ツールズ
             </p>
           </div>
           <button
