@@ -25,22 +25,28 @@ export function StoreTitleSection({
   const [editing, setEditing] = useState(false);
   const [pending, startTransition] = useTransition();
   const [form, setForm] = useState({ name: store.name, genre: store.genre });
+  const [nameError, setNameError] = useState<string | undefined>();
 
   const onText =
     (key: keyof typeof form) =>
-    (e: ChangeEvent<HTMLInputElement>) =>
+    (e: ChangeEvent<HTMLInputElement>) => {
       setForm((prev) => ({ ...prev, [key]: e.target.value }));
+      if (key === "name") setNameError(undefined);
+    };
 
   const onCancel = () => {
     setForm({ name: store.name, genre: store.genre });
+    setNameError(undefined);
     setEditing(false);
   };
 
   const onSave = () => {
     if (!form.name.trim()) {
-      toast.error("店舗名を入力してください");
+      setNameError("店舗名を入力してください");
+      document.getElementById("store_name")?.focus();
       return;
     }
+    setNameError(undefined);
     const patch: StorePatch = { ...form };
     startTransition(async () => {
       const result = await updateStorePatchAction(store.id, patch);
@@ -57,8 +63,16 @@ export function StoreTitleSection({
   if (editing) {
     return (
       <div className="space-y-2">
+        <h1 className="text-xl md:text-2xl font-bold text-foreground">
+          {store.name}
+        </h1>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-w-2xl">
-          <FormField label="店舗名" htmlFor="store_name" required>
+          <FormField
+            label="店舗名"
+            htmlFor="store_name"
+            required
+            error={nameError}
+          >
             <Input
               id="store_name"
               value={form.name}
@@ -101,7 +115,7 @@ export function StoreTitleSection({
 
   return (
     <div>
-      <h2 className="text-xl md:text-2xl font-bold text-foreground inline-flex items-center gap-2 flex-wrap">
+      <h1 className="text-xl md:text-2xl font-bold text-foreground inline-flex items-center gap-2 flex-wrap">
         {store.name}
         <IndividualStoreBadge operatorType={store.operator_type} />
         <ResearchPhaseBadge phase={phase} />
@@ -114,7 +128,7 @@ export function StoreTitleSection({
         >
           <Pencil className="h-3.5 w-3.5" />
         </Button>
-      </h2>
+      </h1>
       <p className="text-sm text-muted-foreground mt-0.5">
         {[store.prefecture, store.city, store.genre]
           .filter(Boolean)

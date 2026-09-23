@@ -25,9 +25,9 @@ export default function DashboardPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-xl md:text-2xl font-bold text-foreground">
+        <h1 className="text-xl md:text-2xl font-bold text-foreground">
           ダッシュボード
-        </h2>
+        </h1>
       </div>
 
       <Suspense fallback={<StatGridSkeleton />}>

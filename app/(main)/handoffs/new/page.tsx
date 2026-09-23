@@ -25,9 +25,9 @@ export default async function NewHandoffPage({ searchParams }: PageProps) {
         >
           ← {deal.store_name} の商談
         </Link>
-        <h2 className="text-xl md:text-2xl font-bold text-foreground mt-1">
+        <h1 className="text-xl md:text-2xl font-bold text-foreground mt-1">
           運用への引き継ぎ
-        </h2>
+        </h1>
       </div>
       <HandoffNewForm deal={deal} />
     </div>

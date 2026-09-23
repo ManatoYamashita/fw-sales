@@ -99,6 +99,12 @@ export default function MainLayout({
 }) {
   return (
     <div className="flex min-h-dvh bg-background text-foreground">
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-md focus:bg-card focus:px-4 focus:py-2 focus:text-foreground focus:shadow-card"
+      >
+        メインコンテンツへスキップ
+      </a>
       <Suspense fallback={<SidebarFallback collapsed={false} />}>
         <SidebarSlot />
       </Suspense>
@@ -106,7 +112,11 @@ export default function MainLayout({
         <Suspense fallback={<TopbarFallback />}>
           <TopbarShell />
         </Suspense>
-        <main className="motion-safe:animate-slide-up flex-1 px-4 md:px-6 py-6 md:py-8 max-w-screen-2xl 4xl:max-w-screen-4xl mx-auto w-full">
+        <main
+          id="main-content"
+          tabIndex={-1}
+          className="motion-safe:animate-slide-up flex-1 px-4 md:px-6 py-6 md:py-8 max-w-screen-2xl 4xl:max-w-screen-4xl mx-auto w-full"
+        >
           {/* #155: 破壊的操作ボタンの権限判定を配送する。Client Provider が RSC
               children を prop 通過するため静的 PPR シェルには影響しない。 */}
           <ViewTransition default="none" enter="fade-in" exit="fade-out">

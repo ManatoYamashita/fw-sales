@@ -8,7 +8,7 @@ export function Textarea({ className, rows = 4, ...props }: TextareaProps) {
     <textarea
       rows={rows}
       className={cn(
-        "flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm leading-6 resize-y",
+        "flex w-full rounded-md border border-input bg-background px-3 py-2 text-base sm:text-sm leading-6 resize-y",
         "text-foreground placeholder:text-muted-foreground",
         "shadow-xs transition-[box-shadow,border-color,background-color]",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:border-ring/60",
