@@ -75,7 +75,7 @@ export function NotificationBell({ notifications }: NotificationBellProps) {
         <Bell className="h-4 w-4" />
         {unreadCount > 0 ? (
           <span
-            className="absolute top-1 right-1 inline-flex h-4 min-w-4 px-1 items-center justify-center rounded-full bg-destructive text-destructive-foreground text-[10px] font-medium leading-none"
+            className="absolute top-1 right-1 inline-flex h-4 min-w-4 px-1 items-center justify-center rounded-full bg-destructive text-destructive-foreground text-xs font-medium leading-none"
             aria-hidden
           >
             {unreadCount > 9 ? "9+" : unreadCount}
@@ -151,7 +151,7 @@ function NotificationRow({ notification, onNavigate }: NotificationRowProps) {
           <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">
             {notification.body}
           </p>
-          <p className="text-[10px] text-muted-foreground mt-1">
+          <p className="text-xs text-muted-foreground mt-1">
             {formatRelativeJst(notification.created_at)}
           </p>
         </div>

@@ -613,7 +613,7 @@ export function ReviewCompletionFooter({
           {/* disabled 理由をボタン直下に常時表示する(tooltip 単独にしない)。
               `aria-describedby` で支援技術にも同じ理由が届く。 */}
           {blockedByConflict && (
-            <span id={hintId} className="text-[11px] text-warning sm:text-right">
+            <span id={hintId} className="text-xs text-warning sm:text-right">
               競合を解決すると有効になります
             </span>
           )}
@@ -629,7 +629,7 @@ export function ReviewCompletionFooter({
               >
                 判断済みの内容だけで完了
               </Button>
-              <span className="text-[11px] text-muted-foreground sm:text-right">
+              <span className="text-xs text-muted-foreground sm:text-right">
                 {buildSkipRemainingNote(summary.total, summary.conflict)}
               </span>
             </>

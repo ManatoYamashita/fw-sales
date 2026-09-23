@@ -95,7 +95,7 @@ function GroupLabel({ children }: { children: React.ReactNode }) {
   return (
     <span
       aria-hidden
-      className="text-[11px] font-semibold tracking-[0.08em] text-muted-foreground pr-0.5"
+      className="text-xs font-semibold tracking-[0.08em] text-muted-foreground pr-0.5"
     >
       {children}
     </span>

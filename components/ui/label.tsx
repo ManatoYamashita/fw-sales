@@ -14,7 +14,7 @@ export function Label({
   return (
     <label
       className={cn(
-        "inline-flex items-center gap-1 text-xs font-semibold text-foreground leading-none",
+        "inline-flex items-center gap-1 text-xs font-semibold text-foreground leading-snug",
         "peer-disabled:cursor-not-allowed peer-disabled:opacity-60",
         className,
       )}

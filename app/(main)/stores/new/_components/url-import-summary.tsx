@@ -100,7 +100,7 @@ export function UrlImportSummary({
               return (
                 <li
                   key={f.key}
-                  className="flex items-center gap-2 px-2 py-1 rounded text-[11px] text-confidence-foreground"
+                  className="flex items-center gap-2 px-2 py-1 rounded text-xs text-confidence-foreground"
                   // confidenceToBg は lightness 92% の薄背景。テーマに依存しない
                   // confidence-foreground を使い、ダークテーマでも可読性を保つ。
                   style={bg ? { backgroundColor: bg } : undefined}
@@ -116,7 +116,7 @@ export function UrlImportSummary({
                       <span className="text-confidence-foreground/70">(取得失敗)</span>
                     )}
                   </span>
-                  <span className="ml-auto text-[10px] text-confidence-foreground/70 shrink-0">
+                  <span className="ml-auto text-xs text-confidence-foreground/70 shrink-0">
                     {tierLabel(tier)}
                     {typeof f.confidence === "number" ? ` ${f.confidence}` : ""}
                   </span>

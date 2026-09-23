@@ -27,6 +27,8 @@ describe("buildEmptyState", () => {
     const markup = markupOf(true);
     expect(markup).toContain("現在の条件に一致する店舗はありません");
     expect(markup).toContain("条件を変更または解除してください。");
+    expect(markup).toContain('href="/stores"');
+    expect(markup).toContain("条件を解除");
   });
 
   it("絞り込み中は新規登録を勧めない", () => {
@@ -34,10 +36,12 @@ describe("buildEmptyState", () => {
     expect(markupOf(true)).not.toContain("登録");
   });
 
-  it("条件なしのときは従来どおり新規登録を案内する", () => {
+  it("条件なしのときは店舗登録への導線を案内する", () => {
     const markup = markupOf(false);
     expect(markup).toContain("該当する店舗がありません");
-    expect(markup).toContain("検索条件を変更するか、店舗を新しく登録してください。");
+    expect(markup).toContain("店舗を登録すると、ここに営業状況が表示されます。");
+    expect(markup).toContain('href="/stores/new"');
+    expect(markup).toContain("店舗を登録する");
   });
 
   it("どちらの状態でも見出しと説明が空でない", () => {

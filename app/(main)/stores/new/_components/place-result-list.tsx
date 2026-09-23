@@ -141,12 +141,12 @@ export function PlaceResultList({
                       {centerLabel}から {formatDistanceMeters(distanceMeters)}
                     </p>
 
-                    <p className="text-[11px] text-muted-foreground">
+                    <p className="text-xs text-muted-foreground">
                       {rankingReasons.join(" / ")}
                     </p>
 
                     {candidateInfoLine && (
-                      <p className="text-[11px] text-muted-foreground">
+                      <p className="text-xs text-muted-foreground">
                         {candidateInfoLine}
                       </p>
                     )}
@@ -247,7 +247,7 @@ export function PlaceResultList({
                           )}
                         </Button>
                         {!isDetailsLoaded && (
-                          <p className="text-[10px] text-muted-foreground">
+                          <p className="text-xs text-muted-foreground">
                             電話番号・Webサイト・評価を取得（API目安 +1回）
                           </p>
                         )}

@@ -20,7 +20,10 @@ import {
   visibleAt as visibleColumnsAt,
 } from "@/components/ui/__tests__/support/column-budget";
 import type { Store } from "@/types/store";
-import { buildColumns } from "../recent-stores-table-view";
+import {
+  buildColumns,
+  RecentStoresTableView,
+} from "../recent-stores-table-view";
 
 /**
  * 列単体の予算 (px)。セル左右の padding 32px を含む実効幅。
@@ -68,6 +71,15 @@ function storeWith(partial: Partial<Store>): Store {
 }
 
 describe("最近登録した店舗の列優先度", () => {
+  it("店舗未登録時は登録導線を表示する", () => {
+    const markup = renderToStaticMarkup(<RecentStoresTableView rows={[]} />);
+
+    expect(markup).toContain("店舗がまだ登録されていません");
+    expect(markup).toContain("店舗を登録すると、ここに最近登録した店舗が表示されます。");
+    expect(markup).toContain('href="/stores/new"');
+    expect(markup).toContain("店舗を登録する");
+  });
+
   it("列の並びと閾値が決定表と一致する", () => {
     const columns = buildColumns();
 

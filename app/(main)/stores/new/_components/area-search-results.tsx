@@ -107,14 +107,14 @@ function MetricPill({
   }[tone];
   return (
     <div className="flex flex-col gap-0.5 rounded-md border border-border px-3 py-1.5">
-      <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+      <span className="text-xs uppercase tracking-wide text-muted-foreground">
         {label}
       </span>
       <span
         className={`inline-flex w-fit items-baseline gap-0.5 rounded px-1.5 py-0.5 text-sm font-semibold tabular-nums ${toneClass}`}
       >
         {value.toLocaleString()}
-        <span className="text-[10px] font-normal opacity-70">件</span>
+        <span className="text-xs font-normal opacity-70">件</span>
       </span>
     </div>
   );

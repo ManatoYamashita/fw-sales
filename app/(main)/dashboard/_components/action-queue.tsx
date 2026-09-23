@@ -95,7 +95,7 @@ export async function ActionQueue() {
         {isEmpty ? (
           <EmptyState
             title="未着手アクションはありません"
-            description="優秀ですねぇ。"
+            description="調査・営業対応・引き継ぎ確認が必要な店舗はここに表示されます。"
           />
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
