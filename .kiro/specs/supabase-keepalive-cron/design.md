@@ -4,7 +4,7 @@
 
 **Purpose**: Supabase Free Tier の「7 日連続 user database activity 無しで自動 pause」を発火させないため、外部 CI（GitHub Actions）から定期的に本番 Supabase へ実 DB クエリを送り、pause タイマーを継続的にリセットする。
 
-**Users**: 本プロダクトの運用者（開発者本人）。本番 `https://fw-sales.vercel.app/` を、無操作期間が続いてもいつでも応答可能な状態に保つ。
+**Users**: 本プロダクトの運用者（開発者本人）。本番 `https://sales.firstweb-works.com/` を、無操作期間が続いてもいつでも応答可能な状態に保つ。
 
 **Impact**: 2026-06-21 に発生した「7 日 pause → `504 MIDDLEWARE_INVOCATION_TIMEOUT`」の根本原因（無アクティビティ）を、アプリ実行経路に一切手を加えずに CI 側で解消する。PR #146 の fail-fast 防御（被害最小化）とは独立し、本設計は pause の **発生予防** のみを担う。
 

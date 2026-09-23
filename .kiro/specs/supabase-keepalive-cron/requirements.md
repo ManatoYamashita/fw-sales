@@ -2,7 +2,7 @@
 
 ## Introduction
 
-本機能は、Supabase Free Tier の「7 日連続無アクセスで自動 pause」によって本番 (`https://fw-sales.vercel.app/`) が `504 GATEWAY_TIMEOUT` (`MIDDLEWARE_INVOCATION_TIMEOUT`) を返す再発を防ぐため、定期的に Supabase へ活性化リクエストを送る GitHub Actions ベースの Keep-Alive ワークフローを導入する。
+本機能は、Supabase Free Tier の「7 日連続無アクセスで自動 pause」によって本番 (`https://sales.firstweb-works.com/`) が `504 GATEWAY_TIMEOUT` (`MIDDLEWARE_INVOCATION_TIMEOUT`) を返す再発を防ぐため、定期的に Supabase へ活性化リクエストを送る GitHub Actions ベースの Keep-Alive ワークフローを導入する。
 
 2026-06-21 の障害（最終 main commit 2026-06-14 → ぴったり 7 日後に pause が発火）を受けて、PR #146 で Edge Middleware に `AbortSignal.timeout(4_000)` の fail-fast 防御を入れたが、これは被害最小化であり pause 自体の予防ではない。本機能は pause タイマーをリセットし続けることで、pause を「発火させない」ことを目的とする。
 
