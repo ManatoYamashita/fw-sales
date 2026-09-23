@@ -38,9 +38,9 @@ export default async function NewStorePage({
   return (
     <div className="space-y-4 max-w-4xl mx-auto">
       <div>
-        <h2 className="text-xl md:text-2xl font-bold text-foreground">
+        <h1 className="text-xl md:text-2xl font-bold text-foreground">
           店舗を登録
-        </h2>
+        </h1>
         <p className="text-sm text-muted-foreground mt-1">
           GoogleマップURLまたはエリア検索で店舗を登録できます。タブで方法を切り替えてください。
         </p>

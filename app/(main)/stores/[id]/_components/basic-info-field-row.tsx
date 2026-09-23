@@ -111,7 +111,7 @@ export function BasicInfoFieldRow({
             {def.label}
           </label>
           <span
-            className={`text-[10px] px-1.5 py-0.5 rounded border ${TIER_CLASS[tier]}`}
+            className={`text-xs px-1.5 py-0.5 rounded border ${TIER_CLASS[tier]}`}
           >
             {tier}・{TIER_LABEL[tier]}
           </span>
@@ -158,20 +158,20 @@ export function BasicInfoFieldRow({
       <div className="flex items-center gap-2 flex-wrap">
         <span className="font-medium text-foreground">{def.label}</span>
         <span
-          className={`text-[10px] px-1.5 py-0.5 rounded border ${TIER_CLASS[tier]}`}
+          className={`text-xs px-1.5 py-0.5 rounded border ${TIER_CLASS[tier]}`}
           aria-label={`取得難易度 ${tier} ${TIER_LABEL[tier]}`}
         >
           {tier}・{TIER_LABEL[tier]}
         </span>
         {filled && field && field.filled_by && (
-          <span className="text-[10px] text-muted-foreground">
+          <span className="text-xs text-muted-foreground">
             取得ソース: {SOURCE_LABEL[field.filled_by]}
           </span>
         )}
         <button
           type="button"
           onClick={onEdit}
-          className="ml-auto inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground"
+          className="ml-auto inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
           aria-label={`${def.label} を編集`}
         >
           <Pencil className="h-3 w-3" /> 編集

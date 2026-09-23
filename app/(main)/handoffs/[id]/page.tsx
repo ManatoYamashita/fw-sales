@@ -34,9 +34,9 @@ export default async function HandoffDetailPage({
         >
           ← 引き継ぎ一覧
         </Link>
-        <h2 className="text-xl md:text-2xl font-bold text-foreground mt-1">
+        <h1 className="text-xl md:text-2xl font-bold text-foreground mt-1">
           {handoff.store_name}
-        </h2>
+        </h1>
         <p className="text-sm text-muted-foreground mt-0.5">
           商談 ID: {handoff.deal_id}
         </p>

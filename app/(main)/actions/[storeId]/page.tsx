@@ -49,9 +49,9 @@ export default async function ActionDetailPage({
           >
             ← アクション一覧
           </Link>
-          <h2 className="text-xl md:text-2xl font-bold text-foreground mt-1">
+          <h1 className="text-xl md:text-2xl font-bold text-foreground mt-1">
             {store.name}
-          </h2>
+          </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
             {[store.prefecture, store.city, store.genre]
               .filter(Boolean)

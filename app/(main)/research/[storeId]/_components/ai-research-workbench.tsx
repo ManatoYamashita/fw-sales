@@ -90,7 +90,7 @@ export function AiResearchWorkbench({
         <Link href="/research" className="text-xs text-muted-foreground hover:text-foreground">
           ← 調査
         </Link>
-        <h2 className="text-xl md:text-2xl font-bold text-foreground mt-1">{store.name}</h2>
+        <h1 className="text-xl md:text-2xl font-bold text-foreground mt-1">{store.name}</h1>
       </div>
 
       {!primaryRun && <StartResearchCard onStart={onStartClick} starting={starting} />}

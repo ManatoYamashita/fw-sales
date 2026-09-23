@@ -180,7 +180,7 @@ export function Sidebar({
             <p className="text-sm font-semibold tracking-tight text-sidebar-foreground truncate">
               FirstWeb
             </p>
-            <p className="text-[11px] text-muted-foreground -mt-0.5">
+            <p className="text-xs text-muted-foreground -mt-0.5">
               Reserch AI for Sales
             </p>
           </div>
@@ -205,7 +205,7 @@ export function Sidebar({
         >
           <p
             className={cn(
-              "px-3 pt-1 pb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground",
+              "px-3 pt-1 pb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground",
               collapsed && "md:hidden",
             )}
           >
@@ -256,7 +256,7 @@ export function Sidebar({
                 {typeof count === "number" && count > 0 ? (
                   <span
                     className={cn(
-                      "inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full text-[11px] font-semibold tabular-nums",
+                      "inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full text-xs font-semibold tabular-nums",
                       collapsed && "md:hidden",
                       active
                         ? "bg-sidebar-primary text-sidebar-primary-foreground"

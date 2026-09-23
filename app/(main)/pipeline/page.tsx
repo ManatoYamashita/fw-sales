@@ -30,9 +30,9 @@ export default async function PipelinePage({ searchParams }: PageProps) {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-xl md:text-2xl font-bold text-foreground">
+        <h1 className="text-xl md:text-2xl font-bold text-foreground">
           パイプライン
-        </h2>
+        </h1>
         <p className="text-sm text-muted-foreground mt-1">
           ステージ別に店舗を一望し、ボトルネックを早期に発見します。
         </p>

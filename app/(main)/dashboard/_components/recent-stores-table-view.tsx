@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Inbox } from "lucide-react";
 import { Card } from "@/components/ui/card";
+import { buttonVariants } from "@/components/ui/button";
 import { DataTable, type ColumnDef } from "@/components/ui/data-table";
 import { EmptyState } from "@/components/ui/empty-state";
 import { StageBadge } from "@/components/feature/stage-badge";
@@ -150,7 +151,15 @@ export function RecentStoresTableView({ rows }: RecentStoresTableViewProps) {
           <EmptyState
             icon={<Inbox />}
             title="店舗がまだ登録されていません"
-            description="右上の「店舗登録」から最初の店舗を追加してください。"
+            description="店舗を登録すると、ここに最近登録した店舗が表示されます。"
+            action={
+              <Link
+                href="/stores/new"
+                className={buttonVariants({ variant: "primary", size: "sm" })}
+              >
+                店舗を登録する
+              </Link>
+            }
           />
         }
       />

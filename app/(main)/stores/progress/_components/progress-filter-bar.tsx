@@ -316,7 +316,7 @@ export function ProgressFilterBar({ profileEntries }: ProgressFilterBarProps) {
             placeholder="店舗名・最寄駅・次回アクションから検索…"
             aria-label="顧客を検索"
             className={cn(
-              "h-11 pl-10 pr-10 text-[15px] tracking-tight",
+              "h-11 pl-10 pr-10 text-base tracking-tight",
               "border-transparent bg-muted/50 hover:bg-muted/70 focus-visible:bg-background",
               "shadow-none rounded-lg",
             )}
@@ -387,7 +387,7 @@ export function ProgressFilterBar({ profileEntries }: ProgressFilterBarProps) {
       {/* === アクティブ状態行 (ピル) === */}
       {hasAnyFilter ? (
         <div className="flex items-center gap-2 flex-wrap border-t border-border/80 px-3 py-2.5 bg-muted/30 rounded-b-xl">
-          <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+          <span className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
             <ListFilter className="h-3 w-3" /> 適用中
           </span>
 
@@ -501,7 +501,7 @@ function TriggerButton({
         <span
           aria-label={`${badge}件のフィルタ適用中`}
           className={cn(
-            "ml-0.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-semibold tabular-nums",
+            "ml-0.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-semibold tabular-nums",
             active
               ? "bg-background text-foreground"
               : "bg-foreground text-background",
@@ -523,7 +523,7 @@ interface ChipProps {
 function Chip({ label, onClear, children }: ChipProps) {
   return (
     <span className="group inline-flex items-center gap-1.5 h-7 pl-2 pr-1 rounded-full border border-border bg-background text-xs">
-      <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+      <span className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
         {label}
       </span>
       <span className="font-medium text-foreground truncate max-w-[160px]">
@@ -643,7 +643,7 @@ function FilterPanel({
 function PanelGroup({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div>
-      <div className="text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground mb-2">
+      <div className="text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground mb-2">
         {label}
       </div>
       {children}

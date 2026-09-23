@@ -110,7 +110,7 @@ export function SourceBadge({ entry }: { entry: SourceRegistryEntry }) {
           title={`${displayName}(URLの店舗同定が未確認のためリンクを無効にしています)`}
         >
           <span className="inline-flex items-center gap-1.5">{content}</span>
-          <span className="text-[11px] text-muted-foreground truncate max-w-[20rem]">
+          <span className="text-xs text-muted-foreground truncate max-w-[20rem]">
             {CANDIDATE_TITLE_LABEL}: {entry.title}
           </span>
         </span>

@@ -99,12 +99,33 @@ export default function SettingsPage() {
 
       <Card>
         <Card.Header>
-          <Card.Title>備考</Card.Title>
+          <Card.Title>クレジットとヴァージョン情報</Card.Title>
         </Card.Header>
-        <Card.Body className="space-y-2 text-sm text-muted-foreground leading-relaxed">
-          <p>
-            このプロジェクトは現在開発中です。一部モックデータを使用していることにご注意ください。
-          </p>
+        <Card.Body>
+          <dl className="space-y-2 text-sm leading-relaxed">
+            <div>
+              <dt className="inline font-medium text-foreground">version:</dt>{" "}
+              <dd className="inline text-muted-foreground">1.0.1</dd>
+            </div>
+            <div>
+              <dt className="inline font-medium text-foreground">開発:</dt>{" "}
+              <dd className="inline text-muted-foreground">新卒グルメ</dd>
+            </div>
+            <div>
+              <dt className="inline font-medium text-foreground">開発者:</dt>{" "}
+              <dd className="inline break-words text-muted-foreground">
+                mail@yamashitamana.to
+              </dd>
+            </div>
+            <div>
+              <dt className="inline font-medium text-foreground">
+                コントリビューター:
+              </dt>{" "}
+              <dd className="inline break-words text-muted-foreground">
+                ohisama.shu@gmail.com
+              </dd>
+            </div>
+          </dl>
         </Card.Body>
       </Card>
     </div>

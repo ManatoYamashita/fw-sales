@@ -8,7 +8,7 @@ import { Card } from "@/components/ui/card";
 import { DataTable, type ColumnDef } from "@/components/ui/data-table";
 import { type SortDir } from "@/components/ui/sortable-header-params";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { StageBadge } from "@/components/feature/stage-badge";
 import { ChannelBadge } from "@/components/feature/channel-badge";
@@ -70,12 +70,28 @@ export function buildEmptyState(isFiltered: boolean) {
       icon={<SearchX />}
       title="現在の条件に一致する店舗はありません"
       description="条件を変更または解除してください。"
+      action={
+        <Link
+          href="/stores"
+          className={buttonVariants({ variant: "outline", size: "sm" })}
+        >
+          条件を解除
+        </Link>
+      }
     />
   ) : (
     <EmptyState
       icon={<Inbox />}
       title="該当する店舗がありません"
-      description="検索条件を変更するか、店舗を新しく登録してください。"
+      description="店舗を登録すると、ここに営業状況が表示されます。"
+      action={
+        <Link
+          href="/stores/new"
+          className={buttonVariants({ variant: "primary", size: "sm" })}
+        >
+          店舗を登録する
+        </Link>
+      }
     />
   );
 }

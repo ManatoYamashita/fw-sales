@@ -136,7 +136,7 @@ export function UserMenu({
           >
             {displayName}
           </span>
-          <span className="block text-[11px] text-muted-foreground truncate">
+          <span className="block text-xs text-muted-foreground truncate">
             {role}
           </span>
         </span>

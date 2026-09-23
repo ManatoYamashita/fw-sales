@@ -12,9 +12,9 @@ export default async function ResearchPage() {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-xl md:text-2xl font-bold text-foreground">
+        <h1 className="text-xl md:text-2xl font-bold text-foreground">
           調査
-        </h2>
+        </h1>
         <p className="text-sm text-muted-foreground mt-1">
           AIで店舗を調査し、53項目のレビューを経て営業資産を生成します。
         </p>

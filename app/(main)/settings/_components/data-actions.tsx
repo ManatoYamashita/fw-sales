@@ -72,7 +72,7 @@ export function DataActions() {
 
         <label
           title={adminOnlyTitle}
-          className="inline-flex items-center justify-center gap-2 h-11 rounded-lg border border-border bg-card text-sm font-medium hover:bg-muted/40 cursor-pointer has-[:disabled]:opacity-40 has-[:disabled]:cursor-not-allowed"
+          className="inline-flex items-center justify-center gap-2 h-11 rounded-lg border border-border bg-card text-sm font-medium hover:bg-muted/40 cursor-pointer has-[:disabled]:opacity-40 has-[:disabled]:cursor-not-allowed has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring"
         >
           <Upload className="h-4 w-4" />
           JSON インポート

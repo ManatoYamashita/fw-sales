@@ -39,9 +39,9 @@ export default async function StoreEditPage({
         >
           ← {store.name}
         </Link>
-        <h2 className="text-xl md:text-2xl font-bold text-foreground mt-1">
+        <h1 className="text-xl md:text-2xl font-bold text-foreground mt-1">
           店舗を編集
-        </h2>
+        </h1>
       </div>
       <StoreEditForm store={store} profiles={profiles} />
     </div>
