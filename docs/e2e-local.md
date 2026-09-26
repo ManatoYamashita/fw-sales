@@ -17,6 +17,12 @@ pnpm e2e:install
 pnpm e2e
 ```
 
+インストール済みのChromium系ブラウザ（Aside、Google Chromeなど）で実行したい場合は、`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`に実行ファイルのパスを設定します。この場合`pnpm e2e:install`は不要です。CI（`CI`が設定された環境）ではこの変数を無視し、常にPlaywright付属のChromiumを使います。
+
+```bash
+PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/Applications/Aside.app/Contents/MacOS/Aside pnpm e2e
+```
+
 `pnpm e2e`は次を自動実行します。
 
 1. `container system start`でApple Containerを起動
