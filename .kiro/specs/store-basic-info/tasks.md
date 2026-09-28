@@ -108,7 +108,7 @@
 - [x] 5.2 クリティカルパスの E2E 検証 (PR2 完了時)
   - 店舗名のみ登録 → エリア検索充填 → 手動編集の保護 → 調査テキスト貼付 → 営業資産生成(構造化非経由)の一連を実機で確認する
   - 完了条件: クリティカルパスが通しで動作し、生成が構造化を経由しない
-  - **検証結果 (2026-06-13, fw-sales.vercel.app production / commit 8f1236d)**:
+  - **検証結果 (2026-06-13, 当時の本番ドメイン `fw-sales.vercel.app` / commit 8f1236d)**。現在の本番 URL は `https://sales.firstweb-works.com` (旧ホストから 308 転送):
     - CP①: `__e2e_5_2_2026-06-13_06-56-07__` を /stores/new (manual) で店舗名のみ登録 → store_mqc05lr6_y3ui1q として作成、詳細画面が破綻なく表示、Card に「営業時間」Row 消滅 (PR #128 反映)、basic_info 50項目アコーディオン正常表示 (`充足 0 / 50`)。
     - CP②: /stores/new (area-search) で「居酒屋 / 新丸子駅 / 1km」検索→「八海山バル TAKA 新丸子店」を追加 → store_mqc07qci_9u0kv1 として作成、詳細で「取得ソース: エリア検索」ラベルが屋号 / 住所 / 料理ジャンル に表示 = `filled_by=places` の決定的証拠。
     - CP③: 純関数 `mergeBasicInfo` (lib/domain/basic-info-merge.ts:82-88) で手動値保護ロジック確認、vitest basic-info-merge.test 16/16 pass、再現経路は area-search 設計上存在しないため実機ではなく純関数 + 静的トレースで証明。
