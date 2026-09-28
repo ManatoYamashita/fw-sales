@@ -30,8 +30,9 @@
 >
 > 1. **却下理由が成立しない。** 「middleware fetch loop リスク」を理由に Vercel 経路を
 >    避けたが、`proxy.ts` の `config.matcher` は否定先読みで `/api/*` を除外しており、
->    cron → route → DB の経路に proxy は一切介在しない。本番実測でも
->    `GET https://fw-sales.vercel.app/api/export` は認証リダイレクト (307) ではなく
+>    cron → route → DB の経路に proxy は一切介在しない。ドメイン切替前の本番実測
+>    (2026-09-05、当時の本番 URL) でも `GET https://fw-sales.vercel.app/api/export` は
+>    認証リダイレクト (307) ではなく
 >    **401 JSON** を返す。
 > 2. **OQ3 を棚上げしたままにできなくなった。** 本 design は OQ3 で「GitHub の 60 日
 >    auto-disable はコードでは解決できず運用観測で担保する」としたが、60 日無活動とは

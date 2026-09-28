@@ -293,7 +293,7 @@ pause しない。
 | 層 | 設定 |
 | --- | --- |
 | DNS (Cloudflare, zone `firstweb-works.com`) | `sales` CNAME → Vercel Domains 画面が指定する値 (`*.vercel-dns-017.com`)。**Proxy は OFF (DNS only)**。オレンジ雲にすると Vercel の証明書発行と検証が通らない |
-| Vercel (team `shinsotsu-gourmet` / project `fw-sales`) | Domains: `sales.firstweb-works.com` → Production、`fw-sales.vercel.app` → 308 Redirect。Env: Production の `NEXT_PUBLIC_APP_URL=https://sales.firstweb-works.com` |
+| Vercel (team `shinsotsu-gourmet` / project `fw-sales`) | Domains: `sales.firstweb-works.com` → Production、`fw-sales.vercel.app` → `https://sales.firstweb-works.com` へ 308 Redirect。Env: Production の `NEXT_PUBLIC_APP_URL=https://sales.firstweb-works.com` |
 | Supabase Auth | Site URL と Redirect URLs を上記ドメインに合わせる。Google OAuth の承認済みリダイレクト URI は `https://<project-ref>.supabase.co/auth/v1/callback` のままで、ドメイン変更の影響を受けない |
 
 - apex `firstweb-works.com` と `www` は別サービス (コーポレートサイト) が使っている。このリポジトリからは触らない
