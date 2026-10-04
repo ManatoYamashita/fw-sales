@@ -55,7 +55,7 @@ export function PlaceResultList({
   onFetchDetails,
 }: PlaceResultListProps) {
   return (
-    <div className="space-y-3">
+    <div className="@container min-w-0 space-y-3">
       <p className="text-sm text-muted-foreground">
         {results.length} 件の店舗が見つかりました
       </p>
@@ -113,22 +113,24 @@ export function PlaceResultList({
                   !isWithinRadius && "opacity-60",
                 )}
               >
-                <Card.Body className="flex items-start gap-3">
-                  {/* チェックボックス列: 選択可能な店舗のみ表示、幅を固定して揃える */}
-                  <div className="pt-0.5 shrink-0 w-4">
+                <Card.Body className="grid grid-cols-[2.75rem_minmax(0,1fr)] gap-3 @min-[430px]:flex @min-[430px]:items-start">
+                  {/* チェックボックス列: 狭いカードではラベル全体を 44px のタップ領域にする */}
+                  <div className="shrink-0 @min-[430px]:w-4">
                     {isEligible && (
-                      <input
-                        type="checkbox"
-                        checked={isSelected}
-                        onChange={() => onToggle(place.placeId)}
-                        aria-label={`${place.name}を選択`}
-                        className="h-4 w-4 cursor-pointer accent-primary"
-                      />
+                      <label className="flex h-11 w-11 cursor-pointer items-center justify-center @min-[430px]:h-5 @min-[430px]:w-4">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => onToggle(place.placeId)}
+                          aria-label={`${place.name}を選択`}
+                          className="h-4 w-4 cursor-pointer accent-primary"
+                        />
+                      </label>
                     )}
                   </div>
 
                   {/* 店舗情報 */}
-                  <div className="min-w-0 flex-1 space-y-1">
+                  <div className="min-w-0 flex-1 space-y-1 [overflow-wrap:anywhere]">
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                       <p className="font-semibold text-foreground leading-snug">
                         {place.name}
@@ -203,7 +205,7 @@ export function PlaceResultList({
                   </div>
 
                   {/* アクション列 */}
-                  <div className="shrink-0 flex flex-col items-end gap-1.5">
+                  <div className="col-start-2 flex min-w-0 flex-wrap items-center gap-1.5 @min-[430px]:shrink-0 @min-[430px]:flex-col @min-[430px]:items-end">
                     {matchedStore !== null ? (
                       <>
                         <Badge tone="success">DB登録済み</Badge>
