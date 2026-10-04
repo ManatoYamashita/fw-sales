@@ -552,7 +552,7 @@ export function AreaSearchResults({
   const metaMessages = getAreaSearchMetaMessages({ ...searchMeta, loadedCount });
 
   return (
-    <div className="space-y-4">
+    <div className="@container min-w-0 space-y-4">
       {/* 結果ヘッダー: 検索条件チップ + 件数メトリクス。
           「何を検索したか」「どれくらい取得して、何件が登録候補か」を一目で把握できる構成。 */}
       <div className="rounded-lg border border-border bg-card px-4 py-3 space-y-3">
@@ -794,9 +794,9 @@ export function AreaSearchResults({
         </Card>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_400px] gap-4 lg:items-start">
-        {/* 地図: スマホでは一覧の上、PCでは右側に sticky 表示 */}
-        <div className="order-1 lg:order-2 lg:sticky lg:top-4">
+      <div className="grid min-w-0 grid-cols-1 gap-4 @min-[800px]:grid-cols-[minmax(0,1fr)_400px] @min-[800px]:items-start">
+        {/* 地図: 結果領域が 800px 未満なら一覧の上、以上なら右側に sticky 表示 */}
+        <div className="order-1 min-w-0 @min-[800px]:order-2 @min-[800px]:sticky @min-[800px]:top-4">
           <AreaSearchMap
             center={center}
             radiusMeters={mainRadiusMeters}
@@ -808,11 +808,12 @@ export function AreaSearchResults({
           />
         </div>
 
-        {/* 一覧 + 操作系: スマホでは地図の下、PCでは左側 */}
-        <div className="order-2 lg:order-1 space-y-4">
+        {/* 一覧 + 操作系: 狭い結果領域では地図の下、広い領域では左側 */}
+        <div className="order-2 min-w-0 space-y-4 @min-[800px]:order-1">
           {allResults.length > 0 && (
             <div className="flex flex-wrap items-center justify-between gap-2 [&>*+*]:ml-auto">
               <Tabs
+                className="min-w-0 max-w-full"
                 value={resultFilter}
                 onValueChange={(next) => setResultFilter(next as ResultFilter)}
                 defaultValue="all"
@@ -852,7 +853,7 @@ export function AreaSearchResults({
               「DB登録済み」フィルタ表示中、または表示中に登録候補が無い場合は出さない。 */}
           {!showBar && resultFilter !== "registered" && displayedEligibleCount > 0 && (
             <div className="space-y-1">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <Button variant="outline" size="sm" onClick={handleSelectAll}>
                   表示中の登録候補を全選択
                 </Button>

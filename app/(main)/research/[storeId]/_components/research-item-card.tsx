@@ -95,9 +95,9 @@ export function ResearchItemCard({
     <div
       id={anchorId}
       tabIndex={anchorId === undefined ? undefined : -1}
-      className="border border-border rounded-lg p-4 space-y-2.5 scroll-mt-24 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="border border-border rounded-lg p-4 space-y-2.5 scroll-mt-24 [overflow-wrap:anywhere] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 [&>*+*]:ml-auto">
         <span className="text-sm font-medium text-foreground">{label}</span>
         <div className="flex items-center gap-2">
           {decided && (

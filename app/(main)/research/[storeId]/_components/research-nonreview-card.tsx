@@ -41,8 +41,8 @@ export function NonReviewItemCard({ item, label }: { item: ResearchItem; label: 
   };
 
   return (
-    <div className="border border-border rounded-lg p-4 space-y-2">
-      <div className="flex items-center justify-between gap-2">
+    <div className="border border-border rounded-lg p-4 space-y-2 [overflow-wrap:anywhere]">
+      <div className="flex flex-wrap items-center justify-between gap-2 [&>*+*]:ml-auto">
         <span className="text-sm font-medium text-foreground">{label}</span>
         <Badge tone={meta.tone}>
           {meta.icon} {meta.label}

@@ -23,10 +23,13 @@ export async function KanbanBoard({ filter }: { filter: StoreFilter }) {
   // Phase 7: 営業担当の表示は profile.display_name を id 経由で解決する。
   const profileNameById = new Map(profiles.map((p) => [p.id, p.display_name]));
   return (
-    <div className="flex gap-3 overflow-x-auto pb-4 -mx-4 md:-mx-6 px-4 md:px-6 scrollbar-none">
-      {columns.map((col) => (
-        <Column key={col.id} column={col} profileNameById={profileNameById} />
-      ))}
+    // 画面幅ではなくボードの利用可能幅で、縦積みと横並びを切り替える。
+    <div className="@container min-w-0">
+      <div className="flex min-w-0 flex-col gap-3 pb-4 @min-[700px]:-mx-6 @min-[700px]:flex-row @min-[700px]:overflow-x-auto @min-[700px]:px-6">
+        {columns.map((col) => (
+          <Column key={col.id} column={col} profileNameById={profileNameById} />
+        ))}
+      </div>
     </div>
   );
 }
@@ -47,8 +50,8 @@ function Column({ column, profileNameById }: ColumnProps) {
     <section
       aria-label={`${column.label} カラム`}
       className={cn(
-        "w-72 shrink-0 rounded-lg bg-card border border-border flex flex-col",
-        "max-h-[calc(100dvh-220px)]",
+        "flex w-full min-w-0 flex-col rounded-lg border border-border bg-card",
+        "@min-[700px]:max-h-[calc(100dvh-220px)] @min-[700px]:w-72 @min-[700px]:shrink-0",
       )}
       data-stage={column.id}
     >
@@ -60,7 +63,7 @@ function Column({ column, profileNameById }: ColumnProps) {
           {column.stores.length}
         </span>
       </header>
-      <div className="flex-1 overflow-y-auto p-2 space-y-2">
+      <div className="flex-1 space-y-2 p-2 @min-[700px]:overflow-y-auto">
         {column.stores.length === 0 ? (
           <p className="text-xs text-muted-foreground text-center py-6">
             該当なし

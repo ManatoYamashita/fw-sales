@@ -270,7 +270,7 @@ export function AreaSearchMap({
         // H2: show error inside the map area instead of an empty gray box + text below
         <div
           role="alert"
-          className="flex h-[280px] lg:h-[520px] w-full flex-col items-center justify-center gap-1 rounded-md border border-border bg-muted"
+          className="flex h-[280px] w-full flex-col items-center justify-center gap-1 rounded-md border border-border bg-muted @min-[800px]:h-[520px]"
         >
           <p className="text-sm text-destructive">地図の読み込みに失敗しました。</p>
         </div>
@@ -278,7 +278,7 @@ export function AreaSearchMap({
         <>
           <div
             ref={containerRef}
-            className="h-[280px] lg:h-[520px] w-full rounded-md border border-border bg-muted"
+            className="h-[280px] w-full rounded-md border border-border bg-muted @min-[800px]:h-[520px]"
           />
           {status === "loading" && (
             <p className="flex items-center gap-1.5 text-xs text-muted-foreground">

@@ -57,18 +57,18 @@ export default async function KpiPage() {
         <Card.Header>
           <Card.Title>営業ファネル</Card.Title>
         </Card.Header>
-        <Card.Body>
+        <Card.Body className="@container">
           <ul className="space-y-3">
             {snapshot.funnel.map((step, i) => {
               const tone =
                 FUNNEL_BAR_TONE[i % FUNNEL_BAR_TONE.length] ?? "bg-chart-1";
               const ratio = (step.count / maxFunnel) * 100;
               return (
-                <li key={step.label} className="flex items-center gap-3">
-                  <span className="w-20 text-sm font-medium text-foreground">
+                <li key={step.label} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1 @min-[430px]:grid-cols-[5rem_minmax(0,1fr)_4rem]">
+                  <span className="min-w-0 text-sm font-medium text-foreground">
                     {step.label}
                   </span>
-                  <div className="flex-1 h-7 rounded-md bg-muted overflow-hidden">
+                  <div className="col-span-2 row-start-2 h-7 min-w-0 overflow-hidden rounded-md bg-muted @min-[430px]:col-span-1 @min-[430px]:col-start-2 @min-[430px]:row-start-1">
                     <div
                       className={cn(
                         "h-full flex items-center px-2 text-xs font-semibold",
@@ -82,7 +82,7 @@ export default async function KpiPage() {
                       {step.count}
                     </div>
                   </div>
-                  <span className="w-16 text-right text-xs tabular-nums text-muted-foreground">
+                  <span className="col-start-2 row-start-1 text-right text-xs tabular-nums text-muted-foreground @min-[430px]:col-start-3">
                     {i === 0 ? "—" : `${step.rate}%`}
                   </span>
                 </li>
@@ -97,17 +97,17 @@ export default async function KpiPage() {
           <Card.Header>
             <Card.Title>チャネル内訳</Card.Title>
           </Card.Header>
-          <Card.Body>
+          <Card.Body className="@container">
             <ul className="space-y-2">
               {snapshot.channelBreakdown.map((row, i) => {
                 const tone =
                   FUNNEL_BAR_TONE[i % FUNNEL_BAR_TONE.length] ?? "bg-chart-1";
                 return (
-                  <li key={row.channel} className="flex items-center gap-3">
-                    <span className="w-24 text-sm text-foreground">
+                  <li key={row.channel} className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-2 gap-y-1 @min-[430px]:grid-cols-[6rem_minmax(0,1fr)_3rem_3rem]">
+                    <span className="min-w-0 text-sm text-foreground [overflow-wrap:anywhere]">
                       {row.channel}
                     </span>
-                    <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
+                    <div className="col-span-3 row-start-2 h-2 min-w-0 overflow-hidden rounded-full bg-muted @min-[430px]:col-span-1 @min-[430px]:col-start-2 @min-[430px]:row-start-1">
                       <div
                         className={cn("h-full rounded-full", tone)}
                         style={{
@@ -116,10 +116,10 @@ export default async function KpiPage() {
                         }}
                       />
                     </div>
-                    <span className="w-12 text-right text-xs tabular-nums text-foreground font-semibold">
+                    <span className="col-start-2 row-start-1 text-right text-xs tabular-nums text-foreground font-semibold @min-[430px]:col-start-3">
                       {row.count}
                     </span>
-                    <span className="w-12 text-right text-xs tabular-nums text-muted-foreground">
+                    <span className="col-start-3 row-start-1 text-right text-xs tabular-nums text-muted-foreground @min-[430px]:col-start-4">
                       {row.share}%
                     </span>
                   </li>
@@ -133,17 +133,17 @@ export default async function KpiPage() {
           <Card.Header>
             <Card.Title>提案商材内訳</Card.Title>
           </Card.Header>
-          <Card.Body>
+          <Card.Body className="@container">
             <ul className="space-y-2">
               {snapshot.serviceBreakdown.map((row, i) => {
                 const tone =
                   FUNNEL_BAR_TONE[i % FUNNEL_BAR_TONE.length] ?? "bg-chart-1";
                 return (
-                  <li key={row.service} className="flex items-center gap-3">
-                    <span className="w-24 text-sm text-foreground">
+                  <li key={row.service} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1 @min-[430px]:grid-cols-[6rem_minmax(0,1fr)_3rem]">
+                    <span className="min-w-0 text-sm text-foreground [overflow-wrap:anywhere]">
                       {row.service}
                     </span>
-                    <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
+                    <div className="col-span-2 row-start-2 h-2 min-w-0 overflow-hidden rounded-full bg-muted @min-[430px]:col-span-1 @min-[430px]:col-start-2 @min-[430px]:row-start-1">
                       <div
                         className={cn("h-full rounded-full", tone)}
                         style={{
@@ -152,7 +152,7 @@ export default async function KpiPage() {
                         }}
                       />
                     </div>
-                    <span className="w-12 text-right text-xs tabular-nums text-foreground font-semibold">
+                    <span className="col-start-2 row-start-1 text-right text-xs tabular-nums text-foreground font-semibold @min-[430px]:col-start-3">
                       {row.count}
                     </span>
                   </li>

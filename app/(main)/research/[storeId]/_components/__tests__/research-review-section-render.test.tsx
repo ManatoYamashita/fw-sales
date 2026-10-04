@@ -175,6 +175,16 @@ describe("完了後の状態", () => {
   });
 });
 
+describe("狭い画面の完了操作", () => {
+  it("未完了の操作領域は低い viewport で高さを制限して内部スクロールできる", () => {
+    const html = render(makeRun([item("seat_count", "confirmed")]));
+    const footer = html.match(/<div[^>]*role="region"[^>]*aria-label="レビュー完了操作"[^>]*>/)?.[0];
+    expect(footer).toBeDefined();
+    expect(footer).toContain("max-h-[70dvh]");
+    expect(footer).toContain("overflow-y-auto");
+  });
+});
+
 describe("項目カードのボタン優先順位(Plan §12.3)", () => {
   it("採用 → 編集して採用 → 却下 → スキップ の順で描画する", () => {
     const html = render(makeRun([item("seat_count", "confirmed")]));

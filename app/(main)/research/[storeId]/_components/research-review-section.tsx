@@ -396,7 +396,7 @@ export function ResearchReviewSection({ store, run, onUpdate, onRestart, restart
             縦積みは w-full の子 1 枚に閉じ込め、Card.Header 側の行レイアウトは触らない。 */}
         <Card.Header>
           <div className="flex flex-col items-start gap-2 w-full">
-            <div className="flex items-center gap-2 w-full justify-between">
+            <div className="flex w-full flex-wrap items-center gap-2 [&>*+*]:ml-auto">
               <Card.Title>
                 AI店舗調査結果({formatDateTime(run.started_at)} 実施)
               </Card.Title>
@@ -522,6 +522,7 @@ export function ResearchReviewSection({ store, run, onUpdate, onRestart, restart
  * sticky が効かない。** 既存の先例(`stores-table-view.tsx` / `area-search-results.tsx`)
  * と同じく Card の外side に置く。クラス列も先例をそのまま踏襲する
  * (`fixed` ではなく `sticky` にすることで、サイドバー折りたたみでも左端がズレない)。
+ * 低い画面では 70dvh を上限として領域内をスクロールさせ、完了ボタンへの到達を保つ。
  */
 export function ReviewCompletionFooter({
   summary,
@@ -550,7 +551,7 @@ export function ReviewCompletionFooter({
     <div
       role="region"
       aria-label="レビュー完了操作"
-      className="sticky bottom-0 z-30 flex flex-col gap-2 border-t border-border bg-background/80 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-md"
+      className="sticky bottom-0 z-30 flex max-h-[70dvh] flex-col gap-2 overflow-y-auto border-t border-border bg-background/80 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-md"
     >
       {/* 完了ブロッカーの説明。tooltip にはしない(hoverしないと分からない設計は禁止)。
           「あと何をすれば完了できるか」を常時、文章と項目名とジャンプCTAで提示する。 */}
