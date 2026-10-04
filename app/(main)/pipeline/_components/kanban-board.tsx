@@ -25,7 +25,7 @@ export async function KanbanBoard({ filter }: { filter: StoreFilter }) {
   return (
     // 画面幅ではなくボードの利用可能幅で、縦積みと横並びを切り替える。
     <div className="@container min-w-0">
-      <div className="flex min-w-0 flex-col gap-3 pb-4 @min-[700px]:-mx-6 @min-[700px]:flex-row @min-[700px]:overflow-x-auto @min-[700px]:px-6">
+      <div className="flex min-w-0 flex-col gap-3 pb-4 @min-[700px]:flex-row @min-[700px]:overflow-x-auto">
         {columns.map((col) => (
           <Column key={col.id} column={col} profileNameById={profileNameById} />
         ))}
