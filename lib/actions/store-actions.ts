@@ -305,7 +305,10 @@ export async function updateStorePatchAction(
 ): Promise<ActionResult> {
   const updated = await repos.store.update(id, patch);
   if (!updated) return failure("店舗が見つかりませんでした");
-  invalidateAllStoreScopes(id);
+  // 呼び出し元はすべて店舗詳細の「保存してその場で確認する」編集 (店舗名・業態 /
+  // 基本情報 / 地図 / Web 資産 / 営業資料)。stale-while-revalidate だと保存直後の
+  // router.refresh() が旧値を返し、店舗名を直したのに見出しが戻らない (#297 の E2E で検出)。
+  invalidateStoreScopesImmediate(id);
   return success(undefined, "更新しました");
 }
 

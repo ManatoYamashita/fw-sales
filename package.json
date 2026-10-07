@@ -24,6 +24,7 @@
     "db:verify-fks": "node --env-file-if-exists=.env.local scripts/verify-store-cascade-fks.mjs",
     "db:verify-hashes": "node --env-file-if-exists=.env.local scripts/verify-migration-hashes.mjs",
     "db:set-role": "node --env-file-if-exists=.env.local scripts/set-profile-role.mjs",
+    "db:list-name-memos": "node --env-file-if-exists=.env.local ./node_modules/tsx/dist/cli.mjs scripts/list-store-name-memos.ts",
     "db:diagnose-area-search": "node --env-file-if-exists=.env.local scripts/diagnose-area-search-plan.mjs"
   },
   "dependencies": {

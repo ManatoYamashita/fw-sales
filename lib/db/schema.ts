@@ -200,6 +200,11 @@ export const deals = pgTable("deals", {
   estimate_amount: integer("estimate_amount").notNull(),
   order_amount: integer("order_amount"),
   lost_reason: text("lost_reason").notNull(),
+  /**
+   * 失注時の再アプローチ可否 (#297)。`'再アプローチ可' | '再アプローチ不可'` (`Reapproach`)。
+   * NULL = 未判断、または失注以外。値の妥当性は Action 層が担保する。
+   */
+  reapproach: text("reapproach"),
   status: text("status").notNull(),
   /**
    * 営業担当ユーザーへの参照 (auth-and-notifications spec)。

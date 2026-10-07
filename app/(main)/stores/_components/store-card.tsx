@@ -5,7 +5,7 @@ import { ChevronRight } from "lucide-react";
 import { type ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { StageBadge } from "@/components/feature/stage-badge";
-import { SalesStateBadge } from "@/components/feature/sales-state-badge";
+import { SalesStateSummary } from "@/components/feature/sales-state-badge";
 import { IndividualStoreBadge } from "@/components/feature/individual-store-badge";
 import { formatDate } from "@/lib/utils/date";
 import {
@@ -72,7 +72,7 @@ export interface StoreCardProps {
  * ## 載せる情報
  * 「コンテナ 974px 相当の列集合を縦に積んだもの」と定義する。#220 / #237 が合意した
  * 閾値順をそのまま使い、新しい優先度を発明しない。
- * 店舗名 / 次回アクション / 操作 (always) + 状態 728 + 現在の営業状態 874 +
+ * 店舗名 / 次回アクション / 操作 (always) + 営業状態 778 + 調査段階 874 +
  * 営業担当 974 の 6 項目。最寄駅 (1174) 以降は載せず、店舗名リンクから詳細へ送る。
  *
  * 現行の 375px は「選択列と店舗名しか見えない」状態なので、これは純増になる。
@@ -112,9 +112,13 @@ export function StoreCard({ row, href, canDelete }: StoreCardProps) {
         />
       </Link>
 
-      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+      {/* 営業状態を先頭に置く (#297)。表の列優先度と同じ順序。 */}
+      <div className="mt-2 flex flex-wrap items-start gap-1.5">
+        <SalesStateSummary
+          state={row.currentSalesState}
+          latestDeal={row.latestDeal}
+        />
         <StageBadge stage={row.store.stage} />
-        <SalesStateBadge state={row.currentSalesState} />
       </div>
 
       <div className="mt-2 rounded-md bg-muted/40 p-2">

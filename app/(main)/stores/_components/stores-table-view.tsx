@@ -12,7 +12,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { StageBadge } from "@/components/feature/stage-badge";
 import { ChannelBadge } from "@/components/feature/channel-badge";
-import { SalesStateBadge } from "@/components/feature/sales-state-badge";
+import { SalesStateSummary } from "@/components/feature/sales-state-badge";
 import { IndividualStoreBadge } from "@/components/feature/individual-store-badge";
 import { formatDate } from "@/lib/utils/date";
 import { toast } from "@/components/ui/toast";
@@ -108,9 +108,12 @@ const storeDetailHref = (row: SalesProgressRow) =>
  *
  * `minContainerWidth` は「その列を出すのに要るコンテナ幅 (px)」で、列単体の実測
  * min-content 幅 (cap を持つ列は cap そのもの) の累計から決めている。always 列
- * (店舗名 / 次回アクション / 操作) = 632px を土台に、狭い順へ 状態 → 現在の営業状態 →
+ * (店舗名 / 次回アクション / 操作) = 632px を土台に、狭い順へ 営業状態 → 調査段階 →
  * 営業担当 → 最寄駅 → チャネル → 最終営業日 → 業態 と積む。落とす順は「直近の
  * 意思決定が乗っていない列から」で、最寄駅 (#175 / #177) は業態より上位に置く。
+ * 営業状態 (受注 / 失注 / 追客…) を調査段階より上に置くのは #297。営業状態は
+ * 営業記録が無い店舗では調査段階から導出される (`deriveCurrentSalesState`) ため、
+ * 調査段階の列が落ちても「未着手」は読み取れる。逆は成り立たない。
  * 単体予算の内訳と積み直しの検算は `__tests__/stores-table-columns.test.tsx` (#237)。
  *
  * テストから配分表を固定するため export している。
@@ -163,16 +166,17 @@ export function buildColumns(canDelete: boolean): ColumnDef<SalesProgressRow>[] 
       minContainerWidth: 1582,
       cell: (r) => r.store.genre || "—",
     },
-    { key: "salesState", header: "現在の営業状態", minContainerWidth: 874, cell: (r) => <SalesStateBadge state={r.currentSalesState} /> },
+    { key: "salesState", header: "営業状態", minContainerWidth: 778, cell: (r) => <SalesStateSummary state={r.currentSalesState} latestDeal={r.latestDeal} /> },
     // 描画は store-card.tsx の renderNextAction が単一の真実 (カードと共有)。
     // max-w-[240px] は列予算 272px (= 240 + padding 32) を確定させるための cap。
     { key: "next", header: "次回アクション", sortKey: "next", sortDefaultDir: "asc", cell: (r) => <div className="max-w-[240px]">{renderNextAction(r)}</div> },
     {
       key: "stage",
-      header: "状態",
+      // 「状態」だと営業状態と区別がつかない (#297)。絞り込みと詳細の呼び名に揃える。
+      header: "調査段階",
       sortKey: "stage",
       sortDefaultDir: "asc",
-      minContainerWidth: 728,
+      minContainerWidth: 874,
       cell: (r) => <StageBadge stage={r.store.stage} />,
     },
     {

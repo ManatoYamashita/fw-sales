@@ -6,8 +6,8 @@ import { repos } from "@/lib/repositories";
 import { getCurrentProfile } from "@/lib/supabase/server";
 import { CACHE_TAGS } from "@/lib/cache";
 import {
-  DEAL_STATUSES, MEETING_TYPES, NEXT_ACTION_TYPES,
-  type DealInput, type DealPatch, type DealStatus, type MeetingType, type NextActionType,
+  DEAL_STATUSES, MEETING_TYPES, NEXT_ACTION_TYPES, REAPPROACH_OPTIONS,
+  type DealInput, type DealPatch, type DealStatus, type MeetingType, type NextActionType, type Reapproach,
 } from "@/types/deal";
 import type { StageId } from "@/types/stage";
 import { todayInTimeZone } from "@/lib/utils/date";
@@ -49,11 +49,13 @@ function validateFields(formData: FormData): ActionResult<never> | null {
   const meetingType = readString(formData, "meeting_type");
   const status = readString(formData, "status");
   const nextType = readNullableString(formData, "next_action_type");
+  const reapproach = readNullableString(formData, "reapproach");
   if (formData.has("date") && !isValidYmd(date)) return failure("実施日は有効な日付 (YYYY-MM-DD) で入力してください");
   if (formData.has("next_action_date") && nextDate && !isValidYmd(nextDate)) return failure("次回アクション予定日は有効な日付 (YYYY-MM-DD) で入力してください");
   if (formData.has("meeting_type") && !isOneOf(meetingType, MEETING_TYPES)) return failure("活動種別が不正です");
   if (formData.has("status") && !isOneOf(status, DEAL_STATUSES)) return failure("営業状態が不正です");
   if (nextType && !isOneOf(nextType, NEXT_ACTION_TYPES)) return failure("次回アクション種別が不正です");
+  if (reapproach && !isOneOf(reapproach, REAPPROACH_OPTIONS)) return failure("再アプローチ可否が不正です");
   for (const key of ["estimate_amount", "order_amount"] as const) {
     if (!formData.has(key)) continue;
     const raw = formData.get(key);
@@ -107,6 +109,7 @@ export async function createDealAction(storeId: string, _prev: ActionResult<{ id
   const statusAmounts = normalizeDealStatusAmounts(status, {
     order_amount: readNullableNumber(formData, "order_amount"),
     lost_reason: readString(formData, "lost_reason"),
+    reapproach: readNullableString(formData, "reapproach") as Reapproach | null,
   });
   const input: DealInput = {
     store_id: storeId, store_name: store.name,
@@ -114,7 +117,7 @@ export async function createDealAction(storeId: string, _prev: ActionResult<{ id
     meeting_type: (readString(formData, "meeting_type") || "対面") as MeetingType,
     status,
     discussion: readString(formData, "discussion"), proposal: readString(formData, "proposal"),
-    estimate_amount: readNumber(formData, "estimate_amount", 0), order_amount: statusAmounts.order_amount, lost_reason: statusAmounts.lost_reason,
+    estimate_amount: readNumber(formData, "estimate_amount", 0), order_amount: statusAmounts.order_amount, lost_reason: statusAmounts.lost_reason, reapproach: statusAmounts.reapproach,
     assigned_sales_user_id: assigned,
     activity_memo: readNullableString(formData, "activity_memo"), next_action_date: readNullableString(formData, "next_action_date"), next_action_type: readNullableString(formData, "next_action_type") as NextActionType | null, next_action_note: readNullableString(formData, "next_action_note"),
   };
@@ -151,18 +154,20 @@ export async function updateDealAction(dealId: string, _prev: ActionResult<{ id:
   if (formData.has("meeting_type")) patch.meeting_type = readString(formData, "meeting_type") as MeetingType;
   if (formData.has("status")) patch.status = readString(formData, "status") as DealStatus;
   if (formData.has("estimate_amount")) patch.estimate_amount = readNumber(formData, "estimate_amount", 0);
-  // status に応じて order_amount / lost_reason を常に再計算する (現在値 + FormData の
-  // 変更値 + 変更後 status から最終値を決定し、旧値の残存を防ぐ)。status / order_amount /
-  // lost_reason のいずれも未送信ならこのブロック自体をスキップし、他フィールドのみの
-  // 部分パッチを維持する。
-  if (formData.has("status") || formData.has("order_amount") || formData.has("lost_reason")) {
+  // status に応じて order_amount / lost_reason / reapproach を常に再計算する (現在値 +
+  // FormData の変更値 + 変更後 status から最終値を決定し、旧値の残存を防ぐ)。status /
+  // order_amount / lost_reason / reapproach のいずれも未送信ならこのブロック自体を
+  // スキップし、他フィールドのみの部分パッチを維持する。
+  if (formData.has("status") || formData.has("order_amount") || formData.has("lost_reason") || formData.has("reapproach")) {
     const finalStatus = (formData.has("status") ? readString(formData, "status") : current.status) as DealStatus;
     const statusAmounts = normalizeDealStatusAmounts(finalStatus, {
       order_amount: formData.has("order_amount") ? readNullableNumber(formData, "order_amount") : current.order_amount,
       lost_reason: formData.has("lost_reason") ? readString(formData, "lost_reason") : current.lost_reason,
+      reapproach: formData.has("reapproach") ? (readNullableString(formData, "reapproach") as Reapproach | null) : current.reapproach,
     });
     patch.order_amount = statusAmounts.order_amount;
     patch.lost_reason = statusAmounts.lost_reason;
+    patch.reapproach = statusAmounts.reapproach;
   }
   if (formData.has("assigned_sales_user_id")) {
     const assigned = readNullableString(formData, "assigned_sales_user_id");
