@@ -8,6 +8,12 @@ import { expect, test, type Page } from "@playwright/test";
  */
 test.describe.configure({ mode: "serial" });
 
+// dev サーバは店舗詳細・Server Action を初回呼び出し時にコンパイルする。並列実行中は
+// 1 回のコンパイルが 30 秒の既定を超えることがあるため、各テストの持ち時間を 3 倍にする。
+test.beforeEach(() => {
+  test.slow();
+});
+
 const tableScroller = (page: Page) =>
   page.locator('[class*="@container/data-table"]').first();
 
