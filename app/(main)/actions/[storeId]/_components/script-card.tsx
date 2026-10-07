@@ -1,6 +1,6 @@
 import { type ReactNode } from "react";
 import { Card } from "@/components/ui/card";
-import { CopyButton } from "./copy-button";
+import { CopyButton } from "@/components/feature/copy-button";
 
 export function ScriptCard({
   title,
