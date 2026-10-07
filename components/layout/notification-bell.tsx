@@ -6,16 +6,24 @@
  * - 未読件数バッジを表示し、クリックで最新通知 (default 10 件) を展開
  * - 通知の `kind` に応じてリンク先を決定 (通常は `link_url` に店舗 URL が埋め込まれる)
  * - 外側クリック / Escape キーで閉じる
+ * - 通知のクリックで既読化し、ヘッダーの「すべて既読にする」で一括既読化する (#296)。
+ *   バッジはサーバー応答を待たずに楽観的に減らし、失敗したときだけ元へ戻す
+ * - リンク先が無い通知 (参照先店舗が削除済みなど) は遷移させず、既読化だけ行う
  *
  * 親 RSC が `getRecentNotifications(userId, limit=10)` の結果を props で渡す前提。
  *
  * 関連: requirements.md §4.1, §4.2, §4.3
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { Bell, Inbox } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
+import { toast } from "@/components/ui/toast";
+import {
+  markAllNotificationsReadAction,
+  markNotificationReadAction,
+} from "@/lib/actions/notification-actions";
 import {
   OVERLAY_ANCHOR_CONTAINER,
   OVERLAY_PANEL_ALIGN_END,
@@ -29,8 +37,57 @@ interface NotificationBellProps {
 export function NotificationBell({ notifications }: NotificationBellProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  // サーバー応答前に既読として扱う通知 ID (楽観更新)。props が最新化された後も
+  // 残るが、そのときは read_at と一致するだけなので害はない。
+  const [locallyRead, setLocallyRead] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const [isMarkingAll, startMarkAll] = useTransition();
 
-  const unreadCount = notifications.filter((n) => !n.read_at).length;
+  const isRead = useCallback(
+    (n: Notification) => n.read_at !== null || locallyRead.has(n.id),
+    [locallyRead],
+  );
+  const unreadIds = notifications.filter((n) => !isRead(n)).map((n) => n.id);
+  const unreadCount = unreadIds.length;
+
+  const markLocally = useCallback((ids: readonly string[]) => {
+    setLocallyRead((prev) => new Set([...prev, ...ids]));
+  }, []);
+  const unmarkLocally = useCallback((ids: readonly string[]) => {
+    setLocallyRead((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) next.delete(id);
+      return next;
+    });
+  }, []);
+
+  const handleRead = useCallback(
+    (notification: Notification) => {
+      if (isRead(notification)) return;
+      markLocally([notification.id]);
+      void markNotificationReadAction(notification.id).then((result) => {
+        if (!result.ok) {
+          unmarkLocally([notification.id]);
+          toast.error(result.error);
+        }
+      });
+    },
+    [isRead, markLocally, unmarkLocally],
+  );
+
+  const handleMarkAll = useCallback(() => {
+    if (unreadIds.length === 0) return;
+    const ids = unreadIds;
+    markLocally(ids);
+    startMarkAll(async () => {
+      const result = await markAllNotificationsReadAction();
+      if (!result.ok) {
+        unmarkLocally(ids);
+        toast.error(result.error);
+      }
+    });
+  }, [unreadIds, markLocally, unmarkLocally]);
 
   // 外側クリックで閉じる
   useEffect(() => {
@@ -92,11 +149,23 @@ export function NotificationBell({ notifications }: NotificationBellProps) {
             OVERLAY_PANEL_ALIGN_END,
           )}
         >
-          <div className="border-b border-border px-3 py-2 flex items-center justify-between">
-            <span className="text-sm font-medium">通知</span>
-            <span className="text-xs text-muted-foreground">
-              {unreadCount > 0 ? `${unreadCount} 件未読` : "未読なし"}
-            </span>
+          <div className="border-b border-border px-3 py-2 flex items-center justify-between gap-2">
+            <div className="flex items-baseline gap-2 min-w-0">
+              <span className="text-sm font-medium">通知</span>
+              <span className="text-xs text-muted-foreground">
+                {unreadCount > 0 ? `${unreadCount} 件未読` : "未読なし"}
+              </span>
+            </div>
+            {unreadCount > 0 ? (
+              <button
+                type="button"
+                onClick={handleMarkAll}
+                disabled={isMarkingAll}
+                className="shrink-0 inline-flex min-h-8 items-center rounded-sm px-1.5 text-xs font-medium text-foreground underline-offset-4 hover:underline disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                すべて既読にする
+              </button>
+            ) : null}
           </div>
           <ul className="max-h-80 overflow-y-auto">
             {notifications.length === 0 ? (
@@ -109,6 +178,8 @@ export function NotificationBell({ notifications }: NotificationBellProps) {
                 <NotificationRow
                   key={n.id}
                   notification={n}
+                  isUnread={!isRead(n)}
+                  onRead={handleRead}
                   onNavigate={handleNavigate}
                 />
               ))
@@ -122,16 +193,22 @@ export function NotificationBell({ notifications }: NotificationBellProps) {
 
 interface NotificationRowProps {
   notification: Notification;
+  isUnread: boolean;
+  onRead: (notification: Notification) => void;
   onNavigate: () => void;
 }
 
-function NotificationRow({ notification, onNavigate }: NotificationRowProps) {
+function NotificationRow({
+  notification,
+  isUnread,
+  onRead,
+  onNavigate,
+}: NotificationRowProps) {
   const href = resolveLink(notification);
-  const isUnread = notification.read_at === null;
   const body = (
     <article
       className={cn(
-        "px-3 py-2 border-b border-border last:border-b-0 hover:bg-accent transition-colors",
+        "px-3 py-2 hover:bg-accent transition-colors",
         isUnread ? "bg-info-soft/30" : null,
       )}
     >
@@ -159,16 +236,37 @@ function NotificationRow({ notification, onNavigate }: NotificationRowProps) {
     </article>
   );
 
+  const label = `${isUnread ? "未読: " : ""}${notification.title}`;
   if (href) {
     return (
-      <li>
-        <Link href={href} onClick={onNavigate} className="block">
+      <li className="border-b border-border last:border-b-0">
+        <Link
+          href={href}
+          aria-label={label}
+          onClick={() => {
+            onRead(notification);
+            onNavigate();
+          }}
+          className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        >
           {body}
         </Link>
       </li>
     );
   }
-  return <li>{body}</li>;
+  // 遷移先が無い通知 (参照先が削除済みなど) は遷移させず、既読化だけ行う。
+  return (
+    <li className="border-b border-border last:border-b-0">
+      <button
+        type="button"
+        aria-label={label}
+        onClick={() => onRead(notification)}
+        className="block w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+      >
+        {body}
+      </button>
+    </li>
+  );
 }
 
 function resolveLink(n: Notification): string | null {
