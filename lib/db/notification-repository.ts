@@ -6,6 +6,7 @@
  * 制約:
  * - `import "server-only"` を必ず付ける
  * - `markAsRead` は `WHERE id = ? AND user_id = ?` で他人の既読化を防ぐ (Req 7.3 invariants)
+ * - `markAllAsRead` も `user_id` で絞り、未読行だけを更新する (#296)
  * - id は `notif_<id>` 形式を採用 (既存 `<entity>_<id>` 規約)
  *
  * 関連: design.md §「NotificationRepository」, requirements.md §7.1, §7.2, §7.3
@@ -80,6 +81,18 @@ export function makeNotificationRepo(
         )
         .returning({ id: notifications.id });
       return result.length > 0;
+    },
+
+    async markAllAsRead(userId) {
+      const now = today();
+      const result = await executor
+        .update(notifications)
+        .set({ read_at: now, updated_at: now })
+        .where(
+          and(eq(notifications.user_id, userId), isNull(notifications.read_at)),
+        )
+        .returning({ id: notifications.id });
+      return result.length;
     },
 
     async insert(input: NotificationInput) {
