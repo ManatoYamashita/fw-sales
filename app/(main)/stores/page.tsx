@@ -49,10 +49,7 @@ function parseSort(p: SearchParams): ProgressSort {
   return { key: p.sort as ProgressSortKey, dir };
 }
 
-export default async function StoresPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  const sp = await searchParams;
-  const filter = parseFilter(sp);
-  const sort = parseSort(sp);
+export default function StoresPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   return <div className="space-y-4">
     <div className="flex items-center justify-between gap-2 flex-wrap [&>*+*]:ml-auto">
       <div><h1 className="text-xl md:text-2xl font-bold text-foreground">店舗・営業一覧</h1><p className="text-sm text-muted-foreground">現在の営業状態と次に行うことを店舗単位で確認できます。</p></div>
@@ -83,11 +80,25 @@ export default async function StoresPage({ searchParams }: { searchParams: Promi
       <ProgressFilterBarSlot />
     </Suspense>
 
-    {/* 一覧側は filter/sort ごとに fallback を出したいので key を維持する。 */}
-    <Suspense key={JSON.stringify({ filter, sort })} fallback={<div className="flex items-center gap-2 text-sm text-muted-foreground py-12 justify-center"><Spinner /> 読み込み中…</div>}>
-      <StoresTable filter={filter} sort={sort} />
+    {/* Request-time Promise は境界の子で読む。ページの静的シェルを待たせない。 */}
+    <Suspense fallback={<StoresTableFallback />}>
+      <StoresTableSlot searchParams={searchParams} />
     </Suspense>
   </div>;
+}
+
+async function StoresTableSlot({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  const sp = await searchParams;
+  const filter = parseFilter(sp);
+  const sort = parseSort(sp);
+  // 一覧だけを filter/sort ごとにリセットし、フィルタバーの入力状態は保持する。
+  return <Suspense key={JSON.stringify({ filter, sort })} fallback={<StoresTableFallback />}>
+    <StoresTable filter={filter} sort={sort} />
+  </Suspense>;
+}
+
+function StoresTableFallback() {
+  return <div className="flex items-center gap-2 text-sm text-muted-foreground py-12 justify-center"><Spinner /> 読み込み中…</div>;
 }
 
 /**
