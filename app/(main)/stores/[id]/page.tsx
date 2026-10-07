@@ -6,7 +6,6 @@ import { StoreDetailTabs } from "./_components/store-detail-tabs";
 import { getStoreCached } from "@/lib/queries/stores";
 import { listDealsByStoreCached } from "@/lib/queries/deals";
 import { getAllProfiles } from "@/lib/queries/profiles";
-import { isApiKeyConfigured } from "@/lib/env";
 import { getStoreResearchPhase } from "@/lib/domain/store-research-phase";
 
 type Params = Promise<{ id: string }>;
@@ -38,12 +37,12 @@ export default async function StoreDetailPage({
   ]);
   if (!store) notFound();
   // task 4.2 (PR3a): DeepResearchSection / getDeepResearchReport / assignedSalesName 解決 /
-  // promptTemplates 取得を撤去。営業資産生成は SalesAssetsGenerator (store-detail-tabs 配下)
-  // が GEMINI_API_KEY 設定済判定だけ受け取る単純構成。
+  // promptTemplates 取得を撤去。
+  // #300: 営業資産の生成は /research/[storeId] に一本化したため、GEMINI_API_KEY の
+  // 設定済判定もそちらへ移した。店舗詳細の AI 分析タブは閲覧専用。
   // store-cascade-delete (#152): dealCount の事前計算 (listDealsByStoreCached) を撤去。
   // 削除ダイアログが open 時に影響件数を非キャッシュで直接取得する。
-  const apiKeyConfigured = isApiKeyConfigured();
-  // 調査フェーズ (未調査 / 調査可 / 生成済み) を現行スキーマから純粋に導出する。
+  // 営業資産フェーズ (未生成 / 生成済み) を現行スキーマから純粋に導出する。
   const researchPhase = getStoreResearchPhase(store);
 
   return (
@@ -62,7 +61,6 @@ export default async function StoreDetailPage({
         store={store}
         profiles={profiles}
         deals={deals}
-        isApiKeyConfigured={apiKeyConfigured}
       />
     </div>
   );

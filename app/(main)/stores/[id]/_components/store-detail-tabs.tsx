@@ -12,7 +12,7 @@ import { BasicInfoFieldsCard } from "./basic-info-fields-card";
 import { MapEmbedCard } from "./map-embed-card";
 import { WebAssetCard } from "./web-asset-card";
 import { SalesProgressCard } from "./sales-progress-card";
-import { AiAnalysisDetailSection } from "./ai-analysis-detail-section";
+import { SalesAssetsSummary } from "./sales-assets-summary";
 import { StageInlineSelect } from "./stage-inline-select";
 import { DeleteStoreButton } from "./delete-store-button";
 import type { Store } from "@/types/store";
@@ -24,9 +24,10 @@ interface StoreDetailTabsProps {
   profiles: readonly Profile[];
   /** 営業進捗タブ用の店舗単位の商談一覧 (最新商談の導出 + 履歴表示)。 */
   deals: readonly Deal[];
-  isApiKeyConfigured: boolean;
   // task 4.2 (PR3a): deepResearchSlot / promptTemplates / hasDeepResearchReport /
-  // assignedSalesName を撤去。営業資産生成は SalesAssetsGenerator に集約済み。
+  // assignedSalesName を撤去。
+  // #300: isApiKeyConfigured を撤去。営業資産の生成は /research/[storeId] に一本化し、
+  // AI 分析タブは閲覧専用 (SalesAssetsSummary) になった。
   // store-cascade-delete (#152): dealCount prop を撤去。削除ダイアログが
   // open 時に影響件数 (商談/調査/引き継ぎ/場所候補) を直接取得する。
 }
@@ -35,7 +36,6 @@ export function StoreDetailTabs({
   store,
   profiles,
   deals,
-  isApiKeyConfigured,
 }: StoreDetailTabsProps) {
   const editHref = `/stores/${store.id}/edit`;
 
@@ -63,7 +63,7 @@ export function StoreDetailTabs({
           <Link
             href={editHref}
             className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-sm border border-border bg-card hover:bg-muted/40 text-foreground whitespace-nowrap"
-            title="フル編集 + AI 再実行ページ"
+            title="店舗情報をまとめて編集"
           >
             <Edit2 className="h-4 w-4" /> 編集
           </Link>
@@ -76,7 +76,7 @@ export function StoreDetailTabs({
             <Link
               href={editHref}
               className="inline-flex items-center gap-2 h-9 px-3 rounded-md text-sm hover:bg-muted/40 text-foreground whitespace-nowrap"
-              title="フル編集 + AI 再実行ページ"
+              title="店舗情報をまとめて編集"
             >
               <Edit2 className="h-4 w-4" /> 編集
             </Link>
@@ -99,10 +99,7 @@ export function StoreDetailTabs({
       </TabsPanel>
 
       <TabsPanel value="ai" className="space-y-4">
-        <AiAnalysisDetailSection
-          store={store}
-          isApiKeyConfigured={isApiKeyConfigured}
-        />
+        <SalesAssetsSummary store={store} />
       </TabsPanel>
     </Tabs>
   );

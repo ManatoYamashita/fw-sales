@@ -142,7 +142,7 @@ export function StoreNewForm({
   const router = useRouter();
 
   // task 4.2 (PR3a): AiAnalysisPanel 撤去に伴い、AI 結果 state / useBeforeUnload 連動を削除。
-  // 営業資産生成は登録後に店舗詳細の SalesAssetsGenerator から実行する設計に統一。
+  // 営業資産生成は登録後に /research/[storeId] の SalesAssetSection から実行する設計に統一 (#300)。
 
   const set = useCallback(
     <K extends keyof FormState>(key: K, value: FormState[K]) => {
