@@ -6,6 +6,9 @@
  * 主表示run(`selectPrimaryResearchRun`)の状態に応じて、開始カード / 進捗カード /
  * 失敗カード / レビューセクションのいずれかを描画する。営業資産生成セクションは
  * 常に表示する(Primary/Secondary導線の切替はセクション内部で行う、Plan §14)。
+ *
+ * Issue #300: 見出し直下に推奨手順 (① AI調査 → ② レビュー → ③ 営業資産を生成) と
+ * 現在地を出す。営業資産の生成はこのページの ③ が唯一の入口。
  */
 
 import { useState, useTransition } from "react";
@@ -19,6 +22,11 @@ import {
   startResearchRunAction,
 } from "@/lib/actions/research-run-actions";
 import { isRunStuck, selectPrimaryResearchRun } from "@/lib/domain/research-review";
+import {
+  getResearchFlowSteps,
+  getSalesAssetGenerationContext,
+} from "@/lib/domain/research-flow";
+import { ResearchFlowSteps } from "./research-flow-steps";
 import { StartResearchCard } from "./start-research-card";
 import { ResearchProgressCard } from "./research-progress-card";
 import { ResearchFailedCard } from "./research-failed-card";
@@ -28,12 +36,17 @@ import { SalesAssetSection } from "./sales-asset-section";
 import type { Store } from "@/types/store";
 import type { StoreResearchRun } from "@/types/research-run";
 
+/** ② レビューの着地点。生成セクションの「レビューへ戻る」が使う。 */
+const REVIEW_SECTION_ID = "research-review";
+
 export function AiResearchWorkbench({
   store,
   initialRuns,
+  isApiKeyConfigured,
 }: {
   store: Store;
   initialRuns: StoreResearchRun[];
+  isApiKeyConfigured: boolean;
 }) {
   const router = useRouter();
   const [runs, setRuns] = useState<StoreResearchRun[]>(initialRuns);
@@ -42,6 +55,8 @@ export function AiResearchWorkbench({
 
   const primaryRun = selectPrimaryResearchRun(runs);
   const pastRuns = primaryRun ? runs.filter((r) => r.id !== primaryRun.id) : runs;
+  const flowSteps = getResearchFlowSteps(primaryRun, store.ai_analysis_result !== null);
+  const generationContext = getSalesAssetGenerationContext(primaryRun);
   const hasUnreviewedSucceeded = runs.some(
     (r) => r.status === "succeeded" && r.review_completed_at === null,
   );
@@ -84,6 +99,14 @@ export function AiResearchWorkbench({
     doStart();
   };
 
+  const onJumpToReview = () => {
+    const el = document.getElementById(REVIEW_SECTION_ID);
+    if (!el) return;
+    el.scrollIntoView({ block: "start" });
+    // 視線だけでなくフォーカスも移し、キーボード・支援技術の利用者を同じ場所へ運ぶ。
+    el.focus({ preventScroll: true });
+  };
+
   return (
     <div className="space-y-4 max-w-4xl mx-auto">
       <div>
@@ -92,6 +115,8 @@ export function AiResearchWorkbench({
         </Link>
         <h1 className="text-xl md:text-2xl font-bold text-foreground mt-1">{store.name}</h1>
       </div>
+
+      <ResearchFlowSteps steps={flowSteps} />
 
       {!primaryRun && <StartResearchCard onStart={onStartClick} starting={starting} />}
 
@@ -109,20 +134,29 @@ export function AiResearchWorkbench({
       )}
 
       {primaryRun?.status === "succeeded" && (
-        <ResearchReviewSection
-          store={store}
-          run={primaryRun}
-          onUpdate={onRunUpdate}
-          onRestart={onStartClick}
-          restarting={starting}
-        />
+        <section
+          id={REVIEW_SECTION_ID}
+          tabIndex={-1}
+          aria-label="② レビュー"
+          className="scroll-mt-4 focus:outline-none"
+        >
+          <ResearchReviewSection
+            store={store}
+            run={primaryRun}
+            onUpdate={onRunUpdate}
+            onRestart={onStartClick}
+            restarting={starting}
+          />
+        </section>
       )}
 
       {pastRuns.length > 0 && <PastRunsList runs={pastRuns} />}
 
       <SalesAssetSection
         store={store}
-        reviewCompleted={primaryRun?.status === "succeeded" && primaryRun.review_completed_at !== null}
+        context={generationContext}
+        isApiKeyConfigured={isApiKeyConfigured}
+        onJumpToReview={onJumpToReview}
       />
 
       <Modal open={confirmRestartOpen} onOpenChange={setConfirmRestartOpen}>
