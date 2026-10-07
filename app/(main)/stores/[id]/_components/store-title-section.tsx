@@ -4,8 +4,6 @@ import { useState, useTransition, type ChangeEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Pencil, X, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { FormField } from "@/components/ui/form-field";
 import { toast } from "@/components/ui/toast";
 import { IndividualStoreBadge } from "@/components/feature/individual-store-badge";
 import { ResearchPhaseBadge } from "./research-phase-badge";
@@ -29,7 +27,7 @@ export function StoreTitleSection({
 
   const onText =
     (key: keyof typeof form) =>
-    (e: ChangeEvent<HTMLInputElement>) => {
+    (e: ChangeEvent<HTMLTextAreaElement>) => {
       setForm((prev) => ({ ...prev, [key]: e.target.value }));
       if (key === "name") setNameError(undefined);
     };
@@ -60,83 +58,120 @@ export function StoreTitleSection({
     });
   };
 
-  if (editing) {
-    return (
-      <div className="space-y-2">
-        <h1 className="text-xl md:text-2xl font-bold text-foreground">
-          {store.name}
-        </h1>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-w-2xl">
-          <FormField
-            label="店舗名"
-            htmlFor="store_name"
-            required
-            error={nameError}
-          >
-            <Input
-              id="store_name"
-              value={form.name}
-              onChange={onText("name")}
-              required
-            />
-          </FormField>
-          <FormField label="業態" htmlFor="store_genre">
-            <Input
-              id="store_genre"
-              value={form.genre}
-              onChange={onText("genre")}
-            />
-          </FormField>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            type="button"
-            variant="primary"
-            size="sm"
-            onClick={onSave}
-            disabled={pending}
-          >
-            <Save className="h-3.5 w-3.5" />
-            {pending ? "保存中…" : "保存"}
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={onCancel}
-            disabled={pending}
-          >
-            <X className="h-3.5 w-3.5" /> キャンセル
-          </Button>
-        </div>
-      </div>
-    );
-  }
+  const location = [store.prefecture, store.city].filter(Boolean).join(" / ");
 
   return (
     <div>
-      <h1 className="text-xl md:text-2xl font-bold text-foreground inline-flex items-center gap-2 flex-wrap">
-        {store.name}
+      <h1 className="text-xl md:text-2xl font-bold text-foreground inline-flex items-center gap-2 flex-wrap max-w-full">
+        <InlineTitleField
+          id="store_name"
+          label="店舗名"
+          value={editing ? form.name : store.name}
+          editing={editing}
+          onChange={onText("name")}
+          required
+          error={nameError}
+          disabled={pending}
+          autoFocus
+        />
         <IndividualStoreBadge operatorType={store.operator_type} />
         <ResearchPhaseBadge phase={phase} />
         <Button
           type="button"
           variant="ghost-muted"
           size="sm"
-          onClick={() => setEditing(true)}
+          className={editing ? "invisible" : undefined}
+          disabled={editing}
+          aria-hidden={editing || undefined}
+          tabIndex={editing ? -1 : undefined}
+          onClick={() => {
+            setForm({ name: store.name, genre: store.genre });
+            setNameError(undefined);
+            setEditing(true);
+          }}
           aria-label="店舗名・業態を編集"
         >
           <Pencil className="h-3.5 w-3.5" />
         </Button>
       </h1>
-      <p className="text-sm text-muted-foreground mt-0.5">
-        {[store.prefecture, store.city, store.genre]
-          .filter(Boolean)
-          .join(" / ") || "—"}
-      </p>
+      {editing && nameError && (
+        <p id="store_name_error" className="text-xs text-destructive mt-1" role="alert">
+          {nameError}
+        </p>
+      )}
+      <div className="text-sm text-muted-foreground mt-0.5 flex items-start flex-wrap gap-x-1">
+        {location && <span>{location}</span>}
+        {location && (store.genre || editing) && <span aria-hidden="true">/</span>}
+        {(store.genre || editing) && (
+          <InlineTitleField
+            id="store_genre"
+            label="業態"
+            value={editing ? form.genre : store.genre}
+            editing={editing}
+            onChange={onText("genre")}
+            disabled={pending}
+          />
+        )}
+        {!location && !store.genre && !editing && <span>—</span>}
+      </div>
       <div className="mt-3">
         <NextActionCta phase={phase} storeId={store.id} />
       </div>
+      {editing && (
+        <div className="flex items-center gap-2 mt-3">
+          <Button type="button" variant="primary" onClick={onSave} disabled={pending}>
+            <Save className="h-3.5 w-3.5" />
+            {pending ? "保存中…" : "保存"}
+          </Button>
+          <Button type="button" variant="ghost" onClick={onCancel} disabled={pending}>
+            <X className="h-3.5 w-3.5" /> キャンセル
+          </Button>
+        </div>
+      )}
     </div>
+  );
+}
+
+/** 表示と入力で同じ文字寸法を使い、長い値の折り返しにも追従する。 */
+function InlineTitleField({
+  id, label, value, editing, onChange, required, error, disabled, autoFocus,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  editing: boolean;
+  onChange: (event: ChangeEvent<HTMLTextAreaElement>) => void;
+  required?: boolean;
+  error?: string;
+  disabled?: boolean;
+  autoFocus?: boolean;
+}) {
+  return (
+    <span className="relative inline-block min-w-[3ch] max-w-full align-top">
+      {/* 同じフォントのミラーで寸法を保つ。field-sizing 未対応でも位置が変わらない。 */}
+      <span
+        aria-hidden={editing || undefined}
+        className={`block whitespace-pre-wrap break-words ${editing ? "invisible" : ""}`}
+      >
+        {value || label}{value.endsWith("\n") ? " " : ""}
+      </span>
+      {editing && (
+        <textarea
+          id={id}
+          aria-label={label}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={error ? `${id}_error` : undefined}
+          value={value}
+          onChange={onChange}
+          required={required}
+          disabled={disabled}
+          autoFocus={autoFocus}
+          rows={1}
+          placeholder={label}
+          className="absolute inset-0 block h-full w-full resize-none overflow-hidden whitespace-pre-wrap break-words rounded-sm border-0 bg-muted/30 p-0 text-foreground ring-1 ring-input focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 aria-invalid:ring-destructive"
+          style={{ font: "inherit", letterSpacing: "inherit" }}
+        />
+      )}
+    </span>
   );
 }
