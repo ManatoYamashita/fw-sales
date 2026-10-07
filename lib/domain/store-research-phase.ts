@@ -1,54 +1,31 @@
 /**
- * 店舗の調査フェーズ導出 (store-flow-guidance / Issue #122)
+ * 店舗の営業資産フェーズ導出 (store-flow-guidance / Issue #122 → #300 で再編)
  *
- * 店舗が「追加 → DeepResearch → 架電生成」の標準フローのどこにいるかを、現行スキーマ
- * (`basic_info` の充足 + `ai_analysis_result` の有無) から純粋に導出する。営業ステージ
- * (`stage`) とは独立した「データ充足の進み具合」の軸。
+ * 店舗詳細のバッジと単一 CTA が使う「営業資産があるか」の軸。営業ステージ (`stage`) とも、
+ * AI 店舗調査の run 状態とも独立している。
  *
- * 状態は 3 つ (#121 後の実態に整合):
- * - `untouched` 未調査: 基本情報が乏しい。まず基本情報を補う。
- * - `ready`     調査可: コア基本情報が揃い、DeepResearch に足る。
- * - `generated` 生成済み: 営業資産 (`ai_analysis_result`) が存在する。
+ * 状態は 2 つ:
+ * - `pending`   未生成: 営業資産 (`ai_analysis_result`) がまだ無い。
+ * - `generated` 生成済み: 営業資産が存在する。
  *
- * 「調査取込済 (貼付済・未生成)」の中間状態は持たない。#121 でワークベンチが単線化され
- * 貼付テキストが永続化されない (生成時に瞬間的に渡すのみ) ため、その状態を検出する信号が
- * 存在しないことによる (4→3 状態への意図的縮退)。
+ * ## #300 で 3 状態から 2 状態へ縮退した理由
+ *
+ * #122 当時は「基本情報待ち (untouched) / 調査可 (ready)」を Places 由来のコア項目数で
+ * 分けていた。AI 店舗調査は店舗名だけで開始でき、調査そのものが基本情報を埋めるため、
+ * その区別は推奨手順 (登録 → AI 調査 → レビュー → 生成) の上で意味を失った。
+ * 「基本情報を入力」へ誘導する CTA は手順と矛盾していたので撤去した。
+ *
+ * 調査の進み具合 (未調査 / 要確認 / 調査済み) は `/research/[storeId]` のステップ表示
+ * (`lib/domain/research-flow.ts`) が持つ。店舗詳細では run を読まない (静的シェルを
+ * 崩さないため。調査状態の正の置き場所は #299 で扱う)。
  *
  * 依存方向: `lib/domain` は `lib/ai` を import しない。型のみ `types/*` に依存する純関数。
- *
- * 関連: .kiro/specs/store-flow-guidance/{requirements,design,tasks}.md
  */
 
-import type { BasicInfo, BasicInfoField } from "@/types/basic-info";
+import type { BasicInfoField } from "@/types/basic-info";
 import type { Store } from "@/types/store";
 
-export type ResearchPhase = "untouched" | "ready" | "generated";
-
-/**
- * 「調査可」判定に用いるコア基本情報キー。
- *
- * エリア検索の公開地図情報 (`primary="places"`) で充填されうる項目のうち、店舗名を除いた
- * 実質的な所在・属性情報。`BASIC_INFO_ITEMS` (lib/domain/basic-info-items.ts) の
- * primary="places" 7 項目から `store_name` を除いた 6 項目。
- */
-export const CORE_BASIC_INFO_KEYS = [
-  "address",
-  "cuisine_genre",
-  "business_hours_holidays",
-  "official_site",
-  "location_feature",
-  "nearest_station",
-] as const;
-
-/**
- * 「調査可」へ昇格するために必要なコア項目の充足数。
- *
- * エリア検索の自動充填 (`placeResultToBasicInfo`) が埋めるコアは実測で
- * `address` + `cuisine_genre` の 2 項目 (`store_name` はコア外)。標準フロー
- * 「エリア検索で追加 → 調査」を成立させるため閾値は **2**。これにより
- * エリア検索由来の店舗は「調査可」、店名のみの手動店舗は「未調査」になる。
- */
-export const READY_CORE_THRESHOLD = 2;
+export type ResearchPhase = "pending" | "generated";
 
 /**
  * 基本情報 1 項目が充填済みかを判定する。
@@ -63,26 +40,16 @@ export function isBasicInfoFieldFilled(
   return field.value !== null && field.value.trim() !== "";
 }
 
-/** コア基本情報キーのうち充填済みの数 (0..CORE_BASIC_INFO_KEYS.length)。 */
-export function filledCoreCount(basicInfo: BasicInfo): number {
-  return CORE_BASIC_INFO_KEYS.reduce(
-    (count, key) => count + (isBasicInfoFieldFilled(basicInfo[key]) ? 1 : 0),
-    0,
-  );
+/** 店舗の営業資産フェーズを導出する純関数。 */
+export function getStoreResearchPhase(
+  store: Pick<Store, "ai_analysis_result">,
+): ResearchPhase {
+  return store.ai_analysis_result != null ? "generated" : "pending";
 }
 
-/**
- * 店舗の調査フェーズを導出する純関数。
- *
- * 優先順: `generated` > `ready` > `untouched`。`ai_analysis_result` が存在すれば必ず
- * `generated`。登録経路 (エリア検索 / 手動) に依らず同じ信号で判定する。
- */
-export function getStoreResearchPhase(
-  store: Pick<Store, "ai_analysis_result" | "basic_info">,
-): ResearchPhase {
-  if (store.ai_analysis_result != null) return "generated";
-  if (filledCoreCount(store.basic_info) >= READY_CORE_THRESHOLD) return "ready";
-  return "untouched";
+/** 営業資産の生成・更新を行う唯一の場所 (`/research/[storeId]` の生成セクション) への href。 */
+export function salesAssetsHref(storeId: string): string {
+  return `/research/${storeId}#sales-assets`;
 }
 
 /** 状態別の次アクション CTA 定義。 */
@@ -97,35 +64,25 @@ export interface PhaseCta {
 /** 状態別の表示メタ (バッジ + 単一 CTA)。 */
 export const RESEARCH_PHASE_META: Record<
   ResearchPhase,
-  { badgeLabel: string; badgeTone: "warning" | "info" | "success"; cta: PhaseCta }
+  { badgeLabel: string; badgeTone: "secondary" | "success"; cta: PhaseCta }
 > = {
-  untouched: {
-    // 営業ステージ (types/stage.ts) の値 "未調査" との文字列衝突を避け、
-    // かつ実態 (コア基本情報が閾値未満 = 調査の前に情報補完が必要) を表すラベル。
-    badgeLabel: "基本情報待ち",
-    badgeTone: "warning",
+  pending: {
+    // 「調査」ではなく「営業資産」の状態であることをラベル自体に書く (#300)。
+    badgeLabel: "営業資産 未生成",
+    badgeTone: "secondary",
     cta: {
-      label: "基本情報を入力",
-      href: (id) => `/stores/${id}?tab=basic`,
-      variant: "secondary",
-      hint: "エリア検索や手動入力で基本情報を補うと、DeepResearch の精度が上がります",
-    },
-  },
-  ready: {
-    badgeLabel: "調査可",
-    badgeTone: "info",
-    cta: {
-      label: "調査して生成",
+      label: "AI調査から始める",
       href: (id) => `/research/${id}`,
       variant: "primary",
+      hint: "店舗名だけで調査できます。AI調査 → レビュー → 営業資産の生成の順に進みます",
     },
   },
   generated: {
-    badgeLabel: "生成済み",
+    badgeLabel: "営業資産 生成済み",
     badgeTone: "success",
     cta: {
-      label: "営業資産を再生成",
-      href: (id) => `/research/${id}`,
+      label: "営業資産を更新",
+      href: salesAssetsHref,
       variant: "secondary",
     },
   },
