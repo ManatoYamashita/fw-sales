@@ -126,7 +126,7 @@ export function SalesAssetSection({
   return (
     <Card
       id={SALES_ASSETS_SECTION_ID}
-      className={reviewed ? "scroll-mt-4 border-primary/40" : "scroll-mt-4"}
+      className={reviewed ? "scroll-mt-24 border-primary/40" : "scroll-mt-24"}
     >
       <Card.Header>
         <Card.Title>③ 営業資産を生成</Card.Title>

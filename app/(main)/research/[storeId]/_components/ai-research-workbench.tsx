@@ -11,7 +11,7 @@
  * 現在地を出す。営業資産の生成はこのページの ③ が唯一の入口。
  */
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Modal, ModalContent, ModalFooter } from "@/components/ui/modal";
@@ -99,6 +99,15 @@ export function AiResearchWorkbench({
     doStart();
   };
 
+  // 店舗詳細の「営業資産を更新」などが付ける `#sales-assets` へ着地させる。
+  // このセグメントは loading.tsx の Suspense 越しに描画されるため、遷移時点では対象要素が
+  // まだ無く、Next.js のハッシュスクロールが空振りする (実測で scrollY 0 のまま)。
+  useEffect(() => {
+    const id = decodeURIComponent(window.location.hash.slice(1));
+    if (id === "") return;
+    document.getElementById(id)?.scrollIntoView({ block: "start" });
+  }, []);
+
   const onJumpToReview = () => {
     const el = document.getElementById(REVIEW_SECTION_ID);
     if (!el) return;
@@ -138,7 +147,7 @@ export function AiResearchWorkbench({
           id={REVIEW_SECTION_ID}
           tabIndex={-1}
           aria-label="② レビュー"
-          className="scroll-mt-4 focus:outline-none"
+          className="scroll-mt-24 focus:outline-none"
         >
           <ResearchReviewSection
             store={store}
