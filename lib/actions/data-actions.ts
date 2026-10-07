@@ -21,6 +21,9 @@
  *   `clearAllAction()` / `importJsonAction(_prev, formData)` /
  *   `getSnapshotForExportAction()`) と戻り値型は無修正で維持する (Req 9.1)。
  * - `next/cache` の `revalidateTag(_, "max")` 失効規約も従前の通り。
+ * - Reset / Clear は admin 判定に加え、`ALLOW_DATA_RESET=1` を立てた本番以外の環境で
+ *   だけ実行できる (#298、`lib/data-reset-policy.ts`)。Import は upsert で既存データを
+ *   消さないため対象外。
  *
  * 関連: requirements.md §8.1–8.6、design.md §「lib/actions/data-actions.ts (修正)」、
  *       research-handoff-db-migration design Flow 4
@@ -33,6 +36,28 @@ import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
 import { failure, success, type ActionResult } from "./_helpers";
 import { requireAdmin } from "./_authz";
+import {
+  DATA_RESET_DENIED_MESSAGE,
+  isDataResetAllowed,
+} from "@/lib/data-reset-policy";
+
+/**
+ * 全削除系 (reset / clear) の環境ガード (#298)。admin 判定の後に呼ぶ。
+ * 許可されない環境では DB に触れず failure を返す。判定の根拠は `lib/data-reset-policy.ts`。
+ */
+function denyDataResetOutsideAllowedEnv(
+  action: string,
+  by: string,
+): ActionResult<never> | null {
+  if (isDataResetAllowed()) return null;
+  console.warn("[authz] denied", {
+    action,
+    email: by,
+    vercelEnv: process.env.VERCEL_ENV ?? null,
+    reason: "data_reset_disabled",
+  });
+  return failure(DATA_RESET_DENIED_MESSAGE);
+}
 
 function invalidateAll() {
   for (const tag of [
@@ -51,6 +76,11 @@ function invalidateAll() {
 export async function resetToSeedAction(): Promise<ActionResult> {
   const guard = await requireAdmin("data.resetToSeed");
   if (!guard.ok) return guard.denied;
+  const envDenied = denyDataResetOutsideAllowedEnv(
+    "data.resetToSeed",
+    guard.profile.email,
+  );
+  if (envDenied) return envDenied;
   // 3 entity 全てを DB トランザクション内でリセット
   // (research-handoff-db-migration §8.3, §8.4, §8.5)。
   // lib/db/* は DATABASE_URL 必須の副作用を持つため動的 import する (Issue 2)。
@@ -107,6 +137,11 @@ export async function resetToSeedAction(): Promise<ActionResult> {
 export async function clearAllAction(): Promise<ActionResult> {
   const guard = await requireAdmin("data.clearAll");
   if (!guard.ok) return guard.denied;
+  const envDenied = denyDataResetOutsideAllowedEnv(
+    "data.clearAll",
+    guard.profile.email,
+  );
+  if (envDenied) return envDenied;
   // 3 entity 全てを DB トランザクション内で全削除
   // (research-handoff-db-migration §8.4, §8.5)。
   // lib/db/* は DATABASE_URL 必須の副作用を持つため動的 import する (Issue 2)。
