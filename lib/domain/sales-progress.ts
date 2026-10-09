@@ -10,9 +10,13 @@
  */
 import type { Deal, DealStatus } from "@/types/deal";
 import type { SortDirection, Store } from "@/types/store";
-import type { StageId } from "@/types/stage";
 import type { Channel } from "@/types/store";
-import { compareChannel, compareStage } from "@/lib/domain/sort-order";
+import { compareChannel } from "@/lib/domain/sort-order";
+import {
+  compareStoreResearchStatus,
+  getStoreResearchStatus,
+  type StoreResearchStatus,
+} from "@/lib/domain/store-research-status";
 import { getNearestStationValue } from "@/lib/domain/nearest-station";
 
 export type CurrentSalesState =
@@ -158,17 +162,26 @@ export interface SalesProgressRow {
   latestMeetingDate: string | null;
   currentSalesState: CurrentSalesState;
   currentNextAction: CurrentNextAction;
+  /**
+   * 調査状態 (#299)。未レビューの AI 調査結果があれば `stage` に関わらず「レビュー待ち」。
+   * 一覧の調査段階列・絞り込み・並べ替えはこれを使い、`store.stage` を直接見ない。
+   */
+  researchStatus: StoreResearchStatus;
 }
 
 /**
  * 全店舗 + 全商談から営業進捗行を組み立てる。
  * 商談ゼロの店舗も必ず 1 行になる (顧客一覧としての網羅性が要件)。
+ *
+ * `needsReviewStoreIds` は既定値を持たせない。省略を許すと渡し忘れで全行が
+ * `stage` 表示に戻り、`/research` と食い違う #299 の状態へ無言で退行するため。
  */
 export function buildSalesProgressRows(
   stores: readonly Store[],
   deals: readonly Deal[],
   profilesById: ReadonlyMap<string, string> | undefined,
   todayStr: string,
+  needsReviewStoreIds: ReadonlySet<string>,
 ): SalesProgressRow[] {
   const dealsByStore = new Map<string, Deal[]>();
   for (const deal of deals) {
@@ -190,6 +203,7 @@ export function buildSalesProgressRows(
       latestMeetingDate: latestDeal?.date ?? null,
       currentSalesState: deriveCurrentSalesState(store, latestDeal),
       currentNextAction: deriveCurrentNextAction(store, latestDeal),
+      researchStatus: getStoreResearchStatus(store.stage, needsReviewStoreIds.has(store.id)),
     };
   });
 }
@@ -220,7 +234,8 @@ export interface SalesProgressFilter {
   /** 次回アクションの緊急度。 */
   next?: NextActionUrgency;
   state?: CurrentSalesState;
-  stage?: StageId;
+  /** 調査状態 (#299)。URL の `stage=` から来るが、比較対象は `row.researchStatus`。 */
+  stage?: StoreResearchStatus;
   channel?: Channel;
 }
 
@@ -258,7 +273,7 @@ export function applyProgressFilter(
     }
     if (filter.next && row.urgency !== filter.next) return false;
     if (filter.state && row.currentSalesState !== filter.state) return false;
-    if (filter.stage && s.stage !== filter.stage) return false;
+    if (filter.stage && row.researchStatus !== filter.stage) return false;
     if (filter.channel && s.channel !== filter.channel) return false;
     if (q) {
       // applyStoreFilter と同じ対象 + 一覧が実際に表示する現在の次回アクション
@@ -376,7 +391,7 @@ export function applyProgressSort(
           diff = a.store.review_avg - b.store.review_avg || a.store.review_count - b.store.review_count;
           break;
         case "stage":
-          diff = compareStage(a.store.stage, b.store.stage);
+          diff = compareStoreResearchStatus(a.researchStatus, b.researchStatus);
           break;
         case "channel":
           diff = compareChannel(a.store.channel, b.store.channel);

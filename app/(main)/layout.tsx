@@ -17,7 +17,8 @@ async function SidebarShell({
 }) {
   // getCurrentProfile() が cookies() を読むため本コンポーネントは動的レンダ。
   // build 時の prerender 対象外となり USE_CACHE_TIMEOUT は発生しない
-  // (loadNavBadgeCounts() は 'use cache' でリクエスト時充填 + cross-request キャッシュ)。
+  // (loadNavBadgeCounts() は research 以外を 'use cache' でリクエスト時充填 +
+  // cross-request キャッシュし、research のレビュー待ち件数だけ都度読む。#299)。
   const [counts, profile] = await Promise.all([
     loadNavBadgeCounts(),
     getCurrentProfile(),

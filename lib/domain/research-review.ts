@@ -25,6 +25,10 @@ import type {
   StoreResearchRun,
 } from "@/types/research-run";
 import type { Store } from "@/types/store";
+import {
+  getStoreResearchStatus,
+  RESEARCH_REVIEW_PENDING,
+} from "@/lib/domain/store-research-status";
 
 /**
  * reviewable item の定義(Plan v3.2 §15): AIが具体的な値候補を出した項目のみ。
@@ -165,21 +169,25 @@ export function isRunStuck(
 }
 
 export interface ResearchQueueBuckets {
-  /** 要確認: 未レビューのsucceeded runが1件以上存在する店舗。 */
+  /** レビュー待ち: 未レビューのsucceeded runが1件以上存在する店舗。 */
   needsReview: Store[];
-  /** 調査待ち: 要確認に該当せず、`stage==="未調査"` の店舗。 */
+  /** 調査待ち: レビュー待ちに該当せず、`stage==="未調査"` の店舗。 */
   waiting: Store[];
-  /** 調査済み: 要確認に該当せず、`stage∈{"調査済み","架電済み"}` の店舗。 */
+  /** 調査済み: レビュー待ちに該当せず、`stage∈{"調査済み","架電済み"}` の店舗。 */
   done: Store[];
 }
 
 /**
  * `/research` 一覧の3タブ分類(Plan v3.2 §6)。相互排他になるよう
- * 「要確認 → 調査待ち → 調査済み」の優先順位で判定する。
+ * 「レビュー待ち → 調査待ち → 調査済み」の優先順位で判定する。
+ *
+ * 店舗ごとの判定は `getStoreResearchStatus` (`lib/domain/store-research-status.ts`) に
+ * 委ねる。サイドバーのバッジ・`/stores` の調査段階列も同じ関数を通るため、
+ * 画面ごとに件数や状態が食い違わない (#299)。
  *
  * `needsReviewStoreIds` は `ResearchRunRepository.listStoreIdsNeedingReview()` の
  * 結果(succeeded かつ review_completed_at IS NULL のrunが存在する店舗id集合)を渡す。
- * これにより、再調査が失敗しても古い未レビューのsucceeded runが「要確認」から
+ * これにより、再調査が失敗しても古い未レビューのsucceeded runが「レビュー待ち」から
  * 消えない(Plan §6)。
  *
  * 純関数。`stores` の順序を保ったまま3バケットに振り分ける。
@@ -190,9 +198,10 @@ export function classifyResearchQueue(
 ): ResearchQueueBuckets {
   const buckets: ResearchQueueBuckets = { needsReview: [], waiting: [], done: [] };
   for (const store of stores) {
-    if (needsReviewStoreIds.has(store.id)) {
+    const status = getStoreResearchStatus(store.stage, needsReviewStoreIds.has(store.id));
+    if (status === RESEARCH_REVIEW_PENDING) {
       buckets.needsReview.push(store);
-    } else if (store.stage === "未調査") {
+    } else if (status === "未調査") {
       buckets.waiting.push(store);
     } else {
       buckets.done.push(store);

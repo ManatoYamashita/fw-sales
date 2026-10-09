@@ -47,7 +47,7 @@ describe("閾値マップ", () => {
     // 由来は data-table-responsive.ts の内訳コメントを参照。
     // 428/528/718 = /handoffs、456/594/695/835 = /dashboard、残りが /stores。
     expect(thresholds).toEqual([
-      428, 456, 528, 594, 695, 718, 778, 835, 874, 974, 1174, 1312, 1422, 1582,
+      428, 456, 528, 594, 695, 718, 778, 835, 898, 998, 1198, 1336, 1446, 1606,
     ]);
   });
 
@@ -140,28 +140,28 @@ describe("resolveColumnHideClass", () => {
   });
 
   it("ソート中の列は閾値を無視して常に表示する (要件5)", () => {
-    const col = { minContainerWidth: 1422, sortKey: "meeting" } as const;
+    const col = { minContainerWidth: 1446, sortKey: "meeting" } as const;
     expect(resolveColumnHideClass(col, { activeSortKey: "meeting" })).toBeUndefined();
     expect(resolveColumnHideClass(col, { activeSortKey: "meeting", hasSelectionColumn: true }))
       .toBeUndefined();
     expect(resolveColumnHideClass(col, { activeSortKey: "name" })).toBe(
-      "@max-[1422px]/data-table:hidden",
+      "@max-[1446px]/data-table:hidden",
     );
   });
 
   it("比較するのは key ではなく sortKey", () => {
     // 最終営業日は key:"updated" / sortKey:"meeting" と食い違う。
     // key で比較する実装に退行すると ?sort=meeting で列が隠れたままになる。
-    const col = { minContainerWidth: 1422, sortKey: "meeting" } as const;
+    const col = { minContainerWidth: 1446, sortKey: "meeting" } as const;
     expect(resolveColumnHideClass(col, { activeSortKey: "updated" })).toBe(
-      "@max-[1422px]/data-table:hidden",
+      "@max-[1446px]/data-table:hidden",
     );
   });
 
   it("sortKey を持たない列は強制表示の対象にならない", () => {
-    const col = { minContainerWidth: 874 } as const;
+    const col = { minContainerWidth: 898 } as const;
     expect(resolveColumnHideClass(col, { activeSortKey: undefined })).toBe(
-      "@max-[874px]/data-table:hidden",
+      "@max-[898px]/data-table:hidden",
     );
   });
 });

@@ -5,11 +5,14 @@
  * `lib/domain/sales-progress.ts` の純粋関数で行の導出・フィルタ・ソートを行う。
  * 合成元がそれぞれ `stores` / `deals` / `profiles` タグでキャッシュされているため、
  * 本モジュール自体は新しいタグや `'use cache'` を持たない。
+ * 未レビューの AI 調査結果を持つ店舗 (#299) だけはキャッシュせず都度読む
+ * (`lib/queries/research.ts` 冒頭のコメント参照)。
  */
 import "server-only";
 import { listStores } from "./stores";
 import { listDealsCached } from "./deals";
 import { getAllProfiles } from "./profiles";
+import { getStoreIdsNeedingReview } from "./research";
 import { todayInTimeZone } from "@/lib/utils/date";
 import {
   applyProgressFilter,
@@ -37,10 +40,11 @@ export async function listSalesProgressRows(
   filter: SalesProgressFilter = {},
   sort: ProgressSort = DEFAULT_PROGRESS_SORT,
 ): Promise<SalesProgressRow[]> {
-  const [stores, deals, profiles] = await Promise.all([
+  const [stores, deals, profiles, needsReviewStoreIds] = await Promise.all([
     listStores({}),
     listDealsCached(),
     getAllProfiles({ excludePlaceholders: false }),
+    getStoreIdsNeedingReview(),
   ]);
   const profilesById = new Map(profiles.map((p) => [p.id, p.display_name]));
   const rows = buildSalesProgressRows(
@@ -48,6 +52,7 @@ export async function listSalesProgressRows(
     deals,
     profilesById,
     todayInTimeZone("Asia/Tokyo"),
+    needsReviewStoreIds,
   );
   return applyProgressSort(applyProgressFilter(rows, filter), sort);
 }

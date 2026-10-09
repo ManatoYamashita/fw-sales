@@ -506,7 +506,7 @@ describe("scrollToResearchItem — 折りたたまれた <details>(M1)", () => {
 });
 
 describe("handleConflictJump(filter ON → 対象itemへ移動)", () => {
-  it("「要確認のみ表示」を ON にしてから対象keyへスクロールする", () => {
+  it("「未判断の項目のみ表示」を ON にしてから対象keyへスクロールする", () => {
     const calls: string[] = [];
     const setFilter = vi.fn((next: boolean) => {
       calls.push(`filter:${next}`);

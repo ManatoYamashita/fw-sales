@@ -55,7 +55,7 @@ test("一覧は営業状態の列を調査段階より優先して出し、ラ�
   await expect(page.getByText("現在の営業状態")).toHaveCount(0);
   await expect(table.getByRole("columnheader", { name: "状態", exact: true })).toHaveCount(0);
 
-  // 営業状態 (778) は残り、調査段階 (874) が先に落ちる帯
+  // 営業状態 (778) は残り、調査段階 (898) が先に落ちる帯
   await fitContainerWidth(page, 820);
   await expect(table.getByRole("columnheader", { name: "営業状態" })).toBeVisible();
   await expect(table.getByRole("columnheader", { name: "調査段階" })).toBeHidden();

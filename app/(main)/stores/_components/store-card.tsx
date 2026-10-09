@@ -4,7 +4,7 @@ import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 import { type ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
-import { StageBadge } from "@/components/feature/stage-badge";
+import { StoreResearchStatusBadge } from "@/components/feature/stage-badge";
 import { SalesStateSummary } from "@/components/feature/sales-state-badge";
 import { IndividualStoreBadge } from "@/components/feature/individual-store-badge";
 import { formatDate } from "@/lib/utils/date";
@@ -70,10 +70,10 @@ export interface StoreCardProps {
  * 店舗カード (#234 / PR3/3)。
  *
  * ## 載せる情報
- * 「コンテナ 974px 相当の列集合を縦に積んだもの」と定義する。#220 / #237 が合意した
+ * 「コンテナ 998px 相当の列集合を縦に積んだもの」と定義する。#220 / #237 が合意した
  * 閾値順をそのまま使い、新しい優先度を発明しない。
- * 店舗名 / 次回アクション / 操作 (always) + 営業状態 778 + 調査段階 874 +
- * 営業担当 974 の 6 項目。最寄駅 (1174) 以降は載せず、店舗名リンクから詳細へ送る。
+ * 店舗名 / 次回アクション / 操作 (always) + 営業状態 778 + 調査段階 898 +
+ * 営業担当 998 の 6 項目。最寄駅 (1198) 以降は載せず、店舗名リンクから詳細へ送る。
  *
  * 現行の 375px は「選択列と店舗名しか見えない」状態なので、これは純増になる。
  *
@@ -118,7 +118,7 @@ export function StoreCard({ row, href, canDelete }: StoreCardProps) {
           state={row.currentSalesState}
           latestDeal={row.latestDeal}
         />
-        <StageBadge stage={row.store.stage} />
+        <StoreResearchStatusBadge status={row.researchStatus} />
       </div>
 
       <div className="mt-2 rounded-md bg-muted/40 p-2">

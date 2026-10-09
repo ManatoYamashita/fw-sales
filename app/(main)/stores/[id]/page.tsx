@@ -1,8 +1,10 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { StoreTitleSection } from "./_components/store-title-section";
 import { StoreDetailTabs } from "./_components/store-detail-tabs";
+import { StoreResearchReviewNotice } from "./_components/store-research-review-notice";
 import { getStoreCached } from "@/lib/queries/stores";
 import { listDealsByStoreCached } from "@/lib/queries/deals";
 import { getAllProfiles } from "@/lib/queries/profiles";
@@ -55,6 +57,10 @@ export default async function StoreDetailPage({
           ← 店舗一覧
         </Link>
         <StoreTitleSection store={store} phase={researchPhase} />
+        {/* 未レビューの AI 調査結果は都度読むため、静的シェルの外 (Suspense の内側) に置く (#299)。 */}
+        <Suspense fallback={null}>
+          <StoreResearchReviewNotice storeId={store.id} />
+        </Suspense>
       </div>
 
       <StoreDetailTabs
