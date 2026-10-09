@@ -10,7 +10,7 @@ import { type SortDir } from "@/components/ui/sortable-header-params";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
-import { StageBadge } from "@/components/feature/stage-badge";
+import { StoreResearchStatusBadge } from "@/components/feature/stage-badge";
 import { ChannelBadge } from "@/components/feature/channel-badge";
 import { SalesStateSummary } from "@/components/feature/sales-state-badge";
 import { IndividualStoreBadge } from "@/components/feature/individual-store-badge";
@@ -163,7 +163,7 @@ export function buildColumns(canDelete: boolean): ColumnDef<SalesProgressRow>[] 
       truncate: true,
       maxWidth: "160px",
       title: (r) => r.store.genre || undefined,
-      minContainerWidth: 1582,
+      minContainerWidth: 1606,
       cell: (r) => r.store.genre || "—",
     },
     { key: "salesState", header: "営業状態", minContainerWidth: 778, cell: (r) => <SalesStateSummary state={r.currentSalesState} latestDeal={r.latestDeal} /> },
@@ -176,15 +176,15 @@ export function buildColumns(canDelete: boolean): ColumnDef<SalesProgressRow>[] 
       header: "調査段階",
       sortKey: "stage",
       sortDefaultDir: "asc",
-      minContainerWidth: 874,
-      cell: (r) => <StageBadge stage={r.store.stage} />,
+      minContainerWidth: 898,
+      cell: (r) => <StoreResearchStatusBadge status={r.researchStatus} />,
     },
     {
       key: "channel",
       header: "チャネル",
       sortKey: "channel",
       sortDefaultDir: "asc",
-      minContainerWidth: 1312,
+      minContainerWidth: 1336,
       cell: (r) => <ChannelBadge channel={r.store.channel} />,
     },
     {
@@ -197,7 +197,7 @@ export function buildColumns(canDelete: boolean): ColumnDef<SalesProgressRow>[] 
       // 閾値がすべてずれるため 100px まで締める。列予算はこの cap そのもの
       // (#237。短いデータでの実測 97px を予算にすると cap 一杯の値で 3px 溢れる)。
       maxWidth: "100px",
-      minContainerWidth: 974,
+      minContainerWidth: 998,
       title: (r) => r.salesName ?? undefined,
       cell: (r) => r.salesName ?? "—",
     },
@@ -206,7 +206,7 @@ export function buildColumns(canDelete: boolean): ColumnDef<SalesProgressRow>[] 
       header: "最終営業日",
       sortKey: "meeting",
       sortDefaultDir: "desc",
-      minContainerWidth: 1422,
+      minContainerWidth: 1446,
       cell: (r) => (
         <span className="text-xs text-muted-foreground whitespace-nowrap">
           {r.latestMeetingDate ? formatDate(r.latestMeetingDate) : "—"}

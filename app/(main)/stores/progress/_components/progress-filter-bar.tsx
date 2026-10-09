@@ -29,7 +29,7 @@ import {
   OVERLAY_PANEL_ALIGN_START,
 } from "@/components/ui/overlay-anchor-classes";
 import { DEAL_STATUSES } from "@/types/deal";
-import { STAGES } from "@/types/stage";
+import { STORE_RESEARCH_STATUSES } from "@/lib/domain/store-research-status";
 import { CHANNELS } from "@/types/store";
 import {
   CURRENT_SALES_STATES,
@@ -631,7 +631,7 @@ function FilterPanel({
             ))}
           </Select>
         </PanelGroup>
-        <PanelGroup label="調査段階"><Select width="full" value={stage} onChange={(e) => onChange("stage", e.target.value)} aria-label="調査段階で絞り込み"><option value="">すべて</option>{STAGES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</Select></PanelGroup>
+        <PanelGroup label="調査段階"><Select width="full" value={stage} onChange={(e) => onChange("stage", e.target.value)} aria-label="調査段階で絞り込み"><option value="">すべて</option>{STORE_RESEARCH_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}</Select></PanelGroup>
         <PanelGroup label="チャネル"><Select width="full" value={channel} onChange={(e) => onChange("channel", e.target.value)} aria-label="チャネルで絞り込み"><option value="">すべて</option>{CHANNELS.map((value) => <option key={value} value={value}>{value}</option>)}</Select></PanelGroup>
       </div>
     </div>

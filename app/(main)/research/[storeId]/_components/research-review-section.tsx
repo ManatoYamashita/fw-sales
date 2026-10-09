@@ -2,7 +2,7 @@
 
 /**
  * 53項目レビューセクション(Plan v3.2 §5.3)。カテゴリごとの折りたたみ(`<details>`)・
- * 「要確認のみ表示」フィルタ・レビュー完了(Primary/Secondary)を提供する。
+ * 「未判断の項目のみ表示」フィルタ・レビュー完了(Primary/Secondary)を提供する。
  *
  * ## feat/ai-research-quality-ux-hardening での変更(Plan §12 / §13)
  *
@@ -28,7 +28,7 @@
  *
  * - 未解決 conflict の**項目名**と「あと何件の候補選択で完了できるか」を sticky footer に常時表示
  * - disabled 理由をボタン直下へ常時表示(tooltip 単独にしない)+ `aria-describedby`
- * - ジャンプCTAで「要確認のみ表示」を ON にした上で**実際に対象itemまでスクロール**
+ * - ジャンプCTAで「未判断の項目のみ表示」を ON にした上で**実際に対象itemまでスクロール**
  *   (旧「競合N件へ移動」は filter を ON にするだけで移動しなかった)。
  *   ユーザーが手で閉じたカテゴリが対象でも届くよう、祖先の `<details>` を開いてから
  *   スクロールする(`scrollToResearchItem` の JSDoc 参照)
@@ -101,7 +101,7 @@ export function researchItemAnchorId(key: string): string {
  * カテゴリは `<details open>` で描画されるが、`open` は **uncontrolled** な属性で、
  * ユーザーが手で閉じても React は開き直さない(React 19.2.4 の `react-dom-client` は
  * `details` に対し `toggle` の購読しか行わず、`input` のような state 復元機構を持たない)。
- * 「要確認のみ表示」を ON にしても、conflict を含むカテゴリは `isUnresolved` が true を
+ * 「未判断の項目のみ表示」を ON にしても、conflict を含むカテゴリは `isUnresolved` が true を
  * 返して描画され続けるため、同じ DOM ノードが**閉じたまま**残る。
  *
  * 閉じた `<details>` の子孫は DOM には存在する(= `getElementById` は要素を返す)が
@@ -147,7 +147,7 @@ export function scrollToResearchItem(key: string): boolean {
 }
 
 /**
- * 「要確認のみ表示」を ON にした**後**の DOM に対してスクロールする。
+ * 「未判断の項目のみ表示」を ON にした**後**の DOM に対してスクロールする。
  *
  * `setState` は同期的に DOM へ反映されないため、次フレームまで待つ。
  * `requestAnimationFrame` が無い環境では `setTimeout(0)` へ退避する。
@@ -164,7 +164,7 @@ function deferScrollToResearchItem(key: string): void {
 }
 
 /**
- * ジャンプCTAの動作: 「要確認のみ表示」を ON にしてから対象itemへ移動する。
+ * ジャンプCTAの動作: 「未判断の項目のみ表示」を ON にしてから対象itemへ移動する。
  *
  * 旧「競合N件へ移動」は filter を ON にするだけで**実際には移動しなかった**ため、
  * 53項目の途中に埋もれた conflict にユーザーが辿り着けなかった。
@@ -401,7 +401,7 @@ export function ResearchReviewSection({ store, run, onUpdate, onRestart, restart
                 AI店舗調査結果({formatDateTime(run.started_at)} 実施)
               </Card.Title>
               <Badge tone={reviewCompleted ? "success" : "warning"}>
-                {reviewCompleted ? "調査済み" : "要確認"}
+                {reviewCompleted ? "レビュー完了" : "レビュー未完了"}
               </Badge>
             </div>
             <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
@@ -442,7 +442,7 @@ export function ResearchReviewSection({ store, run, onUpdate, onRestart, restart
               variant={filterUnresolved ? "primary" : "outline"}
               onClick={() => setFilterUnresolved((v) => !v)}
             >
-              要確認のみ表示
+              未判断の項目のみ表示
             </Button>
             {!reviewCompleted && conflictGuidance !== null && (
               <Button

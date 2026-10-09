@@ -5,7 +5,7 @@ import type { SalesProgressRow } from "@/lib/domain/sales-progress";
 /**
  * 狭幅カード (#234 / PR3/3) の内容を固定するテスト。
  *
- * カードは「コンテナ 974px 相当の列集合を縦に積んだもの」と定義しており、
+ * カードは「コンテナ 998px 相当の列集合を縦に積んだもの」と定義しており、
  * 何を載せ何を載せないかは #220 が合意した閾値順にそのまま従う。ここが動くと
  * その定義が崩れるので、決定を明示的にレビューへ乗せる。
  */
@@ -43,6 +43,7 @@ const ROW = {
   latestMeetingDate: "2026-08-20",
   appointmentAcquired: false,
   latestDeal: null,
+  researchStatus: "架電済み",
 } as unknown as SalesProgressRow;
 
 const render = (row: SalesProgressRow = ROW, canDelete = true) =>
@@ -59,15 +60,26 @@ describe("カードに載せる情報", () => {
     expect(html).toContain("訪問"); // 次回アクション種別
     expect(html).toContain("前回は不在"); // メモ
     expect(html).toContain("期限超過"); // urgency バッジ
-    expect(html).toContain("山下"); // 営業担当 (974)
+    expect(html).toContain("山下"); // 営業担当 (998)
     expect(html).toContain("個人店"); // IndividualStoreBadge
   });
 
   it("営業状態を調査段階より先に置く (#297 / 表の列優先度と同じ順序)", () => {
-    const html = render({ ...ROW, store: { ...ROW.store, stage: "調査済み" } } as SalesProgressRow);
+    const html = render({ ...ROW, researchStatus: "調査済み" } as SalesProgressRow);
     expect(html).toContain('data-stage="調査済み"');
     expect(html.indexOf("継続追客")).toBeGreaterThan(-1);
     expect(html.indexOf("継続追客")).toBeLessThan(html.indexOf('data-stage="'));
+  });
+
+  it("調査段階は store.stage ではなく調査状態を出す (#299)", () => {
+    // stage は調査済みでも、未レビューの AI 調査結果があれば一覧・/research と同じくレビュー待ち。
+    const html = render({
+      ...ROW,
+      store: { ...ROW.store, stage: "調査済み" },
+      researchStatus: "レビュー待ち",
+    } as SalesProgressRow);
+    expect(html).toContain("レビュー待ち");
+    expect(html).not.toContain('data-stage="調査済み"');
   });
 
   it("失注のときは再アプローチ可否を添え、失注理由を title に載せる (#297)", () => {
@@ -103,7 +115,7 @@ describe("カードに載せる情報", () => {
   });
 
   it("最寄駅 / チャネル / 最終営業日 / 業態 は載せない", () => {
-    // 閾値 1174 以降の列。詳細画面 (店舗名リンク) へ送る。
+    // 閾値 1198 以降の列。詳細画面 (店舗名リンク) へ送る。
     const html = render();
     expect(html).not.toContain("東京都");
     expect(html).not.toContain("渋谷区");

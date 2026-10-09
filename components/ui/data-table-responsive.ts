@@ -43,11 +43,14 @@ export const DATA_TABLE_CONTAINER_CLASS = "@container/data-table";
  * ## 内訳 (単体予算 = その列だけの幅。累計ではなく単体を残すこと)
  *
  * ### /stores 一覧 (#220 / #237 で再測定) — always = 店舗名 260 + 次回アクション 272 + 操作 100 = 632
- *    778 = +営業状態 146 /  874 = +調査段階 96     /  974 = +営業担当 100
+ *    778 = +営業状態 146 /  898 = +調査段階 120    /  998 = +営業担当 100
  *   #297 で営業状態と調査段階の順を入れ替えた (旧: 728 = +状態 96 / 874 = +現在の営業状態
- *   146)。単体予算は不変なので 874 以降の累計も不変。
- *   1174 = +最寄駅 200  / 1312 = +チャネル 138       / 1422 = +最終営業日 110
- *   1582 = +業態 160
+ *   146)。
+ *   #299 で調査段階に「レビュー待ち」(6 文字) が加わり、単体予算が 96 → 120 になった。
+ *   実測は 120.00 (同じ測定で 4 文字の「調査済み」96.00 / 6 文字の「運用確認待ち」120.00 が
+ *   既知値と一致することを校正として確認)。調査段階より後の累計はすべて +24。
+ *   1198 = +最寄駅 200  / 1336 = +チャネル 138       / 1446 = +最終営業日 110
+ *   1606 = +業態 160
  *   #220 は営業担当 97 / チャネル 110 / 業態 101 と置いており、閾値の直上で
  *   admin に 5 帯域・member に 1 帯域の横スクロールが残っていた (#237 で 1px 刻みの
  *   掃引により確認)。原因は 2 つで、どちらも下の /dashboard と同じ取り違え。
@@ -103,12 +106,12 @@ const HIDE_BELOW = {
   718: "@max-[718px]/data-table:hidden",
   778: "@max-[778px]/data-table:hidden",
   835: "@max-[835px]/data-table:hidden",
-  874: "@max-[874px]/data-table:hidden",
-  974: "@max-[974px]/data-table:hidden",
-  1174: "@max-[1174px]/data-table:hidden",
-  1312: "@max-[1312px]/data-table:hidden",
-  1422: "@max-[1422px]/data-table:hidden",
-  1582: "@max-[1582px]/data-table:hidden",
+  898: "@max-[898px]/data-table:hidden",
+  998: "@max-[998px]/data-table:hidden",
+  1198: "@max-[1198px]/data-table:hidden",
+  1336: "@max-[1336px]/data-table:hidden",
+  1446: "@max-[1446px]/data-table:hidden",
+  1606: "@max-[1606px]/data-table:hidden",
 } as const;
 
 /**
@@ -152,12 +155,12 @@ const HIDE_BELOW_WITH_SELECTION = {
   718: "@max-[766px]/data-table:hidden",
   778: "@max-[826px]/data-table:hidden",
   835: "@max-[883px]/data-table:hidden",
-  874: "@max-[922px]/data-table:hidden",
-  974: "@max-[1022px]/data-table:hidden",
-  1174: "@max-[1222px]/data-table:hidden",
-  1312: "@max-[1360px]/data-table:hidden",
-  1422: "@max-[1470px]/data-table:hidden",
-  1582: "@max-[1630px]/data-table:hidden",
+  898: "@max-[946px]/data-table:hidden",
+  998: "@max-[1046px]/data-table:hidden",
+  1198: "@max-[1246px]/data-table:hidden",
+  1336: "@max-[1384px]/data-table:hidden",
+  1446: "@max-[1494px]/data-table:hidden",
+  1606: "@max-[1654px]/data-table:hidden",
 } as const;
 
 /**

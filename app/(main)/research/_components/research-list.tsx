@@ -12,7 +12,7 @@ export function NeedsReviewList({ stores }: { stores: Store[] }) {
       <Card>
         <EmptyState
           icon={<CheckCircle2 />}
-          title="要確認の調査結果はありません"
+          title="レビュー待ちの調査結果はありません"
           description="AI店舗調査が完了すると、レビュー待ちの店舗がここに表示されます。"
         />
       </Card>

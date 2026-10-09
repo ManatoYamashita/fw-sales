@@ -493,7 +493,7 @@ export const storeResearchRuns = pgTable(
     }),
   },
   (table) => [
-    // 店舗ごとの最新run取得用 (「要確認」判定・過去run一覧に使用)。
+    // 店舗ごとの最新run取得用 (「レビュー待ち」判定・過去run一覧に使用)。
     index("store_research_runs_store_started_idx").on(
       table.store_id,
       table.started_at,

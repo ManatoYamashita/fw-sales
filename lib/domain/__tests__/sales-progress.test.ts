@@ -233,7 +233,7 @@ describe("buildSalesProgressRows", () => {
   it("商談ゼロの店舗も行になる (latestDeal: null)", () => {
     const stores = [makeStore({ id: "store_1" }), makeStore({ id: "store_2" })];
     const deals = [makeDeal({ id: "deal_1", store_id: "store_2" })];
-    const rows = buildSalesProgressRows(stores, deals, undefined, TODAY);
+    const rows = buildSalesProgressRows(stores, deals, undefined, TODAY, new Set());
     expect(rows).toHaveLength(2);
     expect(rows[0]?.latestDeal).toBeNull();
     expect(rows[0]?.latestMeetingDate).toBeNull();
@@ -247,7 +247,7 @@ describe("buildSalesProgressRows", () => {
       makeDeal({ id: "deal_2", store_id: "store_1", date: "2026-03-01" }),
       makeDeal({ id: "deal_3", store_id: "store_2", date: "2026-02-01" }),
     ];
-    const rows = buildSalesProgressRows(stores, deals, undefined, TODAY);
+    const rows = buildSalesProgressRows(stores, deals, undefined, TODAY, new Set());
     expect(rows[0]?.latestDeal?.id).toBe("deal_2");
     expect(rows[0]?.latestMeetingDate).toBe("2026-03-01");
     expect(rows[1]?.latestDeal?.id).toBe("deal_3");
@@ -258,7 +258,7 @@ describe("buildSalesProgressRows", () => {
       makeStore({ id: "store_1", appointment_acquired_date: "2026-07-01" }),
       makeStore({ id: "store_2", appointment_acquired_date: null }),
     ];
-    const rows = buildSalesProgressRows(stores, [], undefined, TODAY);
+    const rows = buildSalesProgressRows(stores, [], undefined, TODAY, new Set());
     expect(rows[0]?.appointmentAcquired).toBe(true);
     expect(rows[1]?.appointmentAcquired).toBe(false);
   });
@@ -270,7 +270,7 @@ describe("buildSalesProgressRows", () => {
       makeStore({ id: "store_3", assigned_sales_user_id: null }),
     ];
     const profiles = new Map([["uuid-1", "山田"]]);
-    const rows = buildSalesProgressRows(stores, [], profiles, TODAY);
+    const rows = buildSalesProgressRows(stores, [], profiles, TODAY, new Set());
     expect(rows[0]?.salesName).toBe("山田");
     expect(rows[1]?.salesName).toBeNull();
     expect(rows[2]?.salesName).toBeNull();
@@ -281,7 +281,7 @@ describe("buildSalesProgressRows", () => {
       makeStore({ id: "store_1", next_action_date: "2026-07-10" }),
       makeStore({ id: "store_2", next_action_date: null }),
     ];
-    const rows = buildSalesProgressRows(stores, [], undefined, TODAY);
+    const rows = buildSalesProgressRows(stores, [], undefined, TODAY, new Set());
     expect(rows[0]?.urgency).toBe("overdue");
     expect(rows[1]?.urgency).toBe("unset");
   });
@@ -292,7 +292,7 @@ describe("buildSalesProgressRows", () => {
       makeDeal({ id: "deal_1", store_id: "store_1", date: "2026-01-01", next_action_note: "古い記録" }),
       makeDeal({ id: "deal_2", store_id: "store_1", date: "2026-03-01", next_action_date: "2026-07-20", next_action_type: "電話", next_action_note: "最新記録の次回アクション" }),
     ];
-    const rows = buildSalesProgressRows(stores, deals, undefined, TODAY);
+    const rows = buildSalesProgressRows(stores, deals, undefined, TODAY, new Set());
     expect(rows[0]?.currentNextAction).toEqual({
       date: "2026-07-20",
       type: "電話",
@@ -311,7 +311,7 @@ describe("buildSalesProgressRows", () => {
 function rowsOf(...pairs: Array<{ store: Store; deals?: Deal[] }>): SalesProgressRow[] {
   const stores = pairs.map((p) => p.store);
   const deals = pairs.flatMap((p) => p.deals ?? []);
-  return buildSalesProgressRows(stores, deals, undefined, TODAY);
+  return buildSalesProgressRows(stores, deals, undefined, TODAY, new Set());
 }
 
 const idsOf = (rows: SalesProgressRow[]) => rows.map((r) => r.store.id);
@@ -534,6 +534,25 @@ describe("applyProgressFilter", () => {
     expect(idsOf(applyProgressFilter(rows, { stage: "調査済み" }))).toEqual(["b"]);
     expect(idsOf(applyProgressFilter(rows, { channel: "テレアポ推奨" }))).toEqual(["a"]);
   });
+
+  it("調査段階の絞り込みは stage ではなく調査状態で比較する (#299)", () => {
+    // b は stage=調査済み だが未レビューの調査結果があるため、表示はレビュー待ち。
+    // 「調査済み」で絞ると表示と食い違う店舗が混ざってはいけない。
+    const rows = buildSalesProgressRows(
+      [
+        makeStore({ id: "a", stage: "調査済み" }),
+        makeStore({ id: "b", stage: "調査済み" }),
+        makeStore({ id: "c", stage: "未調査" }),
+      ],
+      [],
+      undefined,
+      TODAY,
+      new Set(["b"]),
+    );
+    expect(idsOf(applyProgressFilter(rows, { stage: "調査済み" }))).toEqual(["a"]);
+    expect(idsOf(applyProgressFilter(rows, { stage: "レビュー待ち" }))).toEqual(["b"]);
+    expect(idsOf(applyProgressFilter(rows, { stage: "未調査" }))).toEqual(["c"]);
+  });
 });
 
 describe("applyProgressSort", () => {
@@ -690,6 +709,22 @@ describe("applyProgressSort", () => {
       { store: makeStore({ id: "d", stage: "調査済み" }) },
     );
     expect(idsOf(applyProgressSort(rows, { key: "stage", dir: "desc" }))).toEqual(["c", "d", "b"]);
+  });
+
+  it("stage asc: レビュー待ちは未調査と調査済みの間に並ぶ (#299)", () => {
+    const rows = buildSalesProgressRows(
+      [
+        makeStore({ id: "c", stage: "架電済み" }),
+        makeStore({ id: "d", stage: "調査済み" }),
+        makeStore({ id: "r", stage: "架電済み" }),
+        makeStore({ id: "b", stage: "未調査" }),
+      ],
+      [],
+      undefined,
+      TODAY,
+      new Set(["r"]),
+    );
+    expect(idsOf(applyProgressSort(rows, { key: "stage", dir: "asc" }))).toEqual(["b", "r", "d", "c"]);
   });
 
   it("channel asc: CHANNELS の定義順 (辞書順に退行しない)", () => {

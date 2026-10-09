@@ -12,7 +12,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { getAllProfiles } from "@/lib/queries/profiles";
 import { DEAL_STATUSES, type DealStatus } from "@/types/deal";
 import type { SortDirection } from "@/types/store";
-import { STAGE_IDS, type StageId } from "@/types/stage";
+import { isStoreResearchStatus } from "@/lib/domain/store-research-status";
 import { CHANNELS, type Channel } from "@/types/store";
 import {
   CURRENT_SALES_STATES,
@@ -38,7 +38,7 @@ function parseFilter(p: SearchParams): SalesProgressFilter {
   if (p.sales) filter.sales = p.sales;
   if (p.next && (NEXT_ACTION_URGENCIES as readonly string[]).includes(p.next)) filter.next = p.next as NextActionUrgency;
   if (p.state && (CURRENT_SALES_STATES as readonly string[]).includes(p.state)) filter.state = p.state as CurrentSalesState;
-  if (p.stage && (STAGE_IDS as readonly string[]).includes(p.stage)) filter.stage = p.stage as StageId;
+  if (p.stage && isStoreResearchStatus(p.stage)) filter.stage = p.stage;
   if (p.channel && (CHANNELS as readonly string[]).includes(p.channel)) filter.channel = p.channel as Channel;
   return filter;
 }

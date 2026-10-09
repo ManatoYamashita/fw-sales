@@ -15,9 +15,11 @@
  * その区別は推奨手順 (登録 → AI 調査 → レビュー → 生成) の上で意味を失った。
  * 「基本情報を入力」へ誘導する CTA は手順と矛盾していたので撤去した。
  *
- * 調査の進み具合 (未調査 / 要確認 / 調査済み) は `/research/[storeId]` のステップ表示
- * (`lib/domain/research-flow.ts`) が持つ。店舗詳細では run を読まない (静的シェルを
- * 崩さないため。調査状態の正の置き場所は #299 で扱う)。
+ * 調査の進み具合 (未調査 / レビュー待ち / 調査済み) は本モジュールでは扱わない。
+ * 店舗単位の調査状態は `lib/domain/store-research-status.ts` (#299) が単一の真実で、
+ * `/research/[storeId]` の手順表示は `lib/domain/research-flow.ts` が持つ。店舗詳細は
+ * 静的シェルを崩さないよう、run を Suspense の内側でだけ読む
+ * (`app/(main)/stores/[id]/_components/store-research-review-notice.tsx`)。
  *
  * 依存方向: `lib/domain` は `lib/ai` を import しない。型のみ `types/*` に依存する純関数。
  */
