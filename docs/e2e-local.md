@@ -26,7 +26,7 @@ PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/Applications/Aside.app/Contents/MacOS/Aside
 `pnpm e2e`は次を自動実行します。
 
 1. `container system start`でApple Containerを起動
-2. `fw-sales-e2e-postgres`という名前のPostgreSQLコンテナを起動し、Apple Containerの内部IPへ接続
+2. `fw-sales-e2e-postgres`（`E2E_DB_CONTAINER`で変更可）という名前のPostgreSQLコンテナを起動し、Apple Containerの内部IPへ接続
 3. DB接続を待機
 4. `pnpm db:migrate`で`drizzle/`のmigrationを適用
 5. `pnpm seed`で再現可能なseedデータを投入
@@ -34,6 +34,25 @@ PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/Applications/Aside.app/Contents/MacOS/Aside
 7. Next.js開発サーバーを起動し、Chromium E2Eを実行
 
 E2Eの再実行時は、同名のPostgreSQLコンテナを削除してから作り直します。アプリの通常開発用DBや本番Supabaseには影響しません。
+
+## 複数の作業ツリーで並行して実行する
+
+コンテナ名と開発サーバーのポートは既定で固定です。別の作業ツリー（worktree）で`pnpm e2e`を同時に実行すると、後から始めた側が先に実行中のDBコンテナを削除して作り直すため、先の実行が壊れます。並行して実行するときは、作業ごとにコンテナ名とポートを分けてください。
+
+```bash
+E2E_DB_CONTAINER=fw-sales-e2e-postgres-297 E2E_PORT=3297 pnpm e2e
+```
+
+| 変数 | 既定値 | 用途 |
+|---|---|---|
+| `E2E_DB_CONTAINER` | `fw-sales-e2e-postgres` | E2E用PostgreSQLのコンテナ名。英数字で始まり、英数字と`_.-`だけの63文字以内 |
+| `E2E_PORT` | `3100` | Next.js開発サーバーのポート |
+
+`pnpm e2e:setup`・`pnpm e2e:server`・Playwrightの起動はすべて同じ変数を読むため、`pnpm e2e`の前に指定すれば一貫して切り替わります。終わったら自分のコンテナだけを削除します。
+
+```bash
+container delete --force fw-sales-e2e-postgres-297
+```
 
 ## 認証
 
@@ -62,7 +81,7 @@ UIモードは次で起動できます。
 pnpm e2e:ui
 ```
 
-PostgreSQLコンテナを手動で停止する場合は、E2E専用コンテナだけを対象にしてください。
+PostgreSQLコンテナを手動で停止する場合は、E2E専用コンテナだけを対象にしてください。`E2E_DB_CONTAINER`を指定した場合はその名前を使います。
 
 ```bash
 container delete --force fw-sales-e2e-postgres
