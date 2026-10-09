@@ -72,23 +72,32 @@ describe("getResearchFlowSteps", () => {
 });
 
 describe("getSalesAssetGenerationContext", () => {
-  it("run が無い / failed なら none", () => {
-    expect(getSalesAssetGenerationContext(null)).toEqual({ kind: "none" });
-    expect(getSalesAssetGenerationContext(run({ status: "failed" }))).toEqual({
+  it("run が無い / failed でレビュー済みの run も無いなら none", () => {
+    expect(getSalesAssetGenerationContext(null, false)).toEqual({ kind: "none" });
+    expect(getSalesAssetGenerationContext(run({ status: "failed" }), false)).toEqual({
       kind: "none",
     });
   });
 
-  it("running なら running", () => {
-    expect(getSalesAssetGenerationContext(run({ status: "running" }))).toEqual({
-      kind: "running",
+  it("再調査が failed でも、以前の run がレビュー済みなら failedAfterReview (#313 レビュー)", () => {
+    expect(getSalesAssetGenerationContext(run({ status: "failed" }), true)).toEqual({
+      kind: "failedAfterReview",
     });
+  });
+
+  it("running なら running (以前のレビューの有無に依らない)", () => {
+    for (const hasReviewedRun of [false, true]) {
+      expect(
+        getSalesAssetGenerationContext(run({ status: "running" }), hasReviewedRun),
+      ).toEqual({ kind: "running" });
+    }
   });
 
   it("レビュー済みなら reviewed", () => {
     expect(
       getSalesAssetGenerationContext(
         run({ review_completed_at: "2026-10-07T00:00:00.000Z" }),
+        true,
       ),
     ).toEqual({ kind: "reviewed" });
   });
@@ -108,6 +117,7 @@ describe("getSalesAssetGenerationContext", () => {
         ],
         review_decisions: decisions,
       }),
+      false,
     );
     expect(ctx).toEqual({ kind: "unreviewed", undecidedCount: 3 });
   });
@@ -122,11 +132,17 @@ describe("salesAssetGenerateLabel", () => {
     expect(salesAssetGenerateLabel({ kind: "running" }, false)).toBe(
       "調査の完了を待たずに生成",
     );
+    expect(salesAssetGenerateLabel({ kind: "failedAfterReview" }, false)).toBe(
+      "前回のレビュー結果で生成",
+    );
     expect(salesAssetGenerateLabel({ kind: "none" }, false)).toBe("AI調査をせずに生成");
   });
 
   it("営業資産があれば「再生成」", () => {
     expect(salesAssetGenerateLabel({ kind: "reviewed" }, true)).toBe("営業資産を再生成");
+    expect(salesAssetGenerateLabel({ kind: "failedAfterReview" }, true)).toBe(
+      "前回のレビュー結果で再生成",
+    );
     expect(salesAssetGenerateLabel({ kind: "none" }, true)).toBe("AI調査をせずに再生成");
   });
 });

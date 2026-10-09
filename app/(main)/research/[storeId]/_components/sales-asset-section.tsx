@@ -57,6 +57,8 @@ function contextNote(context: SalesAssetGenerationContext): string | null {
       return "レビューで採用した項目は基本情報に反映済みです。レビューを完了すると手順 ② が完了します。";
     case "running":
       return "AI調査の完了後にレビューすると、調査結果を生成に使えます。";
+    case "failedAfterReview":
+      return "直近のAI調査は失敗しました。前回のレビューで採用した項目は基本情報に入っており、生成に使われます。";
     case "none":
       return "先にAI調査とレビューを行うと、調査結果を生成に使えます。";
   }

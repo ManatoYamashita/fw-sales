@@ -81,15 +81,28 @@ export type SalesAssetGenerationContext =
   /** `undecidedCount`: レビューで未対応のため基本情報に入っていない調査結果の件数。 */
   | { kind: "unreviewed"; undecidedCount: number }
   | { kind: "running" }
+  /**
+   * 直近の調査は失敗したが、以前の調査はレビュー済み。採用済みの項目は基本情報に
+   * 入っているので「AI 調査をしていない」扱いにはしない。
+   */
+  | { kind: "failedAfterReview" }
   | { kind: "none" };
 
+/**
+ * @param hasReviewedRun 店舗の run のうち、レビューを完了したものが 1 件でもあるか。
+ *   主表示 run は最新の run なので、再調査が失敗するとそれだけでは過去のレビューが見えない。
+ */
 export function getSalesAssetGenerationContext(
   primaryRun: Pick<
     StoreResearchRun,
     "status" | "review_completed_at" | "result" | "review_decisions"
   > | null,
+  hasReviewedRun: boolean,
 ): SalesAssetGenerationContext {
-  if (primaryRun === null || primaryRun.status === "failed") return { kind: "none" };
+  if (primaryRun === null) return { kind: "none" };
+  if (primaryRun.status === "failed") {
+    return hasReviewedRun ? { kind: "failedAfterReview" } : { kind: "none" };
+  }
   if (primaryRun.status === "running") return { kind: "running" };
   if (primaryRun.review_completed_at !== null) return { kind: "reviewed" };
   return {
@@ -117,6 +130,8 @@ export function salesAssetGenerateLabel(
       return `レビューせずに${verb}`;
     case "running":
       return `調査の完了を待たずに${verb}`;
+    case "failedAfterReview":
+      return `前回のレビュー結果で${verb}`;
     case "none":
       return `AI調査をせずに${verb}`;
   }

@@ -91,6 +91,13 @@ describe("SalesAssetSection", () => {
     expect(generateButton(render({ kind: "none" })).text).toBe("AI調査をせずに生成");
   });
 
+  it("再調査が失敗しても以前のレビューがあれば、その結果が生成に使われると書く (#313 レビュー)", () => {
+    const html = render({ kind: "failedAfterReview" });
+    expect(generateButton(html).text).toBe("前回のレビュー結果で生成");
+    expect(html).toContain("前回のレビューで採用した項目は基本情報に入っており");
+    expect(html).not.toContain("先にAI調査とレビューを行うと");
+  });
+
   it("補足情報欄は Gemini 等の外部調査テキストの貼付先であることを書き、5 万字まで受け付ける", () => {
     const html = render({ kind: "reviewed" });
     expect(html).toContain("補足情報(任意)");

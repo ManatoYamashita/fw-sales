@@ -57,7 +57,10 @@ export function AiResearchWorkbench({
   const primaryRun = selectPrimaryResearchRun(runs);
   const pastRuns = primaryRun ? runs.filter((r) => r.id !== primaryRun.id) : runs;
   const flowSteps = getResearchFlowSteps(primaryRun, store.ai_analysis_result !== null);
-  const generationContext = getSalesAssetGenerationContext(primaryRun);
+  const generationContext = getSalesAssetGenerationContext(
+    primaryRun,
+    runs.some((r) => r.review_completed_at !== null),
+  );
   const hasUnreviewedSucceeded = runs.some(
     (r) => r.status === "succeeded" && r.review_completed_at === null,
   );
