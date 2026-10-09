@@ -19,15 +19,6 @@ async function openPanel(page: Page) {
   return panel;
 }
 
-/** Server Action の POST 応答 (`next-action` ヘッダ付き) を待つ。 */
-function waitForServerAction(page: Page) {
-  return page.waitForResponse(
-    (res) =>
-      res.request().method() === "POST" &&
-      res.request().headers()["next-action"] !== undefined,
-  );
-}
-
 test("通知はクリックで既読になり、削除済み店舗へは遷移せず、一括既読もできる", async ({
   page,
 }) => {
@@ -72,7 +63,15 @@ test("通知はクリックで既読になり、削除済み店舗へは遷移�
   panel = await openPanel(page);
   // 表示は楽観的に 0 件へ変わるので、再読込の前に保存 (Server Action) の完了を待つ。
   // 待たずに reload すると、初回コンパイル中の Action リクエストが捨てられて未読が戻る。
-  const markedAll = waitForServerAction(page);
+  // 引数の無い Action で要求の本文からは特定できないため、応答の結果 ({ count }) で見分ける
+  // (ページ読み込み時の getSessionRoleAction も引数無しの POST を投げる)。
+  const markedAll = page.waitForResponse(
+    async (res) =>
+      res.request().method() === "POST" &&
+      res.request().headers()["next-action"] !== undefined &&
+      (await res.text()).includes('"count"'),
+    { timeout: 60_000 },
+  );
   await panel.getByRole("button", { name: "すべて既読にする" }).click();
   await markedAll;
   await expect(bell(page)).toHaveAccessibleName("通知 (0 件未読)");

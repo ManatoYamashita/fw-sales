@@ -14,6 +14,22 @@ test.beforeEach(() => {
   test.slow();
 });
 
+/**
+ * 本文に `marker` を含む Server Action の POST 応答 (`next-action` ヘッダ付き) を待つ。
+ *
+ * dev サーバは Action を初回呼び出し時にコンパイルするため、保存結果の確認は応答を
+ * 待ってから行う (既定の 5 秒では負荷下で間に合わないことがある)。/stores 系のページは
+ * 読み込み時にも別の Action (getSessionRoleAction) を投げるので、本文で取り違えを防ぐ。
+ */
+const waitForServerAction = (page: Page, marker: string) =>
+  page.waitForResponse(
+    (res) =>
+      res.request().method() === "POST" &&
+      res.request().headers()["next-action"] !== undefined &&
+      (res.request().postData() ?? "").includes(marker),
+    { timeout: 60_000 },
+  );
+
 const tableScroller = (page: Page) =>
   page.locator('[class*="@container/data-table"]').first();
 
@@ -60,7 +76,9 @@ test("失注と再アプローチ可否を営業記録に残すと、一覧と�
   await form.getByLabel("営業状態").selectOption("失注");
   await form.getByLabel("再アプローチ").selectOption("再アプローチ不可");
   await form.getByLabel("失注理由").fill("予算が合わず、今期は見送り");
+  const saved = waitForServerAction(page, "予算が合わず、今期は見送り");
   await form.getByRole("button", { name: "営業記録を追加" }).click();
+  await saved;
   await expect(page.getByText("営業記録を追加しました")).toBeVisible();
 
   const current = page.locator("dl").first();
@@ -97,8 +115,10 @@ test("営業状態と調査段階の列は、どのコンテナ幅でも横ス�
 test("店舗名に営業メモがあると案内し、候補の店舗名へ直せる", async ({ page }) => {
   await page.goto("/stores/store_002");
   await page.getByRole("button", { name: "店舗名・業態を編集" }).click();
-  await page.getByLabel("店舗名").fill("（確バツ）CAFE VERDE");
+  await page.getByRole("textbox", { name: "店舗名" }).fill("（確バツ）CAFE VERDE");
+  const renamed = waitForServerAction(page, "（確バツ）CAFE VERDE");
   await page.getByRole("button", { name: "保存" }).click();
+  await renamed;
   await expect(page.getByRole("heading", { level: 1 })).toContainText("（確バツ）CAFE VERDE");
 
   const note = page.getByRole("note", { name: "店舗名に含まれる営業メモ" });
@@ -106,8 +126,10 @@ test("店舗名に営業メモがあると案内し、候補の店舗名へ直�
   await note.getByRole("button", { name: "店舗名を「CAFE VERDE」に直す" }).click();
 
   // 自動保存はしない。候補が入った編集フォームを開くだけ
-  await expect(page.getByLabel("店舗名")).toHaveValue("CAFE VERDE");
+  await expect(page.getByRole("textbox", { name: "店舗名" })).toHaveValue("CAFE VERDE");
+  const fixed = waitForServerAction(page, '"CAFE VERDE"');
   await page.getByRole("button", { name: "保存" }).click();
+  await fixed;
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(/^CAFE VERDE/);
   await expect(note).toHaveCount(0);
 });
