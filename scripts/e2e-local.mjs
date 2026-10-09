@@ -9,7 +9,7 @@ export const DEFAULT_E2E_EMAIL = "e2e@example.test";
 export const DEFAULT_E2E_PASSWORD = "e2e-password-please-change";
 export const DEFAULT_E2E_SECRET = "local-e2e-only";
 export const DEFAULT_E2E_PORT = 3100;
-export const E2E_DB_CONTAINER_NAME = "fw-sales-e2e-postgres";
+export const DEFAULT_E2E_DB_CONTAINER_NAME = "fw-sales-e2e-postgres";
 export const E2E_TEST_USER_ID = "00000000-0000-0000-0000-000000000001";
 
 function commandExists(command) {
@@ -29,6 +29,27 @@ function parsePort(value, name, defaultValue) {
     throw new Error(`${name} は1024〜65535の整数で指定してください。`);
   }
   return port;
+}
+
+/**
+ * E2E用PostgreSQLのコンテナ名を返します。
+ *
+ * `pnpm e2e`は起動のたびに同名のコンテナを削除して作り直すため、名前が固定だと
+ * 別の作業ツリーで実行中のE2EのDBを消してしまいます。並行して実行するときは
+ * `E2E_DB_CONTAINER`で作業ごとに別の名前を指定してください。
+ *
+ * @param {Record<string, string | undefined>} [env]
+ * @returns {string}
+ */
+export function getE2eDbContainerName(env = process.env) {
+  const name = env.E2E_DB_CONTAINER?.trim() || DEFAULT_E2E_DB_CONTAINER_NAME;
+  // containerコマンドへそのまま渡すため、英数字で始まり英数字と「_.-」だけの名前に限ります。
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$/.test(name)) {
+    throw new Error(
+      "E2E_DB_CONTAINER は英数字で始まり、英数字と「_.-」だけからなる63文字以内の名前で指定してください。",
+    );
+  }
+  return name;
 }
 
 export function getE2eConfig() {
@@ -58,10 +79,11 @@ function getE2eDatabaseHost() {
     { cwd: PROJECT_ROOT, encoding: "utf8" },
   );
   const containers = JSON.parse(output);
-  const target = containers.find((container) => container.id === E2E_DB_CONTAINER_NAME);
+  const containerName = getE2eDbContainerName();
+  const target = containers.find((container) => container.id === containerName);
   const address = target?.status?.networks?.[0]?.ipv4Address;
   if (!address) {
-    throw new Error("E2E用PostgreSQLコンテナの内部IPを取得できませんでした。");
+    throw new Error(`E2E用PostgreSQLコンテナ「${containerName}」の内部IPを取得できませんでした。`);
   }
   return address.split("/")[0];
 }
@@ -71,6 +93,7 @@ function getE2eDatabaseHost() {
  * Supabase CLIはDocker Engine APIを要求するため、E2Eでは直接PostgreSQLを利用します。
  */
 export function startE2eDatabase() {
+  const containerName = getE2eDbContainerName();
   if (!commandExists("container")) {
     throw new Error(
       "Apple Containerのcontainerコマンドが見つかりません。Apple Containerをインストールしてください。",
@@ -82,7 +105,7 @@ export function startE2eDatabase() {
   });
 
   try {
-    execFileSync("container", ["delete", "--force", E2E_DB_CONTAINER_NAME], {
+    execFileSync("container", ["delete", "--force", containerName], {
       cwd: PROJECT_ROOT,
       stdio: "ignore",
     });
@@ -97,7 +120,7 @@ export function startE2eDatabase() {
       "--detach",
       "--rm",
       "--name",
-      E2E_DB_CONTAINER_NAME,
+      containerName,
       "--env",
       "POSTGRES_USER=postgres",
       "--env",
