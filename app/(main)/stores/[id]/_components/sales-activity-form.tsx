@@ -11,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/toast";
 import { createDealAction, updateDealAction } from "@/lib/actions/deal-actions";
 import { todayInTimeZone } from "@/lib/utils/date";
-import { DEAL_STATUSES, MEETING_TYPES, NEXT_ACTION_TYPES, type Deal } from "@/types/deal";
+import { DEAL_STATUSES, MEETING_TYPES, NEXT_ACTION_TYPES, REAPPROACH_OPTIONS, type Deal } from "@/types/deal";
 import type { Profile } from "@/types/profile";
 import type { Store } from "@/types/store";
 
@@ -41,6 +41,9 @@ export function SalesActivityForm({ store, deal, profiles, onClose }: { store: S
           (estimate_amount: 0 / order_amount: null) に従う */}
       <FormField label="見積金額" htmlFor={`estimate-${deal?.id ?? "new"}`}><YenAmountInput id={`estimate-${deal?.id ?? "new"}`} name="estimate_amount" defaultValue={deal?.estimate_amount} /></FormField>
       {status === "受注" ? <FormField label="受注金額" htmlFor={`order-${deal?.id ?? "new"}`}><YenAmountInput id={`order-${deal?.id ?? "new"}`} name="order_amount" defaultValue={deal?.order_amount} /></FormField> : null}
+      {/* 失注時だけ再アプローチ可否を聞く (#297)。店舗名に「（Rアポ）」「（確バツ）」と
+          書き込まれていた情報の受け皿。失注以外ではサーバ側で null に正規化される */}
+      {status === "失注" ? <FormField label="再アプローチ" htmlFor={`reapproach-${deal?.id ?? "new"}`} hint="店舗名ではなくここに記録します"><Select width="full" id={`reapproach-${deal?.id ?? "new"}`} name="reapproach" defaultValue={deal?.reapproach ?? ""}><option value="">未判断</option>{REAPPROACH_OPTIONS.map((v) => <option key={v}>{v}</option>)}</Select></FormField> : null}
       {status === "失注" ? <FormField label="失注理由" htmlFor={`lost-${deal?.id ?? "new"}`} className="md:col-span-2"><Textarea id={`lost-${deal?.id ?? "new"}`} name="lost_reason" rows={3} maxLength={10000} defaultValue={deal?.lost_reason ?? ""} /></FormField> : null}
       <div className="md:col-span-2 border-t border-border pt-4"><h4 className="text-sm font-semibold">この記録時点の次回アクション</h4><p className="text-xs text-muted-foreground">日付・種別・内容はそれぞれ単独でも保存できます。</p></div>
       <FormField label="次回アクション予定日" htmlFor={`next-date-${deal?.id ?? "new"}`}><Input id={`next-date-${deal?.id ?? "new"}`} name="next_action_date" type="date" defaultValue={deal?.next_action_date ?? ""} /></FormField>

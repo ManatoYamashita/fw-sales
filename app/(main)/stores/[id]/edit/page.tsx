@@ -1,6 +1,8 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import Link from "next/link";
+import { Suspense } from "react";
+import StoreLoading from "../loading";
 import { StoreEditForm } from "./_components/store-edit-form";
 import { getStoreCached } from "@/lib/queries/stores";
 import { getAllProfiles } from "@/lib/queries/profiles";
@@ -17,7 +19,15 @@ export async function generateMetadata({
   return { title: store ? `${store.name} を編集` : "店舗を編集" };
 }
 
-export default async function StoreEditPage({
+export default function StoreEditPage({ params }: { params: Params }) {
+  return (
+    <Suspense fallback={<StoreLoading />}>
+      <StoreEditContent params={params} />
+    </Suspense>
+  );
+}
+
+async function StoreEditContent({
   params,
 }: {
   params: Params;

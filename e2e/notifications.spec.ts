@@ -22,6 +22,9 @@ async function openPanel(page: Page) {
 test("通知はクリックで既読になり、削除済み店舗へは遷移せず、一括既読もできる", async ({
   page,
 }) => {
+  // dev サーバは店舗詳細や Server Action を初回呼び出し時にコンパイルする。
+  // 1 本のシナリオで複数の初回コンパイルを踏むため、既定の 30 秒では足りないことがある。
+  test.slow();
   await page.goto("/stores");
   await expect(bell(page)).toHaveAccessibleName("通知 (3 件未読)");
 
@@ -43,7 +46,8 @@ test("通知はクリックで既読になり、削除済み店舗へは遷移�
   await panel
     .getByRole("link", { name: "未読: E2E: 導楽の調査が完了しました" })
     .click();
-  await expect(page).toHaveURL(/\/stores\/store_001$/);
+  // 初回は /stores/[id] のコンパイルを待つ (既定の 5 秒では遷移前に判定が終わる)
+  await expect(page).toHaveURL(/\/stores\/store_001$/, { timeout: 30_000 });
   await expect(page.getByText("指定された店舗は見つかりませんでした")).toHaveCount(0);
   await expect(bell(page)).toHaveAccessibleName("通知 (1 件未読)");
 
@@ -57,7 +61,19 @@ test("通知はクリックで既読になり、削除済み店舗へは遷移�
 
   // 一括既読
   panel = await openPanel(page);
+  // 表示は楽観的に 0 件へ変わるので、再読込の前に保存 (Server Action) の完了を待つ。
+  // 待たずに reload すると、初回コンパイル中の Action リクエストが捨てられて未読が戻る。
+  // 引数の無い Action で要求の本文からは特定できないため、応答の結果 ({ count }) で見分ける
+  // (ページ読み込み時の getSessionRoleAction も引数無しの POST を投げる)。
+  const markedAll = page.waitForResponse(
+    async (res) =>
+      res.request().method() === "POST" &&
+      res.request().headers()["next-action"] !== undefined &&
+      (await res.text()).includes('"count"'),
+    { timeout: 60_000 },
+  );
   await panel.getByRole("button", { name: "すべて既読にする" }).click();
+  await markedAll;
   await expect(bell(page)).toHaveAccessibleName("通知 (0 件未読)");
   await expect(panel.getByText("未読なし")).toBeVisible();
   await expect(

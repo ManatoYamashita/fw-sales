@@ -34,7 +34,7 @@ const ROWS: Row[] = [{ id: "1", label: "alpha" }];
 function columns(): ColumnDef<Row>[] {
   return [
     { key: "always", header: "常時", cell: (r) => r.label },
-    { key: "gated", header: "段階", minContainerWidth: 728, cell: () => "g" },
+    { key: "gated", header: "段階", minContainerWidth: 778, cell: () => "g" },
     {
       key: "updated",
       header: "最終営業日",
@@ -72,7 +72,7 @@ describe("DataTable の列段階表示", () => {
 
   it("閾値クラスが th と td の双方に付く", () => {
     const html = render();
-    const token = COLUMN_HIDE_CLASSES[728];
+    const token = COLUMN_HIDE_CLASSES[778];
 
     expect(tags(html, "th").filter((t) => t.includes(token))).toHaveLength(1);
     expect(tags(html, "td").filter((t) => t.includes(token))).toHaveLength(ROWS.length);
@@ -90,7 +90,7 @@ describe("DataTable の列段階表示", () => {
     expect(bare).toHaveLength(1 + ROWS.length);
 
     // 使っていない閾値のクラスが紛れ込んでいないこと。
-    const used = new Set([COLUMN_HIDE_CLASSES[728], COLUMN_HIDE_CLASSES[1422]]);
+    const used = new Set([COLUMN_HIDE_CLASSES[778], COLUMN_HIDE_CLASSES[1422]]);
     for (const token of Object.values(COLUMN_HIDE_CLASSES)) {
       if (used.has(token)) continue;
       expect(html).not.toContain(token);
@@ -104,15 +104,15 @@ describe("DataTable の列段階表示", () => {
         onChange: vi.fn(),
       },
     });
-    expect(html).toContain(COLUMN_HIDE_CLASSES_WITH_SELECTION[728]);
-    expect(html).not.toContain(COLUMN_HIDE_CLASSES[728]);
+    expect(html).toContain(COLUMN_HIDE_CLASSES_WITH_SELECTION[778]);
+    expect(html).not.toContain(COLUMN_HIDE_CLASSES[778]);
   });
 
   it("ソート中の列は th/td ともに閾値クラスを持たない (要件5)", () => {
     const html = render({ activeSortKey: "meeting" });
     expect(html).not.toContain(COLUMN_HIDE_CLASSES[1422]);
     // 他の列は影響を受けない
-    expect(html).toContain(COLUMN_HIDE_CLASSES[728]);
+    expect(html).toContain(COLUMN_HIDE_CLASSES[778]);
   });
 
   it("強制表示の判定は key ではなく sortKey を見る", () => {

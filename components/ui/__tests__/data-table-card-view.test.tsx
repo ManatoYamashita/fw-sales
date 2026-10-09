@@ -36,7 +36,7 @@ const ROWS: Row[] = [
 
 const COLUMNS: ColumnDef<Row>[] = [
   { key: "label", header: "ラベル", cell: (r) => r.label },
-  { key: "stage", header: "状態", minContainerWidth: 728, cell: () => "—" },
+  { key: "stage", header: "状態", minContainerWidth: 778, cell: () => "—" },
 ];
 
 const CARD_VIEW = {
@@ -77,7 +77,7 @@ describe("cardView 未指定 (既存テーブルへの影響)", () => {
   });
 
   it("段階表示の列クラスは従来どおり出る", () => {
-    expect(render()).toContain(COLUMN_HIDE_CLASSES[728]);
+    expect(render()).toContain(COLUMN_HIDE_CLASSES[778]);
   });
 });
 

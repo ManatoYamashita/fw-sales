@@ -38,7 +38,7 @@ const ROW = {
   },
   salesName: "山下",
   urgency: "overdue",
-  currentSalesState: "商談中",
+  currentSalesState: "following",
   currentNextAction: { date: "2026-09-01", type: "訪問", note: "前回は不在" },
   latestMeetingDate: "2026-08-20",
   appointmentAcquired: false,
@@ -51,8 +51,9 @@ const render = (row: SalesProgressRow = ROW, canDelete = true) =>
   );
 
 describe("カードに載せる情報", () => {
-  it("店舗名 / 次回アクション / 状態 / 現在の営業状態 / 営業担当 を載せる", () => {
+  it("店舗名 / 次回アクション / 営業状態 / 調査段階 / 営業担当 を載せる", () => {
     const html = render();
+    expect(html).toContain("継続追客"); // 営業状態 (778)
     expect(html).toContain("さくら屋 渋谷店"); // name (always)
     expect(html).toContain("2026/09/01"); // 次回アクション日 (always)
     expect(html).toContain("訪問"); // 次回アクション種別
@@ -60,6 +61,45 @@ describe("カードに載せる情報", () => {
     expect(html).toContain("期限超過"); // urgency バッジ
     expect(html).toContain("山下"); // 営業担当 (974)
     expect(html).toContain("個人店"); // IndividualStoreBadge
+  });
+
+  it("営業状態を調査段階より先に置く (#297 / 表の列優先度と同じ順序)", () => {
+    const html = render({ ...ROW, store: { ...ROW.store, stage: "調査済み" } } as SalesProgressRow);
+    expect(html).toContain('data-stage="調査済み"');
+    expect(html.indexOf("継続追客")).toBeGreaterThan(-1);
+    expect(html.indexOf("継続追客")).toBeLessThan(html.indexOf('data-stage="'));
+  });
+
+  it("失注のときは再アプローチ可否を添え、失注理由を title に載せる (#297)", () => {
+    const lost = {
+      ...ROW,
+      currentSalesState: "lost",
+      latestDeal: { reapproach: "再アプローチ可", lost_reason: "繁忙期で見送り" },
+    } as unknown as SalesProgressRow;
+    const html = render(lost);
+    expect(html).toContain("失注（ロスト）");
+    expect(html).toContain("再アプローチ可");
+    expect(html).toContain('title="失注理由: 繁忙期で見送り"');
+  });
+
+  it("失注で可否が未記録なら「再アプローチ未判断」と出す", () => {
+    const lost = {
+      ...ROW,
+      currentSalesState: "lost",
+      latestDeal: { reapproach: null, lost_reason: "" },
+    } as unknown as SalesProgressRow;
+    const html = render(lost);
+    expect(html).toContain("再アプローチ未判断");
+    expect(html).not.toContain("失注理由:");
+  });
+
+  it("失注以外では再アプローチの行を出さない", () => {
+    const won = {
+      ...ROW,
+      currentSalesState: "won",
+      latestDeal: { reapproach: "再アプローチ可", lost_reason: "" },
+    } as unknown as SalesProgressRow;
+    expect(render(won)).not.toContain("再アプローチ");
   });
 
   it("最寄駅 / チャネル / 最終営業日 / 業態 は載せない", () => {

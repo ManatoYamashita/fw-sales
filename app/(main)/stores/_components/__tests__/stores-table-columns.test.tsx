@@ -64,8 +64,9 @@ const ALWAYS = ["name", "next", "actions"] as const;
 
 /** always の上に積む順 = 優先度の高い順。`/dashboard` (#224) の落とす順と整合させている。 */
 const LADDER = [
-  "stage",
+  // #297: 営業状態 (受注 / 失注 / 追客…) を調査段階より上位に置く。
   "salesState",
+  "stage",
   "sales",
   "location",
   "channel",
@@ -81,8 +82,8 @@ const EXPECTED: Record<string, ColumnMinContainerWidth | undefined> = {
   name: undefined, // 店舗名 260 ┐
   next: undefined, // 次回アクション 272 ├ always 計 632
   actions: undefined, // 操作 100 ┘
-  stage: 728, // + 状態 96
-  salesState: 874, // + 現在の営業状態 146
+  salesState: 778, // + 営業状態 146 (#297 で調査段階と順序を入れ替え)
+  stage: 874, // + 調査段階 96
   sales: 974, // + 営業担当 100
   location: 1174, // + 最寄駅 200
   channel: 1312, // + チャネル 138
