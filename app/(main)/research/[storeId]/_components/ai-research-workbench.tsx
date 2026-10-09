@@ -26,6 +26,7 @@ import {
   getResearchFlowSteps,
   getSalesAssetGenerationContext,
 } from "@/lib/domain/research-flow";
+import { decodeHashId } from "@/lib/utils/hash-id";
 import { ResearchFlowSteps } from "./research-flow-steps";
 import { StartResearchCard } from "./start-research-card";
 import { ResearchProgressCard } from "./research-progress-card";
@@ -103,8 +104,8 @@ export function AiResearchWorkbench({
   // このセグメントは loading.tsx の Suspense 越しに描画されるため、遷移時点では対象要素が
   // まだ無く、Next.js のハッシュスクロールが空振りする (実測で scrollY 0 のまま)。
   useEffect(() => {
-    const id = decodeURIComponent(window.location.hash.slice(1));
-    if (id === "") return;
+    const id = decodeHashId(window.location.hash);
+    if (id === null) return;
     document.getElementById(id)?.scrollIntoView({ block: "start" });
   }, []);
 
