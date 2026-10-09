@@ -91,6 +91,14 @@ describe("getStoreResearchPhase", () => {
 });
 
 describe("RESEARCH_PHASE_META", () => {
+  it("基本情報待ちの CTA は閲覧タブではなく店舗の編集画面へ進む", () => {
+    const cta = RESEARCH_PHASE_META.untouched.cta;
+    const destination = new URL(cta.href("store-1"), "https://example.test");
+    expect(destination.pathname).toBe("/stores/store-1/edit");
+    expect(destination.searchParams.has("tab")).toBe(false);
+    expect(cta.label).toBe("基本情報を編集");
+  });
+
   it("全 3 状態に badge と CTA(遷移先)が定義されている", () => {
     const phases: ResearchPhase[] = ["untouched", "ready", "generated"];
     for (const phase of phases) {

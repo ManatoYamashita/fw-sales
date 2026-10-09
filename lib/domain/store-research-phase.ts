@@ -105,10 +105,10 @@ export const RESEARCH_PHASE_META: Record<
     badgeLabel: "基本情報待ち",
     badgeTone: "warning",
     cta: {
-      label: "基本情報を入力",
-      href: (id) => `/stores/${id}?tab=basic`,
+      label: "基本情報を編集",
+      href: (id) => `/stores/${id}/edit`,
       variant: "secondary",
-      hint: "エリア検索や手動入力で基本情報を補うと、DeepResearch の精度が上がります",
+      hint: "住所・業態・連絡先などを入力・更新できます",
     },
   },
   ready: {

@@ -99,7 +99,7 @@ export function StoreTitleSection({
           {nameError}
         </p>
       )}
-      <div className="text-sm text-muted-foreground mt-0.5 flex items-start flex-wrap gap-x-1">
+      <div className="text-base md:text-sm text-muted-foreground mt-0.5 flex items-start flex-wrap gap-x-1">
         {location && <span>{location}</span>}
         {location && (store.genre || editing) && <span aria-hidden="true">/</span>}
         {(store.genre || editing) && (
@@ -114,11 +114,8 @@ export function StoreTitleSection({
         )}
         {!location && !store.genre && !editing && <span>—</span>}
       </div>
-      <div className="mt-3">
-        <NextActionCta phase={phase} storeId={store.id} />
-      </div>
-      {editing && (
-        <div className="flex items-center gap-2 mt-3">
+      {editing ? (
+        <div className="flex flex-wrap items-center gap-2 mt-2" role="group" aria-label="店舗名・業態の編集操作">
           <Button type="button" variant="primary" onClick={onSave} disabled={pending}>
             <Save className="h-3.5 w-3.5" />
             {pending ? "保存中…" : "保存"}
@@ -126,6 +123,10 @@ export function StoreTitleSection({
           <Button type="button" variant="ghost" onClick={onCancel} disabled={pending}>
             <X className="h-3.5 w-3.5" /> キャンセル
           </Button>
+        </div>
+      ) : (
+        <div className="mt-3">
+          <NextActionCta phase={phase} storeId={store.id} />
         </div>
       )}
     </div>
