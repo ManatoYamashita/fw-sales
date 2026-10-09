@@ -6,8 +6,8 @@
  * (`lib/queries/research.ts`)から呼ばれる、副作用のないドメインロジックのみを集約する。
  * DB I/O・Gemini呼び出しは一切行わない。
  *
- * 関連: Plan v3.2 §4(採用即時反映)、§6(一覧の要確認判定)、§13(tier決定ルール)、
- *       §15(reviewable item定義、レビュー完了条件、要確認runの選定)
+ * 関連: Plan v3.2 §4(採用即時反映)、§6(一覧のレビュー待ち判定)、§13(tier決定ルール)、
+ *       §15(reviewable item定義、レビュー完了条件、レビュー待ちrunの選定)
  */
 
 import type { BasicInfoField } from "@/types/basic-info";
@@ -128,7 +128,7 @@ export function isReviewFullyDecided(
  * 優先順位:
  * 1. `status==="running"` の run のうち最新のもの(未レビュー結果がある状態で
  *    「それでも再調査する」(Plan §5.9)を選んだ直後でも、進行中の調査が必ず
- *    主表示になる。running中のrunは「要確認」条件に該当しないため、これを
+ *    主表示になる。running中のrunは「レビュー待ち」条件に該当しないため、これを
  *    最優先にしても Plan §6 の一覧分類とは矛盾しない)。
  * 2. `status==="succeeded"` かつ `review_completed_at===null` を満たす run のうち
  *    最新のもの(未レビュー結果を再調査の失敗等で隠さない、Plan §6 と同じ考え方)。
