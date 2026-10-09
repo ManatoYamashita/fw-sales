@@ -3,7 +3,9 @@
 /**
  * 営業資産生成統合 Server Action (store-basic-info / task 3.5, PR2)
  *
- * 店舗詳細の「営業資産を生成」ボタンから呼ばれる単一入口 (R7.4)。
+ * `/research/[storeId]` の生成セクション (`sales-asset-section.tsx`) から呼ばれる単一入口。
+ * #300 で店舗詳細「AI 分析」タブの生成 UI を撤去し、呼び出し元をここ 1 か所に集約した
+ * (`sales-assets-single-entry.test.ts` が固定する)。
  * `store.basic_info` (充足項目) + 貼付調査テキスト (構造化しない) + 任意の追加指示を
  * 入力に `AiAnalysisResult` (強み・弱み・グルメ課金・GBP・架電・confidence) を生成し
  * `store.ai_analysis_result` に保存する。**Stage 2 構造化 (`structurer`) を一切呼ばない**
@@ -34,6 +36,10 @@ import {
 import { validateAiAnalysis } from "@/lib/ai/validate";
 import { checkRateLimit } from "@/lib/ai/rate-limiter";
 import { getCurrentSession } from "@/lib/supabase/server";
+import {
+  MAX_INSTRUCTIONS_LENGTH,
+  MAX_SUPPLEMENT_LENGTH,
+} from "@/lib/domain/sales-assets-input";
 import { failure, success, type ActionResult } from "./_helpers";
 
 /**
@@ -46,8 +52,6 @@ import { failure, success, type ActionResult } from "./_helpers";
  * 判断する** (`docs/gemini-model-migration-runbook.md` の「実測して決める項目」)。
  */
 const TIMEOUT_MS = 60_000;
-const MAX_PASTED_LENGTH = 50_000;
-const MAX_INSTRUCTIONS_LENGTH = 500;
 
 /**
  * `AiClientError` を UI 表示用文字列に正規化する
@@ -139,7 +143,7 @@ export async function generateSalesAssetsAction(
   }
 
   // ⑤ プロンプト構築 (Stage 2 構造化を一切経由しない: R7.3)
-  const trimmedPasted = (pastedResearchText ?? "").slice(0, MAX_PASTED_LENGTH);
+  const trimmedPasted = (pastedResearchText ?? "").slice(0, MAX_SUPPLEMENT_LENGTH);
   const trimmedInstructions = (additionalInstructions ?? "").slice(
     0,
     MAX_INSTRUCTIONS_LENGTH,

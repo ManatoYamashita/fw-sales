@@ -39,7 +39,7 @@ async function StoreEditContent({
   ]);
   if (!store) notFound();
   // task 4.2 (PR3a): AiAnalysisPanel 撤去に伴い isApiKeyConfigured / promptTemplates の
-  // 取得・受渡しを削除。営業資産生成は店舗詳細の SalesAssetsGenerator に集約。
+  // 取得・受渡しを削除。営業資産生成は /research/[storeId] の SalesAssetSection に集約 (#300)。
   return (
     <div className="space-y-4 max-w-4xl mx-auto">
       <div>

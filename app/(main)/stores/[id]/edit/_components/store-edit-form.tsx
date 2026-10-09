@@ -54,7 +54,7 @@ export function StoreEditForm({
     operator_name: store.operator_name,
   });
   // task 4.2 (PR3a): AiAnalysisPanel 撤去に伴い AI 関連 state / useBeforeUnload 連動を削除。
-  // 営業資産生成は店舗詳細の SalesAssetsGenerator に集約。本フォームは基本情報の編集のみ。
+  // 営業資産生成は /research/[storeId] の SalesAssetSection に集約 (#300)。本フォームは基本情報の編集のみ。
   const [pending, startTransition] = useTransition();
   const router = useRouter();
 

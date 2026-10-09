@@ -16,12 +16,14 @@ Gem で DeepResearch → STEP1 で貼り戻す」でしたが、**その専用�
 - PR #180 以降、アプリ内の既定は自動 AI 店舗調査パイプライン
   (`workflows/store-research.ts` + 53 項目レビュー UI)
 
-**それでも本ファイルを残す理由**: 店舗詳細「AI 分析」タブの営業資産生成に、
-自由記述の貼付欄が現役で残っているためです
-(`app/(main)/stores/[id]/_components/sales-assets-generator.tsx`、
-プレースホルダ「Gemini UI で実施した DeepResearch の結果テキスト等を貼り付けてください」)。
-そこへ流し込むレポートを Gemini UI 側で作らせるための指示書が本ファイルです。
-貼付テキストは構造化せず `buildSalesAssetsPrompt` の一 Part としてそのまま渡ります (#121)。
+**それでも本ファイルを残す理由**: 営業資産生成に自由記述の貼付欄が現役で残っているためです。
+#300 で Gemini 手動貼付は独立した経路としては撤去し、営業資産生成の唯一の入口である
+`/research/[storeId]` の「③ 営業資産を生成」にある **「補足情報(任意)」欄** に吸収しました
+(`app/(main)/research/[storeId]/_components/sales-asset-section.tsx`)。推奨手順は
+「AI 調査 → レビュー → 営業資産を生成」で、Gem で作ったレポートは AI 調査で拾いきれない
+情報を補うときにその欄へ貼り付けます。
+貼付テキストは構造化せず `buildSalesAssetsPrompt` の「調査結果テキスト(一次情報)」Part として
+そのまま渡ります (#121)。上限は `MAX_SUPPLEMENT_LENGTH` (`lib/domain/sales-assets-input.ts`)。
 
 ## 入力の用意について
 

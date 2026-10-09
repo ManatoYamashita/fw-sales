@@ -1,12 +1,10 @@
 import { describe, it, expect } from "vitest";
-import type { BasicInfo, BasicInfoField, FillSource } from "@/types/basic-info";
+import type { BasicInfoField, FillSource } from "@/types/basic-info";
 import {
-  CORE_BASIC_INFO_KEYS,
-  READY_CORE_THRESHOLD,
   RESEARCH_PHASE_META,
-  filledCoreCount,
   getStoreResearchPhase,
   isBasicInfoFieldFilled,
+  salesAssetsHref,
   type ResearchPhase,
 } from "../store-research-phase";
 
@@ -15,13 +13,6 @@ function field(
   filled_by: FillSource | null,
 ): BasicInfoField {
   return { value, tier: "A", filled_by, updated_at: "2026-06-13T00:00:00.000Z" };
-}
-
-/** 指定キーを places 充填した basic_info を作る。 */
-function basicInfoWith(keys: readonly string[]): BasicInfo {
-  const info: BasicInfo = {};
-  for (const key of keys) info[key] = field("値", "places");
-  return info;
 }
 
 describe("isBasicInfoFieldFilled", () => {
@@ -38,74 +29,51 @@ describe("isBasicInfoFieldFilled", () => {
   });
 });
 
-describe("filledCoreCount", () => {
-  it("コアキーの充填数のみ数える (非コアは無視)", () => {
-    const info = basicInfoWith([
-      CORE_BASIC_INFO_KEYS[0],
-      CORE_BASIC_INFO_KEYS[1],
-      "store_name", // 非コア
-      "concept", // 非コア
-    ]);
-    expect(filledCoreCount(info)).toBe(2);
-  });
-  it("空の basic_info は 0", () => {
-    expect(filledCoreCount({})).toBe(0);
-  });
-});
-
 describe("getStoreResearchPhase", () => {
-  const noAssets = null;
-
-  it("ai_analysis_result があれば常に generated (basic_info に依らず)", () => {
+  it("ai_analysis_result があれば generated", () => {
     const phase = getStoreResearchPhase({
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ai_analysis_result: { call_script: "x" } as any,
-      basic_info: {},
     });
     expect(phase).toBe<ResearchPhase>("generated");
   });
 
-  it("コア充足が閾値以上なら ready", () => {
-    const info = basicInfoWith(
-      CORE_BASIC_INFO_KEYS.slice(0, READY_CORE_THRESHOLD),
+  it("ai_analysis_result が無ければ pending (基本情報の充足には依らない、#300)", () => {
+    expect(getStoreResearchPhase({ ai_analysis_result: null })).toBe<ResearchPhase>(
+      "pending",
     );
-    expect(
-      getStoreResearchPhase({ ai_analysis_result: noAssets, basic_info: info }),
-    ).toBe<ResearchPhase>("ready");
-  });
-
-  it("コア充足が閾値未満なら untouched", () => {
-    const info = basicInfoWith(
-      CORE_BASIC_INFO_KEYS.slice(0, READY_CORE_THRESHOLD - 1),
-    );
-    expect(
-      getStoreResearchPhase({ ai_analysis_result: noAssets, basic_info: info }),
-    ).toBe<ResearchPhase>("untouched");
-  });
-
-  it("基本情報が空なら untouched", () => {
-    expect(
-      getStoreResearchPhase({ ai_analysis_result: noAssets, basic_info: {} }),
-    ).toBe<ResearchPhase>("untouched");
   });
 });
 
 describe("RESEARCH_PHASE_META", () => {
-  it("基本情報待ちの CTA は閲覧タブではなく店舗の編集画面へ進む", () => {
-    const cta = RESEARCH_PHASE_META.untouched.cta;
-    const destination = new URL(cta.href("store-1"), "https://example.test");
-    expect(destination.pathname).toBe("/stores/store-1/edit");
-    expect(destination.searchParams.has("tab")).toBe(false);
-    expect(cta.label).toBe("基本情報を編集");
-  });
+  const phases: ResearchPhase[] = ["pending", "generated"];
 
-  it("全 3 状態に badge と CTA(遷移先)が定義されている", () => {
-    const phases: ResearchPhase[] = ["untouched", "ready", "generated"];
+  it("全状態に badge と CTA が定義されている", () => {
     for (const phase of phases) {
       const meta = RESEARCH_PHASE_META[phase];
       expect(meta.badgeLabel).toBeTruthy();
       expect(meta.cta.label).toBeTruthy();
-      expect(meta.cta.href("store-1")).toContain("store-1");
     }
+  });
+
+  it("バッジは「営業資産」の状態だと読めるラベルを持つ (調査の状態と混同させない、#300)", () => {
+    for (const phase of phases) {
+      expect(RESEARCH_PHASE_META[phase].badgeLabel).toContain("営業資産");
+    }
+  });
+
+  it("CTA はすべて唯一の入口 /research/[storeId] へ遷移する (#300)", () => {
+    for (const phase of phases) {
+      expect(RESEARCH_PHASE_META[phase].cta.href("store-1")).toMatch(
+        /^\/research\/store-1(#|$)/,
+      );
+    }
+  });
+
+  it("生成済みの CTA は生成セクションへ着地する", () => {
+    expect(RESEARCH_PHASE_META.generated.cta.href("store-1")).toBe(
+      salesAssetsHref("store-1"),
+    );
+    expect(salesAssetsHref("store-1")).toBe("/research/store-1#sales-assets");
   });
 });
