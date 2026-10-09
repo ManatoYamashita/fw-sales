@@ -47,7 +47,7 @@ describe("閾値マップ", () => {
     // 由来は data-table-responsive.ts の内訳コメントを参照。
     // 428/528/718 = /handoffs、456/594/695/835 = /dashboard、残りが /stores。
     expect(thresholds).toEqual([
-      428, 456, 528, 594, 695, 718, 728, 835, 874, 974, 1174, 1312, 1422, 1582,
+      428, 456, 528, 594, 695, 718, 778, 835, 874, 974, 1174, 1312, 1422, 1582,
     ]);
   });
 
@@ -128,15 +128,15 @@ describe("resolveColumnHideClass", () => {
   });
 
   it("選択列の有無でマップが切り替わる", () => {
-    const col = { minContainerWidth: 728 } as const;
+    const col = { minContainerWidth: 778 } as const;
     expect(resolveColumnHideClass(col, { hasSelectionColumn: false })).toBe(
-      "@max-[728px]/data-table:hidden",
+      "@max-[778px]/data-table:hidden",
     );
     expect(resolveColumnHideClass(col, { hasSelectionColumn: true })).toBe(
-      "@max-[776px]/data-table:hidden",
+      "@max-[826px]/data-table:hidden",
     );
     // 省略時は選択列なし扱い
-    expect(resolveColumnHideClass(col)).toBe("@max-[728px]/data-table:hidden");
+    expect(resolveColumnHideClass(col)).toBe("@max-[778px]/data-table:hidden");
   });
 
   it("ソート中の列は閾値を無視して常に表示する (要件5)", () => {

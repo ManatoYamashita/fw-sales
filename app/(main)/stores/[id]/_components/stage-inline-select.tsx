@@ -36,7 +36,7 @@ export function StageInlineSelect({
       value={current}
       onChange={handleChange}
       disabled={pending}
-      aria-label="状態"
+      aria-label="調査段階"
       className="min-w-32"
     >
       {STAGES.map((s) => (

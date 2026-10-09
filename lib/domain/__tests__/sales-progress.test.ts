@@ -69,6 +69,7 @@ function makeDeal(overrides: Partial<Deal>): Deal {
     estimate_amount: 0,
     order_amount: null,
     lost_reason: "",
+    reapproach: null,
     status: "継続追客",
     assigned_sales_user_id: null,
     activity_memo: null,

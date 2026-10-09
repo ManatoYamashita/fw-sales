@@ -43,7 +43,9 @@ export const DATA_TABLE_CONTAINER_CLASS = "@container/data-table";
  * ## 内訳 (単体予算 = その列だけの幅。累計ではなく単体を残すこと)
  *
  * ### /stores 一覧 (#220 / #237 で再測定) — always = 店舗名 260 + 次回アクション 272 + 操作 100 = 632
- *    728 = +状態 96     /  874 = +現在の営業状態 146 /  974 = +営業担当 100
+ *    778 = +営業状態 146 /  874 = +調査段階 96     /  974 = +営業担当 100
+ *   #297 で営業状態と調査段階の順を入れ替えた (旧: 728 = +状態 96 / 874 = +現在の営業状態
+ *   146)。単体予算は不変なので 874 以降の累計も不変。
  *   1174 = +最寄駅 200  / 1312 = +チャネル 138       / 1422 = +最終営業日 110
  *   1582 = +業態 160
  *   #220 は営業担当 97 / チャネル 110 / 業態 101 と置いており、閾値の直上で
@@ -99,7 +101,7 @@ const HIDE_BELOW = {
   594: "@max-[594px]/data-table:hidden",
   695: "@max-[695px]/data-table:hidden",
   718: "@max-[718px]/data-table:hidden",
-  728: "@max-[728px]/data-table:hidden",
+  778: "@max-[778px]/data-table:hidden",
   835: "@max-[835px]/data-table:hidden",
   874: "@max-[874px]/data-table:hidden",
   974: "@max-[974px]/data-table:hidden",
@@ -148,7 +150,7 @@ const HIDE_BELOW_WITH_SELECTION = {
   594: "@max-[642px]/data-table:hidden",
   695: "@max-[743px]/data-table:hidden",
   718: "@max-[766px]/data-table:hidden",
-  728: "@max-[776px]/data-table:hidden",
+  778: "@max-[826px]/data-table:hidden",
   835: "@max-[883px]/data-table:hidden",
   874: "@max-[922px]/data-table:hidden",
   974: "@max-[1022px]/data-table:hidden",

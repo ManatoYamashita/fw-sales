@@ -12,7 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Modal, ModalContent, ModalFooter } from "@/components/ui/modal";
 import { toast } from "@/components/ui/toast";
 import { DealStatusBadge } from "@/components/feature/deal-status-badge";
-import { SalesStateBadge } from "@/components/feature/sales-state-badge";
+import { SalesStateSummary } from "@/components/feature/sales-state-badge";
 import { updateSalesProgressAction } from "@/lib/actions/store-actions";
 import { deleteSalesActivityAction } from "@/lib/actions/deal-actions";
 import { formatDate, todayInTimeZone } from "@/lib/utils/date";
@@ -128,11 +128,11 @@ export function SalesProgressCard({ store, deals, profiles }: { store: Store; de
       */}
       <Card.Body className="space-y-4">
         <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-          <Info label="現在の営業状態" note={editingCurrent ? "営業記録から自動" : undefined}>
-            <SalesStateBadge state={deriveCurrentSalesState(store, latest)} />
+          <Info label="営業状態" note={editingCurrent ? "営業記録から自動" : undefined}>
+            <SalesStateSummary state={deriveCurrentSalesState(store, latest)} latestDeal={latest} />
           </Info>
 
-          <Info label="調査・架電段階" note={editingCurrent ? "画面上部で変更" : undefined}>
+          <Info label="調査段階" note={editingCurrent ? "画面上部で変更" : undefined}>
             <span>{store.stage}</span>
           </Info>
 
@@ -143,7 +143,7 @@ export function SalesProgressCard({ store, deals, profiles }: { store: Store; de
                 {/*
                   日付が入っているときだけ出す。「クリア」だと入力欄を空にするだけの
                   操作に読めるが、実際は保存で appointment_acquired_date が null =
-                  アポ未取得の状態に戻る (現在の営業状態の判定からも外れる) ため、
+                  アポ未取得の状態に戻る (営業状態の判定からも外れる) ため、
                   結果を語る文言にする。押した時点では draft を空にするだけで保存しない。
                 */}
                 {appointmentDate ? (
@@ -247,9 +247,9 @@ export function SalesProgressCard({ store, deals, profiles }: { store: Store; de
         <p className="mt-3 text-sm text-muted-foreground leading-relaxed">
           {latest?.id === deleteTarget.id
             ? history.length
-              ? "最新の営業記録を削除すると、一つ前の記録が最新の営業状態として表示されます。"
+              ? "最新の営業記録を削除すると、一つ前の記録の内容が営業状態として表示されます。"
               : "この店舗の最後の営業記録です。削除すると「営業記録はまだありません」と表示されます。"
-            : "過去の履歴のため、最新の営業状態には影響しません。"}
+            : "過去の履歴のため、営業状態には影響しません。"}
         </p>
         <ModalFooter>
           <Button variant="ghost" onClick={() => setDeleteTarget(null)} disabled={deleting}>キャンセル</Button>
@@ -292,4 +292,4 @@ function NextActionCta({ label, onClick }: { label: string; onClick: () => void 
     <Plus className="h-3.5 w-3.5" />{label}
   </Button>;
 }
-function ActivityDetails({ deal, profileName }: { deal: Deal; profileName?: string }) { const items: Array<[string, React.ReactNode]> = [["営業担当", profileName ?? "未割当"], ["営業メモ", deal.activity_memo], ["提案内容", deal.proposal], ["ヒアリング内容", deal.discussion], ["見積金額", deal.estimate_amount ? formatYen(deal.estimate_amount) : null], ["受注金額", deal.order_amount !== null ? formatYen(deal.order_amount) : null], ["失注理由", deal.lost_reason], ["当時設定した次回アクション", [deal.next_action_date ? formatDate(deal.next_action_date) : null, deal.next_action_type, deal.next_action_note].filter(Boolean).join(" / ") || null]]; return <dl className="space-y-3 text-sm">{items.filter(([, value]) => value).map(([label, value]) => <div key={label}><dt className="text-xs font-semibold text-muted-foreground">{label}</dt><dd className="whitespace-pre-wrap break-words leading-6">{value}</dd></div>)}</dl>; }
+function ActivityDetails({ deal, profileName }: { deal: Deal; profileName?: string }) { const items: Array<[string, React.ReactNode]> = [["営業担当", profileName ?? "未割当"], ["営業メモ", deal.activity_memo], ["提案内容", deal.proposal], ["ヒアリング内容", deal.discussion], ["見積金額", deal.estimate_amount ? formatYen(deal.estimate_amount) : null], ["受注金額", deal.order_amount !== null ? formatYen(deal.order_amount) : null], ["再アプローチ", deal.status === "失注" ? (deal.reapproach ?? "未判断") : null], ["失注理由", deal.lost_reason], ["当時設定した次回アクション", [deal.next_action_date ? formatDate(deal.next_action_date) : null, deal.next_action_type, deal.next_action_note].filter(Boolean).join(" / ") || null]]; return <dl className="space-y-3 text-sm">{items.filter(([, value]) => value).map(([label, value]) => <div key={label}><dt className="text-xs font-semibold text-muted-foreground">{label}</dt><dd className="whitespace-pre-wrap break-words leading-6">{value}</dd></div>)}</dl>; }

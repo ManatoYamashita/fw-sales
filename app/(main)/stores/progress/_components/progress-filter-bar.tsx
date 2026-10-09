@@ -114,6 +114,15 @@ const APPT_OPTIONS = [
   { value: "none", label: "未取得" },
 ] as const;
 
+/**
+ * `deal` (最新の営業記録の状態) の表示名。
+ *
+ * 絞り込みパネルからは #297 で外した。「現在の営業状態」と「最新の営業状態」が並び、
+ * 違いが読み取れなかったため。営業状態 (`state`) は最新の営業記録の状態をそのまま
+ * 引き継ぎ、記録が無い店舗だけアポ取得日と調査段階から補うので、`deal` の各値は
+ * `state` で代替できる。既存のブックマークや旧 /stores/progress からの転送で
+ * `deal` が付いて来たときに適用中チップで解除できるよう、表示名だけ残している。
+ */
 const DEAL_OPTIONS = [
   ...DEAL_STATUSES.map((s) => ({ value: s, label: s })),
   { value: "none", label: "営業記録なし" },
@@ -370,7 +379,6 @@ export function ProgressFilterBar({ profileEntries }: ProgressFilterBarProps) {
             <FilterPanel
               state={state}
               appt={appt}
-              deal={deal}
               next={next}
               sales={sales}
               stage={stage}
@@ -407,7 +415,7 @@ export function ProgressFilterBar({ profileEntries }: ProgressFilterBarProps) {
             </Chip>
           ) : null}
           {deal ? (
-            <Chip onClear={() => setKey("deal", "")} label="営業記録">
+            <Chip onClear={() => setKey("deal", "")} label="最新の営業記録">
               {labelOf(DEAL_OPTIONS, deal)}
             </Chip>
           ) : null}
@@ -548,7 +556,6 @@ function Chip({ label, onClear, children }: ChipProps) {
 interface FilterPanelProps {
   state: string;
   appt: string;
-  deal: string;
   next: string;
   sales: string;
   stage: string;
@@ -563,7 +570,6 @@ interface FilterPanelProps {
 function FilterPanel({
   state,
   appt,
-  deal,
   next,
   sales,
   stage,
@@ -589,8 +595,8 @@ function FilterPanel({
       </div>
 
       <div className="px-4 py-3 space-y-4 max-h-[60vh] overflow-y-auto">
-        <PanelGroup label="現在の営業状態">
-          <Select width="full" value={state} onChange={(e) => onChange("state", e.target.value)} aria-label="現在の営業状態で絞り込み">
+        <PanelGroup label="営業状態">
+          <Select width="full" value={state} onChange={(e) => onChange("state", e.target.value)} aria-label="営業状態で絞り込み">
             <option value="">すべて</option>
             {CURRENT_SALES_STATES.map((value) => <option key={value} value={value}>{CURRENT_SALES_STATE_LABELS[value]}</option>)}
           </Select>
@@ -600,14 +606,6 @@ function FilterPanel({
             value={appt}
             onChange={(v) => onChange("appt", v)}
             options={[...APPT_OPTIONS]}
-          />
-        </PanelGroup>
-
-        <PanelGroup label="最新の営業状態">
-          <ChipGroup
-            value={deal}
-            onChange={(v) => onChange("deal", v)}
-            options={DEAL_OPTIONS}
           />
         </PanelGroup>
 
