@@ -1,5 +1,7 @@
 # Technical Design: store-basic-info
 
+> **2026-10-10 改訂(#335)**: 項目数は 53。AI 調査の結果は調査レビューで採用した項目だけが `basic_info` に入る(`buildAdoptedBasicInfoField`)。店舗詳細のカードは「店舗の調査情報」としてインライン編集と信頼度の 3 色表示に改めた(§UI)。
+
 > **2026-06-08 改訂(#121 整合)**: Stage 2 構造化を生成経路から撤去。生成入力は `basic_info` + 貼付自由テキスト。D4(AI 構造化充填)を削除し、充填ソースを Places / 手動の 2 系統に縮小。
 
 ## Overview
@@ -320,6 +322,14 @@ function generateSalesAssetsAction(
 - 51 項目を 8 カテゴリ見出しで表示。tier バッジ・確信度・出典・取得ソース・未充足を表示(2.2–2.6)。
 - 手動編集は `repo.mergeBasicInfo(source="manual")` 経由で `filled_by="manual"` を記録(6.1)。
 - **移行 UI(Issue 3)**: PR1 では read-only の fallback 表示に留め、編集の basic_info 切替は PR2 に集約する(スカラーと basic_info の二重書き込みを防止)。
+
+#### BasicInfoFieldsCard「店舗の調査情報」(#335 で改訂、現行)
+- 実体は `app/(main)/stores/[id]/_components/basic-info-fields-card.tsx`(Server)と `basic-info-field-row.tsx`(Client)。上記の tier バッジ表示は廃止した。
+- 各項目は「項目名 / 値 / 信頼度」の 1 行。値は最初から `Input`(短い項目)または `Textarea`(長文。`field-sizing: content` で伸びる)で、編集モードの切り替えは無い。
+- 変更した項目にだけ「保存」「取消」を出し、保存は `updateBasicInfoFieldAction` を `runAction` 経由で呼ぶ。Action は `mergeBasicInfo(..., "manual")` で保存し、店舗詳細・一覧のタグを `updateTag` で即時失効する(保存直後の再取得で件数・信頼度を最新にするため)。
+- 信頼度は `classifyBasicInfoTrust`(`lib/domain/basic-info-trust.ts`)。色は `--trust-*` トークンだけを使う(`docs/architecture/color-tokens.md`)。
+- 出典・引用・由来・取得区分・更新日時は項目ごとの「根拠・詳細」(`<details>`)へ畳む。
+- 操作契約(キー操作・フォーカス・保存中・失敗時)は `docs/architecture/basic-info-inline-edit.md`。
 
 ## Data Models
 
