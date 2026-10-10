@@ -1,4 +1,6 @@
+import { execFileSync } from "node:child_process";
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import postgres from "postgres";
 
 /**
  * 店舗の調査情報 (基本情報 53 項目) のインライン編集 (#335)。
@@ -7,8 +9,9 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
  * フォーカス移動だけでは未保存の値を捨てないこと、保存中・保存失敗の表示、
  * 狭い幅で保存・取消が切れないことを確かめる。
  *
- * seed の店舗を書き換えるため直列で流す。書き換える店舗は他の spec が参照しない
- * トラットリア SOLE (store_005) に限り、最後に未入力へ戻す。
+ * 基本情報を書き換えるため直列で流す。seed の店舗は他の spec も基本情報を書き換える
+ * (例: 調査レビューの採用で store_005 に値が入る) ため、seed の店舗を複製した専用の店舗を
+ * 基本情報を空にして作り、最後に消す (`research-failure.spec.ts` と同じ方式)。
  */
 test.describe.configure({ mode: "serial" });
 
@@ -17,7 +20,39 @@ test.beforeEach(() => {
   test.slow();
 });
 
-const STORE_URL = "/stores/store_005";
+const STORE_ID = "store_e2e_335";
+const STORE_URL = `/stores/${STORE_ID}`;
+
+/**
+ * E2E 用 DB の接続先。`scripts/e2e-local.mjs` の `getE2eDatabaseEnv` と同じ解決順。
+ * Playwright は spec を CommonJS に変換するため、`import.meta` を使う同ファイルは読み込めない。
+ */
+function e2eDatabaseUrl(): string {
+  if (process.env.E2E_DATABASE_URL) return process.env.E2E_DATABASE_URL;
+  const name = process.env.E2E_DB_CONTAINER?.trim() || "fw-sales-e2e-postgres";
+  const containers = JSON.parse(
+    execFileSync("container", ["list", "--all", "--format", "json"], { encoding: "utf8" }),
+  ) as Array<{ id: string; status?: { networks?: Array<{ ipv4Address?: string }> } }>;
+  const address = containers.find((c) => c.id === name)?.status?.networks?.[0]?.ipv4Address;
+  if (!address) throw new Error(`E2E用PostgreSQLコンテナ「${name}」の内部IPを取得できませんでした。`);
+  return `postgres://postgres:postgres@${address.split("/")[0]}:5432/postgres`;
+}
+
+const sql = postgres(e2eDatabaseUrl(), { prepare: false, max: 1 });
+
+test.beforeAll(async () => {
+  await sql`DELETE FROM stores WHERE id = ${STORE_ID}`;
+  await sql.begin(async (tx) => {
+    await tx`CREATE TEMP TABLE e2e_store ON COMMIT DROP AS SELECT * FROM stores WHERE id = 'store_005'`;
+    await tx`UPDATE e2e_store SET id = ${STORE_ID}, name = 'E2E基本情報', basic_info = '{}'::jsonb`;
+    await tx`INSERT INTO stores SELECT * FROM e2e_store`;
+  });
+});
+
+test.afterAll(async () => {
+  await sql`DELETE FROM stores WHERE id = ${STORE_ID}`;
+  await sql.end();
+});
 
 /** 本文に `marker` を含む Server Action の POST 応答を待つ (sales-status.spec.ts と同じ)。 */
 const waitForServerAction = (page: Page, marker: string) =>
@@ -161,7 +196,7 @@ test("保存中は二重に押せず、保存後は値が残り、手入力の�
   // 空欄で保存すると未入力へ戻ることを、入力欄の近くで示す
   await phone(page).fill("");
   await expect(rowOf(phone(page))).toContainText("空欄のまま保存すると未入力に戻ります");
-  const cleared = waitForServerAction(page, "store_005");
+  const cleared = waitForServerAction(page, STORE_ID);
   await saveIn(phone(page)).click();
   await cleared;
   await expect(saveIn(phone(page))).toHaveCount(0);
@@ -172,7 +207,7 @@ test("長文は Ctrl+Enter で保存し、Enter は改行、IME 変換中の Ent
   await openBasicCategory(page);
   let posted = 0;
   page.on("request", (req) => {
-    if (req.method() === "POST" && req.headers()["next-action"] && (req.postData() ?? "").includes("store_005")) {
+    if (req.method() === "POST" && req.headers()["next-action"] && (req.postData() ?? "").includes(STORE_ID)) {
       posted += 1;
     }
   });
@@ -193,7 +228,7 @@ test("長文は Ctrl+Enter で保存し、Enter は改行、IME 変換中の Ent
   expect(posted).toBe(0);
   await expect(saveIn(concept(page))).toBeVisible();
 
-  const saved = waitForServerAction(page, "store_005");
+  const saved = waitForServerAction(page, STORE_ID);
   await concept(page).press("Control+Enter");
   await saved;
   await expect(saveIn(concept(page))).toHaveCount(0);
@@ -201,7 +236,7 @@ test("長文は Ctrl+Enter で保存し、Enter は改行、IME 変換中の Ent
 
   // 元に戻す
   await concept(page).fill("");
-  const cleared = waitForServerAction(page, "store_005");
+  const cleared = waitForServerAction(page, STORE_ID);
   await saveIn(concept(page)).click();
   await cleared;
   await expect(saveIn(concept(page))).toHaveCount(0);
