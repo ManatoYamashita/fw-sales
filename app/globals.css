@@ -81,6 +81,18 @@
   --color-link-hover: var(--link-hover);
   --color-confidence-foreground: var(--confidence-foreground);
 
+  /*
+   * 基本情報の値の信頼度 (#335)。緑「高」・黄「要確認」・赤「低」の 3 段階だけに使う。
+   * warning は中性化されたグレーなので黄の役割を担えず、success / destructive も
+   * 操作の結果や破壊的操作の意味を持つため流用しない。判定は lib/domain/basic-info-trust.ts。
+   */
+  --color-trust-high-soft: var(--trust-high-soft);
+  --color-trust-high-on-soft: var(--trust-high-on-soft);
+  --color-trust-check-soft: var(--trust-check-soft);
+  --color-trust-check-on-soft: var(--trust-check-on-soft);
+  --color-trust-low-soft: var(--trust-low-soft);
+  --color-trust-low-on-soft: var(--trust-low-on-soft);
+
   /* Chart foregrounds: each bar has a paired readable foreground. */
   --color-chart-1-foreground: var(--chart-1-foreground);
   --color-chart-2-foreground: var(--chart-2-foreground);
@@ -209,6 +221,14 @@
   --link-hover: #1e40af;       /* blue-800 */
   --confidence-foreground: #0f172a;
 
+  /* 基本情報の値の信頼度 (#335)。on-soft は soft 上で AA */
+  --trust-high-soft: oklch(0.95 0.06 145);
+  --trust-high-on-soft: #166534;  /* green-800 */
+  --trust-check-soft: #fef9c3;    /* yellow-100 */
+  --trust-check-on-soft: #854d0e; /* yellow-800 */
+  --trust-low-soft: oklch(0.96 0.04 27.325);
+  --trust-low-on-soft: #991b1b;   /* red-800 */
+
   /* borders & rings (slate-200/300/400) */
   --border: #e2e8f0;           /* slate-200 */
   --input: #cbd5e1;            /* slate-300 */
@@ -306,6 +326,14 @@
   --link: #93c5fd;              /* blue-300: AA on dark surfaces */
   --link-hover: #bfdbfe;       /* blue-200 */
   --confidence-foreground: #0f172a;
+
+  /* 基本情報の値の信頼度 (#335) */
+  --trust-high-soft: oklch(0.3 0.06 145);
+  --trust-high-on-soft: #86efac;  /* green-300 */
+  --trust-check-soft: #422006;    /* yellow-950 */
+  --trust-check-on-soft: #fde047; /* yellow-300 */
+  --trust-low-soft: oklch(0.32 0.08 27.325);
+  --trust-low-on-soft: #fca5a5;   /* red-300 */
 
   /* borders & rings */
   --border: rgba(241, 245, 249, 0.10);  /* slate-100/10 */

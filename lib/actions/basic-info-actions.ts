@@ -19,7 +19,7 @@
  * 関連: requirements.md §6.1 §6.2, design.md §UI / BasicInfoCard §System Flows 充填マージ
  */
 
-import { revalidateTag } from "next/cache";
+import { updateTag } from "next/cache";
 import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
 import { BASIC_INFO_ITEM_BY_KEY } from "@/lib/domain/basic-info-items";
@@ -88,9 +88,12 @@ export async function updateBasicInfoFieldAction(
       const merged = mergeBasicInfo(store.basic_info, incoming, "manual", new Date().toISOString());
       await tx.store.update(storeId, { basic_info: merged });
     });
-    // store 詳細 / 一覧キャッシュを無効化
-    revalidateTag(CACHE_TAGS.store(storeId), "max");
-    revalidateTag(CACHE_TAGS.stores, "max");
+    // 店舗詳細 / 一覧のキャッシュを即時失効する (#335)。
+    // 店舗詳細は保存直後に `router.refresh()` で読み直し、入力済み件数・信頼度・根拠を
+    // 更新する。`revalidateTag(_, "max")` (stale-while-revalidate) だと旧値が返り、
+    // 未入力へ戻したのに件数が減らない (E2E で検出)。`updateStorePatchAction` と同じ規約。
+    updateTag(CACHE_TAGS.store(storeId));
+    updateTag(CACHE_TAGS.stores);
     return success(undefined, `「${def.label}」を更新しました`);
   } catch (err) {
     // 例外の文 (英語・内部の名前を含みうる) は画面に出さず、ログにだけ残す (#327)。

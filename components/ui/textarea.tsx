@@ -1,7 +1,10 @@
-import { type TextareaHTMLAttributes } from "react";
+import { type Ref, type TextareaHTMLAttributes } from "react";
 import { cn } from "@/lib/utils/cn";
 
-export type TextareaProps = TextareaHTMLAttributes<HTMLTextAreaElement>;
+// React 19 では関数コンポーネントへ ref を通常の prop として渡せる (Input と同じ)。
+export type TextareaProps = TextareaHTMLAttributes<HTMLTextAreaElement> & {
+  ref?: Ref<HTMLTextAreaElement>;
+};
 
 export function Textarea({ className, rows = 4, ...props }: TextareaProps) {
   return (

@@ -46,6 +46,13 @@ const CONTRAST_PAIRS: ReadonlyArray<{
   { theme: "dark", foreground: "link", background: "background" },
   { theme: "dark", foreground: "link", background: "card" },
   { theme: "dark", foreground: "link-hover", background: "card" },
+  // 基本情報の値の信頼度バッジ (#335)。バッジの文字は soft 面の上に載る。
+  { theme: "light", foreground: "trust-high-on-soft", background: "trust-high-soft" },
+  { theme: "dark", foreground: "trust-high-on-soft", background: "trust-high-soft" },
+  { theme: "light", foreground: "trust-check-on-soft", background: "trust-check-soft" },
+  { theme: "dark", foreground: "trust-check-on-soft", background: "trust-check-soft" },
+  { theme: "light", foreground: "trust-low-on-soft", background: "trust-low-soft" },
+  { theme: "dark", foreground: "trust-low-on-soft", background: "trust-low-soft" },
 ];
 
 function parseColor(value: string): Rgb {
@@ -150,6 +157,12 @@ describe("色トークンのコントラストガード (#249)", () => {
       "text-link",
       linkHoverClass,
       "text-confidence-foreground",
+      "bg-trust-high-soft",
+      "text-trust-high-on-soft",
+      "bg-trust-check-soft",
+      "text-trust-check-on-soft",
+      "bg-trust-low-soft",
+      "text-trust-low-on-soft",
       "text-chart-1-foreground",
       "text-chart-5-foreground",
     ];
