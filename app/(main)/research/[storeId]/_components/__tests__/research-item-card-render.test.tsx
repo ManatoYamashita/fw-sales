@@ -187,7 +187,7 @@ describe("ResearchItemCard: 押したボタンだけを処理中にする (#337)
 
   it("「編集内容で採用」の処理中は、編集欄を残してそのボタンを処理中にする", () => {
     const html = renderPending(makeItem(), { decision: "adopted", edited: true });
-    expect(html).toContain("<textarea");
+    expect(html).toMatch(/<textarea[^>]* readOnly=""/);
     expect(isBusy(html, "編集内容で採用")).toBe(true);
     expect(isDisabled(html, "キャンセル")).toBe(true);
     // 「採用」と「編集内容で採用」は同じ adopted でもボタンが違う。
