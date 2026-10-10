@@ -162,6 +162,10 @@ export function buildAppEnv(localEnv, e2eConfig) {
   return {
     ...process.env,
     ...localEnv,
+    APP_ENV: "local",
+    VERCEL: "",
+    VERCEL_ENV: "development",
+    NODE_ENV: "development",
     NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:54321",
     NEXT_PUBLIC_SUPABASE_ANON_KEY: "e2e-not-used",
     SUPABASE_SERVICE_ROLE_KEY: "e2e-not-used",

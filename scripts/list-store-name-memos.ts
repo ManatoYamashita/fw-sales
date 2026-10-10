@@ -15,6 +15,7 @@
  * SELECT しか発行しない。tsx (CJS 出力) はトップレベル await を通さないため main() で包む。
  */
 import postgres from "postgres";
+import { assertDatabaseTarget } from "../lib/environment-isolation.mjs";
 import { splitStoreNameMemo } from "../lib/domain/store-name-memo";
 
 /** Markdown の表を壊す文字を潰す。 */
@@ -26,6 +27,7 @@ async function main() {
     console.error("ERROR: DATABASE_URL is not set.");
     process.exit(1);
   }
+  assertDatabaseTarget();
   const sql = postgres(url, { prepare: false, max: 1, idle_timeout: 5, connect_timeout: 10 });
   try {
     const rows = await sql<{ id: string; name: string }[]>`

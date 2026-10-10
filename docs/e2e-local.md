@@ -1,5 +1,7 @@
 # ローカルE2E環境
 
+データを保持しながら手動で画面・DB操作を検証する場合は、[ローカル検証環境の起動手順](environment-separation.md#ローカル検証の起動)の`pnpm dev:local`／`pnpm local:open`を利用してください。この環境はE2E専用DBから独立しています。
+
 このプロジェクトのE2Eは、Apple Container上のE2E専用PostgreSQLとPlaywrightを使います。本番Supabaseへ接続せず、既存のDrizzle migrationとseedデータをローカルDBへ適用してからテストを実行します。
 
 Supabase CLIの`supabase start`はDocker Engine API（`/var/run/docker.sock`）を必要とします。Appleの`container` CLIやDocker互換shimはこのAPIを提供しないため、E2EではSupabase CLIを使わず、PostgreSQLコンテナを直接起動します。Docker Desktopも不要です。
@@ -30,7 +32,7 @@ PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/Applications/Aside.app/Contents/MacOS/Aside
 3. DB接続を待機
 4. `pnpm db:migrate`で`drizzle/`のmigrationを適用
 5. `pnpm seed`で再現可能なseedデータを投入
-6. E2E用profileを冪等に作成
+6. E2E用profileと、E2E用の通知・レビュー待ちの調査結果（store_005）を冪等に作り直す。調査結果の判断は一度記録すると変えられないため、流すたびに未判断へ戻す
 7. Next.js開発サーバーを起動し、Chromium E2Eを実行
 
 E2Eの再実行時は、同名のPostgreSQLコンテナを削除してから作り直します。アプリの通常開発用DBや本番Supabaseには影響しません。

@@ -1,50 +1,6 @@
-# Supabase Free Tier keep-alive。
-#
-# Supabase は Free プランのプロジェクトを「7 日連続 user database activity 無し」で
-# 自動 pause する。pause すると本番 middleware の Supabase fetch が刺さり
-# 504 MIDDLEWARE_INVOCATION_TIMEOUT を返す (2026-06-21 障害 / Issue #147)。
-#
-# 本 workflow は日次で本番 DB に読み取り専用クエリを 1 本投げ、
-# pause タイマーをリセットして発生を予防する。
-# (cron は best-effort で遅延/ドロップし得るため、7 日 window に対し日次=連続 6 回
-#  ドロップしない限り pause しない十分なマージンを確保する。ジョブは数秒で実質無料。)
-#
-# 設計判断:
-# - pause タイマーは「実 DB クエリ」でのみリセットされる (Supabase 公式定義:
-#   "sufficient user database activity over the past 7-day period")。
-#   auth/REST health ping では DB に到達せず無効のため、既存 secret DATABASE_URL を
-#   再利用し実テーブル (app_settings) へ count クエリを投げる。新規 secret は不要。
-# - クエリは Node の postgres クライアントで実行する。psql(libpq) の厳格な URI パーサは
-#   パスワード中の特殊文字 (@ 等) を host と誤読して失敗するため不可
-#   (PR #149 マージ後の初回 dispatch で "could not translate host name" として顕在化)。
-#   migrate.yml と同じく Node 系クライアントなら同 DATABASE_URL を問題なく解釈する。
-# - prepare:false で Transaction Pooler (6543) でも動作。読み取り専用 (count) のため
-#   冪等で本番データを一切変更しない。
-#
-# Vercel Cron との二重化 (Issue #242):
-# GitHub は **public repository の scheduled workflow を 60 日無活動で自動 disable** する。
-# 60 日無活動とは「誰も見ていない期間」そのもので、本 workflow が最も静かに止まる局面と
-# pause が最も気づかれない局面が一致してしまう。この依存を断つため、同じ役目を負う
-# 2 本目の経路として `vercel.json` の cron → `app/api/cron/keepalive` を並走させている。
-# **どちらか一方が生きていれば pause しない**ので、本 workflow はもう単独の生命線ではない。
-#
-# 両者は障害モードが独立している (だから撤去せず恒久的に並走させる):
-# - 60 日 auto-disable / DATABASE_URL secret のローテーション漏れ … 本 workflow だけが止まる
-# - CRON_SECRET 不整合 / Vercel のデプロイ破損 / cron 機能の無効化 … Vercel 側だけが止まる
-#
-# 起動時刻を 09:00 UTC に置き Vercel 側 (21:00 UTC) と 12 時間ずらしているのは、pause 予防の
-# ためではなく (どちらも日次で余裕がある)、設定画面が読む最終実行時刻が常に約 12 時間以内に
-# 更新される状態を保ち、鮮度判定が平常のジッタで揺れないようにするため。
-#
-# 運用上の注意:
-# - 60 日 auto-disable で本 workflow が止まっても Vercel Cron が pause を防ぐが、
-#   **止まったこと自体は静かに起きる**。Actions の有効状態は時折確認すること。
-# - 失敗時は workflow が red になり、GitHub 標準の失敗通知 (本ファイル最終変更者宛) が飛ぶ。
-#   Vercel Cron は失敗してもリトライも通知もせず、Runtime Logs も Hobby では 1 時間で消える。
-#   **人へ push される検知経路を持っているのは本 workflow だけ**である。
-#
-# 前提: GitHub Secret `DATABASE_URL` に本番 Supabase pooler connection string を登録 (migrate.yml と共用)。
-
+# dev/prdをそれぞれのGitHub Environment Secretで日次pingします (#46)。
+# Vercel CronはProductionのみ。本workflowがdevの自動停止を防ぎます。
+# 書込みをせず、実接続先のproject refを検証してからapp_settingsを読みます。
 name: Supabase Keepalive
 
 on:
@@ -57,7 +13,18 @@ permissions: {}
 
 jobs:
   keepalive:
-    name: Ping production database
+    name: Ping ${{ matrix.scope }} database
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - environment: Preview
+            scope: dev
+            project_ref: llohmzwfqgcrvusxabcb
+          - environment: Production
+            scope: prd
+            project_ref: bqllbsiahnikgerckwoj
+    environment: ${{ matrix.environment }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -72,9 +39,19 @@ jobs:
       - name: Run read-only keepalive query
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          EXPECTED_PROJECT_REF: ${{ matrix.project_ref }}
         run: |
           node -e '
           const postgres = require("postgres");
+          let url;
+          try { url = new URL(process.env.DATABASE_URL); }
+          catch { throw new Error("Keepalive DATABASE_URL is missing or invalid."); }
+          if (!["postgres:", "postgresql:"].includes(url.protocol)) throw new Error("Keepalive requires PostgreSQL.");
+          const ref = process.env.EXPECTED_PROJECT_REF;
+          const valid = (url.hostname === `db.${ref}.supabase.co` && decodeURIComponent(url.username) === "postgres")
+            || (/^aws-\d+-[a-z0-9-]+\.pooler\.supabase\.com$/.test(url.hostname)
+                && decodeURIComponent(url.username) === `postgres.${ref}`);
+          if (!valid) throw new Error("Keepalive DATABASE_URL does not match the target project.");
           const sql = postgres(process.env.DATABASE_URL, { prepare: false, max: 1, idle_timeout: 5, connect_timeout: 10 });
           (async () => {
             const start = Date.now();
