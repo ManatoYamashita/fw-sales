@@ -10,7 +10,8 @@
  *       §15(reviewable item定義、レビュー完了条件、レビュー待ちrunの選定)
  */
 
-import type { BasicInfoField } from "@/types/basic-info";
+import type { BasicInfo, BasicInfoField } from "@/types/basic-info";
+import { deriveItemTrust } from "@/lib/domain/research-item-notes";
 // `types/research-run.ts` は `lib/ai/research-result-schema.ts` の re-export ハブ
 // (同ファイル冒頭のJSDoc参照)。上位レイヤーが `lib/ai/*` へ直接依存しないための
 // 既定経路であり、本ファイルは既に同じ specifier へ型依存している。
@@ -69,45 +70,178 @@ export function getUndecidedReviewableItems(
   return getReviewableItems(items).filter((item) => decisions[item.key] === undefined);
 }
 
+/* ------------------------------------------------------------------ */
+/*  採用した場合の結果と、まとめて採用してよい項目の振り分け (#301, #319)  */
+/* ------------------------------------------------------------------ */
+
 /**
- * 未判断 reviewable item の status 別内訳
- * (feat/ai-research-quality-ux-hardening、Plan §12.1.1)。
+ * 基本情報の値を比べるための正規化。
+ *
+ * NFKC(全角英数・全角空白を半角へ)→ 連続する空白を 1 つに → 前後の空白を除去。
+ * **これ以上は崩さない。** 言い換え(「居酒屋、燻製料理、焼き鳥」→「居酒屋、焼き鳥、燻製」)や
+ * 情報の欠落(郵便番号の無い住所)は、利用者が判断すべき「上書き」として残す。
  */
-export interface UndecidedSummary {
-  confirmed: number;
-  inferred: number;
-  conflict: number;
-  /**
-   * Primary CTA(「残りを採用して調査完了」)で自動採用される件数。
-   * **`conflict` は含まない**(候補選択なしで自動採用してはいけないため)。
-   */
-  adoptable: number;
-  /** 未判断 reviewable item の総数(`conflict` を含む)。 */
-  total: number;
+export function normalizeBasicInfoValue(value: string): string {
+  return value.normalize("NFKC").replace(/\s+/g, " ").trim();
+}
+
+/** いま入っている基本情報の値の出どころ。上書きになるときに画面で示す。 */
+export type BasicInfoOrigin = "places" | "typed" | "adopted";
+
+export const BASIC_INFO_ORIGIN_LABELS: Record<BasicInfoOrigin, string> = {
+  places: "Google Places",
+  typed: "手入力",
+  adopted: "前回の調査で採用",
+};
+
+/**
+ * 既存の値の出どころを、保存されている field から判定する。
+ *
+ * - `filled_by === "places"` → Google Places
+ * - `source_quote` が無い、または「編集して採用」の固定文 → 人が入力した値(手入力)。
+ *   `updateBasicInfoFieldAction`(店舗詳細の手入力)は `source_quote` を持たない
+ * - それ以外の `manual` → 調査結果から採用した値(`buildAdoptedBasicInfoField` は根拠を `source_quote` に入れる)
+ */
+export function describeBasicInfoOrigin(field: BasicInfoField): BasicInfoOrigin {
+  if (field.filled_by === "places") return "places";
+  if (!field.source_quote || field.source_quote === EDITED_SOURCE_QUOTE) return "typed";
+  return "adopted";
+}
+
+/** 調査の値を採用したとき、基本情報がどう変わるか。 */
+export type AdoptionEffect =
+  | { kind: "new" }
+  | { kind: "same" }
+  | { kind: "overwrite"; currentValue: string; origin: BasicInfoOrigin };
+
+export const ADOPTION_EFFECT_LABELS: Record<AdoptionEffect["kind"], string> = {
+  new: "新規",
+  same: "変更なし",
+  overwrite: "上書き",
+};
+
+/**
+ * 調査の値 `candidate` を採用した場合の結果を判定する。
+ *
+ * - 現在値が無い・空 → `new`
+ * - 正規化して一致 → `same`(採用しても基本情報を書き換えない。`isSameBasicInfoValue` 参照)
+ * - それ以外 → `overwrite`
+ */
+export function classifyAdoptionEffect(
+  current: BasicInfoField | undefined,
+  candidate: string,
+): AdoptionEffect {
+  const currentValue = current?.value ?? null;
+  if (currentValue === null || currentValue.trim() === "") return { kind: "new" };
+  if (normalizeBasicInfoValue(currentValue) === normalizeBasicInfoValue(candidate)) {
+    return { kind: "same" };
+  }
+  return { kind: "overwrite", currentValue, origin: describeBasicInfoOrigin(current!) };
+}
+
+/** 採用処理側の判定。`same` のときは基本情報へ書き込まない(出典や更新日時も含めて既存値を保つ)。 */
+export function isSameBasicInfoValue(current: BasicInfoField | undefined, candidate: string): boolean {
+  return classifyAdoptionEffect(current, candidate).kind === "same";
 }
 
 /**
- * 未判断 reviewable item を status 別に集計する。
+ * 未判断の項目の振り分け先。
  *
- * Primary CTA を押す前に「何が採用されるか」を画面に出すための純関数
- * (「残り: 確認済み 11・推定 7」「[残り18件を採用して調査完了]」)。
- * `conflict` は採用対象ではないため `adoptable` から除外し、別枠で数える。
+ * - `bulk`       : 主ボタンでまとめて採用してよい
+ * - `individual` : 1 件ずつ確認する
+ * - `choose`     : 競合。候補を選ぶ
  */
-export function summarizeUndecided(
+export type ReviewLane = "bulk" | "individual" | "choose";
+
+/**
+ * `individual` / `choose` になった理由。画面の内訳表示に使う。
+ * 1 つの項目が複数に当てはまるときは、基本情報への影響が大きい順
+ * (上書き → 注記あり → 推定 → 登録済み)に 1 つだけ選ぶ。
+ */
+export type ReviewLaneReason = "new" | "same" | "overwrite" | "noted" | "inferred" | "registered" | "conflict";
+
+export interface PlannedReviewItem {
+  item: ResearchItem;
+  lane: ReviewLane;
+  reason: ReviewLaneReason;
+  /** 採用した場合の結果。競合は候補ごとに変わるため `null`。 */
+  effect: AdoptionEffect | null;
+}
+
+/**
+ * 未判断のレビュー対象項目を、まとめて採用してよいか・1 件ずつ見るべきかに振り分ける。
+ *
+ * **画面の主ボタンとサーバ(`adoptBulkLaneAction`)の両方がこの関数に従う。**
+ * サーバはロックした `stores.basic_info` で計算し直し、画面が送ってきた対象と照合する。
+ *
+ * - 競合 → `choose`
+ * - 採用しても基本情報が変わらない(`same`)→ `bulk`(推定でも安全)
+ * - 注記の無い確認済みで、新規 → `bulk`
+ * - それ以外(推定・上書き・注記あり・登録済みの値の再追加)→ `individual`
+ *
+ * **推定の値と上書きになる値は、`bulk` に入らない**(#301 / #319 の受け入れ条件)。
+ * 返り値の順序は `items` の順序を保つ。純関数。
+ */
+export function planReviewLanes(
   items: readonly ResearchItem[],
   decisions: ReviewDecisions,
-): UndecidedSummary {
-  const undecided = getUndecidedReviewableItems(items, decisions);
-  const confirmed = undecided.filter((item) => item.status === "confirmed").length;
-  const inferred = undecided.filter((item) => item.status === "inferred").length;
-  const conflict = undecided.filter((item) => item.status === "conflict").length;
-  return {
-    confirmed,
-    inferred,
-    conflict,
-    adoptable: confirmed + inferred,
-    total: undecided.length,
+  basicInfo: BasicInfo,
+): PlannedReviewItem[] {
+  return getUndecidedReviewableItems(items, decisions).map((item): PlannedReviewItem => {
+    if (item.status === "conflict" || item.value === null) {
+      return { item, lane: "choose", reason: "conflict", effect: null };
+    }
+    const effect = classifyAdoptionEffect(basicInfo[item.key], item.value);
+    if (effect.kind === "same") return { item, lane: "bulk", reason: "same", effect };
+    const trust = deriveItemTrust(item);
+    if (effect.kind === "overwrite") return { item, lane: "individual", reason: "overwrite", effect };
+    if (trust === "confirmed") return { item, lane: "bulk", reason: "new", effect };
+    const reason: ReviewLaneReason =
+      trust === "noted" ? "noted" : trust === "registered" ? "registered" : "inferred";
+    return { item, lane: "individual", reason, effect };
+  });
+}
+
+/** 振り分けの件数。フッターの内訳と主ボタンの文言に使う。 */
+export interface ReviewPlanSummary {
+  /** 未判断の総数。 */
+  total: number;
+  /** 主ボタンでまとめて採用する項目の key(`items` の順)。 */
+  bulkKeys: string[];
+  bulk: { new: number; same: number };
+  individual: { overwrite: number; noted: number; inferred: number; registered: number };
+  choose: number;
+  /** 主ボタンの後もまだ判断が要る項目(`individual` と `choose`)の key(`items` の順)。 */
+  remainingKeys: string[];
+}
+
+export function summarizeReviewPlan(plan: readonly PlannedReviewItem[]): ReviewPlanSummary {
+  const summary: ReviewPlanSummary = {
+    total: plan.length,
+    bulkKeys: [],
+    bulk: { new: 0, same: 0 },
+    individual: { overwrite: 0, noted: 0, inferred: 0, registered: 0 },
+    choose: 0,
+    remainingKeys: [],
   };
+  for (const entry of plan) {
+    if (entry.lane === "bulk") {
+      summary.bulkKeys.push(entry.item.key);
+      if (entry.reason === "same") summary.bulk.same++;
+      else summary.bulk.new++;
+      continue;
+    }
+    summary.remainingKeys.push(entry.item.key);
+    if (entry.lane === "choose") {
+      summary.choose++;
+      continue;
+    }
+    if (entry.reason === "overwrite") summary.individual.overwrite++;
+    else if (entry.reason === "noted") summary.individual.noted++;
+    else if (entry.reason === "registered") summary.individual.registered++;
+    else summary.individual.inferred++;
+  }
+  return summary;
 }
 
 /**
@@ -329,7 +463,7 @@ export interface AdoptOptions {
  * (`isSourceLinkClickable`)だけに限定する。上記と同じ「canonical の出典として
  * 提示してよいURLだけを書く」という方針の、identity 側からの補完である。
  */
-const EDITED_SOURCE_QUOTE = "人間が編集した値です(直接の出典URLはありません)。";
+export const EDITED_SOURCE_QUOTE = "人間が編集した値です(直接の出典URLはありません)。";
 
 export function buildAdoptedBasicInfoField(
   item: ResearchItem,

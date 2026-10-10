@@ -33,6 +33,8 @@ const render = (item: ResearchItem, sourceRegistry: SourceRegistryEntry[] = []) 
       decision={undefined}
       busy={false}
       onDecide={() => {}}
+      current={undefined}
+      defaultOpen
     />,
   );
 

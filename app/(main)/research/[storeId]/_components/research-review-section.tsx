@@ -2,44 +2,32 @@
 
 /**
  * 53項目レビューセクション(Plan v3.2 §5.3)。カテゴリごとの折りたたみ(`<details>`)・
- * 「未判断の項目のみ表示」フィルタ・レビュー完了(Primary/Secondary)を提供する。
+ * 「未判断の項目のみ表示」フィルタ・レビュー完了(sticky footer)を提供する。
  *
- * ## feat/ai-research-quality-ux-hardening での変更(Plan §12 / §13)
+ * ## 主ボタンの意味 (#301, #319)
  *
- * 実運用の操作モデルは「AIが具体的に調査した値は基本採用。明らかにおかしいものだけ
- * 編集/却下。skipはほぼ使わない」だが、旧UIは逆に「全項目に個別判断を要求し、
- * 残りは『未確認項目をスキップしてレビュー完了』」というモデルだった。しかも
- * 一括操作(`bulkAdoptConfirmedAction`)は `inferred` を対象外にしていたため、
- * それを使っても未判断が必ず残り、**未対応がある間は primary ボタンが画面上に
- * 1つも存在しない**状態になっていた。
+ * 旧主ボタン「残りN件を採用して調査完了」は、未判断の確認済みと**推定**をまとめて採用し、
+ * いまの基本情報を**無条件に上書き**していた。本番では、推定 15 件を見ないまま採用する操作が
+ * いちばん押しやすく、再調査した店舗では既存の基本情報 24〜25 件が言い換えや情報の落ちた値で
+ * 置き換わるところだった。
  *
- * - Primary CTA を「残りN件を採用して調査完了」へ変更(単一の atomic Server Action)
- * - 採用対象の内訳(確認済み / 推定)を押す前に表示
- * - `conflict` が未判断なら Primary を block(候補選択なしで自動採用しない)
- * - 完了操作を **sticky footer**(`<Card>` の外)へ移動。53項目で縦に長く、
- *   旧レイアウトでは画面下までスクロールしないと完了できなかった
+ * 未判断の項目は `planReviewLanes` (`lib/domain/research-review.ts`) で振り分ける。
+ * サーバ(`adoptBulkLaneAction`)も同じ関数で計算し直す。
  *
- * ## 完了ブロッカーUX(本変更)
+ * - まとめて採用 (`bulk`): 採用しても値が変わらない項目と、注記の無い確認済みの新規の項目
+ * - 1件ずつ確認 (`individual`): 上書きになる値・注記ありの値・推定の値。カードを開いておく
+ * - 候補の選択 (`choose`): 競合
  *
- * 上記で Primary CTA は常時表示されるようになったが、`conflict` が残っている間の
- * 表示が「候補を選択する必要がある項目が1件あります」だけで、**何の項目か・どこに
- * あるか・何をすれば有効になるか**が分からなかった。実機で「残り30件を採用して
- * 調査完了が押せない理由がわからない」状態が発生した。
+ * 主ボタンは状態ごとに 1 つ:
+ * - `bulk` がある → 「N件をまとめて採用」。採用後に何も残らないなら「N件を採用して調査完了」
+ * - `bulk` が無く未判断が残る → 「次の未判断の項目へ」(カードへ移動する)
+ * - 未判断が無い → 「レビュー完了」
  *
- * - 未解決 conflict の**項目名**と「あと何件の候補選択で完了できるか」を sticky footer に常時表示
- * - disabled 理由をボタン直下へ常時表示(tooltip 単独にしない)+ `aria-describedby`
- * - ジャンプCTAで「未判断の項目のみ表示」を ON にした上で**実際に対象itemまでスクロール**
- *   (旧「競合N件へ移動」は filter を ON にするだけで移動しなかった)。
- *   ユーザーが手で閉じたカテゴリが対象でも届くよう、祖先の `<details>` を開いてから
- *   スクロールする(`scrollToResearchItem` の JSDoc 参照)
- * - Secondary CTA の補足に競合件数を含め、Primary との違いを明示
- *
- * **server-side invariant は一切変更していない。** `conflict` を候補選択なしで
- * 採用しないルール(`adoptRemainingAndCompleteReviewAction` のガード)も、
- * `summarizeUndecided` の集計意味論もそのまま。変更は UI / ナビゲーション / 文言のみ。
+ * 副ボタン「残りN件は反映せずに完了」は、未判断を基本情報に反映せずに閉じる
+ * (`completeReviewAction` の skipRemaining)。本番で再調査した 2 店舗はこの操作で閉じている。
  */
 
-import { useId, useMemo, useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { AlertTriangle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -49,7 +37,7 @@ import { toast } from "@/components/ui/toast";
 import { ResearchItemCard, type DecideInput } from "./research-item-card";
 import { NonReviewItemCard } from "./research-nonreview-card";
 import {
-  adoptRemainingAndCompleteReviewAction,
+  adoptBulkLaneAction,
   completeReviewAction,
   recordReviewDecisionAction,
 } from "@/lib/actions/research-run-actions";
@@ -61,9 +49,11 @@ import {
 import {
   formatReviewProgressLabel,
   getReviewableItems,
-  getUndecidedReviewableItems,
   isReviewableItem,
-  summarizeUndecided,
+  planReviewLanes,
+  summarizeReviewPlan,
+  type ReviewLane,
+  type ReviewPlanSummary,
 } from "@/lib/domain/research-review";
 import {
   deriveItemTrust,
@@ -86,7 +76,7 @@ const STATUS_COUNT_LABELS: Record<string, string> = {
 };
 
 /* ------------------------------------------------------------------ */
-/*  完了ブロッカーの説明とジャンプ(純関数、UIテストから直接検証する)      */
+/*  項目へのジャンプ(純関数、UIテストから直接検証する)                  */
 /* ------------------------------------------------------------------ */
 
 /**
@@ -173,12 +163,10 @@ function deferScrollToResearchItem(key: string): void {
 /**
  * ジャンプCTAの動作: 「未判断の項目のみ表示」を ON にしてから対象itemへ移動する。
  *
- * 旧「競合N件へ移動」は filter を ON にするだけで**実際には移動しなかった**ため、
- * 53項目の途中に埋もれた conflict にユーザーが辿り着けなかった。
  * scroll 実装を差し替え可能な引数にしてあるのは、DOM 無しでも
  * 「filter ON → 対象keyへ移動」という順序と引数を単体テストで固定するため。
  */
-export function handleConflictJump(
+export function handleItemJump(
   key: string,
   setFilterUnresolved: (next: boolean) => void,
   scroll: (key: string) => void = deferScrollToResearchItem,
@@ -187,71 +175,78 @@ export function handleConflictJump(
   scroll(key);
 }
 
-/** 未解決 conflict の説明文言一式(件数依存の文言をここに集約する)。 */
-export interface ConflictGuidance {
-  /** 未解決 conflict の件数。 */
-  count: number;
-  /** ジャンプ先(先頭の未解決 conflict の item key)。 */
-  targetKey: string;
-  /**
-   * 「あと何**回の候補選択**で完了できるか」。失敗ではなく残作業として提示する。
-   * 単位を「候補選択」と明示するのは、同じ footer に出る「未対応 N」「残り M 件」と
-   * 誤読されないようにするため(`buildConflictGuidance` の JSDoc 参照)。
-   */
-  headline: string;
-  /** 何が起きていて、何をすれば完了できるか。 */
-  detail: string;
-  /** ジャンプCTAのラベル。 */
-  jumpLabel: string;
+/* ------------------------------------------------------------------ */
+/*  フッターの文言(純関数)                                            */
+/* ------------------------------------------------------------------ */
+
+export type ReviewPrimaryAction =
+  | { kind: "bulk"; label: string; keys: string[]; complete: boolean }
+  | { kind: "next"; label: string; targetKey: string }
+  | { kind: "complete"; label: string };
+
+export interface ReviewFooterModel {
+  /** 「まとめて採用: 6件（新規 1・変更なし 5）」。まとめて採用する項目が無ければ null。 */
+  bulkLine: string | null;
+  /** 「1件ずつ確認: 上書き 25・推定 10」。主ボタンの後に判断が要る項目が無ければ null。 */
+  remainingLine: string | null;
+  primary: ReviewPrimaryAction;
+  /** 副ボタン(未判断を反映せずに完了)の文言。未判断が無ければ null。 */
+  skipLabel: string | null;
+}
+
+function joinCounts(parts: [string, number][]): string {
+  return parts
+    .filter(([, count]) => count > 0)
+    .map(([label, count]) => `${label} ${count}`)
+    .join("・");
 }
 
 /**
- * 未解決 conflict から、完了ブロッカーの説明文言を組み立てる。
+ * 振り分けの件数から、フッターの内訳・主ボタン・副ボタンの文言を組み立てる。
  *
- * ## 方針(完了ブロッカーUX)
- *
- * - **失敗表現にしない。** 「エラー」「処理できません」ではなく
- *   「あと N 件の候補選択で完了できます」という残作業の提示にする。
- * - **何をすれば有効になるかまで書く。** disabled の理由説明だけでは、
- *   ユーザーは次の操作を発見できない(実機で発生した状態)。
- * - **項目名を出す。** 件数だけでは 53項目のどこを見ればよいか分からない。
- * - **全件は並べない。** 2件以上は「先頭 ほかN件」に畳んで footer の高さを保つ。
- *
- * ## headline で「候補選択」を明示する理由
- *
- * ブロック中の footer には「未対応 31」「残り30件を採用して調査完了」が同時に出る。
- * ここで headline を「調査完了まであと1件」にすると、**残項目数が1件**だと誤読され、
- * 同じパネル内の 31 / 30 と矛盾して見える。実際の意味は「あと1**回の候補選択**」なので、
- * headline 側でその単位を明示する。headline が「候補選択」を担うぶん、detail 側は
- * 「候補を1つ選ぶと」から「候補を選ぶと」へ縮めて重複を減らす。
- *
- * 未解決 conflict が無ければ `null`(= ブロックしていない)。純関数。
+ * 主ボタンは**上書きにならない項目だけ**を採用する。上書きの件数は押す前に
+ * 「1件ずつ確認」の内訳として見えており、押しても基本情報は書き換わらない (#319)。
  */
-export function buildConflictGuidance(
-  conflicts: readonly { key: string; label: string }[],
-  adoptableCount: number,
-): ConflictGuidance | null {
-  const first = conflicts[0];
-  if (first === undefined) return null;
+export function buildReviewFooterModel(summary: ReviewPlanSummary): ReviewFooterModel {
+  const bulkCount = summary.bulkKeys.length;
+  const bulkLine =
+    bulkCount > 0
+      ? `まとめて採用: ${bulkCount}件（${joinCounts([
+          ["新規", summary.bulk.new],
+          ["変更なし", summary.bulk.same],
+        ])}）`
+      : null;
 
-  const count = conflicts.length;
-  const subject = count === 1 ? `「${first.label}」` : `「${first.label}」ほか${count - 1}件`;
-  const outcome =
-    adoptableCount > 0 ? `残り${adoptableCount}件をまとめて採用できます` : "調査を完了できます";
+  const remainingText = joinCounts([
+    ["上書き", summary.individual.overwrite],
+    ["注記あり", summary.individual.noted],
+    ["推定", summary.individual.inferred],
+    ["登録済み", summary.individual.registered],
+    ["候補の選択", summary.choose],
+  ]);
+  const remainingLine = summary.remainingKeys.length > 0 ? `1件ずつ確認: ${remainingText}` : null;
+
+  let primary: ReviewPrimaryAction;
+  if (bulkCount > 0) {
+    const complete = summary.remainingKeys.length === 0;
+    primary = {
+      kind: "bulk",
+      label: complete ? `${bulkCount}件を採用して調査完了` : `${bulkCount}件をまとめて採用`,
+      keys: summary.bulkKeys,
+      complete,
+    };
+  } else if (summary.remainingKeys.length > 0) {
+    primary = { kind: "next", label: "次の未判断の項目へ", targetKey: summary.remainingKeys[0]! };
+  } else {
+    primary = { kind: "complete", label: "レビュー完了" };
+  }
 
   return {
-    count,
-    targetKey: first.key,
-    headline: `あと${count}件の候補選択で完了できます`,
-    detail: `${subject}の情報源が一致していません。候補を選ぶと、${outcome}。`,
-    jumpLabel: count === 1 ? `${first.label}を確認` : `競合${count}件を確認`,
+    bulkLine,
+    remainingLine,
+    primary,
+    skipLabel: summary.total > 0 ? `残り${summary.total}件は反映せずに完了` : null,
   };
-}
-
-/** Secondary CTA(判断済みのみで完了)の補足文言。競合が残っていればその件数も明示する。 */
-export function buildSkipRemainingNote(totalUndecided: number, conflictCount: number): string {
-  const suffix = conflictCount > 0 ? `（競合${conflictCount}件を含む）` : "";
-  return `未対応${totalUndecided}件${suffix}は反映されません`;
 }
 
 interface Props {
@@ -271,10 +266,17 @@ export function ResearchReviewSection({ store, run, onUpdate, onRestart, restart
 
   const reviewCompleted = run.review_completed_at !== null;
   const reviewableItems = useMemo(() => getReviewableItems(items), [items]);
-  const undecided = useMemo(
-    () => getUndecidedReviewableItems(items, run.review_decisions),
-    [items, run.review_decisions],
+
+  const plan = useMemo(
+    () => planReviewLanes(items, run.review_decisions, store.basic_info),
+    [items, run.review_decisions, store.basic_info],
   );
+  const laneByKey = useMemo(
+    () => new Map<string, ReviewLane>(plan.map((entry) => [entry.item.key, entry.lane])),
+    [plan],
+  );
+  const planSummary = useMemo(() => summarizeReviewPlan(plan), [plan]);
+  const footer = useMemo(() => buildReviewFooterModel(planSummary), [planSummary]);
 
   const statusCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -285,22 +287,20 @@ export function ResearchReviewSection({ store, run, onUpdate, onRestart, restart
     return counts;
   }, [items]);
 
+  /** レビュー対象の項目だけをカテゴリごとに並べる。値の出なかった項目は末尾に 1 つの折りたたみへまとめる。 */
   const grouped = useMemo(() => {
     const map = new Map<CategoryKey, ResearchItem[]>();
-    for (const item of items) {
+    for (const item of reviewableItems) {
       const category = BASIC_INFO_ITEM_BY_KEY.get(item.key)?.category ?? "category_1_basic";
       const arr = map.get(category) ?? [];
       arr.push(item);
       map.set(category, arr);
     }
     return map;
-  }, [items]);
+  }, [reviewableItems]);
+  const nonReviewItems = useMemo(() => items.filter((item) => !isReviewableItem(item)), [items]);
 
-  const isUnresolved = (item: ResearchItem): boolean => {
-    if (item.status === "not_found" || item.status === "conflict") return true;
-    if (!isReviewableItem(item)) return false;
-    return run.review_decisions[item.key] === undefined;
-  };
+  const isUndecided = (item: ResearchItem): boolean => laneByKey.has(item.key);
 
   const onDecide = (item: ResearchItem, input: DecideInput) => {
     if (reviewCompleted) return;
@@ -315,32 +315,51 @@ export function ResearchReviewSection({ store, run, onUpdate, onRestart, restart
       });
       if (res.ok) {
         onUpdate({ ...run, review_decisions: res.data.reviewDecisions });
+        // 採用で基本情報が変わると、ほかの項目の「いまの値」との比較には影響しないが、
+        // 店舗の表示(store prop)はサーバ側の確定値で取り直す。
+        if (input.decision === "adopted") router.refresh();
       } else {
         toast.error(res.error);
       }
     });
   };
 
+  const onJump = (key: string) => {
+    handleItemJump(key, setFilterUnresolved);
+  };
+
   /**
-   * Primary CTA: 未判断の confirmed / inferred をまとめて採用し、レビューを完了する
-   * (feat/ai-research-quality-ux-hardening、Plan §12)。
-   *
-   * 実運用は「AIが調査した値は基本採用。おかしいものだけ編集/却下」であり、
-   * 旧UIの「全項目に個別判断 → 残りをスキップして完了」とは逆だった。
-   * conflict が残っている場合はサーバー側で拒否される(候補選択が必須)。
-   *
-   * 成功レスポンスは server-returned authoritative state をそのまま使う。
-   * クライアント側で `nowIso()` を捏造したり decisions を再構築したりしない。
+   * 主ボタン。サーバの確定値(decisions・完了時刻)をそのまま使い、クライアントで捏造しない。
    */
-  const onAdoptRemainingAndComplete = () => {
+  const onPrimary = () => {
+    const primary = footer.primary;
+    if (primary.kind === "next") {
+      onJump(primary.targetKey);
+      return;
+    }
     startCompleting(async () => {
-      const res = await adoptRemainingAndCompleteReviewAction({ runId: run.id, storeId: store.id });
-      if (res.ok) {
-        onUpdate({
-          ...run,
-          review_decisions: res.data.reviewDecisions,
-          review_completed_at: res.data.reviewCompletedAt,
+      if (primary.kind === "bulk") {
+        const res = await adoptBulkLaneAction({
+          runId: run.id,
+          storeId: store.id,
+          expectedKeys: primary.keys,
+          complete: primary.complete,
         });
+        if (res.ok) {
+          onUpdate({
+            ...run,
+            review_decisions: res.data.reviewDecisions,
+            review_completed_at: res.data.reviewCompletedAt,
+          });
+          toast.success(res.message ?? "採用しました");
+          router.refresh();
+        } else {
+          toast.error(res.error);
+        }
+        return;
+      }
+      const res = await completeReviewAction({ runId: run.id, storeId: store.id, skipRemaining: false });
+      if (res.ok) {
         toast.success(res.message ?? "レビューを完了しました");
         router.refresh();
       } else {
@@ -349,7 +368,7 @@ export function ResearchReviewSection({ store, run, onUpdate, onRestart, restart
     });
   };
 
-  /** Secondary CTA: 未対応項目を反映せず、判断済みの内容だけで完了する。 */
+  /** 副ボタン: 未判断の項目を反映せず、判断済みの内容だけで完了する。 */
   const onCompleteDecidedOnly = () => {
     startCompleting(async () => {
       const res = await completeReviewAction({
@@ -366,36 +385,6 @@ export function ResearchReviewSection({ store, run, onUpdate, onRestart, restart
         toast.error(res.error);
       }
     });
-  };
-
-  /** Primary CTA で何が採用されるかの内訳(押す前に見えるようにする、Plan §12.1.1)。 */
-  const undecidedSummary = useMemo(
-    () => summarizeUndecided(items, run.review_decisions),
-    [items, run.review_decisions],
-  );
-
-  /**
-   * 未解決 conflict の**実際の項目**(件数だけでなくラベルとジャンプ先key)。
-   * `undecided` から導出するため、候補を採用した瞬間に自動で縮み、
-   * 最後の1件を解決した時点で `conflictGuidance` が `null` になる
-   * (= ブロック表示が消えて Primary が有効になる)。ページreloadは不要。
-   */
-  const conflictGuidance = useMemo(
-    () =>
-      buildConflictGuidance(
-        undecided
-          .filter((item) => item.status === "conflict")
-          .map((item) => ({
-            key: item.key,
-            label: BASIC_INFO_ITEM_BY_KEY.get(item.key)?.label ?? item.key,
-          })),
-        undecidedSummary.adoptable,
-      ),
-    [undecided, undecidedSummary.adoptable],
-  );
-
-  const onJumpToConflict = (key: string) => {
-    handleConflictJump(key, setFilterUnresolved);
   };
 
   return (
@@ -440,7 +429,7 @@ export function ResearchReviewSection({ store, run, onUpdate, onRestart, restart
               {formatReviewProgressLabel(
                 items.length,
                 reviewableItems.length,
-                reviewableItems.length - undecided.length,
+                reviewableItems.length - plan.length,
               )}
             </p>
           )}
@@ -454,20 +443,10 @@ export function ResearchReviewSection({ store, run, onUpdate, onRestart, restart
             >
               未判断の項目のみ表示
             </Button>
-            {!reviewCompleted && conflictGuidance !== null && (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => onJumpToConflict(conflictGuidance.targetKey)}
-              >
-                {conflictGuidance.jumpLabel}
-              </Button>
-            )}
           </div>
 
           {Array.from(grouped.entries()).map(([category, categoryItems]) => {
-            const visibleItems = filterUnresolved ? categoryItems.filter(isUnresolved) : categoryItems;
+            const visibleItems = filterUnresolved ? categoryItems.filter(isUndecided) : categoryItems;
             if (visibleItems.length === 0) return null;
             return (
               <details key={category} className="border border-border rounded-lg" open>
@@ -476,26 +455,43 @@ export function ResearchReviewSection({ store, run, onUpdate, onRestart, restart
                 </summary>
                 <div className="p-4 space-y-3">
                   {visibleItems.map((item) => {
-                    const label = BASIC_INFO_ITEM_BY_KEY.get(item.key)?.label ?? item.key;
-                    return isReviewableItem(item) ? (
+                    const lane = laneByKey.get(item.key);
+                    return (
                       <ResearchItemCard
                         key={item.key}
                         item={item}
-                        label={label}
+                        label={BASIC_INFO_ITEM_BY_KEY.get(item.key)?.label ?? item.key}
                         anchorId={researchItemAnchorId(item.key)}
                         sourceRegistry={run.source_registry}
                         decision={run.review_decisions[item.key]}
+                        current={store.basic_info[item.key]}
+                        defaultOpen={!reviewCompleted && (lane === "individual" || lane === "choose")}
                         busy={busy || completing}
                         onDecide={(input) => onDecide(item, input)}
                       />
-                    ) : (
-                      <NonReviewItemCard key={item.key} item={item} label={label} />
                     );
                   })}
                 </div>
               </details>
             );
           })}
+
+          {nonReviewItems.length > 0 && (
+            <details className="border border-border rounded-lg">
+              <summary className="cursor-pointer select-none px-4 py-2.5 text-sm font-medium text-foreground bg-muted/30 rounded-lg">
+                調査で値が出なかった項目({nonReviewItems.length}項目)
+              </summary>
+              <div className="p-4 space-y-3">
+                {nonReviewItems.map((item) => (
+                  <NonReviewItemCard
+                    key={item.key}
+                    item={item}
+                    label={BASIC_INFO_ITEM_BY_KEY.get(item.key)?.label ?? item.key}
+                  />
+                ))}
+              </div>
+            </details>
+          )}
 
           {reviewCompleted && (
             <div className="flex justify-end pt-2 border-t border-border">
@@ -504,21 +500,20 @@ export function ResearchReviewSection({ store, run, onUpdate, onRestart, restart
               </Button>
             </div>
           )}
-          {/* 未完了時の完了操作は sticky footer(Card の外)へ移した。53項目・8カテゴリで
-              縦に長く、旧レイアウトでは画面下までスクロールしないと完了できなかったため。 */}
+          {/* 未完了時の完了操作は sticky footer(Card の外)へ置く。53項目・8カテゴリで
+              縦に長く、画面下までスクロールしないと完了できなかったため。 */}
           {!reviewCompleted && <div className="h-2" aria-hidden />}
         </Card.Body>
       </Card>
       {!reviewCompleted && (
         <ReviewCompletionFooter
-          summary={undecidedSummary}
-          conflictGuidance={conflictGuidance}
-          decidedCount={reviewableItems.length - undecided.length}
+          model={footer}
+          decidedCount={reviewableItems.length - plan.length}
+          undecidedCount={plan.length}
           busy={busy}
           completing={completing}
-          onAdoptRemaining={onAdoptRemainingAndComplete}
+          onPrimary={onPrimary}
           onCompleteDecidedOnly={onCompleteDecidedOnly}
-          onJumpToConflict={onJumpToConflict}
         />
       )}
     </>
@@ -530,32 +525,28 @@ export function ResearchReviewSection({ store, run, onUpdate, onRestart, restart
  *
  * **`<Card>` は `overflow-hidden`(`components/ui/card.tsx`)なので Card の内側では
  * sticky が効かない。** 既存の先例(`stores-table-view.tsx` / `area-search-results.tsx`)
- * と同じく Card の外side に置く。クラス列も先例をそのまま踏襲する
+ * と同じく Card の外に置く。クラス列も先例をそのまま踏襲する
  * (`fixed` ではなく `sticky` にすることで、サイドバー折りたたみでも左端がズレない)。
  * 低い画面では 70dvh を上限として領域内をスクロールさせ、完了ボタンへの到達を保つ。
  */
 export function ReviewCompletionFooter({
-  summary,
-  conflictGuidance,
+  model,
   decidedCount,
+  undecidedCount,
   busy,
   completing,
-  onAdoptRemaining,
+  onPrimary,
   onCompleteDecidedOnly,
-  onJumpToConflict,
 }: {
-  summary: ReturnType<typeof summarizeUndecided>;
-  conflictGuidance: ConflictGuidance | null;
+  model: ReviewFooterModel;
   decidedCount: number;
+  undecidedCount: number;
   busy: boolean;
   completing: boolean;
-  onAdoptRemaining: () => void;
+  onPrimary: () => void;
   onCompleteDecidedOnly: () => void;
-  onJumpToConflict: (key: string) => void;
 }) {
-  const blockedByConflict = conflictGuidance !== null;
   const disabled = busy || completing;
-  const hintId = useId();
 
   return (
     <div
@@ -563,47 +554,14 @@ export function ReviewCompletionFooter({
       aria-label="レビュー完了操作"
       className="sticky bottom-0 z-30 flex max-h-[70dvh] flex-col gap-2 overflow-y-auto border-t border-border bg-background/80 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-md"
     >
-      {/* 完了ブロッカーの説明。tooltip にはしない(hoverしないと分からない設計は禁止)。
-          「あと何をすれば完了できるか」を常時、文章と項目名とジャンプCTAで提示する。 */}
-      {conflictGuidance !== null && (
-        <div
-          role="status"
-          aria-live="polite"
-          className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-md border border-warning/40 bg-warning/10 px-3 py-2"
-        >
-          <p className="flex items-start gap-1.5 text-xs text-warning">
-            <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" aria-hidden />
-            <span>
-              <span className="font-medium">{conflictGuidance.headline}</span>
-              <span className="block text-foreground">{conflictGuidance.detail}</span>
-            </span>
-          </p>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="ml-auto w-full sm:w-auto"
-            onClick={() => onJumpToConflict(conflictGuidance.targetKey)}
-          >
-            {conflictGuidance.jumpLabel}
-          </Button>
-        </div>
-      )}
-
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex flex-col gap-0.5 text-xs text-muted-foreground" aria-live="polite">
-          {/* 「採用済み」ではなく「判断済み」。この値は
-              `reviewableItems.length - undecided.length` であり、採用だけでなく
-              却下・スキップも含む。却下するほど増えるため「採用済み」は誤り。 */}
+          {/* 「採用済み」ではなく「判断済み」。採用だけでなく却下・スキップも含む。 */}
           <span>
-            判断済み {decidedCount} ・ 未対応 {summary.total}
-            {blockedByConflict ? ` ・ 要選択 ${summary.conflict}` : ""}
+            判断済み {decidedCount} ・ 未対応 {undecidedCount}
           </span>
-          {summary.adoptable > 0 && (
-            <span>
-              残り: 確認済み {summary.confirmed}・推定 {summary.inferred}
-            </span>
-          )}
+          {model.bulkLine !== null && <span>{model.bulkLine}</span>}
+          {model.remainingLine !== null && <span>{model.remainingLine}</span>}
         </div>
 
         <div className="ml-auto flex flex-col items-stretch gap-1 sm:items-end">
@@ -611,24 +569,17 @@ export function ReviewCompletionFooter({
             type="button"
             variant="primary"
             className="w-full sm:w-auto"
-            onClick={onAdoptRemaining}
-            disabled={disabled || blockedByConflict}
-            aria-describedby={blockedByConflict ? hintId : undefined}
+            onClick={onPrimary}
+            disabled={disabled}
           >
-            {completing
-              ? "処理中…"
-              : summary.adoptable > 0
-                ? `残り${summary.adoptable}件を採用して調査完了`
-                : "レビュー完了"}
+            {completing ? "処理中…" : model.primary.label}
           </Button>
-          {/* disabled 理由をボタン直下に常時表示する(tooltip 単独にしない)。
-              `aria-describedby` で支援技術にも同じ理由が届く。 */}
-          {blockedByConflict && (
-            <span id={hintId} className="text-xs text-warning sm:text-right">
-              競合を解決すると有効になります
+          {model.primary.kind === "bulk" && !model.primary.complete && (
+            <span className="text-xs text-muted-foreground sm:text-right">
+              上書きになる項目と推定の項目は、1件ずつ確認します
             </span>
           )}
-          {summary.total > 0 && (
+          {model.skipLabel !== null && (
             <>
               <Button
                 type="button"
@@ -638,10 +589,10 @@ export function ReviewCompletionFooter({
                 onClick={onCompleteDecidedOnly}
                 disabled={disabled}
               >
-                判断済みの内容だけで完了
+                {model.skipLabel}
               </Button>
               <span className="text-xs text-muted-foreground sm:text-right">
-                {buildSkipRemainingNote(summary.total, summary.conflict)}
+                未対応の項目は基本情報に反映されません（いまの値のまま）
               </span>
             </>
           )}
