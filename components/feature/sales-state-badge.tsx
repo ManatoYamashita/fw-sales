@@ -32,17 +32,25 @@ export function SalesStateBadge({ state }: { state: CurrentSalesState }) {
  *
  * 縦に積むのは列予算 (`stores-table-columns.test.tsx` の salesState) を
  * 広げないため。添える文言はバッジより短い。
+ *
+ * `layout="inline"` は狭幅の店舗一覧 (#330) 用で、同じ文言をバッジの右に並べる。
+ * 一覧の 1 店舗あたりの高さを 1 行ぶん詰めるためで、表示する内容は変えない。
  */
 export function SalesStateSummary({
   state,
   latestDeal,
+  layout = "stack",
 }: {
   state: CurrentSalesState;
   latestDeal: Pick<Deal, "reapproach" | "lost_reason"> | null;
+  layout?: "stack" | "inline";
 }) {
   const lost = state === "lost" ? latestDeal : null;
   return (
-    <div className="space-y-1" title={lost?.lost_reason ? `失注理由: ${lost.lost_reason}` : undefined}>
+    <div
+      className={layout === "inline" ? "inline-flex flex-wrap items-center gap-x-1.5 gap-y-1" : "space-y-1"}
+      title={lost?.lost_reason ? `失注理由: ${lost.lost_reason}` : undefined}
+    >
       <SalesStateBadge state={state} />
       {lost ? (
         <p className="text-xs text-muted-foreground">{lost.reapproach ?? "再アプローチ未判断"}</p>

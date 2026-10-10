@@ -140,8 +140,8 @@ describe("D: 狭幅カードビュー (#234)", () => {
     expect(viewCode).toContain("canDelete={canDelete}");
   });
 
-  it("カードリストにラベルを与える", () => {
-    expect(viewCode).toContain("カード表示");
+  it("コンパクト表示のリストにラベルを与える", () => {
+    expect(viewCode).toContain('label: "店舗一覧 (コンパクト表示)"');
   });
 
   it('カードリストは role="list" を明示し、偽テーブルを作らない', () => {
