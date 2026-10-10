@@ -65,14 +65,21 @@ import {
   isReviewableItem,
   summarizeUndecided,
 } from "@/lib/domain/research-review";
+import {
+  deriveItemTrust,
+  ITEM_TRUST_LABELS,
+  toUserFacingRunWarning,
+} from "@/lib/domain/research-item-notes";
 import { formatDateTime } from "@/lib/utils/date";
 import type { Store } from "@/types/store";
 import type { ResearchItem, StoreResearchRun } from "@/types/research-run";
 
+/**
+ * 見出しの件数ラベル。レビュー対象の項目はカードのバッジと同じ `deriveItemTrust` の区分で数え、
+ * 「確認済み 17」と数えた項目のカードに「登録済み」「注記あり」と出る食い違いを作らない (#301)。
+ */
 const STATUS_COUNT_LABELS: Record<string, string> = {
-  confirmed: "確認済み",
-  inferred: "推定",
-  conflict: "競合",
+  ...ITEM_TRUST_LABELS,
   not_found: "確認できず",
   hearing_required: "ヒアリング必要",
   external_data_required: "外部データ必要",
@@ -271,7 +278,10 @@ export function ResearchReviewSection({ store, run, onUpdate, onRestart, restart
 
   const statusCounts = useMemo(() => {
     const counts: Record<string, number> = {};
-    for (const item of items) counts[item.status] = (counts[item.status] ?? 0) + 1;
+    for (const item of items) {
+      const key = deriveItemTrust(item) ?? item.status;
+      counts[key] = (counts[key] ?? 0) + 1;
+    }
     return counts;
   }, [items]);
 
@@ -419,7 +429,7 @@ export function ResearchReviewSection({ store, run, onUpdate, onRestart, restart
               {run.warnings.map((warning, i) => (
                 <p key={i} className="flex items-start gap-1.5 text-xs text-warning">
                   <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-                  <span>{warning}</span>
+                  <span>{toUserFacingRunWarning(warning)}</span>
                 </p>
               ))}
             </div>
