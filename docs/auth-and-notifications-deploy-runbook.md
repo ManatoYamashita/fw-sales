@@ -4,8 +4,7 @@ PR #30 を本番に出すまでの **7 段階手順** + 後日適用する 0005 
 仕様詳細: `.kiro/specs/auth-and-notifications/design.md` §Migration Strategy。
 E2E 検証: `docs/auth-and-notifications-e2e.md` 参照。
 
-> **重要前提**: 本リポジトリは `vercel.json` / GitHub Actions に DB migrate hook を持たない。
-> マイグレーション適用はすべて **手動コマンド** で行う。Vercel auto-deploy は app コードのみ反映する。
+> **2026-10-10更新（Issue #46）**: 以下の7段階手順は初回Authリリースの履歴です。現在はGitHub Actionsの`migrate.yml`がmainのDrizzle変更を適用します。環境分離の変更では、devでの適用・検証を先に実行し、その後prdへ進みます。最新手順は[環境分離ドキュメント](environment-separation.md)を参照してください。Vercelのアプリデプロイとmigrationの完了順序は別途確認します。
 
 ---
 
@@ -59,8 +58,9 @@ NEXT_PUBLIC_APP_URL=https://your-domain.com
 ### Supabase Project 側設定
 
 1. **Authentication > Providers > Google** を有効化
-2. **Authorized redirect URIs** に `https://<app-domain>/auth/callback` を登録
-3. **Authorized email domains** で社内ドメインのみ許可 (自由登録防止)
+2. Google Consoleの **Authorized redirect URIs** に `https://<supabase-project-ref>.supabase.co/auth/v1/callback` を登録
+3. SupabaseのURL Configurationで、Site URLとアプリの `https://<app-domain>/auth/callback` を含むRedirect URLsを設定
+4. ログイン対象の制限はGoogle Auth PlatformのAudience等で設定・検証する。SupabaseのURL Configurationはメールドメイン制限ではありません。
 
 ---
 

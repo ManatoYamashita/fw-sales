@@ -48,10 +48,13 @@
  * 単一接続)。psql (libpq) は DATABASE_URL 中の特殊文字を host と誤読するため使わない。
  * 接続文字列や hash 全文はログに出力しない (先頭 12 文字のみ)。
  */
-import crypto from "node:crypto";
+import { getMigrationHashes } from "./_migration-hashes.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import postgres from "postgres";
+import { assertDatabaseTarget } from "../lib/environment-isolation.mjs";
+
+assertDatabaseTarget();
 
 const JOURNAL_PATH = "drizzle/meta/_journal.json";
 
@@ -174,9 +177,9 @@ try {
 
   for (const entry of journal.entries) {
     const file = path.join("drizzle", `${entry.tag}.sql`);
-    let localHash;
+    let localHashes;
     try {
-      localHash = crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+      localHashes = getMigrationHashes(fs.readFileSync(file, "utf8"));
     } catch (e) {
       newDeviations.push({
         kind: "missing_file",
@@ -198,11 +201,11 @@ try {
       continue;
     }
 
-    if (!dbHashes.includes(localHash)) {
+    if (!dbHashes.some(hash => localHashes.includes(hash))) {
       const d = {
         kind: "drift",
         tag: entry.tag,
-        detail: `db=[${dbHashes.map(shortHash).join(", ")}] file=${shortHash(localHash)} (適用後に .sql が編集された)`,
+        detail: `db=[${dbHashes.map(shortHash).join(", ")}] file=[${localHashes.map(shortHash).join(", ")}] (改行以外の変更がある)`,
       };
       (isKnown("drift", entry.tag) ? knownSeen : newDeviations).push(d);
       continue;
@@ -211,7 +214,7 @@ try {
     // hash は一致しているが、同じ slot に複数の適用記録がある。
     // 一致しない側は「別内容で一度適用された」痕跡であり、黙って無視しない。
     if (dbHashes.length > 1) {
-      const others = dbHashes.filter((h) => h !== localHash);
+      const others = dbHashes.filter((h) => !localHashes.includes(h));
       const d = {
         kind: "duplicate_apply",
         tag: entry.tag,

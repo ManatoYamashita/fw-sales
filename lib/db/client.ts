@@ -26,6 +26,7 @@ import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import * as schema from "./schema";
 import { assertEnv } from "@/lib/env";
+import { assertDatabaseTarget } from "@/lib/environment-isolation.mjs";
 
 const GLOBAL_KEY = Symbol.for("__FW_SALES_DB__");
 
@@ -37,6 +38,7 @@ type Cached = {
 const g = globalThis as unknown as { [GLOBAL_KEY]?: Cached };
 
 function buildClient(): Cached {
+  if (process.env.NODE_ENV !== "test") assertDatabaseTarget();
   const sql = postgres(assertEnv("DATABASE_URL"), {
     // Supabase Transaction Pooler 互換のため `prepare: false` 必須
     prepare: false,

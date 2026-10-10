@@ -218,6 +218,13 @@
       "when": 1791371168353,
       "tag": "0030_add_deal_reapproach",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1791611010576,
+      "tag": "0031_secure_server_tables",
+      "breakpoints": true
     }
   ]
 }

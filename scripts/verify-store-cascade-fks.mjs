@@ -27,6 +27,9 @@
  * import しただけで DB へ接続し exit する副作用を持つため、期待値の側を切り出してある。
  */
 import postgres from "postgres";
+import { assertDatabaseTarget } from "../lib/environment-isolation.mjs";
+
+assertDatabaseTarget();
 
 import { DELTYPE_LABEL, EXPECTED } from "./_store-fk-policy.mjs";
 
