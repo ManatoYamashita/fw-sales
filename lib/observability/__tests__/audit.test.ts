@@ -149,6 +149,75 @@ describe("persistent audit writer", () => {
   });
 });
 
+describe("AI research review events (#320)", () => {
+  const ACTOR = { userId: "11111111-1111-4111-8111-111111111111", email: "actor@example.com" };
+  const base = { actor: ACTOR, storeId: "store_123", runId: "research_run_1" } as const;
+  const decide: AuditInput = {
+    ...base, event: AUDIT_EVENTS.researchReviewDecide,
+    payload: { itemKey: "address", decision: "adopted", effect: "overwrite", overwrittenOrigin: "places", edited: false },
+  };
+  const bulk: AuditInput = {
+    ...base, event: AUDIT_EVENTS.researchReviewBulkAdopt,
+    payload: { itemKeys: ["address", "phone"], effectCounts: { new: 1, same: 1, overwrite: 0 } },
+  };
+  const complete: AuditInput = {
+    ...base, event: AUDIT_EVENTS.researchReviewComplete,
+    payload: { method: "skip_remaining", adoptedCount: 2, rejectedCount: 1, skippedCount: 3, autoSkippedCount: 2, stageAdvanced: true },
+  };
+  const start: AuditInput = {
+    ...base, event: AUDIT_EVENTS.researchRunStart, payload: { stuckRunFailedId: null },
+  };
+
+  it.each([decide, bulk, complete, start])("persists $event with the run as target and the store kept", async (event) => {
+    await writeAudit(event);
+    expect(insert).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      event: event.event, kind: "mutation", level: "info", error: null,
+      actor_user_id: ACTOR.userId, actor_email: ACTOR.email,
+      target_type: "research_run", target_id: "research_run_1", store_id: "store_123",
+      payload: event.payload,
+    }));
+    expect(console.error).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    // 項目キーの位置に値を入れる・未知のキー
+    { ...decide, payload: { ...decide.payload, itemKey: "東京都渋谷区PRIVATE" } },
+    { ...decide, payload: { ...decide.payload, itemKey: "password" } },
+    // 値そのものを足す
+    { ...decide, payload: { ...decide.payload, value: "PRIVATE" } },
+    { ...decide, payload: { ...decide.payload, previousValue: "PRIVATE" } },
+    { ...decide, payload: { itemKey: "address", decision: "rejected", edited_value: "PRIVATE" } },
+    // 上書きの有無と出どころが食い違う
+    { ...decide, payload: { ...decide.payload, overwrittenOrigin: null } },
+    { ...decide, payload: { ...decide.payload, effect: "new" } },
+    { ...decide, payload: { ...decide.payload, decision: "approved" } },
+    { ...decide, runId: "" },
+    { ...decide, runId: "x".repeat(201) },
+    { ...decide, actor: null },
+    { ...bulk, payload: { ...bulk.payload, itemKeys: [] } },
+    { ...bulk, payload: { ...bulk.payload, itemKeys: ["address", "address"] } },
+    { ...bulk, payload: { ...bulk.payload, itemKeys: ["address", "PRIVATE"] } },
+    { ...bulk, payload: { ...bulk.payload, effectCounts: { new: 2, same: 1, overwrite: 0 } } },
+    { ...bulk, payload: { ...bulk.payload, values: { address: "PRIVATE" } } },
+    { ...complete, payload: { ...complete.payload, autoSkippedCount: 4 } },
+    { ...complete, payload: { ...complete.payload, method: "all_decided" } },
+    { ...complete, payload: { ...complete.payload, adoptedCount: -1 } },
+    { ...complete, payload: { ...complete.payload, adoptedCount: 1.5 } },
+    { ...start, payload: { stuckRunFailedId: "" } },
+    { ...start, payload: { stuckRunFailedId: null, storeName: "PRIVATE" } },
+    // AI 調査のイベントは run ID が必須、店舗のイベントは run ID を持たない
+    { event: AUDIT_EVENTS.researchReviewDecide, actor: ACTOR, storeId: "store_123", payload: decide.payload },
+    { ...input, runId: "research_run_1" },
+  ])("rejects unsafe research input at runtime without leaking it (%#)", async (unsafe) => {
+    expect(() => serializeAuditInput(unsafe as AuditInput)).toThrow();
+    await expect(writeAudit(unsafe as AuditInput)).resolves.toBeUndefined();
+    expect(insert).not.toHaveBeenCalled();
+    const fallback = JSON.parse(vi.mocked(console.error).mock.calls[0]![0]);
+    expect(fallback.audit).toBeNull();
+    expect(JSON.stringify(fallback)).not.toContain("PRIVATE");
+  });
+});
+
 describe("error serialization", () => {
   it("extracts non-enumerable stack, redacts BEFORE clipping, retains ordinary frames", () => {
     const key = `AIza${"a".repeat(35)}`;
@@ -211,5 +280,10 @@ describe("error serialization", () => {
 function typeContract() {
   // @ts-expect-error arbitrary payload fields are not accepted
   void writeAudit({ ...input, payload: { memo: "forbidden" } });
+  // @ts-expect-error AI research events require the run ID
+  void writeAudit({
+    event: AUDIT_EVENTS.researchReviewDecide, actor: input.actor!, storeId: "store_123",
+    payload: { itemKey: "address", decision: "skipped" },
+  });
 }
 void typeContract;
