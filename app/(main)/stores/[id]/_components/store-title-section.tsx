@@ -1,13 +1,14 @@
 "use client";
 
-import { useState, useTransition, type ChangeEvent } from "react";
+import { useEffect, useRef, useState, useTransition, type ChangeEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Pencil, X, Save } from "lucide-react";
+import { Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IndividualStoreBadge } from "@/components/feature/individual-store-badge";
 import { ResearchPhaseBadge } from "./research-phase-badge";
 import { NextActionCta } from "./next-action-cta";
+import { TITLE_EDIT_BUTTON_ID, TitleEditActions } from "./title-edit-actions";
 import { runAction } from "@/lib/client/run-action";
 import { updateStorePatchAction } from "@/lib/actions/store-actions";
 import { splitStoreNameMemo } from "@/lib/domain/store-name-memo";
@@ -27,6 +28,15 @@ export function StoreTitleSection({
   const [form, setForm] = useState({ name: store.name, genre: store.genre });
   const [nameError, setNameError] = useState<string | undefined>();
   const nameMemo = splitStoreNameMemo(store.name);
+  // 保存・キャンセルで操作グループが消えると、フォーカスが body へ落ちる。
+  // 編集を終えたら同じ位置に戻る鉛筆ボタンへ返す。
+  const restoreFocusRef = useRef(false);
+
+  useEffect(() => {
+    if (editing || !restoreFocusRef.current) return;
+    restoreFocusRef.current = false;
+    document.getElementById(TITLE_EDIT_BUTTON_ID)?.focus();
+  }, [editing]);
 
   const onText =
     (key: keyof typeof form) =>
@@ -38,6 +48,7 @@ export function StoreTitleSection({
   const onCancel = () => {
     setForm({ name: store.name, genre: store.genre });
     setNameError(undefined);
+    restoreFocusRef.current = true;
     setEditing(false);
   };
 
@@ -54,6 +65,7 @@ export function StoreTitleSection({
         success: "更新しました",
       });
       if (result?.ok) {
+        restoreFocusRef.current = true;
         setEditing(false);
         router.refresh();
       }
@@ -78,23 +90,17 @@ export function StoreTitleSection({
         />
         <IndividualStoreBadge operatorType={store.operator_type} />
         <ResearchPhaseBadge phase={phase} />
-        <Button
-          type="button"
-          variant="ghost-muted"
-          size="sm"
-          className={editing ? "invisible" : undefined}
-          disabled={editing}
-          aria-hidden={editing || undefined}
-          tabIndex={editing ? -1 : undefined}
-          onClick={() => {
+        <TitleEditActions
+          editing={editing}
+          pending={pending}
+          onEdit={() => {
             setForm({ name: store.name, genre: store.genre });
             setNameError(undefined);
             setEditing(true);
           }}
-          aria-label="店舗名・業態を編集"
-        >
-          <Pencil className="h-3.5 w-3.5" />
-        </Button>
+          onSave={onSave}
+          onCancel={onCancel}
+        />
       </h1>
       {editing && nameError && (
         <p id="store_name_error" className="text-xs text-destructive mt-1" role="alert">
@@ -116,19 +122,9 @@ export function StoreTitleSection({
         )}
         {!location && !store.genre && !editing && <span>—</span>}
       </div>
-      {editing ? (
-        <div className="flex flex-wrap items-center gap-2 mt-2" role="group" aria-label="店舗名・業態の編集操作">
-          <Button type="button" variant="primary" onClick={onSave} pending={pending}>
-            <Save className="h-3.5 w-3.5" />
-            {pending ? "保存中…" : "保存"}
-          </Button>
-          <Button type="button" variant="ghost" onClick={onCancel} disabled={pending}>
-            <X className="h-3.5 w-3.5" /> キャンセル
-          </Button>
-        </div>
-      ) : (
+      {!editing && (
         <>
-          {/* 店舗名に営業メモがあるときの案内 (#297)。編集中は保存操作との間に挟まないよう出さない。 */}
+          {/* 店舗名に営業メモがあるときの案内 (#297)。編集中は入力に集中できるよう、次アクション案内とともに隠す。 */}
           {nameMemo ? (
             <StoreNameMemoNotice
               memo={nameMemo.memo}
