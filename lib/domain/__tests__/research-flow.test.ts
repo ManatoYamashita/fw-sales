@@ -32,13 +32,14 @@ function item(key: string, status: ResearchItem["status"]): ResearchItem {
 function statuses(
   primaryRun: Run | null,
   hasAssets: boolean,
+  runOverdue = false,
 ): ResearchFlowStepStatus[] {
-  return getResearchFlowSteps(primaryRun, hasAssets).map((s) => s.status);
+  return getResearchFlowSteps(primaryRun, hasAssets, runOverdue).map((s) => s.status);
 }
 
 describe("getResearchFlowSteps", () => {
   it("手順は ① AI調査 → ② レビュー → ③ 営業資産を生成 の順", () => {
-    expect(getResearchFlowSteps(null, false).map((s) => s.label)).toEqual([
+    expect(getResearchFlowSteps(null, false, false).map((s) => s.label)).toEqual([
       "AI調査",
       "レビュー",
       "営業資産を生成",
@@ -49,9 +50,9 @@ describe("getResearchFlowSteps", () => {
     expect(statuses(null, false)).toEqual(["current", "upcoming", "upcoming"]);
   });
 
-  it("failed なら ① をやり直す", () => {
+  it("failed なら ① は失敗 (未着手・いまここと区別する) (#324)", () => {
     expect(statuses(run({ status: "failed" }), false)).toEqual([
-      "current",
+      "failed",
       "upcoming",
       "upcoming",
     ]);
@@ -63,6 +64,31 @@ describe("getResearchFlowSteps", () => {
       "upcoming",
       "upcoming",
     ]);
+  });
+
+  it("running のまま期限を過ぎていれば ① は時間超過 (#324)", () => {
+    expect(statuses(run({ status: "running" }), false, true)).toEqual([
+      "overdue",
+      "upcoming",
+      "upcoming",
+    ]);
+  });
+
+  it("期限超過の指定は running 以外の状態を変えない (終わった run は終わった表示のまま)", () => {
+    expect(statuses(run({ status: "failed" }), false, true)[0]).toBe("failed");
+    expect(statuses(run({}), false, true)).toEqual(["done", "current", "upcoming"]);
+    expect(statuses(null, false, true)[0]).toBe("current");
+  });
+
+  it("running → succeeded で ① は実行中から完了へ、② はいまここへ (① の完了と ② の完了は別)", () => {
+    expect(statuses(run({ status: "running" }), false)[0]).toBe("running");
+    const after = statuses(run({ status: "succeeded" }), false);
+    expect(after).toEqual(["done", "current", "upcoming"]);
+  });
+
+  it("再調査を始めたら (新しい run が running) ① は失敗から実行中へ戻る", () => {
+    expect(statuses(run({ status: "failed" }), false)[0]).toBe("failed");
+    expect(statuses(run({ status: "running" }), false)[0]).toBe("running");
   });
 
   it("succeeded かつ未レビューなら ② が current (営業資産の有無に依らない)", () => {
@@ -160,7 +186,7 @@ describe("isGenerateStepReached (#322)", () => {
     { name: "調査中", run: run({ status: "running" }) },
     { name: "調査完了・レビュー未完了", run: run({ status: "succeeded" }) },
   ])("$name なら未到達 (③ は閉じて始める)", ({ run: r }) => {
-    expect(isGenerateStepReached(getResearchFlowSteps(r, false))).toBe(false);
+    expect(isGenerateStepReached(getResearchFlowSteps(r, false, false))).toBe(false);
   });
 
   it("レビューの未対応が 0 件でも、レビュー完了操作をしていなければ未到達", () => {
@@ -174,12 +200,12 @@ describe("isGenerateStepReached (#322)", () => {
       kind: "unreviewed",
       undecidedCount: 0,
     });
-    expect(isGenerateStepReached(getResearchFlowSteps(r, false))).toBe(false);
+    expect(isGenerateStepReached(getResearchFlowSteps(r, false, false))).toBe(false);
   });
 
   it.each([false, true])("レビュー完了なら到達 (営業資産あり=%s)", (hasAssets) => {
     const r = run({ review_completed_at: "2026-10-10T00:00:00.000Z" });
-    expect(isGenerateStepReached(getResearchFlowSteps(r, hasAssets))).toBe(true);
+    expect(isGenerateStepReached(getResearchFlowSteps(r, hasAssets, false))).toBe(true);
   });
 
   it("手順表示の ② が done のときと一致する", () => {
@@ -192,7 +218,7 @@ describe("isGenerateStepReached (#322)", () => {
     ];
     for (const r of runs) {
       for (const hasAssets of [false, true]) {
-        const steps = getResearchFlowSteps(r, hasAssets);
+        const steps = getResearchFlowSteps(r, hasAssets, false);
         expect(isGenerateStepReached(steps)).toBe(
           steps.find((s) => s.key === "review")?.status === "done",
         );
