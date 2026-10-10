@@ -10,7 +10,13 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { ResearchItem, SourceRegistryEntry } from "@/types/research-run";
-import { ResearchItemCard } from "../research-item-card";
+import type { BasicInfoField } from "@/types/basic-info";
+import {
+  ResearchItemCard,
+  pendingDecisionForItem,
+  toPendingDecision,
+  type PendingDecision,
+} from "../research-item-card";
 
 function makeItem(overrides: Partial<ResearchItem> = {}): ResearchItem {
   return {
@@ -99,5 +105,123 @@ describe("ResearchItemCard (#301)", () => {
     );
     expect(html).not.toContain("このrun");
     expect(html).toContain("掲載が確認できる。");
+  });
+});
+
+/**
+ * 押したボタンだけに処理中の表示を出す (#337)。
+ *
+ * 判断は全項目で 1 つの transition を共有している。`busy` だけを見ると全ボタンが
+ * 一斉に薄くなるだけで、どれを押したかが分からなかった。
+ */
+describe("ResearchItemCard: 押したボタンだけを処理中にする (#337)", () => {
+  /** ラベルで `<button>` を探し、属性部分を返す。処理中はラベルの前にスピナーの svg が入る。 */
+  function buttonAttributes(html: string, label: string): string {
+    const match = html.match(
+      new RegExp(
+        `<button([^>]*)>(?:<svg[^>]*data-slot="button-spinner"[^>]*>.*?</svg>)?(?:<svg[^>]*>.*?</svg>)?${label}</button>`,
+      ),
+    );
+    if (match === null) throw new Error(`button not found: ${label}`);
+    return `${match[1]!} `;
+  }
+  const isBusy = (html: string, label: string) => / aria-busy="true"/.test(buttonAttributes(html, label));
+  const isDisabled = (html: string, label: string) => / disabled(=|\s)/.test(buttonAttributes(html, label));
+
+  const renderPending = (
+    item: ResearchItem,
+    pendingDecision: PendingDecision | null,
+    current?: BasicInfoField,
+  ) =>
+    renderToStaticMarkup(
+      <ResearchItemCard
+        item={item}
+        label="項目"
+        sourceRegistry={[]}
+        decision={undefined}
+        busy
+        pendingDecision={pendingDecision}
+        onDecide={() => {}}
+        current={current}
+        defaultOpen
+      />,
+    );
+
+  it.each([
+    ["adopted", "採用"],
+    ["rejected", "却下"],
+    ["skipped", "スキップ"],
+  ] as const)("%s を押したら「%s」だけが処理中になり、ほかは押せないだけ", (decision, label) => {
+    const html = renderPending(makeItem(), { decision, edited: false });
+    const labels = ["採用", "編集して採用", "却下", "スキップ"];
+    for (const other of labels) {
+      expect(isDisabled(html, other)).toBe(true);
+      expect(isBusy(html, other)).toBe(other === label);
+    }
+  });
+
+  it("上書きになる項目では、言い換えたボタン (上書きする / いまの値を残す) が処理中になる", () => {
+    const current: BasicInfoField = { value: "03-0000-0000", tier: "A", filled_by: "manual", updated_at: "2026-10-01T00:00:00.000Z" };
+    const adopt = renderPending(makeItem(), { decision: "adopted", edited: false }, current);
+    expect(isBusy(adopt, "上書きする")).toBe(true);
+    expect(isBusy(adopt, "いまの値を残す")).toBe(false);
+    const keep = renderPending(makeItem(), { decision: "rejected", edited: false }, current);
+    expect(isBusy(keep, "いまの値を残す")).toBe(true);
+    expect(isBusy(keep, "上書きする")).toBe(false);
+  });
+
+  it("候補を選ぶ項目では、押した候補のボタンだけが処理中になる", () => {
+    const item = makeItem({
+      status: "conflict",
+      value: null,
+      candidates: [
+        { candidate_id: "a", label: "公式サイト", value: "045-111-1111", evidence: "公式", source_ids: [] },
+        { candidate_id: "b", label: "Google Places", value: "045-222-2222", evidence: "Places", source_ids: [] },
+      ],
+    });
+    const html = renderPending(item, { decision: "adopted", selectedCandidateId: "b", edited: false });
+    expect(isBusy(html, "候補Bを採用")).toBe(true);
+    expect(isBusy(html, "候補Aを採用")).toBe(false);
+    expect(isDisabled(html, "候補Aを採用")).toBe(true);
+  });
+
+  it("「編集内容で採用」の処理中は、編集欄を残してそのボタンを処理中にする", () => {
+    const html = renderPending(makeItem(), { decision: "adopted", edited: true });
+    expect(html).toContain("<textarea");
+    expect(isBusy(html, "編集内容で採用")).toBe(true);
+    expect(isDisabled(html, "キャンセル")).toBe(true);
+    // 「採用」と「編集内容で採用」は同じ adopted でもボタンが違う。
+    expect(html).not.toContain(">採用</button>");
+  });
+
+  it("処理中の判断が無ければ (主ボタンの完了処理中など)、全ボタンが押せないだけ", () => {
+    const html = renderPending(makeItem(), null);
+    expect(html).not.toMatch(/ aria-busy="true"/);
+    expect(isDisabled(html, "採用")).toBe(true);
+  });
+});
+
+describe("pendingDecisionForItem (#337)", () => {
+  const pending = { itemKey: "phone", decision: "adopted" as const, edited: false };
+
+  it("判断の処理中なら、押した項目にだけ渡す", () => {
+    expect(pendingDecisionForItem("phone", true, pending)).toBe(pending);
+    expect(pendingDecisionForItem("address", true, pending)).toBeNull();
+  });
+
+  it("処理が終わった後は、記録が残っていても渡さない", () => {
+    expect(pendingDecisionForItem("phone", false, pending)).toBeNull();
+  });
+
+  it("まだ何も押していなければ渡さない", () => {
+    expect(pendingDecisionForItem("phone", true, null)).toBeNull();
+  });
+});
+
+describe("toPendingDecision (#337)", () => {
+  it("編集した値があれば「編集内容で採用」、無ければ「採用」として区別する", () => {
+    expect(toPendingDecision({ decision: "adopted", editedValue: "x" }).edited).toBe(true);
+    expect(toPendingDecision({ decision: "adopted", editedValue: "" }).edited).toBe(true);
+    expect(toPendingDecision({ decision: "adopted" }).edited).toBe(false);
   });
 });
