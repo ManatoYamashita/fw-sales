@@ -72,9 +72,9 @@ export async function updateBasicInfoFieldAction(
     //
     // 旧実装は `repos.store.mergeBasicInfo`(トランザクション外・行ロック無しの
     // read-merge-write)を直接呼んでいた。`stores` の更新は**全列 SET** のため、
-    // review 側の書込み(個別採用 / 一括採用 / 「残りを採用して調査完了」)と
+    // review 側の書込み(個別採用 / 「まとめて採用」)と
     // 並行実行されると後着が先着を丸ごと巻き戻す lost update が発生しうる。
-    // とくに「残りを採用して調査完了」は約30 key を一度に書くため被害が大きい。
+    // とくに「まとめて採用」は多数の key を一度に書くため被害が大きい。
     //
     // ロック順は `stores` のみ(review 系は run -> store)。
     // `stores` -> `store_research_runs` の順で明示ロックを取る経路は存在しないため、

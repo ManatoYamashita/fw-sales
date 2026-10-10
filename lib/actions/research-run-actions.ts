@@ -30,6 +30,8 @@ import {
   getUndecidedReviewableItems,
   isReviewableItem,
   isRunStuck,
+  isSameBasicInfoValue,
+  planReviewLanes,
 } from "@/lib/domain/research-review";
 import {
   isValidReviewDecisionForItem,
@@ -184,7 +186,7 @@ export interface RecordReviewDecisionInput {
  *
  * 「採用した項目のみ mergeBasicInfo(..., "manual") で stores.basic_info へ即時反映」
  * (Plan §4)の実装。却下・スキップは `review_decisions` の記録のみで `basic_info` は
- * 変更しない。
+ * 変更しない。採用でも、いまの値と同じ(正規化して一致)なら `basic_info` は変更しない (#319)。
  *
  * feat/research-review-write-integrity(MAJOR10・MAJOR11)での変更:
  * - `repos.transaction` + `getForUpdate`(`SELECT ... FOR UPDATE`)でrun行をロックし、
@@ -293,82 +295,18 @@ export async function recordReviewDecisionAction(
         return failure("項目の反映に失敗しました");
       }
 
-      const mergedBasicInfo = mergeBasicInfo(store.basic_info, { [itemKey]: field }, "manual", now);
-      await tx.store.update(storeId, { basic_info: mergedBasicInfo });
+      // 採用しても値が変わらない(正規化して一致する)なら基本情報へ書き込まない (#319)。
+      // 書き込むと、いまの値の表記・出典・更新日時が調査の値のもので置き換わってしまう。
+      if (!isSameBasicInfoValue(store.basic_info[itemKey], field.value ?? "")) {
+        const mergedBasicInfo = mergeBasicInfo(store.basic_info, { [itemKey]: field }, "manual", now);
+        await tx.store.update(storeId, { basic_info: mergedBasicInfo });
+      }
     }
 
     await tx.researchRun.update(runId, { review_decisions: mergedDecisions });
     revalidateTag(CACHE_TAGS.store(storeId), "max");
 
     return success({ reviewDecisions: mergedDecisions });
-  });
-}
-
-/**
- * 確認済み(confirmed)項目のうち未対応のものを一括採用する(PR4, Plan v3.2 §5.3
- * 「確認済みを全て採用」)。推定(inferred)項目は対象外(1件ずつの人間判断を強制、
- * Plan §5.3)。store/run の書込みをそれぞれ1回にまとめ、項目数分の往復を避ける。
- *
- * ## 現在 UI からは呼ばれていない(feat/ai-research-quality-ux-hardening)
- *
- * Primary CTA が `adoptRemainingAndCompleteReviewAction`(confirmed + inferred を
- * 採用して完了まで行う)へ置き換わったため、production caller は 0 件。
- * **本 hardening では意図的に削除していない**:
- *
- * - 削除は挙動改善ではなく cleanup であり、hardening の commit に混ぜると
- *   レビュー範囲が広がる
- * - 本 action のテストは `tx.store.getForUpdate` を使う行ロック契約も
- *   カバーしており、消すとその回帰検知も一緒に失われる
- *
- * 撤去は別 cleanup PR で行うこと(その際は対応するテストも同時に整理する)。
- */
-export async function bulkAdoptConfirmedAction(input: {
-  runId: string;
-  storeId: string;
-}): Promise<ActionResult<{ reviewDecisions: ReviewDecisions; adoptedCount: number }>> {
-  const session = await getCurrentSession();
-  if (!session) return failure("ログインが必要です");
-
-  const { runId, storeId } = input;
-  if (typeof runId !== "string" || runId.trim() === "") return failure("パラメータが不正です");
-  if (typeof storeId !== "string" || storeId.trim() === "") return failure("パラメータが不正です");
-
-  // feat/research-review-write-integrity(MAJOR10): getForUpdateでrun行をロックし、
-  // recordReviewDecisionAction/completeReviewActionと同一runへの並行操作を直列化する。
-  // basic_info書込みとreview_decisions書込みも1トランザクションで原子化する。
-  return repos.transaction(async (tx) => {
-    const run = await tx.researchRun.getForUpdate(runId);
-    if (!run || run.store_id !== storeId) return failure("調査結果が見つかりません");
-    if (run.status !== "succeeded") return failure("この調査はまだレビューできません");
-    if (run.review_completed_at !== null) return failure("このレビューは既に完了しています");
-
-    const targets = (run.result ?? []).filter(
-      (item) => item.status === "confirmed" && run.review_decisions[item.key] === undefined,
-    );
-    if (targets.length === 0) {
-      return success({ reviewDecisions: run.review_decisions, adoptedCount: 0 }, "対象がありません");
-    }
-
-    const store = await tx.store.getForUpdate(storeId);
-    if (!store) return failure("店舗が見つかりません");
-
-    const now = nowIso();
-    let basicInfo = store.basic_info;
-    const mergedDecisions: ReviewDecisions = { ...run.review_decisions };
-    for (const item of targets) {
-      const field = buildAdoptedBasicInfoField(item, run.source_registry, now);
-      basicInfo = mergeBasicInfo(basicInfo, { [item.key]: field }, "manual", now);
-      mergedDecisions[item.key] = { decision: "adopted", decided_at: now };
-    }
-
-    await tx.store.update(storeId, { basic_info: basicInfo });
-    await tx.researchRun.update(runId, { review_decisions: mergedDecisions });
-    revalidateTag(CACHE_TAGS.store(storeId), "max");
-
-    return success(
-      { reviewDecisions: mergedDecisions, adoptedCount: targets.length },
-      `${targets.length}件を採用しました`,
-    );
   });
 }
 
@@ -439,57 +377,75 @@ export async function completeReviewAction(
   });
 }
 
-export interface AdoptRemainingInput {
+export interface AdoptBulkLaneInput {
   runId: string;
   storeId: string;
+  /**
+   * 画面がまとめて採用すると表示した項目の key。サーバで計算し直した `bulk` に
+   * 1 つでも含まれなければ、何も書き込まずに失敗する(表示後に基本情報が変わった場合)。
+   */
+  expectedKeys: string[];
+  /** true なら、採用後に未判断が 0 件になることを確かめてレビューを完了する。 */
+  complete: boolean;
 }
 
-export interface AdoptRemainingResult {
+export interface AdoptBulkLaneResult {
   /** マージ後の全 decisions。クライアントはこれで state を置き換える(再構築しない)。 */
   reviewDecisions: ReviewDecisions;
-  /** tx 内で採用した now。クライアントで `nowIso()` を捏造させない。 */
-  reviewCompletedAt: string;
+  /** 完了した場合の完了時刻(tx 内で採用した now)。完了しない場合は null。 */
+  reviewCompletedAt: string | null;
   adoptedCount: number;
+  /** 基本情報が実際に変わった件数(同じ値の項目は数えない)。 */
+  changedCount: number;
 }
 
 /**
- * 「残りを採用して調査完了」(feat/ai-research-quality-ux-hardening、Plan §12.2)。
+ * 主ボタン「N件をまとめて採用」「N件を採用して調査完了」(#301, #319)。
  *
- * ## なぜ必要か
+ * ## 何を採用するか
  *
- * 実運用の操作モデルは「AIが具体的に調査した値は基本採用。明らかにおかしいものだけ
- * 編集/却下。skipはほぼ使わない」だが、UIは逆に「全項目に個別判断を要求し、
- * 残りは『スキップ』して完了」というモデルだった。しかも
- * `bulkAdoptConfirmedAction` は `inferred` を意図的に除外していたため、
- * 一括操作を使っても未判断が必ず残り、Primary CTA が画面から消えていた。
+ * `planReviewLanes` が `bulk` に振り分けた項目だけ:
+ * - 採用しても基本情報が変わらない項目(同じ値)
+ * - 注記の無い確認済みで、いまの値が空の項目(新規)
  *
- * ## semantics(承認済みの仕様変更を含む)
+ * **推定の値・上書きになる値・注記ありの値・競合は採用しない。** これらは 1 件ずつ判断する。
+ * 旧「残りを採用して調査完了」(`adoptRemainingAndCompleteReviewAction`)は推定まで採用し、
+ * 既存の基本情報を無条件に上書きしていた(本番で再調査した 2 店舗の 24〜25 件)。
  *
- * - 未判断 `confirmed` → adopted(tier A)
- * - 未判断 `inferred`  → adopted(tier B)
- *   **これは `bulkAdoptConfirmedAction` の「推定項目は1件ずつの人間判断を強制」という
- *   既存の設計判断を意図的に変更するもの**(ユーザー承認済み)。
- * - 未判断 `conflict`  → **自動採用しない。** 1件でも残っていれば failure を返し、
- *   トランザクションごとロールバックする(DBへ一切書き込まない)。
- * - 既存の `adopted` / `rejected` / `skipped` → 変更しない(immutable decision)。
+ * ## 画面とサーバのずれを防ぐ
  *
- * ## 不変条件
+ * 振り分けはロックした `stores.basic_info` でサーバ側でも計算し直す。画面が表示した
+ * `expectedKeys` が 1 つでも `bulk` に無ければ、何も書き込まずに失敗する。
+ * 画面に「6件をまとめて採用」と出ていたのに、表示後の手入力で 1 件が上書きに変わっていた、
+ * といった場合に、見ていない上書きを起こさないため。
  *
- * - run 行ロック(`researchRun.getForUpdate`)+ **store 行ロック**
- *   (`store.getForUpdate`、Plan §12.2.2)。ロック順は run → store で既存 action と同一。
- * - `stores` への書き込みは `basic_info` と `stage` をまとめて **1回**。
- * - stage は `未調査` のときだけ `調査済み` へ昇格(`架電済み` を降格させない)。
- * - `revalidateTag` は **transaction の外**(`handoff-actions.ts` の規約に揃える)。
+ * ## 不変条件(旧 Action から引き継ぐ)
+ *
+ * - run 行ロック → store 行ロックの順(既存 action と同一)
+ * - `stores` への書き込みは `basic_info` と `stage` をまとめて最大 1 回。変化が無ければ書かない
+ * - 同じ値の項目は `basic_info` を書き換えない(判断だけ記録する)
+ * - stage は `未調査` のときだけ `調査済み` へ昇格(完了する場合のみ)
+ * - now は 1 度だけ取得し、全 decision と review_completed_at で使い回す
+ * - `revalidateTag` は transaction の外
  */
-export async function adoptRemainingAndCompleteReviewAction(
-  input: AdoptRemainingInput,
-): Promise<ActionResult<AdoptRemainingResult>> {
+export async function adoptBulkLaneAction(
+  input: AdoptBulkLaneInput,
+): Promise<ActionResult<AdoptBulkLaneResult>> {
   const session = await getCurrentSession();
   if (!session) return failure("ログインが必要です");
 
-  const { runId, storeId } = input;
+  const { runId, storeId, expectedKeys, complete } = input;
   if (typeof runId !== "string" || runId.trim() === "") return failure("パラメータが不正です");
   if (typeof storeId !== "string" || storeId.trim() === "") return failure("パラメータが不正です");
+  if (typeof complete !== "boolean") return failure("パラメータが不正です");
+  if (
+    !Array.isArray(expectedKeys) ||
+    expectedKeys.length === 0 ||
+    expectedKeys.some((key) => typeof key !== "string" || key.trim() === "") ||
+    new Set(expectedKeys).size !== expectedKeys.length
+  ) {
+    return failure("パラメータが不正です");
+  }
 
   const result = await repos.transaction(async (tx) => {
     const run = await tx.researchRun.getForUpdate(runId);
@@ -497,59 +453,66 @@ export async function adoptRemainingAndCompleteReviewAction(
     if (run.status !== "succeeded") return failure("この調査はまだレビューできません");
     if (run.review_completed_at !== null) return failure("このレビューは既に完了しています");
 
-    const items = run.result ?? [];
-    const undecided = getUndecidedReviewableItems(items, run.review_decisions);
-
-    // conflict は候補選択が必須。1件でも残っていれば書き込む前に中断する
-    // (`buildAdoptedBasicInfoField` は conflict で throw するため、
-    //  ここで弾かないと tx 全体が例外でロールバックされ、ユーザーには理由が伝わらない)。
-    const conflicts = undecided.filter((item) => item.status === "conflict");
-    if (conflicts.length > 0) {
-      return failure(`候補を選択する必要がある項目が${conflicts.length}件あります`);
-    }
-
     const store = await tx.store.getForUpdate(storeId);
     if (!store) return failure("店舗が見つかりません");
 
-    // now は1度だけ取得し、全 decision と review_completed_at で使い回す(決定性)。
-    const now = nowIso();
-    let basicInfo = store.basic_info;
-    const mergedDecisions: ReviewDecisions = { ...run.review_decisions };
-    for (const item of undecided) {
-      const field = buildAdoptedBasicInfoField(item, run.source_registry, now);
-      basicInfo = mergeBasicInfo(basicInfo, { [item.key]: field }, "manual", now);
-      mergedDecisions[item.key] = { decision: "adopted", decided_at: now };
+    const items = run.result ?? [];
+    const plan = planReviewLanes(items, run.review_decisions, store.basic_info);
+    const bulkByKey = new Map(
+      plan.filter((entry) => entry.lane === "bulk").map((entry) => [entry.item.key, entry.item]),
+    );
+    if (expectedKeys.some((key) => !bulkByKey.has(key))) {
+      return failure(
+        "画面を表示した後に基本情報か判断が変わりました。ページを再読み込みしてから、もう一度お試しください。",
+      );
     }
 
-    // basic_info と stage を1回の update にまとめる(既存 completeReviewAction は
-    // stage を別 update で書いていた)。stage 降格禁止ガードは従来どおり allow-list。
-    const storePatch: { basic_info: typeof basicInfo; stage?: "調査済み" } = {
-      basic_info: basicInfo,
-    };
-    if (store.stage === "未調査") storePatch.stage = "調査済み";
-    await tx.store.update(storeId, storePatch);
+    const expected = new Set(expectedKeys);
+    const remaining = plan.filter((entry) => !expected.has(entry.item.key)).length;
+    if (complete && remaining > 0) {
+      return failure(`ほかに判断が必要な項目が${remaining}件あります`);
+    }
+
+    const now = nowIso();
+    let basicInfo = store.basic_info;
+    let changedCount = 0;
+    const mergedDecisions: ReviewDecisions = { ...run.review_decisions };
+    for (const key of expectedKeys) {
+      const item = bulkByKey.get(key)!;
+      const field = buildAdoptedBasicInfoField(item, run.source_registry, now);
+      if (!isSameBasicInfoValue(basicInfo[key], field.value ?? "")) {
+        basicInfo = mergeBasicInfo(basicInfo, { [key]: field }, "manual", now);
+        changedCount++;
+      }
+      mergedDecisions[key] = { decision: "adopted", decided_at: now };
+    }
+
+    const storePatch: { basic_info?: typeof basicInfo; stage?: "調査済み" } = {};
+    if (changedCount > 0) storePatch.basic_info = basicInfo;
+    if (complete && store.stage === "未調査") storePatch.stage = "調査済み";
+    if (Object.keys(storePatch).length > 0) await tx.store.update(storeId, storePatch);
 
     await tx.researchRun.update(runId, {
       review_decisions: mergedDecisions,
-      review_completed_at: now,
+      ...(complete ? { review_completed_at: now } : {}),
     });
 
+    const adoptedCount = expectedKeys.length;
     return success(
       {
         reviewDecisions: mergedDecisions,
-        reviewCompletedAt: now,
-        adoptedCount: undecided.length,
+        reviewCompletedAt: complete ? now : null,
+        adoptedCount,
+        changedCount,
       },
-      undecided.length > 0
-        ? `${undecided.length}件を採用してレビューを完了しました`
-        : "レビューを完了しました",
+      complete ? `${adoptedCount}件を採用してレビューを完了しました` : `${adoptedCount}件を採用しました`,
     );
   });
 
   // revalidate は transaction 成功後にのみ行う(rollback 時に走らせない)。
   if (result.ok) {
     revalidateTag(CACHE_TAGS.store(storeId), "max");
-    revalidateTag(CACHE_TAGS.stores, "max");
+    if (complete) revalidateTag(CACHE_TAGS.stores, "max");
   }
   return result;
 }

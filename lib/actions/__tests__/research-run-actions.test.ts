@@ -85,9 +85,8 @@ const {
   startResearchRunAction,
   getResearchRunStatusAction,
   recordReviewDecisionAction,
-  bulkAdoptConfirmedAction,
   completeReviewAction,
-  adoptRemainingAndCompleteReviewAction,
+  adoptBulkLaneAction,
 } = await import("../research-run-actions");
 const { _resetRateLimitForTest } = await import("@/lib/ai/rate-limiter");
 
@@ -472,11 +471,16 @@ describe("review系Actionの行ロック(getForUpdate)呼び出し", () => {
     expect(mockResearchRunGet).not.toHaveBeenCalled();
   });
 
-  it("bulkAdoptConfirmedActionはgetForUpdateでrun行をロックする", async () => {
+  it("adoptBulkLaneActionはgetForUpdateでrun行をロックする", async () => {
     const run = makeRun();
     mockGetForUpdate.mockResolvedValue(run);
 
-    await bulkAdoptConfirmedAction({ runId: run.id, storeId: run.store_id });
+    await adoptBulkLaneAction({
+      runId: run.id,
+      storeId: run.store_id,
+      expectedKeys: ["business_hours_holidays"],
+      complete: false,
+    });
 
     expect(mockGetForUpdate).toHaveBeenCalledWith(run.id);
     expect(mockResearchRunGet).not.toHaveBeenCalled();
@@ -499,7 +503,12 @@ describe("review系Actionの行ロック(getForUpdate)呼び出し", () => {
     mockResearchRunGet.mockResolvedValue(run);
     mockGetForUpdate.mockResolvedValue(null);
 
-    const result = await bulkAdoptConfirmedAction({ runId: run.id, storeId: run.store_id });
+    const result = await adoptBulkLaneAction({
+      runId: run.id,
+      storeId: run.store_id,
+      expectedKeys: ["business_hours_holidays"],
+      complete: false,
+    });
 
     expect(result.ok).toBe(false);
   });
@@ -538,6 +547,67 @@ describe("recordReviewDecisionAction", () => {
         }),
       }),
     );
+  });
+
+  it("いまの値と同じ(正規化して一致)なら、判断だけ記録し basic_info を書き換えない (#319)", async () => {
+    const run = makeRun();
+    mockGetForUpdate.mockResolvedValue(run);
+    mockStoreGetForUpdate.mockResolvedValue({
+      id: run.store_id,
+      stage: "調査済み",
+      basic_info: {
+        business_hours_holidays: {
+          value: "１７:００〜２４:００",
+          tier: "A",
+          filled_by: "manual",
+          updated_at: "2026-09-01T00:00:00.000Z",
+        },
+      },
+    });
+
+    const result = await recordReviewDecisionAction({
+      runId: run.id,
+      storeId: run.store_id,
+      itemKey: "business_hours_holidays",
+      decision: "adopted",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(mockStoreUpdate).not.toHaveBeenCalled();
+    expect(mockUpdate).toHaveBeenCalledWith(
+      run.id,
+      expect.objectContaining({
+        review_decisions: expect.objectContaining({
+          business_hours_holidays: expect.objectContaining({ decision: "adopted" }),
+        }),
+      }),
+    );
+  });
+
+  it("いまの値と違えば上書きする(上のテストの検知能力の確認)", async () => {
+    const run = makeRun();
+    mockGetForUpdate.mockResolvedValue(run);
+    mockStoreGetForUpdate.mockResolvedValue({
+      id: run.store_id,
+      stage: "調査済み",
+      basic_info: {
+        business_hours_holidays: {
+          value: "18:00〜23:00",
+          tier: "A",
+          filled_by: "manual",
+          updated_at: "2026-09-01T00:00:00.000Z",
+        },
+      },
+    });
+
+    await recordReviewDecisionAction({
+      runId: run.id,
+      storeId: run.store_id,
+      itemKey: "business_hours_holidays",
+      decision: "adopted",
+    });
+
+    expect(mockStoreUpdate).toHaveBeenCalledTimes(1);
   });
 
   it("却下(rejected)時はbasic_infoを変更しない", async () => {
@@ -812,43 +882,6 @@ describe("recordReviewDecisionAction", () => {
   });
 });
 
-describe("bulkAdoptConfirmedAction", () => {
-  it("confirmed かつ未対応の項目のみ一括採用し、書込みは1回ずつにまとめる", async () => {
-    const run = makeRun({
-      result: [
-        makeItem({ key: "store_name", status: "confirmed", value: "A店" }),
-        makeItem({ key: "address", status: "confirmed", value: "東京都..." }),
-        makeItem({ key: "average_spend_day_night", status: "inferred", value: "3000円" }),
-      ],
-    });
-    mockGetForUpdate.mockResolvedValue(run);
-
-    const result = await bulkAdoptConfirmedAction({ runId: run.id, storeId: run.store_id });
-
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(result.data.adoptedCount).toBe(2);
-    expect(mockStoreUpdate).toHaveBeenCalledTimes(1);
-    expect(mockUpdate).toHaveBeenCalledTimes(1);
-    const basicInfoArg = mockStoreUpdate.mock.calls[0]?.[1]?.basic_info;
-    expect(basicInfoArg.store_name.tier).toBe("A");
-    expect(basicInfoArg.address.tier).toBe("A");
-    expect(basicInfoArg.average_spend_day_night).toBeUndefined();
-  });
-
-  it("対象が無ければ書込みを行わない", async () => {
-    const run = makeRun({
-      result: [makeItem({ status: "inferred" })],
-    });
-    mockGetForUpdate.mockResolvedValue(run);
-
-    const result = await bulkAdoptConfirmedAction({ runId: run.id, storeId: run.store_id });
-
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(result.data.adoptedCount).toBe(0);
-    expect(mockStoreUpdate).not.toHaveBeenCalled();
-  });
-});
-
 describe("completeReviewAction", () => {
   it("未対応項目が残っている場合、skipRemaining=falseなら拒否する", async () => {
     const run = makeRun({ result: [makeItem()] });
@@ -942,181 +975,223 @@ describe("completeReviewAction", () => {
  * 既存2 action(`bulkAdoptConfirmedAction` / `completeReviewAction`)の body を
  * **1トランザクション**に連結したもの。既存の不変条件をすべて維持する。
  */
-describe("adoptRemainingAndCompleteReviewAction", () => {
+describe("adoptBulkLaneAction (#301, #319)", () => {
+  const NOW_KEYS = ["business_hours_holidays", "seat_count"];
   const ITEMS: ResearchItem[] = [
     { key: "business_hours_holidays", research_policy: "FACT", status: "confirmed", value: "17:00-24:00", evidence: "e", source_ids: [] },
     { key: "seat_count", research_policy: "FACT", status: "confirmed", value: "20席", evidence: "e", source_ids: [] },
     { key: "main_target", research_policy: "ANALYSIS", status: "inferred", value: "30代", evidence: "e", source_ids: [] },
   ];
 
-  it("未判断のconfirmedをTier A、inferredをTier Bで採用する", async () => {
-    const run = makeRun({ result: ITEMS });
-    mockGetForUpdate.mockResolvedValue(run);
-    mockStoreGetForUpdate.mockResolvedValue({ id: run.store_id, stage: "未調査", basic_info: {} });
+  /** 調査結果から採用済みの値(`source_quote` あり)。 */
+  const adopted = (value: string) => ({
+    value,
+    tier: "A" as const,
+    source_quote: "前回の根拠",
+    filled_by: "manual" as const,
+    updated_at: "2026-09-01T00:00:00.000Z",
+  });
 
-    const result = await adoptRemainingAndCompleteReviewAction({
-      runId: run.id,
-      storeId: run.store_id,
+  const call = (overrides: Partial<Parameters<typeof adoptBulkLaneAction>[0]> = {}) =>
+    adoptBulkLaneAction({
+      runId: "research_run_1",
+      storeId: "store-1",
+      expectedKeys: NOW_KEYS,
+      complete: false,
+      ...overrides,
     });
+
+  beforeEach(() => {
+    mockGetForUpdate.mockResolvedValue(makeRun({ result: ITEMS }));
+    mockStoreGetForUpdate.mockResolvedValue({ id: "store-1", stage: "未調査", basic_info: {} });
+  });
+
+  it("まとめて採用の対象(注記の無い確認済みの新規)だけを採用し、推定は採用しない", async () => {
+    const result = await call();
 
     expect(result.ok).toBe(true);
     const patch = mockStoreUpdate.mock.calls[0]![1] as {
       basic_info: Record<string, { tier: string; filled_by: string }>;
     };
     expect(patch.basic_info.business_hours_holidays!.tier).toBe("A");
-    expect(patch.basic_info.main_target!.tier).toBe("B");
-    expect(patch.basic_info.business_hours_holidays!.filled_by).toBe("manual");
+    expect(patch.basic_info.seat_count!.filled_by).toBe("manual");
+    expect(patch.basic_info.main_target).toBeUndefined();
+    const runPatch = mockUpdate.mock.calls[0]![1] as { review_decisions: Record<string, unknown> };
+    expect(runPatch.review_decisions.main_target).toBeUndefined();
   });
 
-  it("conflictが未判断で残っていれば拒否し、DBへ一切書き込まない", async () => {
-    const run = makeRun({
-      result: [
-        ...ITEMS,
-        {
-          key: "average_spend_day_night",
-          research_policy: "ANALYSIS" as const,
-          status: "conflict" as const,
-          value: null,
-          evidence: "e",
-          source_ids: [],
-          candidates: [{ candidate_id: "c1", label: "A", value: "4000", evidence: "e", source_ids: [] }],
-        },
-      ],
-    });
-    mockGetForUpdate.mockResolvedValue(run);
-
-    const result = await adoptRemainingAndCompleteReviewAction({
-      runId: run.id,
-      storeId: run.store_id,
-    });
+  it("推定を expectedKeys に含めたら、何も書き込まずに拒否する", async () => {
+    const result = await call({ expectedKeys: [...NOW_KEYS, "main_target"] });
 
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toContain("候補を選択");
     expect(mockStoreUpdate).not.toHaveBeenCalled();
     expect(mockUpdate).not.toHaveBeenCalled();
   });
 
-  it("既存のrejected / skipped は変更せず、未判断だけをadoptedにする(immutable)", async () => {
-    const run = makeRun({
-      result: ITEMS,
-      review_decisions: {
-        business_hours_holidays: { decision: "rejected", decided_at: "2026-08-01T00:00:00.000Z" },
-        seat_count: { decision: "skipped", decided_at: "2026-08-01T00:00:00.000Z" },
-      },
+  it("画面の表示後に基本情報が変わり上書きになった項目があれば、何も書き込まずに拒否する", async () => {
+    mockStoreGetForUpdate.mockResolvedValue({
+      id: "store-1",
+      stage: "未調査",
+      basic_info: { seat_count: adopted("18席") },
     });
-    mockGetForUpdate.mockResolvedValue(run);
-    mockStoreGetForUpdate.mockResolvedValue({ id: run.store_id, stage: "未調査", basic_info: {} });
 
-    await adoptRemainingAndCompleteReviewAction({ runId: run.id, storeId: run.store_id });
+    const result = await call();
 
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("再読み込み");
+    expect(mockStoreUpdate).not.toHaveBeenCalled();
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it("上書きにならないことの対照: いまの値が同じなら受け付ける(上のテストの検知能力の確認)", async () => {
+    mockStoreGetForUpdate.mockResolvedValue({
+      id: "store-1",
+      stage: "未調査",
+      basic_info: { seat_count: adopted("20席") },
+    });
+
+    const result = await call();
+
+    expect(result.ok).toBe(true);
+  });
+
+  it("同じ値の項目は判断だけ記録し、基本情報の値・出典・更新日時を書き換えない", async () => {
+    const current = adopted("２０席 ");
+    mockStoreGetForUpdate.mockResolvedValue({
+      id: "store-1",
+      stage: "未調査",
+      basic_info: { seat_count: current },
+    });
+
+    const result = await call();
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.adoptedCount).toBe(2);
+      expect(result.data.changedCount).toBe(1);
+    }
+    const patch = mockStoreUpdate.mock.calls[0]![1] as { basic_info: Record<string, unknown> };
+    expect(patch.basic_info.seat_count).toBe(current);
     const runPatch = mockUpdate.mock.calls[0]![1] as {
       review_decisions: Record<string, { decision: string }>;
     };
-    expect(runPatch.review_decisions.business_hours_holidays!.decision).toBe("rejected");
-    expect(runPatch.review_decisions.seat_count!.decision).toBe("skipped");
-    expect(runPatch.review_decisions.main_target!.decision).toBe("adopted");
+    expect(runPatch.review_decisions.seat_count!.decision).toBe("adopted");
   });
 
-  it("run行とstore行の両方をgetForUpdateでロックする(getは使わない)", async () => {
-    const run = makeRun({ result: ITEMS });
-    mockGetForUpdate.mockResolvedValue(run);
-    mockStoreGetForUpdate.mockResolvedValue({ id: run.store_id, stage: "未調査", basic_info: {} });
+  it("すべて同じ値なら stores へ書き込まない", async () => {
+    mockStoreGetForUpdate.mockResolvedValue({
+      id: "store-1",
+      stage: "未調査",
+      basic_info: { business_hours_holidays: adopted("17:00-24:00"), seat_count: adopted("20席") },
+    });
 
-    await adoptRemainingAndCompleteReviewAction({ runId: run.id, storeId: run.store_id });
+    const result = await call();
 
-    expect(mockGetForUpdate).toHaveBeenCalledWith(run.id);
-    expect(mockStoreGetForUpdate).toHaveBeenCalledWith(run.store_id);
-    expect(mockResearchRunGet).not.toHaveBeenCalled();
-    expect(mockStoreGet).not.toHaveBeenCalled();
-  });
-
-  it("storesへの書き込みは1回にまとめる(basic_info と stage を同時に)", async () => {
-    const run = makeRun({ result: ITEMS });
-    mockGetForUpdate.mockResolvedValue(run);
-    mockStoreGetForUpdate.mockResolvedValue({ id: run.store_id, stage: "未調査", basic_info: {} });
-
-    await adoptRemainingAndCompleteReviewAction({ runId: run.id, storeId: run.store_id });
-
-    expect(mockStoreUpdate).toHaveBeenCalledTimes(1);
+    expect(result.ok).toBe(true);
+    expect(mockStoreUpdate).not.toHaveBeenCalled();
     expect(mockUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it("complete: true は、採用後に未判断が残るなら何も書き込まずに拒否する", async () => {
+    const result = await call({ complete: true });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("1件");
+    expect(mockStoreUpdate).not.toHaveBeenCalled();
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it("complete: true で未判断が残らなければ、完了時刻と stage を 1 回の書き込みで記録する", async () => {
+    mockGetForUpdate.mockResolvedValue(makeRun({ result: ITEMS.slice(0, 2) }));
+
+    const result = await call({ complete: true });
+
+    expect(result.ok).toBe(true);
+    expect(mockStoreUpdate).toHaveBeenCalledTimes(1);
     const patch = mockStoreUpdate.mock.calls[0]![1] as Record<string, unknown>;
     expect(patch.stage).toBe("調査済み");
     expect(patch.basic_info).toBeDefined();
+    const runPatch = mockUpdate.mock.calls[0]![1] as {
+      review_completed_at: string;
+      review_decisions: Record<string, { decided_at: string }>;
+    };
+    if (result.ok) {
+      expect(result.data.reviewCompletedAt).toBe(runPatch.review_completed_at);
+      expect(result.data.reviewDecisions).toEqual(runPatch.review_decisions);
+    }
+    const times = new Set(Object.values(runPatch.review_decisions).map((d) => d.decided_at));
+    expect([...times]).toEqual([runPatch.review_completed_at]);
+  });
+
+  it("complete: false では完了時刻も stage も書かない", async () => {
+    const result = await call();
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data.reviewCompletedAt).toBeNull();
+    const patch = mockStoreUpdate.mock.calls[0]![1] as Record<string, unknown>;
+    expect(patch.stage).toBeUndefined();
+    const runPatch = mockUpdate.mock.calls[0]![1] as Record<string, unknown>;
+    expect(runPatch.review_completed_at).toBeUndefined();
   });
 
   it("架電済みを調査済みへ降格させない", async () => {
-    const run = makeRun({ result: ITEMS });
-    mockGetForUpdate.mockResolvedValue(run);
-    mockStoreGetForUpdate.mockResolvedValue({ id: run.store_id, stage: "架電済み", basic_info: {} });
+    mockGetForUpdate.mockResolvedValue(makeRun({ result: ITEMS.slice(0, 2) }));
+    mockStoreGetForUpdate.mockResolvedValue({ id: "store-1", stage: "架電済み", basic_info: {} });
 
-    await adoptRemainingAndCompleteReviewAction({ runId: run.id, storeId: run.store_id });
+    await call({ complete: true });
 
     const patch = mockStoreUpdate.mock.calls[0]![1] as Record<string, unknown>;
     expect(patch.stage).toBeUndefined();
   });
 
-  it("review_completed_at / reviewDecisions をサーバー側の値として返す(クライアントで捏造させない)", async () => {
-    const run = makeRun({ result: ITEMS });
-    mockGetForUpdate.mockResolvedValue(run);
-    mockStoreGetForUpdate.mockResolvedValue({ id: run.store_id, stage: "未調査", basic_info: {} });
+  it("既存の判断は変更しない(immutable)。判断済みの key を expectedKeys に含めたら拒否する", async () => {
+    mockGetForUpdate.mockResolvedValue(
+      makeRun({
+        result: ITEMS,
+        review_decisions: {
+          business_hours_holidays: { decision: "rejected", decided_at: "2026-08-01T00:00:00.000Z" },
+        },
+      }),
+    );
 
-    const result = await adoptRemainingAndCompleteReviewAction({
-      runId: run.id,
-      storeId: run.store_id,
-    });
-
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      const runPatch = mockUpdate.mock.calls[0]![1] as {
-        review_completed_at: string;
-        review_decisions: Record<string, unknown>;
-      };
-      expect(result.data.reviewCompletedAt).toBe(runPatch.review_completed_at);
-      expect(result.data.reviewDecisions).toEqual(runPatch.review_decisions);
-      expect(result.data.adoptedCount).toBe(3);
-    }
+    expect((await call()).ok).toBe(false);
+    expect((await call({ expectedKeys: ["seat_count"] })).ok).toBe(true);
+    const runPatch = mockUpdate.mock.calls[0]![1] as {
+      review_decisions: Record<string, { decision: string }>;
+    };
+    expect(runPatch.review_decisions.business_hours_holidays!.decision).toBe("rejected");
   });
 
-  it("全decisionのdecided_atが同一(nowを1度だけ取得する)", async () => {
-    const run = makeRun({ result: ITEMS });
-    mockGetForUpdate.mockResolvedValue(run);
-    mockStoreGetForUpdate.mockResolvedValue({ id: run.store_id, stage: "未調査", basic_info: {} });
+  it("run行とstore行の両方をgetForUpdateでロックする(getは使わない)", async () => {
+    await call();
 
-    await adoptRemainingAndCompleteReviewAction({ runId: run.id, storeId: run.store_id });
-
-    const runPatch = mockUpdate.mock.calls[0]![1] as {
-      review_decisions: Record<string, { decided_at: string }>;
-      review_completed_at: string;
-    };
-    const times = new Set(Object.values(runPatch.review_decisions).map((d) => d.decided_at));
-    expect(times.size).toBe(1);
-    expect([...times][0]).toBe(runPatch.review_completed_at);
+    expect(mockGetForUpdate).toHaveBeenCalledWith("research_run_1");
+    expect(mockStoreGetForUpdate).toHaveBeenCalledWith("store-1");
+    expect(mockResearchRunGet).not.toHaveBeenCalled();
+    expect(mockStoreGet).not.toHaveBeenCalled();
   });
 
   it("完了済みrun / succeeded以外 / store_id不一致 は拒否する", async () => {
-    const completed = makeRun({ result: ITEMS, review_completed_at: "2026-08-01T00:00:00.000Z" });
-    mockGetForUpdate.mockResolvedValue(completed);
-    expect(
-      (await adoptRemainingAndCompleteReviewAction({ runId: completed.id, storeId: completed.store_id })).ok,
-    ).toBe(false);
+    mockGetForUpdate.mockResolvedValue(makeRun({ result: ITEMS, review_completed_at: "2026-08-01T00:00:00.000Z" }));
+    expect((await call()).ok).toBe(false);
 
-    const running = makeRun({ result: ITEMS, status: "running" });
-    mockGetForUpdate.mockResolvedValue(running);
-    expect(
-      (await adoptRemainingAndCompleteReviewAction({ runId: running.id, storeId: running.store_id })).ok,
-    ).toBe(false);
+    mockGetForUpdate.mockResolvedValue(makeRun({ result: ITEMS, status: "running" }));
+    expect((await call()).ok).toBe(false);
 
-    const run = makeRun({ result: ITEMS });
-    mockGetForUpdate.mockResolvedValue(run);
-    expect(
-      (await adoptRemainingAndCompleteReviewAction({ runId: run.id, storeId: "other-store" })).ok,
-    ).toBe(false);
+    mockGetForUpdate.mockResolvedValue(makeRun({ result: ITEMS }));
+    expect((await call({ storeId: "other-store" })).ok).toBe(false);
+  });
+
+  it.each([
+    ["空の expectedKeys", { expectedKeys: [] }],
+    ["重複した expectedKeys", { expectedKeys: ["seat_count", "seat_count"] }],
+    ["空文字の key", { expectedKeys: [""] }],
+  ])("%s は拒否する", async (_, overrides) => {
+    expect((await call(overrides)).ok).toBe(false);
+    expect(mockGetForUpdate).not.toHaveBeenCalled();
   });
 
   it("revalidateTagはtransaction成功後に呼ぶ", async () => {
-    const run = makeRun({ result: ITEMS });
-    mockGetForUpdate.mockResolvedValue(run);
-    mockStoreGetForUpdate.mockResolvedValue({ id: run.store_id, stage: "未調査", basic_info: {} });
     const order: string[] = [];
     mockUpdate.mockImplementation(async () => {
       order.push("db");
@@ -1125,30 +1200,15 @@ describe("adoptRemainingAndCompleteReviewAction", () => {
       order.push("revalidate");
     });
 
-    await adoptRemainingAndCompleteReviewAction({ runId: run.id, storeId: run.store_id });
+    await call();
 
     expect(order[0]).toBe("db");
     expect(order).toContain("revalidate");
   });
 
-  it("未判断が0件でも完了できる(すべて判断済みのケース)", async () => {
-    const run = makeRun({
-      result: ITEMS,
-      review_decisions: {
-        business_hours_holidays: { decision: "adopted", decided_at: "2026-08-01T00:00:00.000Z" },
-        seat_count: { decision: "adopted", decided_at: "2026-08-01T00:00:00.000Z" },
-        main_target: { decision: "adopted", decided_at: "2026-08-01T00:00:00.000Z" },
-      },
-    });
-    mockGetForUpdate.mockResolvedValue(run);
-    mockStoreGetForUpdate.mockResolvedValue({ id: run.store_id, stage: "未調査", basic_info: {} });
+  it("拒否したときは revalidateTag を呼ばない", async () => {
+    await call({ expectedKeys: ["main_target"] });
 
-    const result = await adoptRemainingAndCompleteReviewAction({
-      runId: run.id,
-      storeId: run.store_id,
-    });
-
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(result.data.adoptedCount).toBe(0);
+    expect(mockRevalidateTag).not.toHaveBeenCalled();
   });
 });
