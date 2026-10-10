@@ -21,7 +21,12 @@ export function Skeleton({
       className={cn(
         "animate-pulse",
         shape === "pill" ? "rounded-full" : "rounded-md",
-        tone === "card" ? "bg-card" : "bg-muted",
+        // `muted` は文字色の 10% を重ねる。`bg-muted` はライトでページ背景
+        // (--background) と同じ色 (#f1f5f9) で、カードの外に置くと見えなかった (#326)。
+        // ダークではカード色が --secondary と同じなので、単色のトークンはどれも
+        // 「ページ背景とカードの両方の上で見える」を満たさない。半透明の前景色なら
+        // どの面に載っても一段濃く (明るく) 見える。
+        tone === "card" ? "bg-card" : "bg-foreground/10",
         className,
       )}
       aria-hidden
