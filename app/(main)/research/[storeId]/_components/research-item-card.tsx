@@ -323,6 +323,8 @@ export function ResearchItemCard({
             <Textarea
               value={editValue}
               onChange={(e) => setEditValue(e.target.value)}
+              // 処理中に打った文字は送った値に入らない。打てないようにしておく。
+              readOnly={editPending}
               rows={2}
               aria-label={`${label} 編集値`}
             />

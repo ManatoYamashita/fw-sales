@@ -30,7 +30,7 @@ PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/Applications/Aside.app/Contents/MacOS/Aside
 3. DB接続を待機
 4. `pnpm db:migrate`で`drizzle/`のmigrationを適用
 5. `pnpm seed`で再現可能なseedデータを投入
-6. E2E用profileを冪等に作成
+6. E2E用profileと、E2E用の通知・レビュー待ちの調査結果（store_005）を冪等に作り直す。調査結果の判断は一度記録すると変えられないため、流すたびに未判断へ戻す
 7. Next.js開発サーバーを起動し、Chromium E2Eを実行
 
 E2Eの再実行時は、同名のPostgreSQLコンテナを削除してから作り直します。アプリの通常開発用DBや本番Supabaseには影響しません。
