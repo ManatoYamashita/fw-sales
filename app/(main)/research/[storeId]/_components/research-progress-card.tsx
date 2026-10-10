@@ -194,7 +194,9 @@ export function ResearchProgressCard({
             );
           })}
         </ul>
-        <p className="text-xs text-muted-foreground">
+        {/* 経過秒数はサーバとブラウザで別々に時計を読むため、描画の時点で 1 秒ずれうる。
+            ずれを不一致として扱うと、React がこのツリーを作り直してしまう。 */}
+        <p className="text-xs text-muted-foreground" suppressHydrationWarning>
           経過時間: {formatElapsed(elapsedSeconds)}(目安 3〜5分)
         </p>
         {elapsedSeconds > EXPECTED_MAX_SECONDS && (

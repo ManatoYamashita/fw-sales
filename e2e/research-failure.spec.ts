@@ -1,6 +1,6 @@
+import { execFileSync } from "node:child_process";
 import { expect, test, type Page } from "@playwright/test";
 import postgres from "postgres";
-import { getE2eDatabaseEnv } from "../scripts/e2e-local.mjs";
 
 /**
  * AI 調査の失敗・期限超過・進捗の取得失敗を画面へ反映する (#324)。
@@ -17,7 +17,23 @@ test.beforeEach(() => {
 });
 
 const STORE_ID = "store_e2e_324";
-const sql = postgres(getE2eDatabaseEnv().DATABASE_URL, { prepare: false, max: 1 });
+
+/**
+ * E2E 用 DB の接続先。`scripts/e2e-local.mjs` の `getE2eDatabaseEnv` と同じ解決順。
+ * Playwright は spec を CommonJS に変換するため、`import.meta` を使う同ファイルは読み込めない。
+ */
+function e2eDatabaseUrl(): string {
+  if (process.env.E2E_DATABASE_URL) return process.env.E2E_DATABASE_URL;
+  const name = process.env.E2E_DB_CONTAINER?.trim() || "fw-sales-e2e-postgres";
+  const containers = JSON.parse(
+    execFileSync("container", ["list", "--all", "--format", "json"], { encoding: "utf8" }),
+  ) as Array<{ id: string; status?: { networks?: Array<{ ipv4Address?: string }> } }>;
+  const address = containers.find((c) => c.id === name)?.status?.networks?.[0]?.ipv4Address;
+  if (!address) throw new Error(`E2E用PostgreSQLコンテナ「${name}」の内部IPを取得できませんでした。`);
+  return `postgres://postgres:postgres@${address.split("/")[0]}:5432/postgres`;
+}
+
+const sql = postgres(e2eDatabaseUrl(), { prepare: false, max: 1 });
 
 const minutesFromNow = (minutes: number) => new Date(Date.now() + minutes * 60_000).toISOString();
 
@@ -77,7 +93,7 @@ test("実行中の調査が失敗したら、ポーリングで上部と本文�
   await expect(page.getByRole("button", { name: "再調査する" })).toBeVisible();
   await expect(researchStep(page)).toContainText("(失敗)");
   await expect(steps(page).locator("[class*='animate-spin']")).toHaveCount(0);
-  await expect(page.getByText("経過時間:")).toHaveCount(0);
+  await expect(page.getByText("経過時間:").filter({ visible: true })).toHaveCount(0);
 
   await page.reload();
   await expect(researchStep(page)).toContainText("(失敗)");
@@ -97,7 +113,7 @@ test("期限を過ぎた実行中の調査は、上部・本文とも時間超�
   await expect(steps(page).locator("[class*='animate-spin']")).toHaveCount(0);
   await expect(page.getByText("上限の時間を過ぎても調査が終わっていません")).toBeVisible();
   await expect(page.getByRole("button", { name: "再調査する" })).toBeVisible();
-  await expect(page.getByText("中断しました")).toHaveCount(0);
+  await expect(page.getByText("中断しました").filter({ visible: true })).toHaveCount(0);
 });
 
 test("進捗を取得できないときは「進捗を確認できません」と出し、再確認で戻る", async ({ page }) => {
