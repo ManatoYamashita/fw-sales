@@ -9,13 +9,13 @@ Supabaseはdev／prdでプロジェクトを分離し、Vercelは当面1プロ�
 | 実行環境 | DB・認証 | 対応状態 |
 | --- | --- | --- |
 | ローカル検証（`pnpm dev:local`） | 専用PostgreSQL＋ローカルテストユーザー | 本ドキュメントの手順で起動 |
-| 通常のローカル開発／Vercel Development | dev Supabase | DB／Service RoleのConfig登録待ち。Secretの値は再取得不可 |
-| Vercel Preview | dev Supabase | 既存stagingのSecretを共有Previewへ移行 |
+| 通常のローカル開発／Vercel Development | dev Supabase | DB／Service RoleをDevelopmentのConfigへ登録済み |
+| Vercel Preview | dev Supabase | DB／Service Roleを共有PreviewのSecretへ登録済み |
 | Vercel Production | prd Supabase | 既存本番を継続 |
 
-prdは`firstweb_sales_tools`（`bqllbsiahnikgerckwoj`）、devは再開済みの`fw-sales-staging`（`llohmzwfqgcrvusxabcb`）です。Vercelプロジェクト自体の分離とSupabase Branchingは初期対応に含めません。
+prdは`firstweb_sales_tools`（`bqllbsiahnikgerckwoj`）、devは`firstweb_sales_tools_dev`（`llohmzwfqgcrvusxabcb`）です。既存の`fw-sales-staging`を再開し、表示名だけを変更しました。project ref、DB、Authユーザーは保持しています。Vercelプロジェクト自体の分離とSupabase Branchingは初期対応に含めません。
 
-通常の`pnpm dev`やDB運用コマンドは`.env.local`を使います。本変更では本番DBが残っている設定を起動前に拒否します。Developmentの接続情報を揃えるまでは、画面・DB操作の検証に以下の専用コマンドを使ってください。
+通常の`pnpm dev`やDB運用コマンドは`.env.local`を使います。本変更では本番DBが残っている設定を起動前に拒否します。クラウドdevを使う通常開発と、以下の独立したローカル検証環境を用途に応じて選んでください。
 
 ## ローカル検証の起動
 
@@ -83,15 +83,25 @@ pnpm local:stop
 - DBパスワードが取得できないため、初期復旧は管理APIで既存Drizzle SQLと対応するSHA-256／`created_at`を同じトランザクションへ入れて適用しました。管理API側の復旧記録はSupabase履歴にも残ります。以後のmigrationの正本は引き続きDrizzleです。履歴の改行差以外の不一致は拒否します。
 - 0031は全10テーブルのRLSを有効にし、`anon`／`authenticated`のテーブル権限を撤回します。`handle_new_user`は非公開の`private`へ移動します。アプリはowner／BYPASSRLSのDrizzle接続を使い、Authのプロフィール生成triggerも保持します。0031はprdへ未適用です。
 - Vercelの既存staging用`DATABASE_URL`／`SUPABASE_SERVICE_ROLE_KEY`は値を読み出さず、特定ブランチから共有Previewへスコープを変更しました。Auth URLと公開キーはdevへ揃え、Productionの既存接続値は保持しました。
-- 旧Preview／DevelopmentのDB・Service Role値は空にし、`ISSUE46_RETIRED_*`へ改名しています。Vercelの接続ツールに削除機能がないため、空の行だけが残っています。ダッシュボードで削除できます。
-- Vercel Secret（`sensitive`）は読み戻しやConfig（`encrypted`）への変更ができず、Developmentでは使えません。**DevelopmentのDB URL／Service Role KeyとGitHub Preview Secretは、Supabaseへアクセスできる管理者が取得・登録する必要があります。** チャットやIssueへ値を貼りません。
+- 旧PreviewのDB・Service Role値と旧ブランチのAuth値は空にし、`ISSUE46_RETIRED_*`へ改名しています。Developmentの旧行はdev値を登録して再利用しました。退役行には秘密値を保持しません。
+- Vercel Secret（`sensitive`）は読み戻しやConfig（`encrypted`）への変更ができず、Developmentでは使えません。SupabaseのOwnerアカウントでdevのDBパスワードを再設定し、共有PreviewのSecret、DevelopmentのConfig、GitHub Environment PreviewのSecretを同時に更新しました。Service Roleもdevのproject ref／roleを確認してDevelopmentへ登録しました。チャットやIssueへ秘密値を貼りません。
+- 通常開発用の`.env.local`をdevへ切り替えました。従前の設定はGit管理対象外の`.local-preview/prd-env-backup`へ権限0600で退避しています。ローカルの外部APIキーは空にしているため、AI生成・Places／Mapsは別途dev用キーを設定して検証します。
 - devのGoogle providerが有効で、新しいPreview画面からdev Supabase callbackへ向くことを確認しました。Google認証により新しいdevユーザーとプロフィールが作成され、プロフィール生成triggerも動作しています。devテスト用に作成したユーザーをadminにしました。既存ユーザーの権限は保持しています。
-- devのSite URLは旧stagingブランチを参照しており、新しいPreviewが許可されていないため旧URLへ戻ります。固定URL `https://fw-sales-dev-shinsotsu-gourmet.vercel.app` を用意しました。SupabaseのSite URL／redirect許可を修正してから、アプリへのログイン完了・サインアウト・UI操作を検証します。
+- devのSite URLは固定URL `https://fw-sales-dev-shinsotsu-gourmet.vercel.app` へ変更しました。対象プロジェクトのPreviewとlocalhostのredirectを許可しています。環境変数の切替後にPreviewを再ビルドして、固定URLへ割り当てました。固定URLの割当は手動のため、検証対象のPreviewを更新した場合はREADYを確認して再割当します。
 - Vercel環境変数のupsertでは、ターゲットが重なる既存行が残る場合があります。キー・対象環境・ブランチごとの行を確認し、既存IDを指定して修正します。切替後は実際のGoogle callbackをブラウザで検証します。
+
+### クラウドdevの検証結果
+
+- `pnpm env:check`でdev判定、`db:verify-hashes`で32件の来歴一致、`db:verify-fks`で全5制約と逆方向チェックの一致、`db:migrate`で再実行成功を確認しました。
+- 固定dev URLでGoogleログイン完了とadminプロフィールを確認しました。ブラウザから検証用店舗を登録・更新し、dev DBだけに反映されることをSQLでも照合しました。その店舗をブラウザから削除し、devは元の5件へ戻りました。
+- サインアウト後、保護された`/stores`への直接アクセスがログイン画面へ戻ることを確認しました。
+- 本番は読み取り確認のみで店舗24件、検証用店舗0件、dev検証ユーザーUUIDと0031来歴も存在しません。本番DBのmigration・データ書込みは行っていません。
+- ローカル検証DBは店舗6件・商談2件・引き継ぎ1件を保持しています。初期seed以外の既存店舗は変更していません。
+- PR #338のレビューとmainへのマージ後に、dev先行migration・日次keepalive・起動時ガードがmainの運用へ反映されます。現時点ではPreviewで検証しています。
 
 ### Developmentの設定
 
-Vercel Developmentには`APP_ENV=dev`とdevのDB／Auth 4項目、`NEXT_PUBLIC_APP_URL=http://localhost:3000`をセットで登録します。`pnpm env:check`で確認してから`pnpm dev`を起動してください。DB URL／Service Roleが未登録の状態では通常開発を起動しません。
+Vercel Developmentには`APP_ENV=dev`とdevのDB／Auth 4項目、`NEXT_PUBLIC_APP_URL=http://localhost:3000`をセットで登録済みです。新しいチェックアウトでは、正しいVercelチーム・プロジェクトへlinkしたうえでDevelopmentの設定を`.env.local`へpullします。`pnpm env:check`で確認してから`pnpm dev`を起動してください。DB URL／Service Roleが未登録の状態では通常開発を起動しません。
 
 ### 誤接続ガード
 
@@ -101,7 +111,7 @@ Vercel Developmentには`APP_ENV=dev`とdevのDB／Auth 4項目、`NEXT_PUBLIC_A
 
 ### migration・keepalive
 
-- GitHub Environment `Preview`の`DATABASE_URL`はdev、`Production`はprdへ限定します。repository-levelの本番SecretをPreviewの代替として使いません。環境Secretが未登録の場合、devの接続ガードが本番へのfallbackを拒否します。
+- GitHub Environment `Preview`の`DATABASE_URL`はdev、`Production`はprdへ限定し、両方を登録済みです。repository-levelの本番SecretをPreviewの代替として使いません。環境Secretが未登録の場合、devの接続ガードが本番へのfallbackを拒否します。
 - CIの専用PostgreSQLとローカルベンチには`APP_ENV=local`、本番FK監査には`APP_ENV=prd`とProduction環境を明示します。通常のDB運用スクリプトでも接続先を検証します。
 - `migrate.yml`は`db:check-target`、適用、`db:verify-hashes`、`db:verify-fks`をdevで完了してからprdへ進みます。ワークフローの同時実行を抑止します。mainへのマージ前に両環境のSecret登録を確認してください。
 - 日次keepaliveは同じGitHub Environmentsでdev／prdへ別々に実行します。Vercel CronはProductionのみであり、devの代替にはなりません。`CRON_SECRET`を本番からdevへコピーしません。
@@ -109,6 +119,13 @@ Vercel Developmentには`APP_ENV=dev`とdevのDB／Auth 4項目、`NEXT_PUBLIC_A
 
 ### Google OAuth
 
-Google Consoleのredirect URIは`https://llohmzwfqgcrvusxabcb.supabase.co/auth/v1/callback`、Supabase側はlocalhostとdev Previewの`/auth/callback`を許可します。ProductionのGoogle callback／Site URLは保持します。Previewを広く許可する場合は対象Vercelチーム・プロジェクトの範囲に限定し、任意の`vercel.app`へ広げません。
+Google Consoleのredirect URIは`https://llohmzwfqgcrvusxabcb.supabase.co/auth/v1/callback`です。SupabaseのSite URLは固定dev URL、redirect許可は以下です。ProductionのGoogle callback／Site URLは保持します。Previewを広く許可する場合は対象Vercelチーム・プロジェクトの範囲に限定し、任意の`vercel.app`へ広げません。
+
+- `https://fw-sales-dev-shinsotsu-gourmet.vercel.app/**`
+- `https://fw-sales-*-shinsotsu-gourmet.vercel.app/**`
+- `http://localhost:3000/**`
+- `http://127.0.0.1:3000/**`
+
+プロジェクト名を変更してもproject refは変わらないため、Google callback URIの変更は不要です。
 
 旧Auth Runbookは初回リリースの履歴です。現在の環境設定・migrationは本ドキュメントと`migrate.yml`を参照してください。
