@@ -120,6 +120,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     env:
+      APP_ENV: local # CI専用PostgreSQLを明示 (#46)
       DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/audit_integration"
       # Vercel / serverless 想定の最小プール。これが 1 でないと本テストは無意味になる
       # (テスト側でも 1 であることを assert している)。

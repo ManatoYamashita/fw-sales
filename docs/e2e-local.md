@@ -1,5 +1,7 @@
 # ローカルE2E環境
 
+データを保持しながら手動で画面・DB操作を検証する場合は、[ローカル検証環境の起動手順](environment-separation.md#ローカル検証の起動)の`pnpm dev:local`／`pnpm local:open`を利用してください。この環境はE2E専用DBから独立しています。
+
 このプロジェクトのE2Eは、Apple Container上のE2E専用PostgreSQLとPlaywrightを使います。本番Supabaseへ接続せず、既存のDrizzle migrationとseedデータをローカルDBへ適用してからテストを実行します。
 
 Supabase CLIの`supabase start`はDocker Engine API（`/var/run/docker.sock`）を必要とします。Appleの`container` CLIやDocker互換shimはこのAPIを提供しないため、E2EではSupabase CLIを使わず、PostgreSQLコンテナを直接起動します。Docker Desktopも不要です。

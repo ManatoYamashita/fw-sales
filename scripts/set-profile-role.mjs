@@ -15,9 +15,10 @@
  * - before/after の行を表示し、0 件一致なら exit 1 (email 打ち間違い防御)。
  * - role は member / admin / placeholder のみ許可。
  *
- * 注意: 本番 DB へ直接 UPDATE を行う。実行は要承認。
+ * 本番運用ではAPP_ENV=prdと本番接続情報を明示し、対象アカウントを確認します。
  */
 import postgres from "postgres";
+import { assertDatabaseTarget } from "../lib/environment-isolation.mjs";
 
 const VALID_ROLES = ["member", "admin", "placeholder"];
 
@@ -46,6 +47,8 @@ if (!url) {
   console.error("ERROR: DATABASE_URL is not set.");
   process.exit(1);
 }
+
+assertDatabaseTarget();
 
 const sql = postgres(url, {
   prepare: false,
