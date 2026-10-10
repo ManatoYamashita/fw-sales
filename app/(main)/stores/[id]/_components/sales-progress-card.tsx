@@ -253,7 +253,7 @@ export function SalesProgressCard({ store, deals, profiles }: { store: Store; de
         </p>
         <ModalFooter>
           <Button variant="ghost" onClick={() => setDeleteTarget(null)} disabled={deleting}>キャンセル</Button>
-          <Button variant="danger" onClick={confirmDelete} disabled={deleting}>{deleting ? "削除中…" : "削除する"}</Button>
+          <Button variant="danger" onClick={confirmDelete} pending={deleting}>{deleting ? "削除中…" : "削除する"}</Button>
         </ModalFooter>
       </ModalContent> : null}
     </Modal>

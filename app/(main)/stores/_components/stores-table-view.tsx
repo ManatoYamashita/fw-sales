@@ -9,7 +9,6 @@ import { DataTable, type ColumnDef } from "@/components/ui/data-table";
 import { type SortDir } from "@/components/ui/sortable-header-params";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { Spinner } from "@/components/ui/spinner";
 import { StoreResearchStatusBadge } from "@/components/feature/stage-badge";
 import { ChannelBadge } from "@/components/feature/channel-badge";
 import { SalesStateSummary } from "@/components/feature/sales-state-badge";
@@ -337,10 +336,10 @@ export function StoresTableView({
             size="touch"
             gap="tight"
             onClick={() => setBulkOpen(true)}
-            disabled={isDeleting}
+            pending={isDeleting}
             className="ml-auto"
           >
-            {isDeleting ? <Spinner /> : <Trash2 className="h-3.5 w-3.5" />}
+            <Trash2 className="h-3.5 w-3.5" />
             削除
           </Button>
         </div>

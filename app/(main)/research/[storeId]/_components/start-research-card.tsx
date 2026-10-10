@@ -22,7 +22,7 @@ export function StartResearchCard({
           Web検索・URLの内容確認を使い、53項目の基本情報を自動調査します(所要3〜5分)。
         </p>
         <div className="flex justify-center py-2">
-          <Button type="button" variant="primary" size="lg" onClick={onStart} disabled={starting}>
+          <Button type="button" variant="primary" size="lg" onClick={onStart} pending={starting}>
             <Sparkles className="h-4 w-4" />
             {starting ? "開始中…" : "AIで店舗を調査"}
           </Button>

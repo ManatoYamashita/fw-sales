@@ -481,7 +481,7 @@ export function StoreNewForm({
         >
           キャンセル
         </Button>
-        <Button type="submit" variant="primary" disabled={pending}>
+        <Button type="submit" variant="primary" pending={pending}>
           {pending ? "登録中…" : "登録する"}
         </Button>
       </Card.Footer>

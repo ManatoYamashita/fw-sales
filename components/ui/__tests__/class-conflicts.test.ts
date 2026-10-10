@@ -281,6 +281,7 @@ const PROP_VALUES: Record<string, readonly string[]> = {
   "Select.density": ["default", "compact"],
   "Card.Body.padding": ["default", "compact", "flush", "spacious"],
   "Skeleton.tone": ["muted", "card"],
+  "Skeleton.shape": ["rounded", "pill"],
   "Spinner.size": ["sm", "md", "lg"],
   "Spinner.tone": ["muted", "primary"],
 };
@@ -365,8 +366,12 @@ function baseClasses(
     }
     case "Skeleton": {
       return collect(
-        pick("tone", "Skeleton.tone").map((tone) =>
-          renderedClassName(Skeleton({ tone: tone as never })).split(/\s+/),
+        pick("tone", "Skeleton.tone").flatMap((tone) =>
+          pick("shape", "Skeleton.shape").map((shape) =>
+            renderedClassName(
+              Skeleton({ tone: tone as never, shape: shape as never }),
+            ).split(/\s+/),
+          ),
         ),
       );
     }
@@ -696,10 +701,12 @@ const SELF_CONFLICT_CASES: Array<{ name: string; classes: () => string[] }> = [
     name: `Card.Body padding=${padding}`,
     classes: () => renderedClassName(CardBody({ padding })).split(/\s+/),
   })),
-  ...(["muted", "card"] as const).map((tone) => ({
-    name: `Skeleton tone=${tone}`,
-    classes: () => renderedClassName(Skeleton({ tone })).split(/\s+/),
-  })),
+  ...(["muted", "card"] as const).flatMap((tone) =>
+    (["rounded", "pill"] as const).map((shape) => ({
+      name: `Skeleton tone=${tone} shape=${shape}`,
+      classes: () => renderedClassName(Skeleton({ tone, shape })).split(/\s+/),
+    })),
+  ),
   ...(["sm", "md", "lg"] as const).flatMap((size) =>
     (["muted", "primary"] as const).map((tone) => ({
       name: `Spinner size=${size} tone=${tone}`,

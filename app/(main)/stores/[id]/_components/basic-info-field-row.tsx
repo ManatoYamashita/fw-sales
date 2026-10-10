@@ -141,7 +141,7 @@ export function BasicInfoFieldRow({
               variant="primary"
               size="sm"
               onClick={onSave}
-              disabled={pending}
+              pending={pending}
             >
               <Save className="h-3.5 w-3.5" />
               {pending ? "保存中…" : "保存(手動入力として記録)"}

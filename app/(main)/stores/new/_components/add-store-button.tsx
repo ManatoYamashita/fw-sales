@@ -52,7 +52,7 @@ export function AddStoreButton({
       variant="outline"
       size="sm"
       onClick={handleClick}
-      disabled={isPending}
+      pending={isPending}
     >
       {isPending ? "追加中…" : "追加"}
     </Button>

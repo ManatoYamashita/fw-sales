@@ -495,7 +495,7 @@ export function ResearchReviewSection({ store, run, onUpdate, onRestart, restart
 
           {reviewCompleted && (
             <div className="flex justify-end pt-2 border-t border-border">
-              <Button type="button" variant="outline" onClick={onRestart} disabled={restarting}>
+              <Button type="button" variant="outline" onClick={onRestart} pending={restarting}>
                 再調査する
               </Button>
             </div>
@@ -570,6 +570,7 @@ export function ReviewCompletionFooter({
             variant="primary"
             className="w-full sm:w-auto"
             onClick={onPrimary}
+            pending={completing}
             disabled={disabled}
           >
             {completing ? "処理中…" : model.primary.label}

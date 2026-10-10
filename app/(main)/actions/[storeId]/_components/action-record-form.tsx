@@ -107,7 +107,7 @@ export function ActionRecordForm({ storeId }: { storeId: string }) {
           >
             商談化する
           </Link>
-          <Button type="submit" variant="success" disabled={pending}>
+          <Button type="submit" variant="success" pending={pending}>
             {pending ? "記録中…" : "記録を保存"}
           </Button>
         </Card.Footer>

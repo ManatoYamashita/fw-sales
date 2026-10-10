@@ -1,8 +1,16 @@
 "use client";
 
-import Link from "next/link";
+import Link, { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
-import { Menu, PanelLeft, PanelLeftClose, X, Zap } from "lucide-react";
+import {
+  Loader2,
+  Menu,
+  PanelLeft,
+  PanelLeftClose,
+  X,
+  Zap,
+  type LucideIcon,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { NAV_ITEMS } from "@/lib/domain/nav";
 import {
@@ -27,6 +35,54 @@ export interface SidebarProps {
    * フォールバック中のちらつき (w-60 → w-16) を防ぐ。
    */
   defaultCollapsed?: boolean;
+}
+
+/**
+ * ナビ項目のアイコン。押した項目の遷移中だけスピナーへ差し替える (#326)。
+ *
+ * `useLinkStatus` は `Link` の子孫でしか使えないため、項目ごとに 1 つ置く。
+ * 両方を常に描いて重ね、opacity / scale / blur でクロスフェードする
+ * (要素の出し入れでレイアウトを揺らさないため)。速い遷移ではちらつかせないよう、
+ * スピナーへの切り替えだけ 100ms 遅らせる。
+ */
+function NavItemIcon({
+  icon: Icon,
+  active,
+}: {
+  icon: LucideIcon;
+  active: boolean;
+}) {
+  const { pending } = useLinkStatus();
+  const swap =
+    "transition-[color,opacity,scale,filter] duration-200 ease-[cubic-bezier(0.2,0,0,1)]";
+  return (
+    <span
+      className="relative inline-flex size-4 shrink-0"
+      data-pending={pending ? "true" : undefined}
+    >
+      <Icon
+        aria-hidden
+        className={cn(
+          "size-4",
+          swap,
+          active
+            ? "text-sidebar-primary"
+            : "text-muted-foreground group-hover:text-sidebar-accent-foreground",
+          pending && "delay-100 opacity-0 scale-25 blur-[4px]",
+        )}
+      />
+      <Loader2
+        aria-hidden
+        className={cn(
+          "absolute inset-0 size-4 animate-spin text-sidebar-primary",
+          swap,
+          pending
+            ? "delay-100 opacity-100 scale-100 blur-none"
+            : "opacity-0 scale-25 blur-[4px]",
+        )}
+      />
+    </span>
+  );
 }
 
 /** デスクトップの折りたたみ状態を 1 年間 Cookie に保存する。 */
@@ -237,14 +293,7 @@ export function Sidebar({
                     className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-0.5 rounded-r-sm bg-sidebar-primary"
                   />
                 ) : null}
-                <Icon
-                  className={cn(
-                    "h-4 w-4 shrink-0 transition-colors",
-                    active
-                      ? "text-sidebar-primary"
-                      : "text-muted-foreground group-hover:text-sidebar-accent-foreground",
-                  )}
-                />
+                <NavItemIcon icon={Icon} active={active} />
                 <span
                   className={cn("flex-1 truncate", collapsed && "md:hidden")}
                 >

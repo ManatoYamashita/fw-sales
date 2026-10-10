@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Separator } from "@/components/ui/separator";
-import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "@/components/ui/toast";
 import { PlaceResultList } from "./place-result-list";
@@ -629,15 +628,10 @@ export function AreaSearchResults({
                   size="sm"
                   gap="tight"
                   onClick={handleLoadMore}
-                  disabled={isLoadingMore}
+                  pending={isLoadingMore}
                   className="shrink-0"
                 >
-                  {isLoadingMore ? (
-                    <>
-                      <Spinner />
-                      読み込み中…
-                    </>
-                  ) : (
+                  {isLoadingMore ? "読み込み中…" : (
                     "さらに候補を読み込む"
                   )}
                 </Button>
@@ -684,11 +678,9 @@ export function AreaSearchResults({
                       size="sm"
                       gap="tight"
                       onClick={() => handleExplore("keyword", chip)}
-                      disabled={
-                        explorationPendingId !== null || exploredRunIds.has(runId)
-                      }
+                      pending={explorationPendingId === runId}
+                      disabled={explorationPendingId !== null || exploredRunIds.has(runId)}
                     >
-                      {explorationPendingId === runId && <Spinner size="sm" />}
                       {chip}
                       {exploredRunIds.has(runId) && (
                         <span className="text-xs text-muted-foreground">探索済み</span>
@@ -718,11 +710,9 @@ export function AreaSearchResults({
                       size="sm"
                       gap="tight"
                       onClick={() => handleExplore("center", chip)}
-                      disabled={
-                        explorationPendingId !== null || exploredRunIds.has(runId)
-                      }
+                      pending={explorationPendingId === runId}
+                      disabled={explorationPendingId !== null || exploredRunIds.has(runId)}
                     >
-                      {explorationPendingId === runId && <Spinner size="sm" />}
                       {chip}
                       {exploredRunIds.has(runId) && (
                         <span className="text-xs text-muted-foreground">探索済み</span>
@@ -748,11 +738,9 @@ export function AreaSearchResults({
                       size="sm"
                       gap="tight"
                       onClick={() => handleExplore("radius", chip)}
-                      disabled={
-                        explorationPendingId !== null || exploredRunIds.has(runId)
-                      }
+                      pending={explorationPendingId === runId}
+                      disabled={explorationPendingId !== null || exploredRunIds.has(runId)}
                     >
-                      {explorationPendingId === runId && <Spinner size="sm" />}
                       {label}
                       {exploredRunIds.has(runId) && (
                         <span className="text-xs text-muted-foreground">探索済み</span>
@@ -965,15 +953,10 @@ export function AreaSearchResults({
                 size="sm"
                 gap="tight"
                 onClick={handleBulkAdd}
-                disabled={isBulkPending}
+                pending={isBulkPending}
                 className="ml-auto"
               >
-                {isBulkPending ? (
-                  <>
-                    <Spinner tone="primary" />
-                    登録中…
-                  </>
-                ) : (
+                {isBulkPending ? "登録中…" : (
                   "選択した店舗を登録"
                 )}
               </Button>

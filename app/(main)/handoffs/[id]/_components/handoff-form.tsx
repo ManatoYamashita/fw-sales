@@ -98,7 +98,7 @@ export function HandoffForm({ handoff }: { handoff: Handoff }) {
               type="button"
               variant="success"
               onClick={complete}
-              disabled={completing}
+              pending={completing}
             >
               {completing ? "処理中…" : "引き継ぎを完了"}
             </Button>
@@ -262,7 +262,7 @@ export function HandoffForm({ handoff }: { handoff: Handoff }) {
           </FormField>
         </Card.Body>
         <Card.Footer>
-          <Button type="submit" variant="primary" disabled={pending}>
+          <Button type="submit" variant="primary" pending={pending}>
             {pending ? "保存中…" : "更新する"}
           </Button>
         </Card.Footer>
