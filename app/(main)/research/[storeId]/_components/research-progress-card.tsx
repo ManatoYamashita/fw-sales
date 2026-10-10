@@ -80,7 +80,7 @@ function StepIcon({ status }: { status: StepStatus }) {
           ? "bg-primary text-primary-foreground"
           : status === "done"
             ? "bg-success-soft text-success-on-soft"
-            : "border border-muted-foreground/40",
+            : "border border-muted-foreground/60",
       )}
     >
       {status === "active" ? (
