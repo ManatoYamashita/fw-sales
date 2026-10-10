@@ -102,6 +102,9 @@ function GroupLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** 実チップと fallback が共有する高さ。高さそのものの差し替えを避ける (#257)。 */
+export const QUICK_FILTER_CHIP_SIZE_CLASS = "h-9 min-h-11 md:min-h-0";
+
 /**
  * クイックフィルタチップの class。テストから直接検証できるよう純関数にしている。
  *
@@ -124,7 +127,8 @@ function GroupLabel({ children }: { children: React.ReactNode }) {
  */
 export function quickFilterChipClassName(active: boolean): string {
   return cn(
-    "inline-flex items-center gap-1 h-11 md:h-9 px-3 rounded-full text-sm",
+    QUICK_FILTER_CHIP_SIZE_CLASS,
+    "inline-flex items-center gap-1 px-3 rounded-full text-sm",
     "border transition-[background-color,color,border-color]",
     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
     active
@@ -171,9 +175,19 @@ function QuickFilterChip({
 export function StoreQuickFiltersFallback() {
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2" aria-hidden>
-      <div className="h-9 w-[330px] max-w-full rounded-full bg-muted/40" />
+      <div
+        className={cn(
+          QUICK_FILTER_CHIP_SIZE_CLASS,
+          "w-[330px] max-w-full rounded-full bg-muted/40",
+        )}
+      />
       <span className="hidden sm:block h-5 w-px self-center bg-border" />
-      <div className="h-9 w-[250px] max-w-full rounded-full bg-muted/40" />
+      <div
+        className={cn(
+          QUICK_FILTER_CHIP_SIZE_CLASS,
+          "w-[250px] max-w-full rounded-full bg-muted/40",
+        )}
+      />
     </div>
   );
 }

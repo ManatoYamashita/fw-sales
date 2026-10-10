@@ -221,6 +221,16 @@ Tailwind v4 のクラス生成はソースの静的走査で、**走査された
 
 UI プリミティブのサイズ、幅、余白、色を利用側の `className` で上書きしない。`Select` は `width` と `density`、`Spinner` は `size` と `tone`、`Card.Body` は `padding`、`Skeleton` は `tone`、`Button` は `size` / `variant` / `gap` を使い、意図を props で表現する。`Card.Header` / `Card.Footer` は props を持たないので、**行の並べ方 (`flex-wrap` / 寄せ / 交差軸) を利用側から書き換えない** — 変えたいレイアウトは子側で組む (§4.5.1)。`cn` は `tailwind-merge` を持たないため、基底クラスと同じ CSS プロパティを `className` に書くと、どちらが勝つかは生成 CSS の順序次第になる。この 7 つのプリミティブについては `components/ui/__tests__/class-conflicts.test.ts` が `app/` と `components/` の JSX を走査して落とす（ガードは実装の基底クラスを直接読むので、プリミティブ側を変えれば検査範囲も自動で追従する）。`className` は**リテラルでも式でも読む**。式は取り出せた文字列リテラルを合併して検査するので、`className={editing ? undefined : "p-0"}` のように片方の枝だけが衝突する形も落ちる。変数参照のように**クラスを供給しうるのに中身を読めない部分があれば fail-closed で落とす**（#262）。落ちたらクラスを文字列リテラルで書くか、意図を props へ移すこと。新しい例外が必要なら、先にプリミティブへ軸を追加する（`gap-1.5` を通すために `Button` へ `gap` 軸を足したのがその例）。軸を足すときは**基底から同じプロパティのクラスを外す**こと。基底に残すと軸の値と基底が争い、同じ事故が起きる。
 
+### 4.3.1 入力系と独自ピルのタッチターゲット (#257)
+
+md 未満では `Input`、`Select`（`density="compact"` を含む）、店舗クイックフィルタのリンクピルにも、ボタンと同じ **44px の最小高さ**を適用する。入力欄と実行・保存ボタンが横並びでも高さの段差を作らない。`h-*` は既存の値を保持し、別プロパティの `min-h-11 md:min-h-0` を重ねる。高さそのものをブレークポイントで差し替えたり、利用側の `className` で競合する高さを追加したりしない。
+
+md 以上は下限を解除し、Input / default Select / ピルは 36px、compact Select は 32px を維持する。compact はデスクトップの密度指定であり、モバイルのタッチ下限の例外にはしない。ピルは URL ナビゲーションなので `<Link>` を保ち、`rounded-full` / `gap-1` を維持する。fallback と実チップは同じサイズ定数を使い、読み込み完了時の高さの変化を防ぐ。
+
+`Textarea` は行数（既定 4 行）とリサイズで高さを管理するため、この単一行入力の高さ統一からは除外する。独自の小さなボタンなど、未対応の残余は §8 の表で管理し、本変更を全操作要素の 44px 達成とは扱わない。
+
+実装のクラス表を走査する `input-touch-target.test.tsx` と、リンク・fallback の描画を確認する `store-quick-filter-touch-target.test.tsx` で下限・md での解除・配線を固定する。
+
 ### 4.4 flex の子への `min-w-0` 付け忘れ
 
 §D4 のとおり。`truncate` が効かず横溢れする。
@@ -452,9 +462,9 @@ Epic #225 の進行に伴って更新する。
 | `tabs.tsx` の `TabsList` が狭幅で溢れる | **解決済み**（#252 / PR #255）。`overflow-x-auto` + `max-w-full` + `scrollbar-none` へ退避し、矢印キー移動も同時に実装した |
 | `Card.Header` / `Card.Footer` の折り返し | **解決済み**（#270）。双方に `flex-wrap`、2 行目の右寄せは `Card.Header` の基底 `[&>*+*]:ml-auto` が持つ（**消費者へは配らない**。§4.5）。プリミティブ外で同じ組を書いた 5 箇所も同時に是正し、走査ガードを入れた（§4.5.2） |
 | `sidebar.tsx` のドロワーにフォーカストラップ / スクロールロック / Escape が無い | **解決済み**（#253 / PR #256）。ただし**開いた状態の自動テストは無い**（§5「この土台で検知できないもの」） |
-| タッチターゲットの全画面 44px 化 | **方針決定済み**（#225 Phase 1 / PR #258）。md 未満で全ボタン `min-h-11`、デスクトップは据え置き。残余（入力欄との 8px 段差、独自ピルの方式二重化）は **#257** |
-| 入力系の高さ 36px・文字サイズ 14px | **要再評価**（**#257**）。iOS Safari は focus 時にフォントが 16px 未満だとオートズームする |
-| `CopyButton`（`copy-button.tsx`）が `<Button>` を使わない独自ピル | **未対応。** `h-8` 固定で 44px 下限を持たない。#257 が挙げる `store-quick-filters.tsx` と同型 |
+| タッチターゲットの全画面 44px 化 | **方針決定済み**（#225 Phase 1 / PR #258）。md 未満で全ボタン `min-h-11`、デスクトップは据え置き。入力欄・Select（compact 含む）・店舗クイックフィルタも **#257 で統一済み**（§4.3.1）。Textarea と独自操作要素の残余は別途管理する |
+| 入力系のモバイル高さ・文字サイズ | 高さは **#257 で md 未満 44px に統一済み**。文字サイズは既存の sm 未満 16px を維持。sm 以上の Input / default Select は 14px、compact Select は 12px のため、iOS Safari の focus 時オートズームは別途実機で確認する |
+| `CopyButton`（`copy-button.tsx`）が `<Button>` を使わない独自ピル | **未対応。** `h-8` 固定で 44px 下限を持たない。`store-quick-filters.tsx` は #257 で是正済みだが、こちらは残余として未対応 |
 | `Card` 本体のクラス列を写した placeholder | **一部未対応。** `TableSkeleton` は #270 で `Card` を呼ぶ形へ寄せたが、`FormSkeleton` (`skeleton.tsx`) / `Stat` (`stat.tsx`) / `pipeline-filters.tsx` はまだ `bg-card … rounded-lg shadow-card` を手書きしている（§4.5.1）。`KanbanSkeleton` は `bg-muted/40` の別物で、この群には入らない |
 | `/dashboard` `/pipeline` `/actions` `/handoffs` `/kpi` | **ルート無効化中**（`lib/domain/nav-routes.ts`）。これらの閾値・レイアウトは無効化状態での暫定値で、**再有効化時に列構成ごと再測定する** |
 | `kanban-board.tsx` / `app/(main)/kpi/page.tsx` | **狭幅構造を是正済み**（#225 Phase 4）。Kanban はコンテナ 700px 未満で縦積み、KPI のバーはカード内容幅 430px 未満でラベル・数値の下へ移す。無効化中のため、再有効化時は実データで再測定する。検証用ビルドでは両ルートを一時的に有効化し、Phase 5 の 34 ケース（10 幅、768px 以上はサイドバー 2 状態）で横溢れ 0 を確認した |

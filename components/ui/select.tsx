@@ -4,8 +4,14 @@ import { cn } from "@/lib/utils/cn";
 export type SelectProps = SelectHTMLAttributes<HTMLSelectElement> & {
   /** Select の幅は利用側で意図を明示する。未指定の基底幅に依存させない。 */
   width: "full" | "auto";
-  density?: "default" | "compact";
+  density?: keyof typeof SELECT_DENSITY_CLASSES;
 };
+
+/** compact も md 未満は 44px。md 以上の高さと字送りは density ごとに維持する (#257)。 */
+export const SELECT_DENSITY_CLASSES = {
+  default: "h-9 min-h-11 md:min-h-0 text-base sm:text-sm",
+  compact: "h-8 min-h-11 md:min-h-0 text-base sm:text-xs",
+} as const;
 
 const CHEVRON_DATA_URL =
   "data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPScxMicgaGVpZ2h0PScxMicgdmlld0JveD0nMCAwIDI0IDI0JyBmaWxsPSdub25lJyBzdHJva2U9J2N1cnJlbnRDb2xvcicgc3Ryb2tlLXdpZHRoPScyJyBzdHJva2UtbGluZWNhcD0ncm91bmQnIHN0cm9rZS1saW5lam9pbj0ncm91bmQnPjxwb2x5bGluZSBwb2ludHM9IjYgOSAxMiAxNSAxOCA5Ij48L3BvbHlsaW5lPjwvc3ZnPg==";
@@ -23,7 +29,7 @@ export function Select({
         "flex appearance-none rounded-md border border-input bg-background px-3 pr-8",
         // 高さと字送りは density で排他にする。基底へ `text-sm` を残して compact 側に
         // `text-xs` を重ねると、`cn` (素の clsx) では勝敗が生成 CSS の順序で決まる。
-        density === "compact" ? "h-8 text-base sm:text-xs" : "h-9 text-base sm:text-sm",
+        SELECT_DENSITY_CLASSES[density],
         width === "full" && "w-full",
         "text-foreground shadow-xs transition-[box-shadow,border-color,background-color]",
         "bg-no-repeat bg-[right_0.6rem_center] [background-size:12px_12px]",
