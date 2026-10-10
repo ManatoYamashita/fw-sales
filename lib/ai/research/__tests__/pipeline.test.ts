@@ -1128,12 +1128,19 @@ describe("appendConfirmedMediaContext (feat/ai-research-final-quality、Observed
     },
   ];
 
-  it("own_net_exposure/exposure_gapのevidenceへ、実際に成功したsourceの一覧を追記する(表示名はhostnameからdeterministicに導出、entry.titleは使わない)", () => {
+  it("own_net_exposure/exposure_gapのvalueへ、実際に成功したsourceの一覧を付加する(表示名はhostnameからdeterministicに導出、entry.titleは使わない)", () => {
     const items = [makeItem("own_net_exposure"), makeItem("exposure_gap")];
     const result = appendConfirmedMediaContext(items, registryWithSuccess);
-    expect(result[0]!.evidence).toContain("ホットペッパーグルメ");
-    expect(result[1]!.evidence).toContain("ホットペッパーグルメ");
-    expect(result[0]!.evidence).not.toContain("自己申告のtitle");
+    expect(result[0]!.value).toContain("ホットペッパーグルメ");
+    expect(result[1]!.value).toContain("ホットペッパーグルメ");
+    expect(result[0]!.value).not.toContain("自己申告のtitle");
+  });
+
+  it("evidenceへは媒体一覧を追記しない(#301: valueと同じ一覧が画面に二重に出ていた)", () => {
+    const items = [makeItem("own_net_exposure", "元のevidence"), makeItem("exposure_gap", "元のevidence")];
+    const result = appendConfirmedMediaContext(items, registryWithSuccess);
+    expect(result[0]!.evidence).toBe("元のevidence");
+    expect(result[1]!.evidence).toBe("元のevidence");
   });
 
   it("valueの先頭にdeterministicなFACT部分(確認できた掲載媒体)を付加する(feat/ai-research-final-trust-boundary、value/verified sourceのズレ修正)", () => {

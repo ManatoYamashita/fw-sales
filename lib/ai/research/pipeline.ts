@@ -1123,8 +1123,8 @@ function deriveIdentityStatusFromVerification(
  * 含める設計は原理的に機能しない(常に空になる、fix/ai-research-quality-refinementで
  * 導入し feat/ai-research-final-quality で撤去した"Observed Web Presence"ブロックの
  * バグ)。この関数はStage2完了後の`finalRegistry`(url_context_status反映済み)から
- * 実際に本文取得へ成功した情報源を求め、`own_net_exposure`/`exposure_gap`のevidenceへ
- * 補足として追記する。追加のGemini呼出は行わない(deterministicな後処理のみ)。
+ * 実際に本文取得へ成功した情報源を求め、`own_net_exposure`/`exposure_gap`のvalue先頭へ
+ * 「確認できた掲載媒体」として付加する。追加のGemini呼出は行わない(deterministicな後処理のみ)。
  */
 export function appendConfirmedMediaContext(
   items: readonly ResearchItem[],
@@ -1154,7 +1154,6 @@ export function appendConfirmedMediaContext(
 
   const targetKeys = new Set(["own_net_exposure", "exposure_gap"]);
   const mediaList = confirmedNames.join("、");
-  const evidenceSupplement = `(このrunで実際に本文を確認できた情報源: ${mediaList})`;
   // FACT部分(掲載媒体名)をvalueの先頭にdeterministicに配置する(feat/ai-research-final-trust-boundary)。
   // AIのANALYSIS文章自体(推論・評価の部分)は維持するが、「どの媒体に掲載されているか」という
   // 事実部分をAIの自由記述に委ねず、finalRegistryの実測値で先頭に明示することで、
@@ -1165,8 +1164,12 @@ export function appendConfirmedMediaContext(
     if (!targetKeys.has(item.key)) return item;
     return {
       ...item,
+      // evidence へは追記しない(#301)。以前は「(このrunで実際に本文を確認できた情報源: …)」を
+      // evidence 末尾にも付けていたが、value 先頭の factPrefix と同じ媒体一覧が
+      // 調査レビュー画面に二重に表示され、内部用語(run)も露出していた。
+      // 保存済みの旧 run は `stripLegacyEvidenceSupplement`(lib/domain/research-item-notes.ts)が
+      // 表示時に取り除く。
       value: item.value ? `${factPrefix} ${item.value}` : item.value,
-      evidence: `${item.evidence} ${evidenceSupplement}`,
     };
   });
 }

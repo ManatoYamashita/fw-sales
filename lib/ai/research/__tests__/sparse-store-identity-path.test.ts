@@ -57,7 +57,12 @@ const { isVerifiedSourceForItem, validateResearchItemStatus } = await import(
   "@/lib/ai/research-result-schema"
 );
 
-import type { SourceRegistryEntry, ResearchItem } from "@/lib/ai/research-result-schema";
+import {
+  DOWNGRADE_REASON_ACQUISITION,
+  DOWNGRADE_REASON_IDENTITY_TARGET,
+  type SourceRegistryEntry,
+  type ResearchItem,
+} from "@/lib/ai/research-result-schema";
 import type { SourceVerification } from "@/types/research-run";
 
 const NOW = "2026-08-14T00:00:00.000Z";
@@ -170,7 +175,9 @@ describe("sparse store identity recovery (end-to-end, no live API)", () => {
     const validated = validateResearchItemStatus(ITEM, { sourceRegistry: [entry] });
     expect(validated.status).toBe("confirmed");
     expect(validated.value).toBe(ITEM.value);
-    expect(validated.warning ?? "").not.toContain("格下げ");
+    // 降格理由の定数で比べる(#301 で文言から「格下げ」が消え、部分文字列では空振りするため)。
+    expect(validated.warning ?? "").not.toContain(DOWNGRADE_REASON_IDENTITY_TARGET);
+    expect(validated.warning ?? "").not.toContain(DOWNGRADE_REASON_ACQUISITION);
   });
 
   it("観測電話一致でも target_match になる", async () => {
@@ -197,7 +204,7 @@ describe("sparse store identity recovery (end-to-end, no live API)", () => {
     const validated = validateResearchItemStatus(ITEM, { sourceRegistry: [entry] });
     expect(validated.status).toBe("not_found");
     // 本文取得には成功しているので、同定失敗の文言になる。
-    expect(validated.warning).toContain("対象店舗のページであることを確認できなかった");
+    expect(validated.warning).toContain(DOWNGRADE_REASON_IDENTITY_TARGET);
   });
 
   it("観測住所も電話も無ければ anchor があっても uncertain(名前だけで昇格しない)", async () => {
