@@ -4,6 +4,7 @@ import postgres from "postgres";
 
 /**
  * AI 調査の失敗・期限超過・進捗の取得失敗を画面へ反映する (#324)。
+ * 調査中カードの工程一覧が、工程の進行に合わせて回転アイコンと状態の文言を移す (#323)。
  *
  * 調査 run は E2E 用 DB へ直接書き込んで用意する (AI と Workflow を実際には動かさない)。
  * 他の spec の店舗を汚さないよう、seed の店舗を複製した専用の店舗を作り、最後に消す
@@ -64,6 +65,42 @@ test.afterAll(async () => {
 
 const steps = (page: Page) => page.getByRole("navigation", { name: "営業資産ができるまでの手順" });
 const researchStep = (page: Page) => steps(page).getByRole("listitem").first();
+/** 調査中カードの工程一覧 (#323)。 */
+const progressList = (page: Page) => page.getByRole("list", { name: "調査の工程" });
+const progressRow = (page: Page, label: string) =>
+  progressList(page).getByRole("listitem").filter({ hasText: label });
+
+test("調査中の工程一覧は、工程の進行に合わせて回転アイコンと状態の文言を移す (#323)", async ({
+  page,
+}) => {
+  await insertRun("research_run_e2e_323_progress", {
+    started_at: minutesFromNow(-1),
+    expires_at: minutesFromNow(29),
+  });
+  await page.goto(`/research/${STORE_ID}`);
+
+  const spinners = progressList(page).locator("[class*='animate-spin']");
+  await expect(spinners).toHaveCount(1);
+  await expect(progressRow(page, "Web情報源を検索")).toHaveAttribute("aria-current", "step");
+  await expect(progressRow(page, "Web情報源を検索")).toContainText("進行中");
+  await expect(progressRow(page, "店舗を確認")).toContainText("完了");
+  await expect(progressRow(page, "店舗情報を取得・分析")).toContainText("未着手");
+  await expect(page.getByText("店舗情報を取得・分析中")).toHaveCount(0);
+
+  // Workflow が工程を進めたときと同じ形で stage を書き換える。
+  await sql`UPDATE store_research_runs SET stage = 'researching' WHERE id = 'research_run_e2e_323_progress'`;
+
+  await expect(progressRow(page, "店舗情報を取得・分析")).toHaveAttribute("aria-current", "step", {
+    timeout: 30_000,
+  });
+  await expect(progressRow(page, "店舗情報を取得・分析")).toContainText("進行中");
+  await expect(progressRow(page, "Web情報源を検索")).toContainText("完了");
+  await expect(progressRow(page, "Web情報源を検索")).not.toHaveAttribute("aria-current", "step");
+  await expect(spinners).toHaveCount(1);
+  await expect(progressRow(page, "店舗情報を取得・分析").locator("[class*='animate-spin']")).toHaveCount(1);
+  await expect(page.getByText("経過時間:")).toBeVisible();
+  await expect(page.getByText("このページを離れても調査は継続されます。")).toBeVisible();
+});
 
 test("実行中の調査が失敗したら、ポーリングで上部と本文を失敗の表示に切り替え、再読込後も保つ", async ({
   page,
@@ -76,6 +113,7 @@ test("実行中の調査が失敗したら、ポーリングで上部と本文�
 
   await expect(researchStep(page)).toContainText("(実行中)");
   await expect(researchStep(page).locator("[class*='animate-spin']")).toHaveCount(1);
+  await expect(progressList(page).locator("[class*='animate-spin']")).toHaveCount(1);
   await expect(page.getByText("経過時間:")).toBeVisible();
 
   // 実行基盤の終了を突き合わせた Action が記録するのと同じ形で失敗を書き込む。
@@ -93,6 +131,8 @@ test("実行中の調査が失敗したら、ポーリングで上部と本文�
   await expect(page.getByRole("button", { name: "再調査する" })).toBeVisible();
   await expect(researchStep(page)).toContainText("(失敗)");
   await expect(steps(page).locator("[class*='animate-spin']")).toHaveCount(0);
+  // 調査中カードの工程一覧も消え、回転アイコンを残さない (#323)
+  await expect(progressList(page)).toHaveCount(0);
   await expect(page.getByText("経過時間:").filter({ visible: true })).toHaveCount(0);
 
   await page.reload();
@@ -111,6 +151,7 @@ test("期限を過ぎた実行中の調査は、上部・本文とも時間超�
 
   await expect(researchStep(page)).toContainText("(時間超過)");
   await expect(steps(page).locator("[class*='animate-spin']")).toHaveCount(0);
+  await expect(progressList(page)).toHaveCount(0);
   await expect(page.getByText("上限の時間を過ぎても調査が終わっていません")).toBeVisible();
   await expect(page.getByRole("button", { name: "再調査する" })).toBeVisible();
   await expect(page.getByText("中断しました").filter({ visible: true })).toHaveCount(0);

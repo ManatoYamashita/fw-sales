@@ -49,10 +49,11 @@ const RUN: StoreResearchRun = {
 function render({
   overdue = false,
   unavailableMessage = null,
-}: { overdue?: boolean; unavailableMessage?: string | null } = {}): string {
+  run = RUN,
+}: { overdue?: boolean; unavailableMessage?: string | null; run?: StoreResearchRun } = {}): string {
   return renderToStaticMarkup(
     <ResearchProgressCard
-      run={RUN}
+      run={run}
       onUpdate={() => {}}
       overdue={overdue}
       onRetry={() => {}}
@@ -130,6 +131,92 @@ describe("ResearchProgressCard (#324)", () => {
     expect(html).toContain("ログインの有効期限が切れた可能性があります");
     expect(html).toContain('href="/login"');
     expect(html).toContain("ログインし直す");
+  });
+});
+
+/**
+ * 工程一覧の表示契約 (#323)。
+ *
+ * | 状態 | アイコン | 文言 | 行 |
+ * | 進行中 | 回転アイコン | 進行中 | 強調 (`aria-current="step"`) |
+ * | 完了 | チェック | 完了 | - |
+ * | 未着手 | 枠線だけの円 | 未着手 | - |
+ */
+describe("ResearchProgressCard の工程一覧 (#323)", () => {
+  const SPINNER = "animate-spin";
+
+  /** 工程一覧の各行 (`li`) の HTML。 */
+  function stepRows(html: string): string[] {
+    const list = html.match(/<ol aria-label="調査の工程"[^>]*>(.*?)<\/ol>/)![1]!;
+    return list.match(/<li[^>]*>.*?<\/li>/g)!;
+  }
+
+  function renderStage(stage: StoreResearchRun["stage"]): string[] {
+    return stepRows(render({ run: { ...RUN, stage } }));
+  }
+
+  it("工程名に状態を埋め込まない (「店舗情報を取得・分析中」と書かない)", () => {
+    const html = render();
+    expect(html).toContain(">店舗情報を取得・分析<");
+    expect(html).not.toContain("取得・分析中");
+  });
+
+  it.each([
+    [null, 0],
+    ["discovering", 1],
+    ["researching", 2],
+    ["done", 3],
+  ] as const)("stage=%s では %i 番目の工程だけが回転アイコン・強調・「進行中」になる", (stage, activeIndex) => {
+    const rows = renderStage(stage);
+    expect(rows).toHaveLength(4);
+    rows.forEach((row, index) => {
+      if (index === activeIndex) {
+        expect(row).toContain(SPINNER);
+        expect(row).toContain("motion-safe:animate-spin");
+        expect(row).toContain('aria-current="step"');
+        expect(row).toContain("bg-primary/10");
+        expect(row).toContain(">進行中<");
+      } else {
+        expect(row).not.toContain(SPINNER);
+        expect(row).not.toContain("aria-current");
+        expect(row).not.toContain(">進行中<");
+      }
+      if (index < activeIndex) {
+        expect(row).toContain("lucide-check");
+        expect(row).toContain(">完了<");
+      }
+      if (index > activeIndex) {
+        expect(row).not.toContain("lucide-check");
+        expect(row).toContain(">未着手<");
+      }
+    });
+  });
+
+  it("状態は色やアニメーションだけでなく、各行の文言でも読める", () => {
+    const rows = renderStage("researching");
+    expect(rows.map((row) => row.match(/>(完了|進行中|未着手)</)?.[1])).toEqual([
+      "完了",
+      "完了",
+      "進行中",
+      "未着手",
+    ]);
+    // アイコンは装飾として読み上げから外し、状態は文言で伝える
+    for (const row of rows) expect(row).toMatch(/<span aria-hidden="true"/);
+  });
+
+  it("期限を過ぎたら工程一覧ごと消し、回転アイコンを残さない", () => {
+    const html = render({ overdue: true, run: { ...RUN, stage: "researching" } });
+    expect(html).not.toContain("調査の工程");
+    expect(html).not.toContain(SPINNER);
+  });
+
+  it("経過時間・目安・ページを離れても続く案内を、工程一覧の後ろにまとめて出す", () => {
+    const html = render();
+    const listEnd = html.indexOf("</ol>");
+    expect(listEnd).toBeGreaterThan(0);
+    for (const text of ["経過時間: 1分30秒(目安 3〜5分)", "このページを離れても調査は継続されます。"]) {
+      expect(html.indexOf(text)).toBeGreaterThan(listEnd);
+    }
   });
 });
 
