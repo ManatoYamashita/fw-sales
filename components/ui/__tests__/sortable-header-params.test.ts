@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildSortHref,
+  buildSortResetHref,
   nextSortDir,
   readSortState,
 } from "../sortable-header-params";
@@ -74,5 +75,23 @@ describe("buildSortHref", () => {
     expect(buildSortHref("/stores", params(""), "x", "asc").startsWith("/stores?")).toBe(
       true,
     );
+  });
+});
+
+describe("buildSortResetHref (#330)", () => {
+  it("絞り込みを保ったまま sort と dir だけを落とす", () => {
+    const href = buildSortResetHref(
+      "/stores",
+      params("q=%E5%B1%85%E9%85%92%E5%B1%8B&sort=next&dir=desc&next=overdue"),
+    );
+    const out = new URL(href, "http://x").searchParams;
+    expect(out.get("q")).toBe("居酒屋");
+    expect(out.get("next")).toBe("overdue");
+    expect(out.has("sort")).toBe(false);
+    expect(out.has("dir")).toBe(false);
+  });
+
+  it("クエリが空になったら ? を付けない", () => {
+    expect(buildSortResetHref("/stores", params("sort=name&dir=asc"))).toBe("/stores");
   });
 });

@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils/cn";
 import { DataTableRow } from "./data-table-row";
 import { SortableHeader, type SortDir } from "./sortable-header";
 import { DataTableSortSelect, type SortOption } from "./data-table-sort-select";
+import { DataTableSortReset } from "./data-table-sort-reset";
 import {
   DATA_TABLE_CONTAINER_CLASS,
   resolveColumnHideClass,
@@ -84,24 +85,39 @@ export interface DataTableProps<T> {
     rowLabel?: (row: T) => string;
   };
   /**
-   * サーバで確定した現在のソート方向 (#234)。カードモードの並び替えコントロールが
+   * サーバで確定した現在のソート方向 (#234)。コンパクト表示の並び替えコントロールが
    * 現在値を表示するために使う。`activeSortKey` と同じく `useSearchParams` は読まない。
    */
   activeSortDir?: SortDir;
   /**
-   * 狭いコンテナで `<table>` の代わりに描画するカード (#234 / PR3/3)。
+   * URL に `sort` が無いときのページの既定の並び (#330)。
    *
-   * **未指定なら出力は現行と 1 バイトも変わらない。** カードビューを必要としない
+   * 指定すると、コンパクト表示の並び替えに「解除」を出す。現在の並びがこの既定と
+   * 一致するときは出さない (押しても何も変わらないため)。
+   */
+  defaultSort?: { sortKey: string; dir: SortDir };
+  /**
+   * 狭いコンテナで `<table>` の代わりに描画するコンパクト表示 (#234 で導入、
+   * #330 で枠付きカードから区切り線の行へ組み直し)。名前は導入時のまま残している。
+   *
+   * **未指定なら出力は現行と 1 バイトも変わらない。** コンパクト表示を必要としない
    * テーブル (dashboard / handoffs) へ影響を出さないための設計。
    *
-   * 指定すると表とカードリストの**両方を DOM に出し**、コンテナクエリで排他に
+   * 指定すると表とリストの**両方を DOM に出し**、コンテナクエリで排他に
    * 出し分ける。JS による viewport 判定は使わない (PPR の静的シェルが viewport を
    * 知らず、hydration 後の差し替えでレイアウトシフトとフォーカス喪失が起きるため)。
+   *
+   * リストは表と同じ見た目の規則に寄せる: `<thead>` に当たる帯 (全選択・並び替え) を
+   * 先頭に置き、行は表の行と同じ薄い区切り線で分け、行ごとの枠は持たない。
+   * 選択のチェックボックスは帯と各行で同じ 44px の列にそろえる。
    */
   cardView?: {
-    /** 1 行を 1 枚のカードとして描画する。 */
+    /**
+     * 1 行ぶんの中身を描画する。区切り線・左右の余白・選択のチェックボックスは
+     * `DataTable` 側が持つので、ここでは枠や外側の余白を付けないこと。
+     */
     render: (row: T) => ReactNode;
-    /** カードリストの aria-label。 */
+    /** リストの aria-label。 */
     label?: string;
   };
 }
@@ -127,6 +143,7 @@ export function DataTable<T>({
   rowSelection,
   activeSortKey,
   activeSortDir,
+  defaultSort,
   cardView,
 }: DataTableProps<T>) {
   if (rows.length === 0) {
@@ -298,31 +315,51 @@ export function DataTable<T>({
       </table>
 
       {cardView ? (
-        <div className={cn("flex flex-col gap-2 py-2", viewSwitch.cardList)}>
+        <div className={cn(viewSwitch.cardList)}>
           {rowSelection || sortOptions.length > 0 ? (
-            <div className="flex flex-wrap items-center gap-2">
+            /*
+              表の <thead> に当たる帯。選択・並び替えをここへまとめ、下の行と同じ左端
+              (選択のチェックボックス列) にそろえる。並び替えは右へ寄せ、折り返したときも
+              右端に置く (`[&>*+*]:ml-auto`。flex-wrap の 2 行目は justify-between が効かない)。
+            */
+            <div
+              className={cn(
+                "flex flex-wrap items-center gap-x-1 border-b border-border bg-muted/50 pr-3 [&>*+*]:ml-auto",
+                rowSelection ? "pl-0.5" : "pl-4",
+              )}
+            >
               {rowSelection ? (
-                // 表の <thead> チェックボックスがカードモードでは消えるため、
+                // 表の <thead> チェックボックスがコンパクト表示では消えるため、
                 // 等価の「すべて選択」をここに置く。これが無いと admin は狭幅で
                 // 一括操作へ到達できなくなる。
-                <label className="inline-flex h-11 cursor-pointer items-center gap-2 rounded-md px-2 text-sm text-muted-foreground">
-                  <input
-                    type="checkbox"
-                    checked={Boolean(allSelected)}
-                    onChange={(e) => toggleAllRows(e.currentTarget.checked)}
-                    aria-label={rowSelection.allRowsLabel ?? "全行を選択"}
-                    className="h-4 w-4 accent-primary"
-                  />
+                <label className="inline-flex h-11 cursor-pointer items-center pr-1 text-sm text-muted-foreground">
+                  <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(allSelected)}
+                      onChange={(e) => toggleAllRows(e.currentTarget.checked)}
+                      aria-label={rowSelection.allRowsLabel ?? "全行を選択"}
+                      className="h-4 w-4 accent-primary"
+                    />
+                  </span>
                   すべて選択
                 </label>
               ) : null}
               {sortOptions.length > 0 ? (
-                <DataTableSortSelect
-                  options={sortOptions}
-                  activeSortKey={activeSortKey}
-                  activeSortDir={activeSortDir}
-                  className="min-w-0 flex-1"
-                />
+                <div className="flex min-w-0 items-center gap-1">
+                  <DataTableSortSelect
+                    options={sortOptions}
+                    activeSortKey={activeSortKey}
+                    activeSortDir={activeSortDir}
+                    className="min-w-0"
+                  />
+                  {defaultSort &&
+                  activeSortKey !== undefined &&
+                  (activeSortKey !== defaultSort.sortKey ||
+                    activeSortDir !== defaultSort.dir) ? (
+                    <DataTableSortReset />
+                  ) : null}
+                </div>
               ) : null}
             </div>
           ) : null}
@@ -330,16 +367,19 @@ export function DataTable<T>({
           {/*
             Tailwind preflight が `list-style: none` を当てるため、Safari + VoiceOver で
             リストのセマンティクスが失われる。role="list" で明示的に復元する。
+            行どうしは表の行と同じ薄い区切り線で分け、行ごとの枠は持たない (#330)。
           */}
-          <ul
-            role="list"
-            aria-label={cardView.label ?? "一覧 (カード表示)"}
-            className="flex flex-col gap-2"
-          >
+          <ul role="list" aria-label={cardView.label ?? "一覧 (コンパクト表示)"}>
             {rows.map((row) => {
               const id = rowKey(row);
               return (
-                <li key={id} className="flex items-start gap-1">
+                <li
+                  key={id}
+                  className={cn(
+                    "flex items-start gap-1 border-b border-border/60 pt-0.5 pb-2.5 pr-3 last:border-b-0",
+                    rowSelection ? "pl-0.5" : "pl-4",
+                  )}
+                >
                   {rowSelection ? (
                     <label className="inline-flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center">
                       <input

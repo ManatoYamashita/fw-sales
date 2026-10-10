@@ -56,3 +56,20 @@ export function buildSortHref(
   next.set("dir", dir);
   return `${pathname}?${next.toString()}`;
 }
+
+/**
+ * 並び替えを解除した href (#330)。他のクエリ (絞り込み) は保ったまま `sort` と `dir` だけを
+ * 落とす。行き先の並び順はページの既定値 (`/stores` なら次回アクションの昇順) になる。
+ *
+ * クエリが空になったら `?` を付けない (`/stores?` と `/stores` を別の URL にしないため)。
+ */
+export function buildSortResetHref(
+  pathname: string,
+  params: URLSearchParams,
+): string {
+  const next = new URLSearchParams(params.toString());
+  next.delete("sort");
+  next.delete("dir");
+  const query = next.toString();
+  return query ? `${pathname}?${query}` : pathname;
+}

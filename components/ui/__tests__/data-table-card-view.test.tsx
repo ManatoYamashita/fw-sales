@@ -165,6 +165,81 @@ describe("cardView 指定", () => {
   });
 });
 
+describe("コンパクト表示の操作帯と行 (#330)", () => {
+  const sortable: ColumnDef<Row>[] = [
+    { key: "label", header: "ラベル", sortKey: "label", cell: (r) => r.label },
+    { key: "next", header: "次", sortKey: "next", cell: () => "—" },
+  ];
+  const selection = { selectedRowKeys: [], onChange: vi.fn() };
+
+  /** カードリスト側 (表の後ろ) の HTML だけを取り出す。 */
+  const cardPart = (html: string) => html.slice(html.indexOf("</table>"));
+
+  it("行ごとの枠を持たず、表の行と同じ薄い区切り線で分ける", () => {
+    const html = cardPart(render({ cardView: CARD_VIEW }));
+    const lis = tags(html, "li");
+    expect(lis).toHaveLength(ROWS.length);
+    for (const li of lis) {
+      expect(li).toContain("border-b border-border/60");
+      expect(li).toContain("last:border-b-0");
+    }
+    // 行どうしの隙間 (gap) で枠付きカードを並べる旧構造に戻っていないこと。
+    expect(tags(html, "ul")[0]).not.toMatch(/\bgap-\d/);
+  });
+
+  it("全選択のチェックボックスは行のチェックボックスと同じ 44px の列に置く", () => {
+    // 本文と同じ左端にそろえる。左の余白 (pl-0.5) と 44px の枠が行と一致すること。
+    const html = cardPart(render({ cardView: CARD_VIEW, rowSelection: selection, columns: sortable }));
+    const toolbar = tags(html, "div").find((t) => t.includes("bg-muted/50"));
+    expect(toolbar).toBeDefined();
+    expect(toolbar).toContain("pl-0.5");
+    for (const li of tags(html, "li")) expect(li).toContain("pl-0.5");
+    expect(html).toContain('<span class="inline-flex h-11 w-11 shrink-0 items-center justify-center">');
+  });
+
+  it("操作帯は折り返しても並び替えを右端に置く ([&>*+*]:ml-auto)", () => {
+    const html = cardPart(render({ cardView: CARD_VIEW, rowSelection: selection, columns: sortable }));
+    const toolbar = tags(html, "div").find((t) => t.includes("bg-muted/50"));
+    expect(toolbar).toContain("flex-wrap");
+    expect(toolbar).toContain("[&amp;&gt;*+*]:ml-auto");
+    expect(toolbar).not.toContain("justify-between");
+  });
+
+  it("既定と違う並びなら「解除」を出し、絞り込みを残したまま sort / dir を外す", () => {
+    const html = render({
+      cardView: CARD_VIEW,
+      columns: sortable,
+      activeSortKey: "next",
+      activeSortDir: "desc",
+      defaultSort: { sortKey: "next", dir: "asc" },
+    });
+    expect(html).toContain('aria-label="並び替えを解除 (既定の並び順に戻す)"');
+    // usePathname は "/stores"、useSearchParams は空 (このファイル冒頭の mock)。
+    expect(html).toMatch(/<a [^>]*href="\/stores"[^>]*>解除<\/a>/);
+  });
+
+  it("既定の並びのときは「解除」を出さない", () => {
+    const html = render({
+      cardView: CARD_VIEW,
+      columns: sortable,
+      activeSortKey: "next",
+      activeSortDir: "asc",
+      defaultSort: { sortKey: "next", dir: "asc" },
+    });
+    expect(html).not.toContain("並び替えを解除");
+  });
+
+  it("defaultSort を渡さないテーブルには「解除」を出さない", () => {
+    const html = render({
+      cardView: CARD_VIEW,
+      columns: sortable,
+      activeSortKey: "label",
+      activeSortDir: "desc",
+    });
+    expect(html).not.toContain("並び替えを解除");
+  });
+});
+
 describe("選択列のタッチターゲット (#234)", () => {
   it("チェックボックスを 44px の label で包む", () => {
     const html = render({
