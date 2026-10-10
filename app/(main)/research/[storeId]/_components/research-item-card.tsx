@@ -10,6 +10,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { SourceBadgeList } from "./research-source-badge";
+import {
+  deriveItemTrust,
+  getVisibleItemNotes,
+  ITEM_TRUST_LABELS,
+  stripLegacyEvidenceSupplement,
+  type ItemTrust,
+} from "@/lib/domain/research-item-notes";
 import type {
   ResearchItem,
   ReviewDecision,
@@ -17,13 +24,16 @@ import type {
   SourceRegistryEntry,
 } from "@/types/research-run";
 
-const STATUS_LABELS: Record<string, string> = {
-  confirmed: "確認済み",
-  inferred: "推定",
-  conflict: "競合",
-};
-
-const STATUS_TONES: Record<string, "success" | "warning" | "destructive"> = {
+/**
+ * バッジの色。文言は `ITEM_TRUST_LABELS`(`lib/domain/research-item-notes.ts`)。
+ *
+ * 見せ方は `item.status` ではなく `deriveItemTrust` で決める (#301)。status だけで
+ * 「確認済み」と出すと、登録済みの値を折り返しただけの項目や、AI が不一致の注記を付けた
+ * 項目で、バッジと注記が矛盾して見えていた。
+ */
+const TRUST_TONES: Record<ItemTrust, "success" | "warning" | "destructive" | "info"> = {
+  registered: "info",
+  noted: "warning",
   confirmed: "success",
   inferred: "warning",
   conflict: "destructive",
@@ -90,6 +100,8 @@ export function ResearchItemCard({
   const [editValue, setEditValue] = useState(item.value ?? "");
 
   const decided = decisionLabel(decision);
+  const trust = deriveItemTrust(item);
+  const notes = getVisibleItemNotes(item.warning);
 
   return (
     <div
@@ -105,7 +117,7 @@ export function ResearchItemCard({
               {decided}
             </Badge>
           )}
-          <Badge tone={STATUS_TONES[item.status] ?? "secondary"}>{STATUS_LABELS[item.status] ?? item.status}</Badge>
+          {trust !== null && <Badge tone={TRUST_TONES[trust]}>{ITEM_TRUST_LABELS[trust]}</Badge>}
         </div>
       </div>
 
@@ -145,18 +157,26 @@ export function ResearchItemCard({
       ) : (
         <div className="space-y-1.5">
           <p className="text-sm text-foreground">現在値: {item.value ?? "未取得"}</p>
-          <p className="text-xs text-muted-foreground">{item.evidence}</p>
+          <p className="text-xs text-muted-foreground">{stripLegacyEvidenceSupplement(item.evidence)}</p>
           {item.confidence !== null && item.confidence !== undefined && (
             <p className="text-xs text-muted-foreground">確信度: {item.confidence}%</p>
           )}
           {item.evidence_basis && (
             <p className="text-xs text-muted-foreground">{EVIDENCE_BASIS_LABELS[item.evidence_basis]}</p>
           )}
-          <SourceBadgeList sourceIds={item.source_ids} sourceRegistry={sourceRegistry} />
+          <SourceBadgeList
+            sourceIds={item.source_ids}
+            sourceRegistry={sourceRegistry}
+            evidenceBasis={item.evidence_basis}
+          />
         </div>
       )}
 
-      {item.warning && <p className="text-xs text-warning">{item.warning}</p>}
+      {notes.map((note) => (
+        <p key={note.text} className="text-xs text-warning">
+          {note.text}
+        </p>
+      ))}
 
       {editing && item.status !== "conflict" && (
         <div className="space-y-1.5 pt-1">
