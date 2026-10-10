@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { cn } from "@/lib/utils/cn";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
+import { NavigationProgress } from "@/components/layout/navigation-progress";
 import { CurrentUserProvider } from "@/components/layout/current-user-provider";
 import { loadNavBadgeCounts } from "@/components/layout/nav-badges";
 import { getCurrentProfile } from "@/lib/supabase/server";
@@ -100,6 +101,11 @@ export default function MainLayout({
 }) {
   return (
     <div className="flex min-h-dvh bg-background text-foreground">
+      {/* useSearchParams を読むため Suspense が必須。fallback は何も描かない
+          (遷移が始まるまでバーは見えないので、静的シェルに出すものが無い)。 */}
+      <Suspense fallback={null}>
+        <NavigationProgress />
+      </Suspense>
       <a
         href="#main-content"
         className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-md focus:bg-card focus:px-4 focus:py-2 focus:text-foreground focus:shadow-card"
