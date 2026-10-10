@@ -21,6 +21,7 @@
  */
 
 import {
+  useEffect,
   useId,
   useRef,
   useState,
@@ -78,6 +79,15 @@ export function BasicInfoFieldRow({ storeId, def, field }: BasicInfoFieldRowProp
   const [draft, setDraft] = useState(serverValue);
   const [failed, setFailed] = useState(false);
   const [pending, startTransition] = useTransition();
+  // 保存できたら、保存中の表示を終えてから画面を再取得する。
+  // 遷移の中で `router.refresh()` を呼ぶと、再取得の遷移が保存の遷移に束ねられ、
+  // 再取得が終わるまで「保存中」が消えない (dev では 10 秒近く残った)。
+  const refreshAfterSaveRef = useRef(false);
+  useEffect(() => {
+    if (pending || !refreshAfterSaveRef.current) return;
+    refreshAfterSaveRef.current = false;
+    router.refresh();
+  }, [pending, router]);
 
   // 再取得や他の人の保存でサーバの値が変わったら追従する。入力中の値は上書きしない。
   const [prevServerValue, setPrevServerValue] = useState(serverValue);
@@ -123,7 +133,7 @@ export function BasicInfoFieldRow({ storeId, def, field }: BasicInfoFieldRowProp
         setDraft(next);
         setFailed(false);
         focusInput();
-        router.refresh();
+        refreshAfterSaveRef.current = true;
         return;
       }
       // 失敗の理由は runAction のトーストが読み上げる。ここでは入力欄の近くに

@@ -88,12 +88,12 @@ export function BasicInfoFieldsCard({ storeId, basicInfo }: BasicInfoFieldsCardP
               <details
                 key={cat}
                 name="basic-info-category"
-                className="group rounded-md border border-border"
+                className="group/category rounded-md border border-border"
               >
                 <summary className="flex min-h-11 cursor-pointer select-none items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-muted/40 md:min-h-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                   <ChevronRight
                     aria-hidden
-                    className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-90 motion-reduce:transition-none"
+                    className="size-4 shrink-0 text-muted-foreground transition-transform group-open/category:rotate-90 motion-reduce:transition-none"
                   />
                   {/* 狭い幅では件数・未保存の表示を次の行へ送り、語の途中で折り返さない。 */}
                   <span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 gap-y-0.5">
@@ -101,7 +101,7 @@ export function BasicInfoFieldsCard({ storeId, basicInfo }: BasicInfoFieldsCardP
                     <span className="whitespace-nowrap text-xs text-muted-foreground tabular-nums">
                       {`入力済み ${filledInCat} / ${items.length}`}
                     </span>
-                    <span className="ml-auto hidden whitespace-nowrap text-xs font-medium text-foreground group-has-[[data-unsaved]]:inline">
+                    <span className="ml-auto hidden whitespace-nowrap text-xs font-medium text-foreground group-has-[[data-unsaved]]/category:inline">
                       未保存の変更あり
                     </span>
                   </span>
