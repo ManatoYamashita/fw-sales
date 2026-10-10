@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   session: vi.fn(), insert: vi.fn(), transaction: vi.fn(), revalidateTag: vi.fn(), start: vi.fn(),
   runGetForUpdate: vi.fn(), runUpdate: vi.fn(), storeGetForUpdate: vi.fn(), storeUpdate: vi.fn(),
   storeGet: vi.fn(), getLatestForStore: vi.fn(), create: vi.fn(), runUpdateOutsideTx: vi.fn(),
+  runUpdateIfRunning: vi.fn(),
 }));
 vi.mock("@/lib/supabase/server", () => ({ getCurrentSession: mocks.session }));
 vi.mock("workflow/api", () => ({ start: mocks.start }));
@@ -20,6 +21,8 @@ vi.mock("@/lib/repositories", () => ({ repos: {
   store: { get: mocks.storeGet },
   researchRun: {
     getLatestForStore: mocks.getLatestForStore, create: mocks.create, update: mocks.runUpdateOutsideTx,
+    // 起動した Workflow run の ID を記録する (#324)。監査の順序には含めない。
+    updateIfRunning: mocks.runUpdateIfRunning,
   },
   eventLog: { insert: mocks.insert },
   transaction: mocks.transaction,
@@ -101,11 +104,15 @@ beforeEach(() => {
   mocks.create.mockImplementation(async () => { order.push("create"); return { id: RUN_ID }; });
   mocks.start.mockImplementation(async () => { order.push("workflow"); return { runId: "wrun_1" }; });
   mocks.runUpdateOutsideTx.mockResolvedValue({});
+  mocks.runUpdateIfRunning.mockResolvedValue({});
+  // 開始前の実行条件チェック (#324) を通すため、AI の API キーがある環境にする。
+  vi.stubEnv("GEMINI_API_KEY", "test-key");
   vi.spyOn(console, "error").mockImplementation(() => undefined);
 });
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 const RUN_TARGET = {
@@ -343,6 +350,14 @@ describe("adoptBulkLaneAction persistent audit", () => {
 });
 
 describe("startResearchRunAction persistent audit", () => {
+  it("does not create a run or an audit row when AI research cannot run here (#324)", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "");
+    expect((await startResearchRunAction(STORE_ID)).ok).toBe(false);
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(mocks.start).not.toHaveBeenCalled();
+    expect(mocks.insert).not.toHaveBeenCalled();
+  });
+
   it("records the started run after the workflow is enqueued", async () => {
     expect((await startResearchRunAction(STORE_ID)).ok).toBe(true);
     expect(mocks.insert).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
