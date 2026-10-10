@@ -59,6 +59,8 @@ vi.mock("@/lib/repositories", () => ({
       create: mockCreate,
       update: mockUpdate,
     },
+    // 監査 (#320) の書き込み先。監査そのものの検証は research-run-actions.audit.test.ts で行う。
+    eventLog: { insert: vi.fn() },
     transaction: mockTransaction,
   },
 }));

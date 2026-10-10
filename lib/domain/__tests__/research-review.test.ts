@@ -8,6 +8,7 @@ import {
   classifyAdoptionEffect,
   describeBasicInfoOrigin,
   EDITED_SOURCE_QUOTE,
+  isEditedAdoption,
   normalizeBasicInfoValue,
   planReviewLanes,
   summarizeReviewPlan,
@@ -285,6 +286,42 @@ describe("resolveSourceUrls", () => {
 
   it("registryに存在しないidは無視する", () => {
     expect(resolveSourceUrls(["S99"], registry)).toEqual([]);
+  });
+});
+
+describe("isEditedAdoption (#320)", () => {
+  const conflict = makeItem({
+    status: "conflict",
+    value: null,
+    candidates: [
+      { candidate_id: "c1", label: "候補A", value: "17:00〜24:00", evidence: "e1", source_ids: [] },
+      { candidate_id: "c2", label: "候補B", value: "18:00〜23:00", evidence: "e2", source_ids: [] },
+    ],
+  });
+
+  it("editedValue が無ければ編集していない", () => {
+    expect(isEditedAdoption(makeItem({}))).toBe(false);
+  });
+
+  it("調査の値と同じ editedValue は編集とみなさない(根拠を引き継ぐ側と同じ判定)", () => {
+    expect(isEditedAdoption(makeItem({}), { editedValue: "17:00〜24:00" })).toBe(false);
+  });
+
+  it("調査の値と異なる editedValue は編集とみなす", () => {
+    expect(isEditedAdoption(makeItem({}), { editedValue: "10:00〜18:00" })).toBe(true);
+  });
+
+  it("競合は選んだ候補の値と比べる", () => {
+    expect(isEditedAdoption(conflict, { selectedCandidateId: "c2", editedValue: "18:00〜23:00" })).toBe(false);
+    expect(isEditedAdoption(conflict, { selectedCandidateId: "c1", editedValue: "18:00〜23:00" })).toBe(true);
+  });
+
+  it("buildAdoptedBasicInfoField の出典の扱いと一致する", () => {
+    const registry = [makeSource({ id: "S01" })];
+    for (const editedValue of [undefined, "17:00〜24:00", "10:00〜18:00"]) {
+      const field = buildAdoptedBasicInfoField(makeItem({}), registry, "2026-10-10T00:00:00.000Z", { editedValue });
+      expect(field.source_quote === EDITED_SOURCE_QUOTE).toBe(isEditedAdoption(makeItem({}), { editedValue }));
+    }
   });
 });
 
