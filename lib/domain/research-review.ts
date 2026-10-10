@@ -465,6 +465,24 @@ export interface AdoptOptions {
  */
 export const EDITED_SOURCE_QUOTE = "人間が編集した値です(直接の出典URLはありません)。";
 
+/**
+ * 「編集して採用」で、調査の値(競合なら選んだ候補の値)と異なる値を入れたか。
+ *
+ * `buildAdoptedBasicInfoField` が根拠(confidence / source_urls / source_quote)を
+ * 引き継ぐかどうかと、監査ログ(`research.review.decide` の `edited`)が同じ判定を使う。
+ * 競合で候補が見つからない場合は `false`(採用自体は `buildAdoptedBasicInfoField` が拒否する)。
+ */
+export function isEditedAdoption(item: ResearchItem, options: AdoptOptions = {}): boolean {
+  if (options.editedValue === undefined) return false;
+  if (item.status === "conflict") {
+    const candidate = (item.candidates ?? []).find(
+      (c) => c.candidate_id === options.selectedCandidateId,
+    );
+    return candidate !== undefined && options.editedValue !== candidate.value;
+  }
+  return options.editedValue !== item.value;
+}
+
 export function buildAdoptedBasicInfoField(
   item: ResearchItem,
   sourceRegistry: readonly SourceRegistryEntry[],
@@ -481,7 +499,7 @@ export function buildAdoptedBasicInfoField(
     if (!candidate) {
       throw new Error(`候補が見つかりません: ${options.selectedCandidateId}`);
     }
-    const wasEdited = options.editedValue !== undefined && options.editedValue !== candidate.value;
+    const wasEdited = isEditedAdoption(item, options);
     return {
       value: options.editedValue ?? candidate.value,
       tier: "A",
@@ -495,7 +513,7 @@ export function buildAdoptedBasicInfoField(
     };
   }
 
-  const wasEdited = options.editedValue !== undefined && options.editedValue !== item.value;
+  const wasEdited = isEditedAdoption(item, options);
   return {
     value: options.editedValue ?? item.value,
     tier: item.status === "confirmed" ? "A" : "B",

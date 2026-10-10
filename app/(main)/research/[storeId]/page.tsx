@@ -4,6 +4,7 @@ import { AiResearchWorkbench } from "./_components/ai-research-workbench";
 import { getStoreCached } from "@/lib/queries/stores";
 import { repos } from "@/lib/repositories";
 import { isApiKeyConfigured } from "@/lib/env";
+import { getResearchAvailability } from "@/lib/ai/research/availability";
 
 type Params = Promise<{ storeId: string }>;
 
@@ -36,11 +37,16 @@ export default async function ResearchDetailPage({
   // 撤去した(§5.1, §12)。`buildBasicInfoBlock` 自体は `generateSalesAssetsAction` の
   // プロンプト組み立てに引き続き使われるため削除しない(§14)。
   // 営業資産生成の唯一の入口 (#300) なので、API キー未設定の判定もここで渡す。
+  // AI 調査を実行できない理由も、押す前に示すためここで渡す (#324)。値ではなく固定文のみ。
+  const researchAvailability = getResearchAvailability();
   return (
     <AiResearchWorkbench
       store={store}
       initialRuns={runs}
       isApiKeyConfigured={isApiKeyConfigured()}
+      researchUnavailableMessage={
+        researchAvailability.available ? null : researchAvailability.message
+      }
     />
   );
 }

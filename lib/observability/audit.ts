@@ -66,8 +66,9 @@ export async function writeAudit(input: AuditInput): Promise<void> {
       event: safe.event,
       actor_user_id: safe.actor?.userId ?? null,
       actor_email: safe.actor?.email ?? null,
-      target_type: "store",
-      target_id: safe.storeId,
+      // AI 調査のイベントは run を対象とし、店舗単位の検索のため store_id も残す。
+      target_type: "runId" in safe ? "research_run" : "store",
+      target_id: "runId" in safe ? safe.runId : safe.storeId,
       store_id: safe.storeId,
       payload: safe.payload,
       error: null,

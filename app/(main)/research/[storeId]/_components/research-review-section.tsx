@@ -33,7 +33,7 @@ import { AlertTriangle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { ResearchItemCard, type DecideInput } from "./research-item-card";
+import { ResearchItemCard, type DecideInput, toPendingDecision, pendingDecisionForItem, type PendingDecision } from "./research-item-card";
 import { NonReviewItemCard } from "./research-nonreview-card";
 import { runAction } from "@/lib/client/run-action";
 import {
@@ -262,6 +262,11 @@ export function ResearchReviewSection({ store, run, onUpdate, onRestart, restart
   const items = useMemo(() => run.result ?? [], [run.result]);
   const [filterUnresolved, setFilterUnresolved] = useState(false);
   const [busy, startTransition] = useTransition();
+  // 項目の判断で、いま処理中なのはどの項目のどのボタンか (#337)。transition の
+  // 終わりで消さなくてよい: 表示は `busy` の間だけ効かせ、次に押したら上書きする。
+  const [pendingDecision, setPendingDecision] = useState<
+    (PendingDecision & { itemKey: string }) | null
+  >(null);
   const [completing, startCompleting] = useTransition();
 
   const reviewCompleted = run.review_completed_at !== null;
@@ -304,6 +309,7 @@ export function ResearchReviewSection({ store, run, onUpdate, onRestart, restart
 
   const onDecide = (item: ResearchItem, input: DecideInput) => {
     if (reviewCompleted) return;
+    setPendingDecision({ itemKey: item.key, ...toPendingDecision(input) });
     startTransition(async () => {
       // 項目ごとの判断は数十件を続けて押すため、成功はトーストではなく項目の
       // 表示が変わることで伝える (#327 で決定)。失敗と例外はトーストで出す。
@@ -471,6 +477,7 @@ export function ResearchReviewSection({ store, run, onUpdate, onRestart, restart
                         current={store.basic_info[item.key]}
                         defaultOpen={!reviewCompleted && (lane === "individual" || lane === "choose")}
                         busy={busy || completing}
+                        pendingDecision={pendingDecisionForItem(item.key, busy, pendingDecision)}
                         onDecide={(input) => onDecide(item, input)}
                       />
                     );

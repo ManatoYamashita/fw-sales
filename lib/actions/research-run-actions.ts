@@ -22,17 +22,33 @@ import { CACHE_TAGS } from "@/lib/cache";
 import { parsePostgresError } from "@/lib/db/postgres-error";
 import { getCurrentSession } from "@/lib/supabase/server";
 import { checkRateLimit } from "@/lib/ai/rate-limiter";
+import { getResearchAvailability } from "@/lib/ai/research/availability";
+import {
+  dropBlankVercelUrl,
+  linkWorkflowRun,
+  syncRunWithWorkflow,
+} from "@/lib/ai/research/workflow-run-sync";
 import { nowIso } from "@/lib/utils/date";
 import { storeResearchWorkflow } from "@/workflows/store-research";
 import { mergeBasicInfo } from "@/lib/domain/basic-info-merge";
 import {
   buildAdoptedBasicInfoField,
+  classifyAdoptionEffect,
   getUndecidedReviewableItems,
+  isEditedAdoption,
   isReviewableItem,
   isRunStuck,
-  isSameBasicInfoValue,
   planReviewLanes,
 } from "@/lib/domain/research-review";
+import {
+  AUDIT_EVENTS,
+  type AdoptionEffectKind,
+  type ResearchReviewCompletePayload,
+  type ResearchReviewDecidePayload,
+  type ReviewCompletionMethod,
+} from "@/lib/observability/events";
+import { snapshotSessionActor } from "@/lib/observability/actor";
+import { writeAudit } from "@/lib/observability/audit";
 import {
   isValidReviewDecisionForItem,
   ReviewDecisionSchema,
@@ -50,6 +66,28 @@ export interface StartResearchRunResult {
   runId: string;
 }
 
+/**
+ * レビュー完了時点の判断の内訳を `research.review.complete` の payload にする。
+ * 値は数えるだけで、項目キーや採用した値は含めない。
+ */
+function buildReviewCompletePayload(
+  decisions: ReviewDecisions,
+  method: ReviewCompletionMethod,
+  autoSkippedCount: number,
+  stageAdvanced: boolean,
+): ResearchReviewCompletePayload {
+  const counts = { adopted: 0, rejected: 0, skipped: 0 };
+  for (const decision of Object.values(decisions)) counts[decision.decision]++;
+  return {
+    method,
+    adoptedCount: counts.adopted,
+    rejectedCount: counts.rejected,
+    skippedCount: counts.skipped,
+    autoSkippedCount,
+    stageAdvanced,
+  };
+}
+
 export async function startResearchRunAction(
   storeId: string,
 ): Promise<ActionResult<StartResearchRunResult>> {
@@ -60,6 +98,11 @@ export async function startResearchRunAction(
     return failure("店舗IDが不正です");
   }
 
+  // 設定が足りない環境では run を作らない。作ると Workflow の中で必ず同じ理由で失敗し、
+  // 利用者は待たされたうえで再調査を繰り返すことになる (#324)。
+  const availability = getResearchAvailability();
+  if (!availability.available) return failure(availability.message);
+
   const rateLimit = checkRateLimit(storeId);
   if (!rateLimit.ok) return failure(rateLimit.message);
 
@@ -67,6 +110,7 @@ export async function startResearchRunAction(
   if (!store) return failure("店舗が見つかりません");
 
   const latest = await repos.researchRun.getLatestForStore(storeId);
+  let stuckRunFailedId: string | null = null;
   if (latest?.status === "running") {
     // stuck run対策(Plan v3.2 §17): Workflowが想定外にクラッシュし
     // markFailedStepすら実行されなかった最悪ケースへの保険。expires_atを
@@ -80,6 +124,7 @@ export async function startResearchRunAction(
         error_message: "処理時間が想定を超えたため中断しました。",
         finished_at: nowIso(),
       });
+      stuckRunFailedId = latest.id;
     } else {
       return failure("この店舗は既に調査中です。完了までお待ちください。");
     }
@@ -125,8 +170,11 @@ export async function startResearchRunAction(
     return failure("調査の開始に失敗しました。しばらくしてから再度お試しください。");
   }
 
+  let workflowRunId: string;
   try {
-    await start(storeResearchWorkflow, [runId, storeId]);
+    dropBlankVercelUrl();
+    const workflowRun = await start(storeResearchWorkflow, [runId, storeId]);
+    workflowRunId = workflowRun.runId;
   } catch (err) {
     // DB へ raw message を残さなくなった分、運用診断は structured log 側で担保する
     // (同ファイルの `[research.startRun] create failed` と同じ規約。err オブジェクト
@@ -149,7 +197,18 @@ export async function startResearchRunAction(
     });
     return failure("調査の開始に失敗しました。しばらくしてから再度お試しください。");
   }
+  // enqueue 後に実行基盤で失敗しても気づけるよう、Workflow run と関連付ける (#324)。
+  await linkWorkflowRun(runId, workflowRunId);
 
+  // 監査は run の作成と Workflow の起動が成立した後に書く。失敗しても起動は取り消さない
+  // (`writeAudit` は例外を投げない)。
+  await writeAudit({
+    event: AUDIT_EVENTS.researchRunStart,
+    actor: snapshotSessionActor(session),
+    storeId,
+    runId,
+    payload: { stuckRunFailedId },
+  });
   revalidateTag(CACHE_TAGS.store(storeId), "max");
   return success({ runId }, "AI店舗調査を開始しました");
 }
@@ -158,6 +217,9 @@ export async function startResearchRunAction(
  * run 進捗のポーリング用(PR4)。`repos.researchRun` は server-only のため、
  * client component からは本 Action 経由で読む。`'use cache'` は使わない
  * (running中のrunを数秒間隔で読むため、Cache Componentsのキャッシュ対象外)。
+ *
+ * running の run は Workflow の実行基盤の状態と突き合わせ、基盤が終了していれば
+ * failed として記録してから返す (#324、`syncRunWithWorkflow`)。
  */
 export async function getResearchRunStatusAction(
   runId: string,
@@ -169,7 +231,10 @@ export async function getResearchRunStatusAction(
   }
   const run = await repos.researchRun.get(runId);
   if (!run) return failure("調査結果が見つかりません");
-  return success(run);
+  dropBlankVercelUrl();
+  const synced = await syncRunWithWorkflow(run);
+  if (synced.markedFailed) revalidateTag(CACHE_TAGS.store(run.store_id), "max");
+  return success(synced.run);
 }
 
 export interface RecordReviewDecisionInput {
@@ -247,7 +312,11 @@ export async function recordReviewDecisionAction(
   const parsedDecision = ReviewDecisionSchema.safeParse(reviewDecision);
   if (!parsedDecision.success) return failure("不正な選択です");
 
-  return repos.transaction(async (tx) => {
+  // 監査に書く内容。transaction の中で、書き込みが成功する経路でだけ決める。
+  // (`as` で宣言型を保つ。callback 内の代入は制御フロー解析に見えず、`null` に絞り込まれるため)
+  let auditPayload = null as ResearchReviewDecidePayload | null;
+
+  const result = await repos.transaction(async (tx) => {
     const run = await tx.researchRun.getForUpdate(runId);
     if (!run || run.store_id !== storeId) return failure("調査結果が見つかりません");
     if (run.status !== "succeeded") return failure("この調査はまだレビューできません");
@@ -281,33 +350,57 @@ export async function recordReviewDecisionAction(
       [itemKey]: parsedDecision.data,
     };
 
+    let payload: ResearchReviewDecidePayload;
     if (parsedDecision.data.decision === "adopted") {
       const store = await tx.store.getForUpdate(storeId);
       if (!store) return failure("店舗が見つかりません");
 
+      const adoptOptions = { selectedCandidateId, editedValue: trimmedEditedValue };
       let field;
       try {
-        field = buildAdoptedBasicInfoField(item, run.source_registry, now, {
-          selectedCandidateId,
-          editedValue: trimmedEditedValue,
-        });
+        field = buildAdoptedBasicInfoField(item, run.source_registry, now, adoptOptions);
       } catch {
         return failure("項目の反映に失敗しました");
       }
 
       // 採用しても値が変わらない(正規化して一致する)なら基本情報へ書き込まない (#319)。
       // 書き込むと、いまの値の表記・出典・更新日時が調査の値のもので置き換わってしまう。
-      if (!isSameBasicInfoValue(store.basic_info[itemKey], field.value ?? "")) {
+      // 画面の「新規 / 変更なし / 上書き」と同じ判定を、監査の `effect` にも使う。
+      const effect = classifyAdoptionEffect(store.basic_info[itemKey], field.value ?? "");
+      if (effect.kind !== "same") {
         const mergedBasicInfo = mergeBasicInfo(store.basic_info, { [itemKey]: field }, "manual", now);
         await tx.store.update(storeId, { basic_info: mergedBasicInfo });
       }
+      payload = {
+        itemKey,
+        decision: "adopted",
+        effect: effect.kind,
+        overwrittenOrigin: effect.kind === "overwrite" ? effect.origin : null,
+        edited: isEditedAdoption(item, adoptOptions),
+      };
+    } else {
+      payload = { itemKey, decision: parsedDecision.data.decision };
     }
 
     await tx.researchRun.update(runId, { review_decisions: mergedDecisions });
-    revalidateTag(CACHE_TAGS.store(storeId), "max");
+    auditPayload = payload;
 
     return success({ reviewDecisions: mergedDecisions });
   });
+
+  // 監査と revalidate は transaction のコミット後にだけ行う(rollback 時に走らせない)。
+  // 監査の書き込みに失敗しても判断の記録は取り消さない(`writeAudit` は例外を投げない)。
+  if (result.ok && auditPayload) {
+    await writeAudit({
+      event: AUDIT_EVENTS.researchReviewDecide,
+      actor: snapshotSessionActor(session),
+      storeId,
+      runId,
+      payload: auditPayload,
+    });
+  }
+  if (result.ok) revalidateTag(CACHE_TAGS.store(storeId), "max");
+  return result;
 }
 
 export interface CompleteReviewInput {
@@ -339,7 +432,9 @@ export async function completeReviewAction(
   // feat/research-review-write-integrity(MAJOR10): getForUpdateでrun行をロックし、
   // review_decisions/review_completed_at書込みとstore.stage書込みを1トランザクションで
   // 原子化する(旧実装は別々のawaitで、片側のみ成功する不整合の余地があった)。
-  return repos.transaction(async (tx) => {
+  let auditPayload = null as ResearchReviewCompletePayload | null;
+
+  const result = await repos.transaction(async (tx) => {
     const run = await tx.researchRun.getForUpdate(runId);
     if (!run || run.store_id !== storeId) return failure("調査結果が見つかりません");
     if (run.status !== "succeeded") return failure("この調査はまだレビューできません");
@@ -366,15 +461,35 @@ export async function completeReviewAction(
     });
 
     const store = await tx.store.getForUpdate(storeId);
-    if (store && store.stage === "未調査") {
+    const stageAdvanced = store?.stage === "未調査";
+    if (stageAdvanced) {
       await tx.store.update(storeId, { stage: "調査済み" });
     }
 
-    revalidateTag(CACHE_TAGS.store(storeId), "max");
-    revalidateTag(CACHE_TAGS.stores, "max");
-
+    auditPayload = buildReviewCompletePayload(
+      mergedDecisions,
+      undecided.length > 0 ? "skip_remaining" : "all_decided",
+      undecided.length,
+      stageAdvanced,
+    );
     return success(undefined, "レビューを完了しました");
   });
+
+  // 監査と revalidate は transaction のコミット後にだけ行う(rollback 時に走らせない)。
+  if (result.ok && auditPayload) {
+    await writeAudit({
+      event: AUDIT_EVENTS.researchReviewComplete,
+      actor: snapshotSessionActor(session),
+      storeId,
+      runId,
+      payload: auditPayload,
+    });
+  }
+  if (result.ok) {
+    revalidateTag(CACHE_TAGS.store(storeId), "max");
+    revalidateTag(CACHE_TAGS.stores, "max");
+  }
+  return result;
 }
 
 export interface AdoptBulkLaneInput {
@@ -447,6 +562,9 @@ export async function adoptBulkLaneAction(
     return failure("パラメータが不正です");
   }
 
+  let auditEffectCounts = null as Record<AdoptionEffectKind, number> | null;
+  let auditCompletePayload = null as ResearchReviewCompletePayload | null;
+
   const result = await repos.transaction(async (tx) => {
     const run = await tx.researchRun.getForUpdate(runId);
     if (!run || run.store_id !== storeId) return failure("調査結果が見つかりません");
@@ -476,26 +594,36 @@ export async function adoptBulkLaneAction(
     const now = nowIso();
     let basicInfo = store.basic_info;
     let changedCount = 0;
+    // `bulk` の振り分け上は new / same しか来ないが、監査には実際の判定をそのまま数える。
+    const effectCounts: Record<AdoptionEffectKind, number> = { new: 0, same: 0, overwrite: 0 };
     const mergedDecisions: ReviewDecisions = { ...run.review_decisions };
     for (const key of expectedKeys) {
       const item = bulkByKey.get(key)!;
       const field = buildAdoptedBasicInfoField(item, run.source_registry, now);
-      if (!isSameBasicInfoValue(basicInfo[key], field.value ?? "")) {
+      const effect = classifyAdoptionEffect(basicInfo[key], field.value ?? "");
+      effectCounts[effect.kind]++;
+      if (effect.kind !== "same") {
         basicInfo = mergeBasicInfo(basicInfo, { [key]: field }, "manual", now);
         changedCount++;
       }
       mergedDecisions[key] = { decision: "adopted", decided_at: now };
     }
 
+    const stageAdvanced = complete && store.stage === "未調査";
     const storePatch: { basic_info?: typeof basicInfo; stage?: "調査済み" } = {};
     if (changedCount > 0) storePatch.basic_info = basicInfo;
-    if (complete && store.stage === "未調査") storePatch.stage = "調査済み";
+    if (stageAdvanced) storePatch.stage = "調査済み";
     if (Object.keys(storePatch).length > 0) await tx.store.update(storeId, storePatch);
 
     await tx.researchRun.update(runId, {
       review_decisions: mergedDecisions,
       ...(complete ? { review_completed_at: now } : {}),
     });
+
+    auditEffectCounts = effectCounts;
+    auditCompletePayload = complete
+      ? buildReviewCompletePayload(mergedDecisions, "adopt_bulk", 0, stageAdvanced)
+      : null;
 
     const adoptedCount = expectedKeys.length;
     return success(
@@ -509,7 +637,28 @@ export async function adoptBulkLaneAction(
     );
   });
 
-  // revalidate は transaction 成功後にのみ行う(rollback 時に走らせない)。
+  // 監査と revalidate は transaction のコミット後にだけ行う(rollback 時に走らせない)。
+  // 完了も伴う場合は「採用」と「完了」の 2 件を順に書く。どちらも失敗しても例外を投げないため、
+  // 監査 DB が詰まったときの待ち時間は最大で 2 件分(`AUDIT_WRITE_WAIT_MS` × 2)になる。
+  if (result.ok && auditEffectCounts) {
+    const actor = snapshotSessionActor(session);
+    await writeAudit({
+      event: AUDIT_EVENTS.researchReviewBulkAdopt,
+      actor,
+      storeId,
+      runId,
+      payload: { itemKeys: expectedKeys, effectCounts: auditEffectCounts },
+    });
+    if (auditCompletePayload) {
+      await writeAudit({
+        event: AUDIT_EVENTS.researchReviewComplete,
+        actor,
+        storeId,
+        runId,
+        payload: auditCompletePayload,
+      });
+    }
+  }
   if (result.ok) {
     revalidateTag(CACHE_TAGS.store(storeId), "max");
     if (complete) revalidateTag(CACHE_TAGS.stores, "max");

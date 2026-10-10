@@ -20,7 +20,9 @@ vi.mock("@/lib/actions/store-actions", () => ({
 }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 
-const { SalesAssetSection, SALES_ASSETS_SECTION_ID } = await import("../sales-asset-section");
+const { SalesAssetSection, SALES_ASSETS_SECTION_ID, SALES_ASSETS_BODY_ID } = await import(
+  "../sales-asset-section"
+);
 const { BUTTON_VARIANT_CLASSES } = await import("@/components/ui/button");
 
 const STORE = {
@@ -35,13 +37,16 @@ const STORE = {
 
 function render(
   context: SalesAssetGenerationContext,
-  opts: { isApiKeyConfigured?: boolean; store?: Store } = {},
+  opts: { isApiKeyConfigured?: boolean; store?: Store; generateStepReached?: boolean } = {},
 ): string {
   return renderToStaticMarkup(
     <SalesAssetSection
       store={opts.store ?? STORE}
       context={context}
       isApiKeyConfigured={opts.isApiKeyConfigured ?? true}
+      // 既存の文言検証は本文が開いている前提で書かれている。閉じていても本文は描画される
+      // (hidden で隠すだけ) ので、どちらでも同じ文言が出る。
+      generateStepReached={opts.generateStepReached ?? true}
       onJumpToReview={() => {}}
     />,
   );
@@ -107,7 +112,7 @@ describe("SalesAssetSection", () => {
 
   it("API キー未設定なら生成ボタンを無効化し、理由を常時表示する", () => {
     const html = render({ kind: "reviewed" }, { isApiKeyConfigured: false });
-    expect(generateButton(html).tag).toContain("disabled");
+    expect(generateButton(html).tag).toMatch(/\sdisabled=""/);
     expect(html).toContain("GEMINI_API_KEY が未設定のため生成できません");
   });
 
@@ -128,5 +133,60 @@ describe("SalesAssetSection", () => {
     expect(generateButton(html).text).toBe("営業資産を再生成");
     expect(html.indexOf("ai-call_script")).toBeLessThan(html.indexOf("ai-strengths_markdown"));
     expect(html).toContain(`<span class="sr-only">架電スクリプトを</span>`);
+  });
+
+  describe("開閉 (#322)", () => {
+    /** 開閉ボタン (h3 の中の button) の開始タグ。 */
+    function toggleButton(html: string): string {
+      const match = html.match(/<h3[^>]*>(<button[^>]*>)[\s\S]*?③ 営業資産を生成<\/button><\/h3>/);
+      if (!match) throw new Error("見出しの開閉ボタンが見つからない");
+      return match[1] ?? "";
+    }
+
+    /** 本文 (`Card.Body`) の開始タグ。 */
+    function body(html: string): string {
+      const match = html.match(new RegExp(`<div[^>]*id="${SALES_ASSETS_BODY_ID}"[^>]*>`));
+      if (!match) throw new Error("本文が見つからない");
+      return match[0];
+    }
+
+    it("見出しは h3 の中のボタンで、本文を aria-controls で指す", () => {
+      const button = toggleButton(render({ kind: "reviewed" }));
+      expect(button).toContain(`type="button"`);
+      expect(button).toContain(`aria-controls="${SALES_ASSETS_BODY_ID}"`);
+    });
+
+    it("① ② が完了していれば開いて始める", () => {
+      const html = render({ kind: "reviewed" }, { generateStepReached: true });
+      expect(toggleButton(html)).toContain(`aria-expanded="true"`);
+      expect(body(html)).not.toMatch(/\shidden=""/);
+      expect(html).toContain(`data-state="open"`);
+    });
+
+    it.each([
+      { name: "未調査", context: { kind: "none" } as const },
+      { name: "調査中", context: { kind: "running" } as const },
+      { name: "レビュー未完了", context: { kind: "unreviewed", undecidedCount: 0 } as const },
+    ])("$name なら閉じて始める", ({ context }) => {
+      const html = render(context, { generateStepReached: false });
+      expect(toggleButton(html)).toContain(`aria-expanded="false"`);
+      expect(body(html)).toMatch(/\shidden=""/);
+      expect(html).toContain(`data-state="closed"`);
+    });
+
+    it("閉じていても本文はアンマウントしない (入力欄・生成ボタンが DOM に残り、入力が失われない)", () => {
+      const html = render({ kind: "none" }, { generateStepReached: false });
+      expect(html).toContain(`id="sales-assets-supplement"`);
+      expect(html).toContain(`id="sales-assets-instructions"`);
+      // 生成を ①② 完了の必須条件にしない: 閉じていても生成ボタンは有効なまま。
+      expect(generateButton(html).text).toBe("AI調査をせずに生成");
+      expect(generateButton(html).tag).not.toMatch(/\sdisabled=""/);
+    });
+
+    it("閉じていても基本情報の件数は見出し行に残る", () => {
+      expect(render({ kind: "none" }, { generateStepReached: false })).toMatch(
+        /基本情報 1 \/ \d+ 件を使用/,
+      );
+    });
   });
 });

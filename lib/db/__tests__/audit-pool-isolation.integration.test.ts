@@ -133,6 +133,28 @@ describe("audit writes against a real PostgreSQL pool", () => {
     expect(console.error).not.toHaveBeenCalled();
   }, TEST_TIMEOUT_MS);
 
+  it("TEST 1b: persists an AI research review event with the run as its target (#320)", async () => {
+    await withHardTimeout(writeAudit({
+      event: AUDIT_EVENTS.researchReviewDecide,
+      actor: ACTOR,
+      storeId: "store_research",
+      runId: "research_run_integration",
+      payload: { itemKey: "address", decision: "adopted", effect: "overwrite", overwrittenOrigin: "places", edited: false },
+    }), HARD_TIMEOUT_MS, "research audit write hung");
+
+    const rows = await admin<{ event: string; target_type: string; target_id: string; store_id: string; payload: unknown }[]>`
+      select event, target_type, target_id, store_id, payload from event_logs where store_id = 'store_research'
+    `;
+    expect(rows).toEqual([{
+      event: AUDIT_EVENTS.researchReviewDecide,
+      target_type: "research_run",
+      target_id: "research_run_integration",
+      store_id: "store_research",
+      payload: { itemKey: "address", decision: "adopted", effect: "overwrite", overwrittenOrigin: "places", edited: false },
+    }]);
+    expect(console.error).not.toHaveBeenCalled();
+  }, TEST_TIMEOUT_MS);
+
   it("TEST 2: a blocked audit INSERT does not starve the business pool", async () => {
     await withEventLogsLocked(async () => {
       const auditStartedAt = Date.now();

@@ -2,8 +2,14 @@ import { describe, it, expect } from "vitest";
 import {
   getResearchFlowSteps,
   getSalesAssetGenerationContext,
+  initialSalesAssetDisclosure,
+  isGenerateStepReached,
+  isSalesAssetDisclosureOpen,
   salesAssetGenerateLabel,
+  syncSalesAssetDisclosure,
+  toggleSalesAssetDisclosure,
   type ResearchFlowStepStatus,
+  type SalesAssetDisclosure,
 } from "../research-flow";
 import type { ResearchItem, ReviewDecisions } from "@/types/research-run";
 
@@ -26,13 +32,14 @@ function item(key: string, status: ResearchItem["status"]): ResearchItem {
 function statuses(
   primaryRun: Run | null,
   hasAssets: boolean,
+  runOverdue = false,
 ): ResearchFlowStepStatus[] {
-  return getResearchFlowSteps(primaryRun, hasAssets).map((s) => s.status);
+  return getResearchFlowSteps(primaryRun, hasAssets, runOverdue).map((s) => s.status);
 }
 
 describe("getResearchFlowSteps", () => {
   it("手順は ① AI調査 → ② レビュー → ③ 営業資産を生成 の順", () => {
-    expect(getResearchFlowSteps(null, false).map((s) => s.label)).toEqual([
+    expect(getResearchFlowSteps(null, false, false).map((s) => s.label)).toEqual([
       "AI調査",
       "レビュー",
       "営業資産を生成",
@@ -43,9 +50,9 @@ describe("getResearchFlowSteps", () => {
     expect(statuses(null, false)).toEqual(["current", "upcoming", "upcoming"]);
   });
 
-  it("failed なら ① をやり直す", () => {
+  it("failed なら ① は失敗 (未着手・いまここと区別する) (#324)", () => {
     expect(statuses(run({ status: "failed" }), false)).toEqual([
-      "current",
+      "failed",
       "upcoming",
       "upcoming",
     ]);
@@ -57,6 +64,31 @@ describe("getResearchFlowSteps", () => {
       "upcoming",
       "upcoming",
     ]);
+  });
+
+  it("running のまま期限を過ぎていれば ① は時間超過 (#324)", () => {
+    expect(statuses(run({ status: "running" }), false, true)).toEqual([
+      "overdue",
+      "upcoming",
+      "upcoming",
+    ]);
+  });
+
+  it("期限超過の指定は running 以外の状態を変えない (終わった run は終わった表示のまま)", () => {
+    expect(statuses(run({ status: "failed" }), false, true)[0]).toBe("failed");
+    expect(statuses(run({}), false, true)).toEqual(["done", "current", "upcoming"]);
+    expect(statuses(null, false, true)[0]).toBe("current");
+  });
+
+  it("running → succeeded で ① は実行中から完了へ、② はいまここへ (① の完了と ② の完了は別)", () => {
+    expect(statuses(run({ status: "running" }), false)[0]).toBe("running");
+    const after = statuses(run({ status: "succeeded" }), false);
+    expect(after).toEqual(["done", "current", "upcoming"]);
+  });
+
+  it("再調査を始めたら (新しい run が running) ① は失敗から実行中へ戻る", () => {
+    expect(statuses(run({ status: "failed" }), false)[0]).toBe("failed");
+    expect(statuses(run({ status: "running" }), false)[0]).toBe("running");
   });
 
   it("succeeded かつ未レビューなら ② が current (営業資産の有無に依らない)", () => {
@@ -144,5 +176,118 @@ describe("salesAssetGenerateLabel", () => {
       "前回のレビュー結果で再生成",
     );
     expect(salesAssetGenerateLabel({ kind: "none" }, true)).toBe("AI調査をせずに再生成");
+  });
+});
+
+describe("isGenerateStepReached (#322)", () => {
+  it.each([
+    { name: "未調査", run: null },
+    { name: "調査失敗", run: run({ status: "failed" }) },
+    { name: "調査中", run: run({ status: "running" }) },
+    { name: "調査完了・レビュー未完了", run: run({ status: "succeeded" }) },
+  ])("$name なら未到達 (③ は閉じて始める)", ({ run: r }) => {
+    expect(isGenerateStepReached(getResearchFlowSteps(r, false, false))).toBe(false);
+  });
+
+  it("レビューの未対応が 0 件でも、レビュー完了操作をしていなければ未到達", () => {
+    const r = run({
+      result: [item("phone", "confirmed")],
+      review_decisions: {
+        phone: { decision: "adopted", decided_at: "2026-10-10T00:00:00.000Z" },
+      },
+    });
+    expect(getSalesAssetGenerationContext(r, false)).toEqual({
+      kind: "unreviewed",
+      undecidedCount: 0,
+    });
+    expect(isGenerateStepReached(getResearchFlowSteps(r, false, false))).toBe(false);
+  });
+
+  it.each([false, true])("レビュー完了なら到達 (営業資産あり=%s)", (hasAssets) => {
+    const r = run({ review_completed_at: "2026-10-10T00:00:00.000Z" });
+    expect(isGenerateStepReached(getResearchFlowSteps(r, hasAssets, false))).toBe(true);
+  });
+
+  it("手順表示の ② が done のときと一致する", () => {
+    const runs = [
+      null,
+      run({ status: "failed" }),
+      run({ status: "running" }),
+      run({}),
+      run({ review_completed_at: "2026-10-10T00:00:00.000Z" }),
+    ];
+    for (const r of runs) {
+      for (const hasAssets of [false, true]) {
+        const steps = getResearchFlowSteps(r, hasAssets, false);
+        expect(isGenerateStepReached(steps)).toBe(
+          steps.find((s) => s.key === "review")?.status === "done",
+        );
+      }
+    }
+  });
+});
+
+describe("SalesAssetDisclosure (#322)", () => {
+  const open = (s: SalesAssetDisclosure, revealed = false) =>
+    isSalesAssetDisclosureOpen(s, revealed);
+
+  it("初期状態は到達状態に従う", () => {
+    expect(open(initialSalesAssetDisclosure(false))).toBe(false);
+    expect(open(initialSalesAssetDisclosure(true))).toBe(true);
+  });
+
+  it("未到達でも手動で開ける (①② を生成の必須条件にしない)", () => {
+    const s = toggleSalesAssetDisclosure(initialSalesAssetDisclosure(false), false);
+    expect(open(s)).toBe(true);
+  });
+
+  it("到達済みでも手動で閉じられ、もう一度押すと開く", () => {
+    const closed = toggleSalesAssetDisclosure(initialSalesAssetDisclosure(true), false);
+    expect(open(closed)).toBe(false);
+    expect(open(toggleSalesAssetDisclosure(closed, false))).toBe(true);
+  });
+
+  it("到達状態が変わらない再描画 (ポーリング等) は同じオブジェクトを返し、手動操作を取り消さない", () => {
+    for (const reached of [false, true]) {
+      const manual = toggleSalesAssetDisclosure(initialSalesAssetDisclosure(reached), false);
+      const synced = syncSalesAssetDisclosure(manual, reached);
+      expect(synced).toBe(manual);
+      expect(open(synced)).toBe(!reached);
+    }
+  });
+
+  it("未到達 → 到達 (レビュー完了) で開く。手動で閉じていても開いて次の作業へ進める", () => {
+    expect(open(syncSalesAssetDisclosure(initialSalesAssetDisclosure(false), true))).toBe(true);
+    // 閉じたままの状態を手動で選んでいた (一度開いて閉じた) 場合も同じ。
+    const manuallyClosed = toggleSalesAssetDisclosure(
+      toggleSalesAssetDisclosure(initialSalesAssetDisclosure(false), false),
+      false,
+    );
+    expect(open(manuallyClosed)).toBe(false);
+    expect(open(syncSalesAssetDisclosure(manuallyClosed, true))).toBe(true);
+  });
+
+  it("到達 → 未到達 (再調査の開始) では閉じない。入力の途中で本文を隠さない", () => {
+    const s = syncSalesAssetDisclosure(initialSalesAssetDisclosure(true), false);
+    expect(open(s)).toBe(true);
+    // その後またレビューを完了しても開いたまま。
+    expect(open(syncSalesAssetDisclosure(s, true))).toBe(true);
+  });
+
+  it("到達 → 未到達 → 到達 の往復でも、2 回目の到達で手動の閉を開け直す", () => {
+    let s = initialSalesAssetDisclosure(true);
+    s = syncSalesAssetDisclosure(s, false);
+    s = toggleSalesAssetDisclosure(s, false);
+    expect(open(s)).toBe(false);
+    s = syncSalesAssetDisclosure(s, true);
+    expect(open(s)).toBe(true);
+  });
+
+  it("`#sales-assets` で来たら未到達でも開いて始め、利用者が閉じればそれに従う", () => {
+    const s = initialSalesAssetDisclosure(false);
+    expect(open(s, true)).toBe(true);
+    const closed = toggleSalesAssetDisclosure(s, true);
+    expect(open(closed, true)).toBe(false);
+    expect(open(toggleSalesAssetDisclosure(closed, true), true)).toBe(true);
   });
 });
