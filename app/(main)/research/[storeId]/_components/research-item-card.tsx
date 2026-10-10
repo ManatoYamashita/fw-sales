@@ -162,12 +162,13 @@ export function ResearchItemCard({
       id={anchorId}
       tabIndex={anchorId === undefined ? undefined : -1}
       open={defaultOpen}
-      className="border border-border rounded-lg scroll-mt-24 [overflow-wrap:anywhere] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="group border border-border rounded-lg scroll-mt-24 [overflow-wrap:anywhere] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       <summary className="flex cursor-pointer select-none flex-wrap items-center gap-2 px-4 py-3 [&>*+*]:ml-auto">
         <span className="flex min-w-0 flex-col">
           <span className="text-sm font-medium text-foreground">{label}</span>
-          <span className="line-clamp-1 text-xs text-muted-foreground">{preview}</span>
+          {/* 閉じているときだけ値を 1 行で見せる。開いたら本文の「調査の値」と重なるので隠す。 */}
+          <span className="line-clamp-1 text-xs text-muted-foreground group-open:hidden">{preview}</span>
         </span>
         <span className="flex flex-wrap items-center gap-2">
           {decided && (
