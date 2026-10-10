@@ -63,6 +63,11 @@ test.afterAll(async () => {
   await sql.end();
 });
 
+/**
+ * 本文 (`#main-content`) の中の文言。再読込直後のストリーミングでは、差し替え前の隠れた
+ * 複製が本文の外に一時的に残り、`page.getByText` が 2 件に一致して strict mode で落ちる。
+ */
+const inMain = (page: Page, text: string) => page.locator("#main-content").getByText(text);
 const steps = (page: Page) => page.getByRole("navigation", { name: "営業資産ができるまでの手順" });
 const researchStep = (page: Page) => steps(page).getByRole("listitem").first();
 /** 調査中カードの工程一覧 (#323)。 */
@@ -124,7 +129,7 @@ test("実行中の調査が失敗したら、ポーリングで上部と本文�
     WHERE id = 'research_run_e2e_324_fail'
   `;
 
-  await expect(page.getByText("調査に失敗しました")).toBeVisible({ timeout: 30_000 });
+  await expect(inMain(page, "調査に失敗しました")).toBeVisible({ timeout: 30_000 });
   await expect(
     page.getByText("調査の処理が途中で止まりました。時間をおいて再調査してください。"),
   ).toBeVisible();
@@ -137,7 +142,7 @@ test("実行中の調査が失敗したら、ポーリングで上部と本文�
 
   await page.reload();
   await expect(researchStep(page)).toContainText("(失敗)");
-  await expect(page.getByText("調査に失敗しました")).toBeVisible();
+  await expect(inMain(page, "調査に失敗しました")).toBeVisible();
 });
 
 test("期限を過ぎた実行中の調査は、上部・本文とも時間超過の異常として出し、「中断しました」とは言わない", async ({
@@ -176,7 +181,7 @@ test("進捗を取得できないときは「進捗を確認できません」�
   const notice = page.getByText("進捗を確認できません。通信状況を確認して、もう一度確認してください。");
   await expect(notice).toBeVisible({ timeout: 30_000 });
   // 調査の失敗とは区別する: 失敗カードは出さず、上部は実行中のまま
-  await expect(page.getByText("調査に失敗しました")).toHaveCount(0);
+  await expect(inMain(page, "調査に失敗しました")).toHaveCount(0);
   await expect(researchStep(page)).toContainText("(実行中)");
 
   await page.unroute(isServerAction);
