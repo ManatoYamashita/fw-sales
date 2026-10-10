@@ -17,6 +17,7 @@
 /test-results/
 /.local-preview/
 /supabase/.temp/
+/.claude/worktrees/
 
 # next.js
 /.next/
