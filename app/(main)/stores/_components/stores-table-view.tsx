@@ -14,7 +14,7 @@ import { ChannelBadge } from "@/components/feature/channel-badge";
 import { SalesStateSummary } from "@/components/feature/sales-state-badge";
 import { IndividualStoreBadge } from "@/components/feature/individual-store-badge";
 import { formatDate } from "@/lib/utils/date";
-import { type SalesProgressRow } from "@/lib/domain/sales-progress";
+import { DEFAULT_PROGRESS_SORT, type SalesProgressRow } from "@/lib/domain/sales-progress";
 import { StoreCard, renderNextAction } from "./store-card";
 import { StoreRowActions } from "./store-row-actions";
 import { StoreDeleteConfirmDialog } from "./store-delete-confirm-dialog";
@@ -34,7 +34,7 @@ export interface StoresTableViewProps {
   activeSortKey?: string;
   /**
    * 現在のソート方向 (`page.tsx` の `parseSort` がサーバで確定させた値)。
-   * カードモードの並び替えコントロールが現在値を表示するために使う。
+   * 狭幅のコンパクト表示の並び替えコントロールが現在値を表示するために使う。
    */
   activeSortDir?: SortDir;
   /**
@@ -166,7 +166,7 @@ export function buildColumns(canDelete: boolean): ColumnDef<SalesProgressRow>[] 
       cell: (r) => r.store.genre || "—",
     },
     { key: "salesState", header: "営業状態", minContainerWidth: 778, cell: (r) => <SalesStateSummary state={r.currentSalesState} latestDeal={r.latestDeal} /> },
-    // 描画は store-card.tsx の renderNextAction が単一の真実 (カードと共有)。
+    // 描画は store-card.tsx の renderNextAction が単一の真実 (狭幅のコンパクト行と共有)。
     // max-w-[240px] は列予算 272px (= 240 + padding 32) を確定させるための cap。
     { key: "next", header: "次回アクション", sortKey: "next", sortDefaultDir: "asc", cell: (r) => <div className="max-w-[240px]">{renderNextAction(r)}</div> },
     {
@@ -284,14 +284,18 @@ export function StoresTableView({
           rowHref={storeDetailHref}
           activeSortKey={activeSortKey}
           activeSortDir={activeSortDir}
+          // コンパクト表示の並び替えに「解除」を出す基準 (#330)。page.tsx の parseSort と同じ既定値。
+          defaultSort={{ sortKey: DEFAULT_PROGRESS_SORT.key, dir: DEFAULT_PROGRESS_SORT.dir }}
           /*
-            コンテナ 640px 未満 (admin は 688px 未満) では <table> を捨ててカードに
-            切り替える (#234 / PR3/3)。always 列の min-content は非 admin 632px /
-            admin 680px あり、375px viewport のコンテナ 341px では列を落としきっても
-            収まらないため、ビューごと差し替える以外に横スクロールを消す手段がない。
+            コンテナ 640px 未満 (admin は 688px 未満) では <table> を捨てて店舗ごとの
+            コンパクト行に切り替える (#234 で導入、#330 で行表示へ組み直し)。always 列の
+            min-content は非 admin 632px / admin 680px あり、375px viewport のコンテナ 341px
+            では列を落としきっても収まらないため、ビューごと差し替える以外に横スクロールを
+            消す手段がない。行の中身は表の列と同じ順 (店舗名 → 営業状態 → 次回アクション →
+            調査段階・営業担当 → 操作) に並べる。
           */
           cardView={{
-            label: "店舗一覧 (カード表示)",
+            label: "店舗一覧 (コンパクト表示)",
             render: (r) => (
               <StoreCard
                 row={r}
