@@ -50,6 +50,6 @@ export function SalesActivityForm({ store, deal, profiles, onClose }: { store: S
       <FormField label="次回アクション種別" htmlFor={`next-type-${deal?.id ?? "new"}`}><Select width="full" id={`next-type-${deal?.id ?? "new"}`} name="next_action_type" defaultValue={deal?.next_action_type ?? ""}><option value="">未設定</option>{NEXT_ACTION_TYPES.map((v) => <option key={v}>{v}</option>)}</Select></FormField>
       <FormField label="次回アクション内容" htmlFor={`next-note-${deal?.id ?? "new"}`} hint="最大500文字" className="md:col-span-2"><Textarea id={`next-note-${deal?.id ?? "new"}`} name="next_action_note" rows={3} maxLength={500} defaultValue={deal?.next_action_note ?? ""} /></FormField>
     </div>
-    <div className="flex justify-end"><Button type="submit" variant="primary" disabled={pending}>{pending ? "保存中…" : deal ? "変更を保存" : "営業記録を追加"}</Button></div>
+    <div className="flex justify-end"><Button type="submit" variant="primary" pending={pending}>{pending ? "保存中…" : deal ? "変更を保存" : "営業記録を追加"}</Button></div>
   </form>;
 }

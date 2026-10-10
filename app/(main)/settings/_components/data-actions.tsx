@@ -122,7 +122,7 @@ export function DataActions({
                     >
                       キャンセル
                     </Button>
-                    <Button variant="danger" onClick={reset} disabled={pending}>
+                    <Button variant="danger" onClick={reset} pending={pending}>
                       {pending ? "処理中…" : "リセット"}
                     </Button>
                   </ModalFooter>
@@ -156,7 +156,7 @@ export function DataActions({
                     <Button
                       variant="danger"
                       onClick={clearAll}
-                      disabled={pending}
+                      pending={pending}
                     >
                       {pending ? "削除中…" : "削除する"}
                     </Button>

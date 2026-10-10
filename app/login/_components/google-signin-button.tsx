@@ -59,7 +59,7 @@ export function GoogleSignInButton({ redirectTo }: Props) {
         size="lg"
         className="w-full"
         onClick={handleClick}
-        disabled={isPending}
+        pending={isPending}
       >
         <GoogleIcon />
         <span>{isPending ? "サインイン中..." : "Google でサインイン"}</span>

@@ -208,7 +208,7 @@ export function StoreDeleteConfirmDialog({
           >
             キャンセル
           </Button>
-          <Button variant="danger" onClick={onConfirm} disabled={pending}>
+          <Button variant="danger" onClick={onConfirm} pending={pending}>
             {pending ? "削除中…" : "削除する"}
           </Button>
         </ModalFooter>

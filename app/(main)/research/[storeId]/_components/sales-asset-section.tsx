@@ -215,6 +215,7 @@ export function SalesAssetSection({
             type="button"
             variant={reviewed ? "primary" : "secondary"}
             onClick={onGenerate}
+            pending={generating}
             disabled={busy || !isApiKeyConfigured}
           >
             <Sparkles className="h-3.5 w-3.5" aria-hidden />
@@ -243,7 +244,7 @@ export function SalesAssetSection({
             ))}
             <div className="flex items-center justify-end gap-2">
               {!persisted && <span className="text-xs text-warning">未保存の変更があります</span>}
-              <Button type="button" variant="primary" onClick={onSave} disabled={busy || persisted}>
+              <Button type="button" variant="primary" onClick={onSave} pending={saving} disabled={busy || persisted}>
                 <Save className="h-3.5 w-3.5" aria-hidden />
                 {saving ? "保存中…" : "保存"}
               </Button>

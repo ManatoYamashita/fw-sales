@@ -176,7 +176,7 @@ export function HandoffNewForm({ deal }: { deal: Deal }) {
           <Button type="button" variant="ghost" onClick={() => router.back()}>
             キャンセル
           </Button>
-          <Button type="submit" variant="primary" disabled={pending}>
+          <Button type="submit" variant="primary" pending={pending}>
             {pending ? "作成中…" : "引き継ぎを作成"}
           </Button>
         </Card.Footer>

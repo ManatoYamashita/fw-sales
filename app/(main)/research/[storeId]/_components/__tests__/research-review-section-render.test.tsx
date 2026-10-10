@@ -89,10 +89,19 @@ function makeRun(items: ResearchItem[], decisions: ReviewDecisions = {}): StoreR
  * className には Tailwind の `disabled:opacity-50` 等が常に含まれるため、
  * `html.includes("disabled")` では検知能力がゼロになる(常に true になる)。
  */
-function hasDisabledAttribute(html: string, label: string): boolean {
-  const match = html.match(new RegExp(`<button([^>]*)>${label}</button>`));
+function buttonAttributes(html: string, label: string): string {
+  // 処理中のボタンはラベルの前に `pending` のスピナー (svg) を持つ (#326)。
+  const match = html.match(
+    new RegExp(
+      `<button([^>]*)>(?:<svg[^>]*data-slot="button-spinner"[^>]*>.*?</svg>)?${label}</button>`,
+    ),
+  );
   if (match === null) throw new Error(`button not found: ${label}`);
-  return / disabled(=|>|\s|$)/.test(`${match[1]!} `);
+  return `${match[1]!} `;
+}
+
+function hasDisabledAttribute(html: string, label: string): boolean {
+  return / disabled(=|>|\s|$)/.test(buttonAttributes(html, label));
 }
 
 function render(run: StoreResearchRun, basicInfo: BasicInfo = {}): string {
@@ -562,5 +571,8 @@ describe("ReviewCompletionFooter の busy / completing 挙動", () => {
     const html = renderFooter({ completing: true });
     expect(hasDisabledAttribute(html, "処理中…")).toBe(true);
     expect(hasDisabledAttribute(html, "残り3件は反映せずに完了")).toBe(true);
+    // 処理中を示すのは押した主ボタンだけ。副ボタンは押せないだけで処理中ではない (#326)。
+    expect(buttonAttributes(html, "処理中…")).toContain(' aria-busy="true"');
+    expect(buttonAttributes(html, "残り3件は反映せずに完了")).not.toContain("aria-busy=");
   });
 });

@@ -130,7 +130,7 @@ export function ResearchFailedCard({
           </div>
         </div>
         <div className="flex justify-center py-1">
-          <Button type="button" variant="primary" onClick={onRetry} disabled={retrying}>
+          <Button type="button" variant="primary" onClick={onRetry} pending={retrying}>
             <RotateCcw className="h-3.5 w-3.5" />
             {retrying ? "開始中…" : "再調査する"}
           </Button>

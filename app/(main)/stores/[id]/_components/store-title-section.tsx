@@ -119,7 +119,7 @@ export function StoreTitleSection({
       </div>
       {editing ? (
         <div className="flex flex-wrap items-center gap-2 mt-2" role="group" aria-label="店舗名・業態の編集操作">
-          <Button type="button" variant="primary" onClick={onSave} disabled={pending}>
+          <Button type="button" variant="primary" onClick={onSave} pending={pending}>
             <Save className="h-3.5 w-3.5" />
             {pending ? "保存中…" : "保存"}
           </Button>

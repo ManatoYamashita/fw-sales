@@ -269,6 +269,7 @@ function TemplateRow({
             size="sm"
             variant="ghost"
             onClick={() => onSetDefault(t.id)}
+            pending={isChangingThis}
             disabled={isAnyChanging}
             title={isChangingThis ? "変更中…" : "デフォルトにする"}
             aria-label={isChangingThis ? "変更中…" : "デフォルトにする"}
@@ -357,7 +358,7 @@ function DeleteConfirmDialog({
           <Button variant="ghost" onClick={onClose} disabled={isPending}>
             キャンセル
           </Button>
-          <Button variant="danger" onClick={handleDelete} disabled={isPending}>
+          <Button variant="danger" onClick={handleDelete} pending={isPending}>
             {isPending ? "削除中…" : "削除する"}
           </Button>
         </ModalFooter>
@@ -616,7 +617,8 @@ function TemplateDialog({ dialogMode, onSuccess, onClose }: TemplateDialogProps)
             <Button
               variant="primary"
               onClick={handleSubmit}
-              disabled={isPending || !canSubmit}
+              pending={isPending}
+              disabled={!canSubmit}
             >
               {isPending ? "保存中…" : isEdit ? "更新する" : "作成する"}
             </Button>

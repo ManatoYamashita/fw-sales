@@ -354,7 +354,7 @@ export function StoreEditForm({
         <Button type="button" variant="ghost" onClick={() => router.back()}>
           キャンセル
         </Button>
-        <Button type="submit" variant="primary" disabled={pending}>
+        <Button type="submit" variant="primary" pending={pending}>
           {pending ? "保存中…" : "保存する"}
         </Button>
       </Card.Footer>

@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { FormField } from "@/components/ui/form-field";
-import { Spinner } from "@/components/ui/spinner";
 import { toast } from "@/components/ui/toast";
 import { importFromUrlAction } from "@/lib/actions/url-parse-actions";
 import { Select } from "@/components/ui/select";
@@ -238,15 +237,10 @@ export function UrlSearchPanel({ onLoaded }: UrlSearchPanelProps) {
         <Button
           variant="primary"
           onClick={importNow}
-          disabled={pending}
+          pending={pending}
           className="sm:w-32 gap-2"
         >
-          {pending ? (
-            <>
-              <Spinner tone="primary" />
-              読込中…
-            </>
-          ) : (
+          {pending ? "読込中…" : (
             <>
               <Download className="h-4 w-4" />
               読込
@@ -422,15 +416,10 @@ export function AreaSearchPanel({
           <Button
             variant="primary"
             onClick={handleSearch}
-            disabled={pending}
+            pending={pending}
             className="gap-2 w-full md:w-auto"
           >
-            {pending ? (
-              <>
-                <Spinner tone="primary" />
-                検索中…
-              </>
-            ) : (
+            {pending ? "検索中…" : (
               <>
                 <Search className="h-4 w-4" />
                 店舗を検索

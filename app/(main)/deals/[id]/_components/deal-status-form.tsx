@@ -141,7 +141,7 @@ export function DealStatusForm({ deal }: { deal: Deal }) {
           </FormField>
         </Card.Body>
         <Card.Footer>
-          <Button type="submit" variant="primary" disabled={pending}>
+          <Button type="submit" variant="primary" pending={pending}>
             {pending ? "保存中…" : "更新する"}
           </Button>
         </Card.Footer>

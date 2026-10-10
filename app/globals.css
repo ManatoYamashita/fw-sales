@@ -381,6 +381,46 @@
 }
 
 /* ------------------------------------------------------------------ */
+/*  画面上部の進行バー (components/layout/navigation-progress.tsx, #326) */
+/* ------------------------------------------------------------------ */
+/*
+ * loading: 0 → 85% まで減速しながら伸び、完了を待つ。表示は 100ms 遅らせて、
+ *          速い遷移ではちらつかせない (遷移が先に終われば一度も見えない)。
+ * done:    100% まで伸び切ってから消える。
+ * 減速の曲線は transition と同じ cubic-bezier(0.2, 0, 0, 1)。
+ * prefers-reduced-motion では下の全体指定で動きが即時になり、静的なバーだけが残る。
+ */
+/*
+ * Button の処理中 (components/ui/button.tsx の `pending`, #326)。
+ * スピナーが先頭アイコンの位置を引き継ぐ。並べて出すと幅が増えてボタンが跳ねるので、
+ * スピナー直後の svg (先頭アイコン) だけを隠す。
+ */
+[data-slot="button-spinner"] + svg {
+  display: none;
+}
+
+@keyframes nav-progress-grow {
+  from { transform: scaleX(0); }
+  to   { transform: scaleX(0.85); }
+}
+.nav-progress-bar {
+  transform: scaleX(0);
+  opacity: 0;
+}
+.nav-progress[data-phase="loading"] > .nav-progress-bar {
+  opacity: 1;
+  animation: nav-progress-grow 8s cubic-bezier(0.2, 0, 0, 1) forwards;
+  transition: opacity 150ms ease-out 100ms;
+}
+.nav-progress[data-phase="done"] > .nav-progress-bar {
+  transform: scaleX(1);
+  opacity: 0;
+  transition:
+    transform 200ms cubic-bezier(0.2, 0, 0, 1),
+    opacity 200ms ease-out 200ms;
+}
+
+/* ------------------------------------------------------------------ */
 /*  Base                                                                */
 /* ------------------------------------------------------------------ */
 @layer base {
