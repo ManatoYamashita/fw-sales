@@ -11,6 +11,15 @@ import { withWorkflow } from "workflow/next";
 // document.startViewTransition は発火せず (実測 0 回)、発火するのは setState 経路のみ。
 
 const nextConfig: NextConfig = {
+  experimental: {
+    // Turbopack のビルド用キャッシュ (16.3 から既定で有効) を使わない。
+    // Vercel は .next/cache をビルド間で引き継ぐが、このキャッシュは app/globals.css の
+    // 変更を拾わず、手書きの規則だけが古いまま本番へ出た (#326 の進行バー・スピナーの
+    // 規則 5 つが欠落。Tailwind のクラスは新しいのに globals.css の追記分だけ抜けた)。
+    // 「キャッシュを残したまま旧 main → 新 main の順でビルド」で手元でも再現している。
+    // 戻すときは、同じ手順で globals.css の変更が成果物に載ることを確かめること。
+    turbopackFileSystemCacheForBuild: false,
+  },
   cacheComponents: true,
   // `'use cache'` 共通プロファイル。無効化は全 mutation の revalidateTag(タグ駆動)が
   // 担うため、TTL は保険として長めに設定する。stale 5m / revalidate 6h / expire 7d。
