@@ -156,6 +156,8 @@ describe("ResearchFailedCard の案内と操作 (#324)", () => {
     const html = renderWith({ error_kind: "retryable_exhausted:rate_limit" }, reason);
     expect(html).toContain(reason);
     expect(html).not.toContain("再調査する");
+    // 原因別の「時間をおいて再調査してください」も出さない (理由と食い違うため)
+    expect(html).not.toContain("再調査してください");
     expect(html).not.toContain("<button");
   });
 

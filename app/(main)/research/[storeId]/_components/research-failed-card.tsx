@@ -154,7 +154,11 @@ export function ResearchFailedCard({
           <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" aria-hidden />
           <div>
             <p className="font-medium">調査に失敗しました</p>
-            <p className="text-muted-foreground mt-0.5">{errorMessage(run)}</p>
+            {/* 実行できない環境では、原因別の「再調査してください」を出すと理由と食い違う。
+                次の操作は実行できない理由の案内だけにする。 */}
+            <p className="text-muted-foreground mt-0.5">
+              {unavailableMessage ?? errorMessage(run)}
+            </p>
             {loaded && isAdmin && (
               <p className="text-xs text-muted-foreground/80 font-mono mt-1.5 break-all">
                 {adminDiagnostic(run)}
@@ -162,9 +166,7 @@ export function ResearchFailedCard({
             )}
           </div>
         </div>
-        {unavailableMessage !== null ? (
-          <p className="text-sm text-muted-foreground">{unavailableMessage}</p>
-        ) : (
+        {unavailableMessage === null && (
           <div className="flex justify-center py-1">
             <Button
               type="button"
