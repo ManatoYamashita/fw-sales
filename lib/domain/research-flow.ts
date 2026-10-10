@@ -136,3 +136,74 @@ export function salesAssetGenerateLabel(
       return `AI調査をせずに${verb}`;
   }
 }
+
+// ---- ③ 営業資産を生成 の開閉 (Issue #322) ----------------------------------
+//
+// 推奨順序に沿う初期表示と、手順を飛ばす任意操作を両立させるための状態。
+//
+// - ① AI調査・② レビューが完了するまでは ③ を閉じて始め、いまの作業に集中させる。
+// - ただし ③ は ①② を飛ばしても使えるので、閉じていても利用者はいつでも手動で開ける。
+//   折りたたみを「使ってはいけない」の意味にしない。
+// - 一度利用者が開閉したら、ポーリングや再描画で取り消さない。自動で開くのは
+//   「② が完了した瞬間」(= ③ に到達した) だけで、自動で閉じることはない。
+
+/**
+ * ③ に到達しているか (= ① AI調査と ② レビューが完了しているか)。
+ *
+ * 判定は手順表示 (`getResearchFlowSteps`) の ② の状態と一致させる。レビューの未対応が
+ * 0 件でも、レビュー完了操作をしていなければ ② は完了ではない。
+ */
+export function isGenerateStepReached(steps: readonly ResearchFlowStep[]): boolean {
+  return steps.find((s) => s.key === "review")?.status === "done";
+}
+
+export interface SalesAssetDisclosure {
+  /** 利用者が最後に選んだ開閉。null は未操作で、既定 (`autoOpen`) に従う。 */
+  manual: boolean | null;
+  /** ③ に到達したことで開いているか。一度 true になったら自動では戻さない。 */
+  autoOpen: boolean;
+  /** 直前に受け取った `isGenerateStepReached`。到達した瞬間を見分けるために持つ。 */
+  reached: boolean;
+}
+
+export function initialSalesAssetDisclosure(reached: boolean): SalesAssetDisclosure {
+  return { manual: null, autoOpen: reached, reached };
+}
+
+/**
+ * 最新の到達状態を反映する。変化が無ければ**同じオブジェクトを返す** (呼び出し側は
+ * 参照の一致で「更新不要」を判定する)。
+ *
+ * - 未到達 → 到達: レビュー完了という利用者自身の操作の結果なので、次の作業へ進めるよう
+ *   開く。手動で閉じていても開く。
+ * - 到達 → 未到達 (再調査を始めた等): 開閉は変えない。入力の途中で閉じないため。
+ */
+export function syncSalesAssetDisclosure(
+  state: SalesAssetDisclosure,
+  reached: boolean,
+): SalesAssetDisclosure {
+  if (state.reached === reached) return state;
+  if (reached) return { manual: null, autoOpen: true, reached };
+  return { ...state, reached };
+}
+
+/**
+ * いま開いているか。
+ *
+ * @param revealed `#sales-assets` へのリンクで来たか。着地先が閉じていると導線が切れるので、
+ *   利用者が手動で閉じるまでは開いた状態にする。
+ */
+export function isSalesAssetDisclosureOpen(
+  state: SalesAssetDisclosure,
+  revealed: boolean,
+): boolean {
+  return state.manual ?? (state.autoOpen || revealed);
+}
+
+/** 開閉ボタンの操作。いま見えている状態の逆を、利用者の選択として記録する。 */
+export function toggleSalesAssetDisclosure(
+  state: SalesAssetDisclosure,
+  revealed: boolean,
+): SalesAssetDisclosure {
+  return { ...state, manual: !isSalesAssetDisclosureOpen(state, revealed) };
+}

@@ -9,6 +9,9 @@
  *
  * Issue #300: 見出し直下に推奨手順 (① AI調査 → ② レビュー → ③ 営業資産を生成) と
  * 現在地を出す。営業資産の生成はこのページの ③ が唯一の入口。
+ *
+ * Issue #322: ③ は ①② が完了するまで閉じて始める。完了の判定は手順表示と同じ
+ * `flowSteps` から取る (`isGenerateStepReached`)。
  */
 
 import { useEffect, useState, useTransition } from "react";
@@ -25,6 +28,7 @@ import { isRunStuck, selectPrimaryResearchRun } from "@/lib/domain/research-revi
 import {
   getResearchFlowSteps,
   getSalesAssetGenerationContext,
+  isGenerateStepReached,
 } from "@/lib/domain/research-flow";
 import { decodeHashId } from "@/lib/utils/hash-id";
 import { ResearchFlowSteps } from "./research-flow-steps";
@@ -103,6 +107,7 @@ export function AiResearchWorkbench({
   };
 
   // 店舗詳細の「営業資産を更新」などが付ける `#sales-assets` へ着地させる。
+  // ③ が閉じて始まる店舗でも、`SalesAssetSection` がハッシュを読んで開いた状態で描く (#322)。
   // このセグメントは loading.tsx の Suspense 越しに描画されるため、遷移時点では対象要素が
   // まだ無く、Next.js のハッシュスクロールが空振りする (実測で scrollY 0 のまま)。
   useEffect(() => {
@@ -168,6 +173,7 @@ export function AiResearchWorkbench({
         store={store}
         context={generationContext}
         isApiKeyConfigured={isApiKeyConfigured}
+        generateStepReached={isGenerateStepReached(flowSteps)}
         onJumpToReview={onJumpToReview}
       />
 
