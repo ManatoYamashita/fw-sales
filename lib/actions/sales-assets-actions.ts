@@ -23,6 +23,7 @@
 import { revalidateTag } from "next/cache";
 import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
+import { clipForLog } from "@/lib/utils/log-sanitize";
 import {
   createGeminiClient,
   isAiClientError,
@@ -172,11 +173,12 @@ export async function generateSalesAssetsAction(
     // ⑦ Zod 再検証
     const validated = validateAiAnalysis(raw);
     if (!validated.ok) {
-      return failure(
-        `AI の応答が想定外の形式でした。再度お試しください。 (${validated.error.zodIssues
-          .slice(0, 3)
-          .join("; ")})`,
-      );
+      // 検証エラーの詳細 (英語・項目名) は画面に出さず、ログにだけ残す (#327)。
+      console.error("[salesAssets.generate] invalid AI response", {
+        storeId,
+        issues: validated.error.zodIssues.slice(0, 3).map((issue) => clipForLog(issue)),
+      });
+      return failure("AI の応答が想定外の形式でした。もう一度お試しください。");
     }
 
     // ⑧ 保存 + キャッシュ無効化 (R7.5 再表示可能)

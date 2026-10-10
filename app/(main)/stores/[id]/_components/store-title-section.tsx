@@ -5,10 +5,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Pencil, X, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { toast } from "@/components/ui/toast";
 import { IndividualStoreBadge } from "@/components/feature/individual-store-badge";
 import { ResearchPhaseBadge } from "./research-phase-badge";
 import { NextActionCta } from "./next-action-cta";
+import { runAction } from "@/lib/client/run-action";
 import { updateStorePatchAction } from "@/lib/actions/store-actions";
 import { splitStoreNameMemo } from "@/lib/domain/store-name-memo";
 import type { ResearchPhase } from "@/lib/domain/store-research-phase";
@@ -50,13 +50,12 @@ export function StoreTitleSection({
     setNameError(undefined);
     const patch: StorePatch = { ...form };
     startTransition(async () => {
-      const result = await updateStorePatchAction(store.id, patch);
-      if (result.ok) {
-        toast.success(result.message ?? "更新しました");
+      const result = await runAction(() => updateStorePatchAction(store.id, patch), {
+        success: "更新しました",
+      });
+      if (result?.ok) {
         setEditing(false);
         router.refresh();
-      } else {
-        toast.error(result.error);
       }
     });
   };

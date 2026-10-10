@@ -11,6 +11,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "@/components/ui/toast";
 import { PlaceResultList } from "./place-result-list";
 import { AreaSearchMap } from "./area-search-map";
+import { runAction } from "@/lib/client/run-action";
 import {
   bulkAddStoresFromPlacesAction,
   getPlaceDetailsForAreaSearchAction,
@@ -500,19 +501,26 @@ export function AreaSearchResults({
     setError(null);
     const ids = [...selectedIds];
     startBulkTransition(async () => {
-      const result = await bulkAddStoresFromPlacesAction(ids);
+      const result = await runAction(() => bulkAddStoresFromPlacesAction(ids), {
+        success: ({ added, failed }) => {
+          if (added === 0) {
+            return { message: `${failed}件すべて登録できませんでした`, tone: "warning" };
+          }
+          if (failed > 0) {
+            return { message: `${added}件を登録しました（${failed}件は失敗）`, tone: "warning" };
+          }
+          return `${added}件を登録しました`;
+        },
+      });
+      if (!result) return;
       if (!result.ok) {
+        // トーストに加えて一覧の上にも残す。どの操作が失敗したかを見失わないため。
         setError(result.error);
         return;
       }
       const { added, failed, failedPlaceIds } = result.data;
       if (added > 0) {
-        // 1 件でも追加できたら登録店舗一覧へ遷移する (失敗分は toast で通知)。
-        toast.success(
-          failed > 0
-            ? `${added}件を登録しました（${failed}件は失敗）`
-            : `${added}件を登録しました`,
-        );
+        // 1 件でも追加できたら登録店舗一覧へ遷移する (失敗分はトーストで通知済み)。
         router.push("/stores");
         return;
       }

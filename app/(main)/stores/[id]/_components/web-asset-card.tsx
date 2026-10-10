@@ -7,7 +7,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FormField } from "@/components/ui/form-field";
-import { toast } from "@/components/ui/toast";
+import { runAction } from "@/lib/client/run-action";
 import { updateStorePatchAction } from "@/lib/actions/store-actions";
 import type { Store, StorePatch } from "@/types/store";
 
@@ -64,13 +64,12 @@ export function WebAssetCard({ store }: { store: Store }) {
   const onSave = () => {
     const patch: StorePatch = { ...form };
     startTransition(async () => {
-      const result = await updateStorePatchAction(store.id, patch);
-      if (result.ok) {
-        toast.success(result.message ?? "更新しました");
+      const result = await runAction(() => updateStorePatchAction(store.id, patch), {
+        success: "更新しました",
+      });
+      if (result?.ok) {
         setEditing(false);
         router.refresh();
-      } else {
-        toast.error(result.error);
       }
     });
   };

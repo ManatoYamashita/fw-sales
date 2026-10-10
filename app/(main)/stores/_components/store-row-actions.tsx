@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { Pencil, Trash2 } from "lucide-react";
+import { runAction } from "@/lib/client/run-action";
 import { deleteStoreAction } from "@/lib/actions/store-actions";
-import { toast } from "@/components/ui/toast";
 import { StoreDeleteConfirmDialog } from "./store-delete-confirm-dialog";
 import { cn } from "@/lib/utils/cn";
 
@@ -49,11 +49,11 @@ export function StoreRowActions({
 
   const remove = () => {
     startTransition(async () => {
-      const result = await deleteStoreAction(storeId);
-      // delete 成功時は redirect が throw されてここまで到達しない
-      if (result && !result.ok) {
-        toast.error(result.error);
-      }
+      // 成功時は deleteStoreAction が /stores へ redirect する。runAction が成功トーストを
+      // 出してから redirect を投げ直すので、ここで後続処理は要らない。
+      await runAction(() => deleteStoreAction(storeId), {
+        success: "店舗を削除しました",
+      });
     });
   };
 

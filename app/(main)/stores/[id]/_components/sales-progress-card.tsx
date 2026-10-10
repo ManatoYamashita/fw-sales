@@ -10,9 +10,9 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Modal, ModalContent, ModalFooter } from "@/components/ui/modal";
-import { toast } from "@/components/ui/toast";
 import { DealStatusBadge } from "@/components/feature/deal-status-badge";
 import { SalesStateSummary } from "@/components/feature/sales-state-badge";
+import { runAction } from "@/lib/client/run-action";
 import { updateSalesProgressAction } from "@/lib/actions/store-actions";
 import { deleteSalesActivityAction } from "@/lib/actions/deal-actions";
 import { formatDate, todayInTimeZone } from "@/lib/utils/date";
@@ -63,9 +63,10 @@ export function SalesProgressCard({ store, deals, profiles }: { store: Store; de
     const target = deleteTarget;
     if (!target || deleting) return;
     startDeleteTransition(async () => {
-      const result = await deleteSalesActivityAction(target.id);
-      if (!result.ok) return toast.error(result.error);
-      toast.success(result.message ?? "営業記録を削除しました");
+      const result = await runAction(() => deleteSalesActivityAction(target.id), {
+        success: "営業記録を削除しました",
+      });
+      if (!result?.ok) return;
       setDeleteTarget(null);
       if (formTarget === target.id) setFormTarget(null);
       // URL に削除済みの activity ID を残さない。replace しない場合のみ refresh を発行する
@@ -109,9 +110,12 @@ export function SalesProgressCard({ store, deals, profiles }: { store: Store; de
     startTransition(async () => {
       const data = new FormData();
       for (const [name, value] of changed) data.set(name, value);
-      const result = await updateSalesProgressAction(store.id, data);
-      if (!result.ok) return toast.error(result.error);
-      toast.success("現在の営業状況を更新しました"); setEditingCurrent(false); router.refresh();
+      const result = await runAction(() => updateSalesProgressAction(store.id, data), {
+        success: () => "現在の営業状況を更新しました",
+      });
+      if (!result?.ok) return;
+      setEditingCurrent(false);
+      router.refresh();
     });
   };
   return <div className="space-y-4">

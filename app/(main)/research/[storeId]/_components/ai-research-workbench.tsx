@@ -16,7 +16,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Modal, ModalContent, ModalFooter } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
-import { toast } from "@/components/ui/toast";
+import { runAction } from "@/lib/client/run-action";
 import {
   getResearchRunStatusAction,
   startResearchRunAction,
@@ -77,14 +77,13 @@ export function AiResearchWorkbench({
 
   const doStart = () => {
     startStarting(async () => {
-      const res = await startResearchRunAction(store.id);
-      if (!res.ok) {
-        toast.error(res.error);
-        return;
-      }
-      toast.success("AI店舗調査を開始しました");
-      const statusRes = await getResearchRunStatusAction(res.data.runId);
-      if (statusRes.ok) onRunUpdate(statusRes.data);
+      const res = await runAction(() => startResearchRunAction(store.id), {
+        success: () => "AI店舗調査を開始しました",
+      });
+      if (!res?.ok) return;
+      // 状態の取得に失敗しても調査自体は始まっている。画面の再取得とポーリングに任せる。
+      const statusRes = await getResearchRunStatusAction(res.data.runId).catch(() => null);
+      if (statusRes?.ok) onRunUpdate(statusRes.data);
       router.refresh();
     });
   };

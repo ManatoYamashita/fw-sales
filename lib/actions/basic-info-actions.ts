@@ -24,6 +24,7 @@ import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
 import { BASIC_INFO_ITEM_BY_KEY } from "@/lib/domain/basic-info-items";
 import { mergeBasicInfo } from "@/lib/domain/basic-info-merge";
+import { clipForLog } from "@/lib/utils/log-sanitize";
 import type { BasicInfo, BasicInfoField } from "@/types/basic-info";
 import { failure, success, type ActionResult } from "./_helpers";
 
@@ -48,7 +49,9 @@ export async function updateBasicInfoFieldAction(
   // key 検証 (BASIC_INFO_ITEMS が単一の真実)
   const def = BASIC_INFO_ITEM_BY_KEY.get(key);
   if (!def) {
-    return failure(`未知の項目キーです: ${key}`);
+    // 項目キーは内部の識別子なので画面には出さず、ログにだけ残す (#327)。
+    console.warn("[basicInfo.update] unknown key", { key: clipForLog(key) });
+    return failure("この項目は編集できません。ページを再読み込みしてから、もう一度お試しください。");
   }
 
   // value: trim 後空なら未充足 (value=null)、それ以外は trim 済み文字列
@@ -90,9 +93,12 @@ export async function updateBasicInfoFieldAction(
     revalidateTag(CACHE_TAGS.stores, "max");
     return success(undefined, `「${def.label}」を更新しました`);
   } catch (err) {
-    // 未存在 id 等を failure に正規化
-    const message =
-      err instanceof Error ? err.message : "基本情報の更新に失敗しました";
-    return failure(message);
+    // 例外の文 (英語・内部の名前を含みうる) は画面に出さず、ログにだけ残す (#327)。
+    console.error("[basicInfo.update] failed", {
+      storeId,
+      key,
+      message: clipForLog(err instanceof Error ? err.message : String(err)),
+    });
+    return failure("基本情報を更新できませんでした。ページを再読み込みしてから、もう一度お試しください。");
   }
 }

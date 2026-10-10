@@ -57,7 +57,7 @@ const fewShotExampleSchema = z.object({
     .min(1, "架電スクリプト例を入力してください")
     .max(2000, "架電スクリプト例は 2000 文字以内にしてください")
     .refine((v) => v.includes("{ASSIGNED_SALES}"), {
-      message: "call_script_ideal に {ASSIGNED_SALES} を含めてください",
+      message: "架電スクリプト例に {ASSIGNED_SALES} (担当営業名の差し込み位置) を含めてください",
     }),
 });
 

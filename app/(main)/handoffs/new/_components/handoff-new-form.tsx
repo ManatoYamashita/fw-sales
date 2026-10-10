@@ -8,10 +8,10 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { runAction } from "@/lib/client/run-action";
 import { createHandoffAction } from "@/lib/actions/handoff-actions";
 import { OPS_MEMBERS } from "@/lib/domain/staff";
 import { today } from "@/lib/utils/date";
-import { toast } from "@/components/ui/toast";
 import type { Deal } from "@/types/deal";
 
 export function HandoffNewForm({ deal }: { deal: Deal }) {
@@ -40,13 +40,11 @@ export function HandoffNewForm({ deal }: { deal: Deal }) {
 
   const submit = (formData: FormData) => {
     startTransition(async () => {
-      const result = await createHandoffAction(deal.id, null, formData);
-      if (result.ok) {
-        toast.success(result.message ?? "作成しました");
-        router.push(`/handoffs/${result.data.id}`);
-      } else {
-        toast.error(result.error);
-      }
+      const result = await runAction(
+        () => createHandoffAction(deal.id, null, formData),
+        { success: "作成しました" },
+      );
+      if (result?.ok) router.push(`/handoffs/${result.data.id}`);
     });
   };
 

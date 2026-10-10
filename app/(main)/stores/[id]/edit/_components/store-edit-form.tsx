@@ -9,6 +9,7 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { ServiceCheckboxGroup } from "@/app/(main)/stores/new/_components/service-checkbox-group";
+import { runAction } from "@/lib/client/run-action";
 import { updateStoreAction } from "@/lib/actions/store-actions";
 import { decideChannel } from "@/lib/domain/channel";
 import {
@@ -16,7 +17,6 @@ import {
   OPERATOR_TYPES,
   CHANNELS,
 } from "@/types/store";
-import { toast } from "@/components/ui/toast";
 import type { Store } from "@/types/store";
 import type { Profile } from "@/types/profile";
 
@@ -81,12 +81,11 @@ export function StoreEditForm({
     // 既存値の上書き保護のため formData に明示空文字を入れず、updateStoreAction の
     // readNullableAiAnalysis が FormData から欠落キーを既存値維持として扱う既存挙動に委ねる。
     startTransition(async () => {
-      const result = await updateStoreAction(store.id, null, formData);
-      if (result.ok) {
-        toast.success(result.message ?? "更新しました");
+      const result = await runAction(() => updateStoreAction(store.id, null, formData), {
+        success: "更新しました",
+      });
+      if (result?.ok) {
         router.push(`/stores/${store.id}`);
-      } else {
-        toast.error(result.error);
       }
     });
   };

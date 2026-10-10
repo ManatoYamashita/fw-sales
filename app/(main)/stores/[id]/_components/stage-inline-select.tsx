@@ -2,9 +2,9 @@
 
 import { useTransition, type ChangeEvent } from "react";
 import { Select } from "@/components/ui/select";
+import { runAction } from "@/lib/client/run-action";
 import { updateStoreStageAction } from "@/lib/actions/store-actions";
 import { STAGES, type StageId } from "@/types/stage";
-import { toast } from "@/components/ui/toast";
 
 export interface StageInlineSelectProps {
   storeId: string;
@@ -21,12 +21,9 @@ export function StageInlineSelect({
     const next = e.target.value as StageId;
     if (next === current) return;
     startTransition(async () => {
-      const result = await updateStoreStageAction(storeId, next);
-      if (result.ok) {
-        toast.success(result.message ?? "更新しました");
-      } else {
-        toast.error(result.error);
-      }
+      await runAction(() => updateStoreStageAction(storeId, next), {
+        success: "更新しました",
+      });
     });
   };
 

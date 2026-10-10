@@ -8,9 +8,9 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { runAction } from "@/lib/client/run-action";
 import { updateDealAction } from "@/lib/actions/deal-actions";
 import { DEAL_STATUSES, type Deal } from "@/types/deal";
-import { toast } from "@/components/ui/toast";
 
 export function DealStatusForm({ deal }: { deal: Deal }) {
   const [form, setForm] = useState({
@@ -36,13 +36,11 @@ export function DealStatusForm({ deal }: { deal: Deal }) {
 
   const submit = (formData: FormData) => {
     startTransition(async () => {
-      const result = await updateDealAction(deal.id, null, formData);
-      if (result.ok) {
-        toast.success(result.message ?? "更新しました");
-        router.refresh();
-      } else {
-        toast.error(result.error);
-      }
+      const result = await runAction(
+        () => updateDealAction(deal.id, null, formData),
+        { success: "更新しました" },
+      );
+      if (result?.ok) router.refresh();
     });
   };
 
