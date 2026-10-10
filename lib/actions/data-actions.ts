@@ -33,6 +33,7 @@ import { revalidateTag } from "next/cache";
 import { SEED_STORES, SEED_DEALS, SEED_HANDOFFS } from "@/lib/db/seed-data";
 import type { DbSnapshot } from "@/lib/db/snapshot";
 import { repos } from "@/lib/repositories";
+import { clipForLog } from "@/lib/utils/log-sanitize";
 import { CACHE_TAGS } from "@/lib/cache";
 import { failure, success, type ActionResult } from "./_helpers";
 import { requireAdmin } from "./_authz";
@@ -122,11 +123,10 @@ export async function resetToSeedAction(): Promise<ActionResult> {
       }
     });
   } catch (e) {
-    return failure(
-      e instanceof Error
-        ? `リセットに失敗しました: ${e.message}`
-        : "リセットに失敗しました",
-    );
+    console.error("[data.reset] failed", {
+      message: clipForLog(e instanceof Error ? e.message : String(e)),
+    });
+    return failure("シードデータに戻せませんでした。時間をおいて、もう一度お試しください。");
   }
 
   invalidateAll();
@@ -155,11 +155,10 @@ export async function clearAllAction(): Promise<ActionResult> {
       await tx.delete(stores);
     });
   } catch (e) {
-    return failure(
-      e instanceof Error
-        ? `削除に失敗しました: ${e.message}`
-        : "削除に失敗しました",
-    );
+    console.error("[data.clear] failed", {
+      message: clipForLog(e instanceof Error ? e.message : String(e)),
+    });
+    return failure("データを削除できませんでした。時間をおいて、もう一度お試しください。");
   }
 
   invalidateAll();
@@ -239,8 +238,12 @@ export async function importJsonAction(
     console.log("[audit] data.import", { by: guard.profile.email });
     return success(undefined, "インポートに成功しました");
   } catch (e) {
+    // JSON の構文エラーも DB のエラーもここに来る。どちらも英語の文なので画面には出さない。
+    console.error("[data.import] failed", {
+      message: clipForLog(e instanceof Error ? e.message : String(e)),
+    });
     return failure(
-      e instanceof Error ? `JSON解析失敗: ${e.message}` : "インポートに失敗しました",
+      "インポートできませんでした。このツールで書き出した JSON ファイルを選んでいるか確認してください。",
     );
   }
 }
