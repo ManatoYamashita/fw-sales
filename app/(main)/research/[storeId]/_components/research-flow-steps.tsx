@@ -11,12 +11,18 @@ const STATUS_TEXT: Record<ResearchFlowStepStatus, string> = {
   running: "実行中",
   done: "完了",
   upcoming: "未着手",
+  failed: "失敗",
+  overdue: "時間超過",
 };
 
 /**
  * 推奨手順 (① AI調査 → ② レビュー → ③ 営業資産を生成) と現在地を示す (Issue #300)。
  *
  * 状態は番号/アイコン・文言・`aria-current` の 3 つで伝え、色は補助にとどめる。
+ *
+ * アイコンの表示契約 (#324):
+ * - 実行中: 回転アイコン / 完了: チェック / 失敗・時間超過: 「!」 / それ以外: ステップ番号
+ * - 終わった処理に回転アイコンを残さない
  */
 export function ResearchFlowSteps({ steps }: { steps: readonly ResearchFlowStep[] }) {
   return (
@@ -24,6 +30,7 @@ export function ResearchFlowSteps({ steps }: { steps: readonly ResearchFlowStep[
       <ol className="flex flex-wrap items-center gap-x-2 gap-y-2 text-sm">
         {steps.map((step, index) => {
           const active = step.status === "current" || step.status === "running";
+          const problem = step.status === "failed" || step.status === "overdue";
           return (
             <li key={step.key} className="flex items-center gap-2">
               {index > 0 && (
@@ -32,12 +39,14 @@ export function ResearchFlowSteps({ steps }: { steps: readonly ResearchFlowStep[
                 </span>
               )}
               <span
-                aria-current={active ? "step" : undefined}
+                aria-current={active || problem ? "step" : undefined}
                 className={cn(
                   "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1",
                   active
                     ? "border-primary bg-primary/10 text-foreground font-medium"
-                    : "border-border text-muted-foreground",
+                    : problem
+                      ? "border-destructive bg-destructive-soft text-foreground font-medium"
+                      : "border-border text-muted-foreground",
                 )}
               >
                 <span
@@ -46,7 +55,9 @@ export function ResearchFlowSteps({ steps }: { steps: readonly ResearchFlowStep[
                     "inline-flex size-5 items-center justify-center rounded-full text-xs tabular-nums",
                     active
                       ? "bg-primary text-primary-foreground"
-                      : step.status === "done"
+                      : problem
+                        ? "bg-destructive text-destructive-foreground"
+                        : step.status === "done"
                         ? "bg-success-soft text-success-on-soft"
                         : "bg-muted text-muted-foreground",
                   )}
@@ -55,12 +66,22 @@ export function ResearchFlowSteps({ steps }: { steps: readonly ResearchFlowStep[
                     <Check className="size-3" />
                   ) : step.status === "running" ? (
                     <Loader2 className="size-3 motion-safe:animate-spin" />
+                  ) : problem ? (
+                    // 円形の赤い地に「!」を置き、それ自体を 1 つのアイコンとして見せる。
+                    <span className="font-bold leading-none">!</span>
                   ) : (
                     index + 1
                   )}
                 </span>
                 {step.label}
-                <span className="text-xs text-muted-foreground">({STATUS_TEXT[step.status]})</span>
+                <span
+                  className={cn(
+                    "text-xs",
+                    problem ? "text-destructive-on-soft" : "text-muted-foreground",
+                  )}
+                >
+                  ({STATUS_TEXT[step.status]})
+                </span>
               </span>
             </li>
           );

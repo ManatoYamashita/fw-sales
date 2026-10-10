@@ -22,8 +22,20 @@ export type ResearchFlowStepKey = "research" | "review" | "generate";
  * - `running`  実行中で待つだけのステップ (AI 調査の進行中)
  * - `done`     完了したステップ
  * - `upcoming` まだ到達していないステップ
+ * - `failed`   失敗が確定したステップ (#324)
+ * - `overdue`  実行中のまま期限 (`expires_at`) を過ぎたステップ。止まった確証は無いが、
+ *              待っても終わる見込みが薄いので異常として示す (#324)
+ *
+ * 終わった処理 (`done` / `failed`) と、待つ意味が薄い処理 (`overdue`) には回転アイコンを
+ * 出さない。表示は `research-flow-steps.tsx`。
  */
-export type ResearchFlowStepStatus = "current" | "running" | "done" | "upcoming";
+export type ResearchFlowStepStatus =
+  | "current"
+  | "running"
+  | "done"
+  | "upcoming"
+  | "failed"
+  | "overdue";
 
 export interface ResearchFlowStep {
   key: ResearchFlowStepKey;
@@ -54,20 +66,28 @@ function steps(
 /**
  * 主表示 run (`selectPrimaryResearchRun`) と営業資産の有無から、3 ステップの状態を返す。
  *
- * - run なし / failed: ① が current
- * - running: ① が running
+ * - run なし: ① が current
+ * - failed: ① が failed (やり直すのは ① だが、未着手とは区別する)
+ * - running: ① が running。期限を過ぎていれば overdue
  * - succeeded かつ未レビュー: ② が current
  * - レビュー済み: ③ が current。営業資産があれば ③ も done
+ *
+ * @param runOverdue 主表示 run が running のまま期限を過ぎているか (`isRunStuck`)。
+ *   本文の進捗カードと同じ値を渡し、上部と本文の表示を同じ更新で切り替える。
  */
 export function getResearchFlowSteps(
   primaryRun: FlowRun | null,
   hasAssets: boolean,
+  runOverdue: boolean,
 ): ResearchFlowStep[] {
-  if (primaryRun === null || primaryRun.status === "failed") {
+  if (primaryRun === null) {
     return steps("current", "upcoming", "upcoming");
   }
+  if (primaryRun.status === "failed") {
+    return steps("failed", "upcoming", "upcoming");
+  }
   if (primaryRun.status === "running") {
-    return steps("running", "upcoming", "upcoming");
+    return steps(runOverdue ? "overdue" : "running", "upcoming", "upcoming");
   }
   if (primaryRun.review_completed_at === null) {
     return steps("done", "current", "upcoming");

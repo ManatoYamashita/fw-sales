@@ -22,6 +22,12 @@ import { CACHE_TAGS } from "@/lib/cache";
 import { parsePostgresError } from "@/lib/db/postgres-error";
 import { getCurrentSession } from "@/lib/supabase/server";
 import { checkRateLimit } from "@/lib/ai/rate-limiter";
+import { getResearchAvailability } from "@/lib/ai/research/availability";
+import {
+  dropBlankVercelUrl,
+  linkWorkflowRun,
+  syncRunWithWorkflow,
+} from "@/lib/ai/research/workflow-run-sync";
 import { nowIso } from "@/lib/utils/date";
 import { storeResearchWorkflow } from "@/workflows/store-research";
 import { mergeBasicInfo } from "@/lib/domain/basic-info-merge";
@@ -92,6 +98,11 @@ export async function startResearchRunAction(
     return failure("店舗IDが不正です");
   }
 
+  // 設定が足りない環境では run を作らない。作ると Workflow の中で必ず同じ理由で失敗し、
+  // 利用者は待たされたうえで再調査を繰り返すことになる (#324)。
+  const availability = getResearchAvailability();
+  if (!availability.available) return failure(availability.message);
+
   const rateLimit = checkRateLimit(storeId);
   if (!rateLimit.ok) return failure(rateLimit.message);
 
@@ -159,8 +170,11 @@ export async function startResearchRunAction(
     return failure("調査の開始に失敗しました。しばらくしてから再度お試しください。");
   }
 
+  let workflowRunId: string;
   try {
-    await start(storeResearchWorkflow, [runId, storeId]);
+    dropBlankVercelUrl();
+    const workflowRun = await start(storeResearchWorkflow, [runId, storeId]);
+    workflowRunId = workflowRun.runId;
   } catch (err) {
     // DB へ raw message を残さなくなった分、運用診断は structured log 側で担保する
     // (同ファイルの `[research.startRun] create failed` と同じ規約。err オブジェクト
@@ -183,6 +197,8 @@ export async function startResearchRunAction(
     });
     return failure("調査の開始に失敗しました。しばらくしてから再度お試しください。");
   }
+  // enqueue 後に実行基盤で失敗しても気づけるよう、Workflow run と関連付ける (#324)。
+  await linkWorkflowRun(runId, workflowRunId);
 
   // 監査は run の作成と Workflow の起動が成立した後に書く。失敗しても起動は取り消さない
   // (`writeAudit` は例外を投げない)。
@@ -201,6 +217,9 @@ export async function startResearchRunAction(
  * run 進捗のポーリング用(PR4)。`repos.researchRun` は server-only のため、
  * client component からは本 Action 経由で読む。`'use cache'` は使わない
  * (running中のrunを数秒間隔で読むため、Cache Componentsのキャッシュ対象外)。
+ *
+ * running の run は Workflow の実行基盤の状態と突き合わせ、基盤が終了していれば
+ * failed として記録してから返す (#324、`syncRunWithWorkflow`)。
  */
 export async function getResearchRunStatusAction(
   runId: string,
@@ -212,7 +231,10 @@ export async function getResearchRunStatusAction(
   }
   const run = await repos.researchRun.get(runId);
   if (!run) return failure("調査結果が見つかりません");
-  return success(run);
+  dropBlankVercelUrl();
+  const synced = await syncRunWithWorkflow(run);
+  if (synced.markedFailed) revalidateTag(CACHE_TAGS.store(run.store_id), "max");
+  return success(synced.run);
 }
 
 export interface RecordReviewDecisionInput {

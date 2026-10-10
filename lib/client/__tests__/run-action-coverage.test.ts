@@ -63,7 +63,8 @@ const NON_WRITE_ACTIONS: Record<string, string> = {
   signOutAction: "認証セッションを破棄するだけで、業務データを書き換えない",
   getSnapshotForExportAction: "書き出し用に読むだけ",
   listPromptTemplatesAction: "一覧を読むだけ",
-  getResearchRunStatusAction: "調査の進み具合を読むだけ",
+  getResearchRunStatusAction:
+    "調査の進み具合を読む。実行基盤が終了済みなら失敗の記録だけを同期する (#324)。利用者の操作ではなく数秒ごとのポーリングなのでトーストを出さない",
   getStoreDeleteImpactAction: "削除の影響件数を数えるだけ",
   importFromUrlAction: "URL を解析して入力候補を返すだけ (保存はフォーム送信時の createStoreAction)",
 };

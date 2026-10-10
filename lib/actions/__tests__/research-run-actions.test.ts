@@ -5,7 +5,7 @@
  * をモックし、実 Gemini API・実 DB・実 Workflow 起動を一切行わない。
  */
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ResearchItem, SourceRegistryEntry, StoreResearchRun } from "@/types/research-run";
 import type { BasicInfo } from "@/types/basic-info";
 
@@ -13,6 +13,8 @@ vi.mock("server-only", () => ({}));
 
 const {
   mockStart,
+  mockGetRunStatus,
+  mockUpdateIfRunning,
   mockStoreGet,
   mockStoreGetForUpdate,
   mockStoreUpdate,
@@ -26,6 +28,9 @@ const {
   mockTransaction,
 } = vi.hoisted(() => ({
   mockStart: vi.fn(),
+  // Workflow run の状態 (`getRun(id).status`)。#324 の突き合わせに使う。
+  mockGetRunStatus: vi.fn(),
+  mockUpdateIfRunning: vi.fn(),
   mockStoreGet: vi.fn(),
   // feat/ai-research-quality-ux-hardening(Plan 12.2.2): `stores` 行ロックも
   // run行ロックと同じく **別mock** にする。tx内の実装が誤ってロック無しの `get` を
@@ -48,7 +53,14 @@ const {
   mockTransaction: vi.fn(),
 }));
 
-vi.mock("workflow/api", () => ({ start: mockStart }));
+vi.mock("workflow/api", () => ({
+  start: mockStart,
+  getRun: (id: string) => ({
+    get status() {
+      return mockGetRunStatus(id);
+    },
+  }),
+}));
 vi.mock("@/workflows/store-research", () => ({ storeResearchWorkflow: vi.fn() }));
 vi.mock("@/lib/repositories", () => ({
   repos: {
@@ -58,6 +70,7 @@ vi.mock("@/lib/repositories", () => ({
       get: mockResearchRunGet,
       create: mockCreate,
       update: mockUpdate,
+      updateIfRunning: mockUpdateIfRunning,
     },
     // 監査 (#320) の書き込み先。監査そのものの検証は research-run-actions.audit.test.ts で行う。
     eventLog: { insert: vi.fn() },
@@ -160,6 +173,10 @@ function makePgError(code: string, extra: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   mockStart.mockReset();
+  mockGetRunStatus.mockReset();
+  mockUpdateIfRunning.mockReset();
+  // 開始前の実行条件チェック (#324) を通すため、AI の API キーがある環境にする。
+  vi.stubEnv("GEMINI_API_KEY", "test-key");
   mockStoreGet.mockReset();
   mockStoreGetForUpdate.mockReset();
   mockStoreUpdate.mockReset();
@@ -189,6 +206,15 @@ beforeEach(() => {
   mockCreate.mockResolvedValue({ id: "research_run_1", store_id: "store-1", status: "running" });
   mockUpdate.mockImplementation(async (id: string, patch: unknown) => ({ id, ...(patch as object) }));
   mockStart.mockResolvedValue({ runId: "wrun_1" });
+  mockGetRunStatus.mockResolvedValue("running");
+  mockUpdateIfRunning.mockImplementation(async (id: string, patch: unknown) => ({
+    ...makeRun({ id, status: "running" }),
+    ...(patch as object),
+  }));
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 describe("startResearchRunAction", () => {
@@ -414,6 +440,84 @@ describe("startResearchRunAction", () => {
     spy.mockRestore();
   });
 
+  describe("開始前の実行条件チェック (#324)", () => {
+    it("AI の API キーが無い検証環境では run を作らず、Workflow も起動せずに理由を返す", async () => {
+      vi.stubEnv("GEMINI_API_KEY", "");
+      vi.stubEnv("VERCEL", "");
+
+      const result = await startResearchRunAction(nextStoreId());
+
+      expect(result).toEqual({
+        ok: false,
+        error: "この検証環境ではAI調査を実行できません。店舗情報の入力や画面の確認はできます。",
+      });
+      expect(mockCreate).not.toHaveBeenCalled();
+      expect(mockStart).not.toHaveBeenCalled();
+      expect(mockUpdate).not.toHaveBeenCalled();
+    });
+
+    it("デプロイ環境で API キーが無ければ、管理者への設定依頼を返す", async () => {
+      vi.stubEnv("GEMINI_API_KEY", "");
+      vi.stubEnv("VERCEL", "1");
+
+      const result = await startResearchRunAction(nextStoreId());
+
+      expect(result).toEqual({
+        ok: false,
+        error: "AI調査を利用するための設定が完了していません。管理者に設定を依頼してください。",
+      });
+      expect(mockCreate).not.toHaveBeenCalled();
+    });
+
+    it("実行できない環境では、期限切れの running run も打ち切らない (既存結果を書き換えない)", async () => {
+      vi.stubEnv("GEMINI_API_KEY", "");
+      mockGetLatestForStore.mockResolvedValue({
+        id: "research_run_stuck",
+        status: "running",
+        expires_at: "2000-01-01T00:00:00.000Z",
+      });
+
+      await startResearchRunAction(nextStoreId());
+
+      expect(mockUpdate).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("Workflow run との関連付け (#324)", () => {
+    it("起動した Workflow run の ID を running の run にだけ記録する (compare-and-swap)", async () => {
+      await startResearchRunAction(nextStoreId());
+
+      expect(mockUpdateIfRunning).toHaveBeenCalledWith("research_run_1", {
+        token_usage: { workflow_run_id: "wrun_1" },
+      });
+    });
+
+    it("記録に失敗しても調査の開始は成功として返す (調査自体は進んでいる)", async () => {
+      const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+      mockUpdateIfRunning.mockRejectedValue(new Error("db down host=10.0.0.7"));
+
+      const result = await startResearchRunAction(nextStoreId());
+
+      expect(result.ok).toBe(true);
+      expect(JSON.stringify(spy.mock.calls)).not.toContain("10.0.0.7");
+      spy.mockRestore();
+    });
+
+    it("空文字の VERCEL_URL を未定義に戻してから起動する (SDK が https:// を URL として扱い失敗するため)", async () => {
+      vi.stubEnv("VERCEL_URL", "");
+      let seenAtStart: string | undefined = "not called";
+      mockStart.mockImplementation(async () => {
+        seenAtStart = process.env.VERCEL_URL;
+        return { runId: "wrun_1" };
+      });
+
+      await startResearchRunAction(nextStoreId());
+
+      expect(seenAtStart).toBeUndefined();
+      expect("VERCEL_URL" in process.env).toBe(false);
+    });
+  });
+
   it("レート制限に達している場合はエラーを返す", async () => {
     const storeId = nextStoreId();
     // per-store 上限(10分5回)に達するまで呼び出す
@@ -436,6 +540,15 @@ describe("getResearchRunStatusAction", () => {
     expect(result.ok).toBe(false);
   });
 
+  it("未ログインの文は、画面が「再ログイン」の案内に切り替える文と一致する (#324)", async () => {
+    const { STATUS_CHECK_SIGNED_OUT_ERROR } = await import(
+      "@/app/(main)/research/[storeId]/_components/use-research-run-polling"
+    );
+    mockGetCurrentSession.mockResolvedValue(null);
+    const result = await getResearchRunStatusAction("research_run_1");
+    expect(result).toEqual({ ok: false, error: STATUS_CHECK_SIGNED_OUT_ERROR });
+  });
+
   it("存在しないrunはエラー", async () => {
     mockResearchRunGet.mockResolvedValue(null);
     const result = await getResearchRunStatusAction("missing");
@@ -448,6 +561,78 @@ describe("getResearchRunStatusAction", () => {
     const result = await getResearchRunStatusAction(run.id);
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.data.id).toBe(run.id);
+  });
+
+  describe("実行基盤の終了状態との突き合わせ (#324)", () => {
+    const runningRun = () =>
+      makeRun({
+        status: "running",
+        stage: null,
+        result: null,
+        token_usage: { workflow_run_id: "wrun_9" },
+        finished_at: null,
+      });
+
+    it("enqueue 後に実行基盤で失敗した run は failed として記録して返す", async () => {
+      const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+      mockResearchRunGet.mockResolvedValue(runningRun());
+      mockGetRunStatus.mockResolvedValue("failed");
+
+      const result = await getResearchRunStatusAction("research_run_1");
+
+      expect(mockGetRunStatus).toHaveBeenCalledWith("wrun_9");
+      expect(mockUpdateIfRunning).toHaveBeenCalledWith(
+        "research_run_1",
+        expect.objectContaining({
+          status: "failed",
+          error_kind: "workflow_run_failed",
+          error_message: "AI店舗調査に失敗しました",
+        }),
+      );
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.data.status).toBe("failed");
+        expect(result.data.error_kind).toBe("workflow_run_failed");
+      }
+      // 他の画面 (一覧・店舗詳細) のキャッシュも古い「実行中」を出さないようにする。
+      expect(mockRevalidateTag).toHaveBeenCalled();
+      spy.mockRestore();
+    });
+
+    it("正常な長時間処理 (実行基盤も running) は running のまま返し、何も書き込まない", async () => {
+      const run = makeRun({ ...runningRun(), started_at: "2000-01-01T00:00:00.000Z" });
+      mockResearchRunGet.mockResolvedValue(run);
+      mockGetRunStatus.mockResolvedValue("running");
+
+      const result = await getResearchRunStatusAction(run.id);
+
+      expect(result.ok && result.data.status).toBe("running");
+      expect(mockUpdateIfRunning).not.toHaveBeenCalled();
+      expect(mockRevalidateTag).not.toHaveBeenCalled();
+    });
+
+    it("実行基盤に問い合わせられないときは失敗と断定せず running のまま返す", async () => {
+      const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      mockResearchRunGet.mockResolvedValue(runningRun());
+      mockGetRunStatus.mockRejectedValue(new Error("WorkflowAPIError token=secret-abc"));
+
+      const result = await getResearchRunStatusAction("research_run_1");
+
+      expect(result.ok && result.data.status).toBe("running");
+      expect(mockUpdateIfRunning).not.toHaveBeenCalled();
+      expect(JSON.stringify(spy.mock.calls)).not.toContain("secret-abc");
+      spy.mockRestore();
+    });
+
+    it("終了済みの run は実行基盤へ問い合わせない", async () => {
+      mockResearchRunGet.mockResolvedValue(
+        makeRun({ status: "failed", token_usage: { workflow_run_id: "wrun_9" } }),
+      );
+
+      await getResearchRunStatusAction("research_run_1");
+
+      expect(mockGetRunStatus).not.toHaveBeenCalled();
+    });
   });
 });
 

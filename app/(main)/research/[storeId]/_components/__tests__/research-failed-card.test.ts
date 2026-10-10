@@ -21,7 +21,7 @@ vi.mock("@/components/layout/current-user-provider", () => ({
   useIsAdmin: () => ({ isAdmin: false, loaded: true }),
 }));
 
-const { errorMessage, adminDiagnostic } = await import("../research-failed-card");
+const { errorMessage, adminDiagnostic, failureNextStep } = await import("../research-failed-card");
 
 describe("errorMessage (research-failed-card)", () => {
   it("error_kindが'retryable_exhausted'完全一致(種別トークン無し)なら汎用の再試行済みメッセージになる", () => {
@@ -47,7 +47,7 @@ describe("errorMessage (research-failed-card)", () => {
 
   it("stuck_run_timeoutは専用メッセージになる", () => {
     expect(errorMessage({ error_kind: "stuck_run_timeout", error_message: null })).toBe(
-      "処理時間が想定を超えたため中断しました。再度お試しください。",
+      "処理が上限の時間内に終わらなかったため、この調査を打ち切りました。再調査してください。",
     );
   });
 
@@ -147,7 +147,7 @@ describe("errorMessage (research-failed-card)", () => {
     // 先に置くという順序の不変条件を固定する。
     it("stuck_run_timeoutはtimeout分岐に吸い込まれず専用メッセージのままである", () => {
       expect(errorMessage({ error_kind: "stuck_run_timeout", error_message: null })).toBe(
-        "処理時間が想定を超えたため中断しました。再度お試しください。",
+        "処理が上限の時間内に終わらなかったため、この調査を打ち切りました。再調査してください。",
       );
     });
 
@@ -191,5 +191,68 @@ describe("adminDiagnostic (research-failed-card)", () => {
     expect(adminDiagnostic({ error_kind: null, stage: null })).toBe(
       "診断コード: (なし) / stage: (なし)",
     );
+  });
+});
+
+describe("実行基盤の終了を突き合わせて記録した失敗 (#324)", () => {
+  it("最初の工程に届く前 (stage なし) なら「開始できませんでした」と次の操作を示す", () => {
+    expect(
+      errorMessage({ error_kind: "workflow_run_failed", error_message: "raw", stage: null }),
+    ).toBe(
+      "調査を開始できませんでした。時間をおいて再調査してください。繰り返し起きる場合は管理者に確認してください。",
+    );
+  });
+
+  it("工程の途中なら「途中で止まりました」と示す", () => {
+    expect(
+      errorMessage({
+        error_kind: "workflow_run_failed",
+        error_message: "raw",
+        stage: "researching",
+      }),
+    ).toBe(
+      "調査の処理が途中で止まりました。時間をおいて再調査してください。繰り返し起きる場合は管理者に確認してください。",
+    );
+    expect(
+      errorMessage({
+        error_kind: "workflow_run_completed_without_result",
+        error_message: null,
+        stage: "discovering",
+      }),
+    ).toContain("途中で止まりました");
+  });
+
+  it("取り消された run は取り消しを伝える", () => {
+    expect(
+      errorMessage({ error_kind: "workflow_run_cancelled", error_message: null, stage: null }),
+    ).toBe("調査が取り消されました。必要であれば再調査してください。");
+  });
+
+  it("確証の無い停止を「中断しました」と断定しない (打ち切った事実だけを伝える)", () => {
+    for (const kind of ["stuck_run_timeout", "workflow_run_failed", "workflow_run_cancelled"]) {
+      expect(errorMessage({ error_kind: kind, error_message: null, stage: null })).not.toContain(
+        "中断しました",
+      );
+    }
+  });
+});
+
+describe("failureNextStep (#324)", () => {
+  it("設定の不備 (auth_error / missing_api_key) は管理者の対応が先", () => {
+    expect(failureNextStep({ error_kind: "fatal:auth_error" })).toBe("admin");
+    expect(failureNextStep({ error_kind: "fatal:missing_api_key" })).toBe("admin");
+  });
+
+  it.each([
+    "retryable_exhausted:rate_limit",
+    "retryable_exhausted:api_error:503",
+    "workflow_start_failed",
+    "workflow_run_failed",
+    "stuck_run_timeout",
+    "fatal:max_tokens",
+    "unknown",
+    null,
+  ])("%s は再調査を促す", (kind) => {
+    expect(failureNextStep({ error_kind: kind })).toBe("retry");
   });
 });
