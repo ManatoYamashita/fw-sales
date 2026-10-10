@@ -9,9 +9,9 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { runAction } from "@/lib/client/run-action";
 import { recordActionAction } from "@/lib/actions/action-actions";
 import { today } from "@/lib/utils/date";
-import { toast } from "@/components/ui/toast";
 
 const RESULTS = [
   "未実施",
@@ -39,15 +39,15 @@ export function ActionRecordForm({ storeId }: { storeId: string }) {
 
   const submit = (formData: FormData) => {
     startTransition(async () => {
-      const result = await recordActionAction(storeId, null, formData);
-      if (result.ok) {
-        toast.success(result.message ?? "記録しました");
+      const result = await runAction(
+        () => recordActionAction(storeId, null, formData),
+        { success: "記録しました" },
+      );
+      if (result?.ok) {
         router.refresh();
         if (form.result === "商談化") {
           router.push(`/deals/new?store=${storeId}`);
         }
-      } else {
-        toast.error(result.error);
       }
     });
   };

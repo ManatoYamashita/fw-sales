@@ -26,8 +26,8 @@ import { AlertTriangle, Save, Sparkles } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { toast } from "@/components/ui/toast";
 import { CopyButton } from "@/components/feature/copy-button";
+import { runAction } from "@/lib/client/run-action";
 import { generateSalesAssetsAction } from "@/lib/actions/sales-assets-actions";
 import { updateStorePatchAction } from "@/lib/actions/store-actions";
 import { BASIC_INFO_ITEMS } from "@/lib/domain/basic-info-items";
@@ -94,14 +94,14 @@ export function SalesAssetSection({
 
   const onGenerate = () => {
     startGenerating(async () => {
-      const res = await generateSalesAssetsAction(store.id, supplement, instructions);
-      if (res.ok) {
+      const res = await runAction(
+        () => generateSalesAssetsAction(store.id, supplement, instructions),
+        { success: "営業資産を生成しました" },
+      );
+      if (res?.ok) {
         setAiResult(res.data);
         setPersisted(true);
-        toast.success(res.message ?? "営業資産を生成しました");
         router.refresh();
-      } else {
-        toast.error(res.error);
       }
     });
   };
@@ -114,13 +114,14 @@ export function SalesAssetSection({
   const onSave = () => {
     if (!aiResult) return;
     startSaving(async () => {
-      const res = await updateStorePatchAction(store.id, { ai_analysis_result: aiResult });
-      if (res.ok) {
-        toast.success("店舗に保存しました");
+      const res = await runAction(
+        () => updateStorePatchAction(store.id, { ai_analysis_result: aiResult }),
+        // 共通の「更新しました」ではなく、生成結果を店舗へ保存したことを伝える。
+        { success: () => "店舗に保存しました" },
+      );
+      if (res?.ok) {
         setPersisted(true);
         router.refresh();
-      } else {
-        toast.error(res.error);
       }
     });
   };

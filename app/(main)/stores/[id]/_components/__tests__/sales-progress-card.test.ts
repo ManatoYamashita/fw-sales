@@ -233,9 +233,9 @@ describe("営業担当 Select", () => {
     const guardEnd = noop.indexOf("startTransition");
     expect(guardEnd).toBeGreaterThan(-1);
     expect(noop.slice(0, guardEnd)).not.toContain("updateSalesProgressAction");
-    // action 呼び出しは差分ありの経路 1 箇所だけ。
+    // action 呼び出しは差分ありの経路 1 箇所だけ (runAction 経由で呼ぶため await は付かない。#327)。
     expect(
-      saveCurrentBody.match(/await updateSalesProgressAction\(/g) ?? [],
+      saveCurrentBody.match(/\bupdateSalesProgressAction\(/g) ?? [],
     ).toHaveLength(1);
   });
 });

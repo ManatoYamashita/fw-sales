@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { YenAmountInput } from "@/components/ui/yen-amount-input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { toast } from "@/components/ui/toast";
+import { runAction } from "@/lib/client/run-action";
 import { createDealAction, updateDealAction } from "@/lib/actions/deal-actions";
 import { todayInTimeZone } from "@/lib/utils/date";
 import { DEAL_STATUSES, MEETING_TYPES, NEXT_ACTION_TYPES, REAPPROACH_OPTIONS, type Deal } from "@/types/deal";
@@ -20,9 +20,11 @@ export function SalesActivityForm({ store, deal, profiles, onClose }: { store: S
   const [pending, startTransition] = useTransition();
   const router = useRouter();
   const submit = (formData: FormData) => startTransition(async () => {
-    const result = deal ? await updateDealAction(deal.id, null, formData) : await createDealAction(store.id, null, formData);
-    if (!result.ok) return toast.error(result.error);
-    toast.success(result.message ?? "保存しました");
+    const result = await runAction(
+      () => (deal ? updateDealAction(deal.id, null, formData) : createDealAction(store.id, null, formData)),
+      { success: "保存しました" },
+    );
+    if (!result?.ok) return;
     onClose();
     router.refresh();
   });

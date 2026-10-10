@@ -17,7 +17,7 @@ import { useRouter } from "next/navigation";
 import { Pencil, Save, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { toast } from "@/components/ui/toast";
+import { runAction } from "@/lib/client/run-action";
 import { updateBasicInfoFieldAction } from "@/lib/actions/basic-info-actions";
 import type {
   BasicInfoItemDef,
@@ -88,13 +88,12 @@ export function BasicInfoFieldRow({
 
   const onSave = () => {
     startTransition(async () => {
-      const result = await updateBasicInfoFieldAction(storeId, def.key, draft);
-      if (result.ok) {
-        toast.success(result.message ?? "更新しました");
+      const result = await runAction(() => updateBasicInfoFieldAction(storeId, def.key, draft), {
+        success: "更新しました",
+      });
+      if (result?.ok) {
         setEditing(false);
         router.refresh();
-      } else {
-        toast.error(result.error);
       }
     });
   };

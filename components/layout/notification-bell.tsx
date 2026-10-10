@@ -19,7 +19,7 @@ import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { Bell, Inbox } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
-import { toast } from "@/components/ui/toast";
+import { runAction } from "@/lib/client/run-action";
 import {
   markAllNotificationsReadAction,
   markNotificationReadAction,
@@ -66,11 +66,12 @@ export function NotificationBell({ notifications }: NotificationBellProps) {
     (notification: Notification) => {
       if (isRead(notification)) return;
       markLocally([notification.id]);
-      void markNotificationReadAction(notification.id).then((result) => {
-        if (!result.ok) {
-          unmarkLocally([notification.id]);
-          toast.error(result.error);
-        }
+      // 既読化は一覧を開くと自動で行うため、成功はトーストではなく未読の印が
+      // 消えることで伝える (#327 で決定)。失敗と例外はトーストで出す。
+      void runAction(() => markNotificationReadAction(notification.id), {
+        silentSuccess: true,
+      }).then((result) => {
+        if (!result?.ok) unmarkLocally([notification.id]);
       });
     },
     [isRead, markLocally, unmarkLocally],
@@ -81,11 +82,10 @@ export function NotificationBell({ notifications }: NotificationBellProps) {
     const ids = unreadIds;
     markLocally(ids);
     startMarkAll(async () => {
-      const result = await markAllNotificationsReadAction();
-      if (!result.ok) {
-        unmarkLocally(ids);
-        toast.error(result.error);
-      }
+      const result = await runAction(() => markAllNotificationsReadAction(), {
+        silentSuccess: true,
+      });
+      if (!result?.ok) unmarkLocally(ids);
     });
   }, [unreadIds, markLocally, unmarkLocally]);
 

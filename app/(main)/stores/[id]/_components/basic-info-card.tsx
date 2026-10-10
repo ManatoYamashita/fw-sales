@@ -12,7 +12,7 @@ import { StarRating } from "@/components/ui/star-rating";
 import { ChannelBadge } from "@/components/feature/channel-badge";
 import { ServiceTagList } from "@/components/feature/service-tag-list";
 import { ServiceCheckboxGroup } from "@/app/(main)/stores/new/_components/service-checkbox-group";
-import { toast } from "@/components/ui/toast";
+import { runAction } from "@/lib/client/run-action";
 import { updateStorePatchAction } from "@/lib/actions/store-actions";
 import { decideChannel } from "@/lib/domain/channel";
 import { formatDate } from "@/lib/utils/date";
@@ -103,13 +103,12 @@ export function BasicInfoCard({ store, profiles }: BasicInfoCardProps) {
   const onSave = () => {
     const patch: StorePatch = { ...form };
     startTransition(async () => {
-      const result = await updateStorePatchAction(store.id, patch);
-      if (result.ok) {
-        toast.success(result.message ?? "更新しました");
+      const result = await runAction(() => updateStorePatchAction(store.id, patch), {
+        success: "更新しました",
+      });
+      if (result?.ok) {
         setEditing(false);
         router.refresh();
-      } else {
-        toast.error(result.error);
       }
     });
   };

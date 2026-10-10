@@ -10,12 +10,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CheckCircle2 } from "lucide-react";
+import { runAction } from "@/lib/client/run-action";
 import {
   completeHandoffAction,
   updateHandoffAction,
 } from "@/lib/actions/handoff-actions";
 import { OPS_MEMBERS } from "@/lib/domain/staff";
-import { toast } from "@/components/ui/toast";
 import type { Handoff } from "@/types/handoff";
 
 export function HandoffForm({ handoff }: { handoff: Handoff }) {
@@ -45,25 +45,20 @@ export function HandoffForm({ handoff }: { handoff: Handoff }) {
 
   const submit = (formData: FormData) => {
     startTransition(async () => {
-      const result = await updateHandoffAction(handoff.id, null, formData);
-      if (result.ok) {
-        toast.success(result.message ?? "更新しました");
-        router.refresh();
-      } else {
-        toast.error(result.error);
-      }
+      const result = await runAction(
+        () => updateHandoffAction(handoff.id, null, formData),
+        { success: "更新しました" },
+      );
+      if (result?.ok) router.refresh();
     });
   };
 
   const complete = () => {
     startCompletion(async () => {
-      const result = await completeHandoffAction(handoff.id);
-      if (result.ok) {
-        toast.success(result.message ?? "完了にしました");
-        router.refresh();
-      } else {
-        toast.error(result.error);
-      }
+      const result = await runAction(() => completeHandoffAction(handoff.id), {
+        success: "完了にしました",
+      });
+      if (result?.ok) router.refresh();
     });
   };
 

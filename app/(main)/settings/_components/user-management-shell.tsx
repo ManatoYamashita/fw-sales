@@ -7,7 +7,7 @@ import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalContent, ModalFooter } from "@/components/ui/modal";
-import { toast } from "@/components/ui/toast";
+import { runAction } from "@/lib/client/run-action";
 import { updateProfileRoleAction } from "@/lib/actions/profile-actions";
 import type { Profile, ProfileRole } from "@/types/profile";
 
@@ -44,12 +44,12 @@ export function UserManagementShell({
     setOptimistic((prev) => ({ ...prev, [userId]: role }));
     setChangingId(userId);
     startTransition(async () => {
-      const result = await updateProfileRoleAction(userId, role);
-      if (result.ok) {
-        toast.success(result.message ?? "ロールを更新しました");
+      const result = await runAction(() => updateProfileRoleAction(userId, role), {
+        success: "ロールを更新しました",
+      });
+      if (result?.ok) {
         router.refresh();
       } else {
-        toast.error(result.error);
         setOptimistic((prev) => {
           const next = { ...prev };
           delete next[userId];

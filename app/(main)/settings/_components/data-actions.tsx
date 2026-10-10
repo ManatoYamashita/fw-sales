@@ -7,12 +7,12 @@ import { Text } from "@/components/ui/typography";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalContent, ModalFooter } from "@/components/ui/modal";
 import { useState } from "react";
+import { runAction } from "@/lib/client/run-action";
 import {
   clearAllAction,
   importJsonAction,
   resetToSeedAction,
 } from "@/lib/actions/data-actions";
-import { toast } from "@/components/ui/toast";
 import { useIsAdmin } from "@/components/layout/current-user-provider";
 
 /**
@@ -36,18 +36,20 @@ export function DataActions({
 
   const reset = () => {
     startTransition(async () => {
-      const r = await resetToSeedAction();
-      if (r.ok) toast.success(r.message ?? "リセットしました");
-      else toast.error(r.error);
+      await runAction(() => resetToSeedAction(), { success: "リセットしました" });
       setResetOpen(false);
     });
   };
 
   const clearAll = () => {
     startTransition(async () => {
-      const r = await clearAllAction();
-      if (r.ok) toast.warn(r.message ?? "全データを削除しました");
-      else toast.error(r.error);
+      await runAction(() => clearAllAction(), {
+        // 取り消せない操作の結果なので、成功でも注意の色で出す。
+        success: (_, message) => ({
+          message: message ?? "全データを削除しました",
+          tone: "warning",
+        }),
+      });
       setClearOpen(false);
     });
   };
@@ -58,9 +60,9 @@ export function DataActions({
     const formData = new FormData();
     formData.set("file", file);
     startTransition(async () => {
-      const r = await importJsonAction(null, formData);
-      if (r.ok) toast.success(r.message ?? "インポートしました");
-      else toast.error(r.error);
+      await runAction(() => importJsonAction(null, formData), {
+        success: "インポートしました",
+      });
       e.target.value = "";
     });
   };

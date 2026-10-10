@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { CheckCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { toast } from "@/components/ui/toast";
+import { runAction } from "@/lib/client/run-action";
 import { addStoreFromPlaceAction } from "@/lib/actions/area-search-actions";
 
 interface AddStoreButtonProps {
@@ -35,14 +35,13 @@ export function AddStoreButton({
 
   const handleClick = () => {
     startTransition(async () => {
-      const result = await addStoreFromPlaceAction(placeId);
-      if (result.ok) {
+      const result = await runAction(() => addStoreFromPlaceAction(placeId), {
+        success: `「${placeName}」を追加しました`,
+      });
+      if (result?.ok) {
         onAdded(placeId);
-        toast.success(result.message ?? `「${placeName}」を追加しました`);
         // 追加した店舗の詳細ページへ遷移 (トーストは遷移後も Toaster が表示する)。
         router.push(`/stores/${result.data.id}`);
-      } else {
-        toast.error(result.error);
       }
     });
   };

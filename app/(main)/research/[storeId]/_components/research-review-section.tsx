@@ -33,9 +33,9 @@ import { AlertTriangle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { toast } from "@/components/ui/toast";
 import { ResearchItemCard, type DecideInput } from "./research-item-card";
 import { NonReviewItemCard } from "./research-nonreview-card";
+import { runAction } from "@/lib/client/run-action";
 import {
   adoptBulkLaneAction,
   completeReviewAction,
@@ -305,21 +305,25 @@ export function ResearchReviewSection({ store, run, onUpdate, onRestart, restart
   const onDecide = (item: ResearchItem, input: DecideInput) => {
     if (reviewCompleted) return;
     startTransition(async () => {
-      const res = await recordReviewDecisionAction({
-        runId: run.id,
-        storeId: store.id,
-        itemKey: item.key,
-        decision: input.decision,
-        selectedCandidateId: input.selectedCandidateId,
-        editedValue: input.editedValue,
-      });
-      if (res.ok) {
+      // 項目ごとの判断は数十件を続けて押すため、成功はトーストではなく項目の
+      // 表示が変わることで伝える (#327 で決定)。失敗と例外はトーストで出す。
+      const res = await runAction(
+        () =>
+          recordReviewDecisionAction({
+            runId: run.id,
+            storeId: store.id,
+            itemKey: item.key,
+            decision: input.decision,
+            selectedCandidateId: input.selectedCandidateId,
+            editedValue: input.editedValue,
+          }),
+        { silentSuccess: true },
+      );
+      if (res?.ok) {
         onUpdate({ ...run, review_decisions: res.data.reviewDecisions });
         // 採用で基本情報が変わると、ほかの項目の「いまの値」との比較には影響しないが、
         // 店舗の表示(store prop)はサーバ側の確定値で取り直す。
         if (input.decision === "adopted") router.refresh();
-      } else {
-        toast.error(res.error);
       }
     });
   };
@@ -339,50 +343,50 @@ export function ResearchReviewSection({ store, run, onUpdate, onRestart, restart
     }
     startCompleting(async () => {
       if (primary.kind === "bulk") {
-        const res = await adoptBulkLaneAction({
-          runId: run.id,
-          storeId: store.id,
-          expectedKeys: primary.keys,
-          complete: primary.complete,
-        });
-        if (res.ok) {
+        const res = await runAction(
+          () =>
+            adoptBulkLaneAction({
+              runId: run.id,
+              storeId: store.id,
+              expectedKeys: primary.keys,
+              complete: primary.complete,
+            }),
+          { success: "採用しました" },
+        );
+        if (res?.ok) {
           onUpdate({
             ...run,
             review_decisions: res.data.reviewDecisions,
             review_completed_at: res.data.reviewCompletedAt,
           });
-          toast.success(res.message ?? "採用しました");
           router.refresh();
-        } else {
-          toast.error(res.error);
         }
         return;
       }
-      const res = await completeReviewAction({ runId: run.id, storeId: store.id, skipRemaining: false });
-      if (res.ok) {
-        toast.success(res.message ?? "レビューを完了しました");
-        router.refresh();
-      } else {
-        toast.error(res.error);
-      }
+      const res = await runAction(
+        () => completeReviewAction({ runId: run.id, storeId: store.id, skipRemaining: false }),
+        { success: "レビューを完了しました" },
+      );
+      if (res?.ok) router.refresh();
     });
   };
 
   /** 副ボタン: 未判断の項目を反映せず、判断済みの内容だけで完了する。 */
   const onCompleteDecidedOnly = () => {
     startCompleting(async () => {
-      const res = await completeReviewAction({
-        runId: run.id,
-        storeId: store.id,
-        skipRemaining: true,
-      });
-      if (res.ok) {
-        toast.success(res.message ?? "レビューを完了しました");
+      const res = await runAction(
+        () =>
+          completeReviewAction({
+            runId: run.id,
+            storeId: store.id,
+            skipRemaining: true,
+          }),
+        { success: "レビューを完了しました" },
+      );
+      if (res?.ok) {
         // `completeReviewAction` は decisions を返さないため、サーバー側の確定状態は
         // `router.refresh()` の再取得に委ねる(クライアントで値を捏造しない)。
         router.refresh();
-      } else {
-        toast.error(res.error);
       }
     });
   };

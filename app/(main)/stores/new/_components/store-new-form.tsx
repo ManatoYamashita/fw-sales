@@ -15,6 +15,7 @@ import { Select } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { MemoInput, MemoTextarea } from "./memo-input";
 import { ServiceCheckboxGroup } from "./service-checkbox-group";
+import { runAction } from "@/lib/client/run-action";
 import { createStoreAction } from "@/lib/actions/store-actions";
 import { decideChannel } from "@/lib/domain/channel";
 import {
@@ -22,7 +23,6 @@ import {
   OPERATOR_TYPES,
 } from "@/types/store";
 import type { Profile } from "@/types/profile";
-import { toast } from "@/components/ui/toast";
 import type { ApplyConfidence, ApplyResult } from "@/lib/url-parser/types";
 import { confidenceToBg } from "@/lib/url-parser/confidence-color";
 
@@ -198,12 +198,11 @@ export function StoreNewForm({
     // ai_analysis_result は task 4.2 (PR3a) で AiAnalysisPanel を撤去したため
     // 新規登録フォームからは送信せず、登録後に店舗詳細で生成する設計に統一。
     startTransition(async () => {
-      const result = await createStoreAction(null, formData);
-      if (result.ok) {
-        toast.success(result.message ?? "登録しました");
+      const result = await runAction(() => createStoreAction(null, formData), {
+        success: "登録しました",
+      });
+      if (result?.ok) {
         router.push(`/stores/${result.data.id}`);
-      } else {
-        toast.error(result.error);
       }
     });
   };

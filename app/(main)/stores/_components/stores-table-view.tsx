@@ -14,12 +14,12 @@ import { ChannelBadge } from "@/components/feature/channel-badge";
 import { SalesStateSummary } from "@/components/feature/sales-state-badge";
 import { IndividualStoreBadge } from "@/components/feature/individual-store-badge";
 import { formatDate } from "@/lib/utils/date";
-import { toast } from "@/components/ui/toast";
 import { type SalesProgressRow } from "@/lib/domain/sales-progress";
 import { StoreCard, renderNextAction } from "./store-card";
 import { StoreRowActions } from "./store-row-actions";
 import { StoreDeleteConfirmDialog } from "./store-delete-confirm-dialog";
 import { buildStoreLocationColumn } from "./store-location-column";
+import { runAction } from "@/lib/client/run-action";
 import { bulkDeleteStoresAction } from "@/lib/actions/store-actions";
 
 export interface StoresTableViewProps {
@@ -246,19 +246,22 @@ export function StoresTableView({
     if (selectedVisibleIds.length === 0) return;
     const targetIds = selectedVisibleIds;
     startDelete(async () => {
-      const result = await bulkDeleteStoresAction(targetIds);
-      if (!result.ok) {
-        toast.error(result.error ?? "一括削除に失敗しました");
-        return;
-      }
-      const { deletedCount, requestedCount } = result.data;
-      if (deletedCount === 0) {
-        toast.warn("削除対象が見つかりませんでした");
-      } else if (deletedCount < requestedCount) {
-        toast.warn(`${deletedCount}/${requestedCount} 件を削除しました`);
-      } else {
-        toast.success(`${deletedCount} 件を削除しました`);
-      }
+      const result = await runAction(() => bulkDeleteStoresAction(targetIds), {
+        // 一部だけ削除できた場合は、成功ではなく注意として件数を出す。
+        success: ({ deletedCount, requestedCount }) => {
+          if (deletedCount === 0) {
+            return { message: "削除対象が見つかりませんでした", tone: "warning" };
+          }
+          if (deletedCount < requestedCount) {
+            return {
+              message: `${deletedCount}/${requestedCount} 件を削除しました`,
+              tone: "warning",
+            };
+          }
+          return `${deletedCount} 件を削除しました`;
+        },
+      });
+      if (!result?.ok) return;
       setBulkOpen(false);
       setSelectedIds((prev) => prev.filter((id) => !targetIds.includes(id)));
       router.refresh();
