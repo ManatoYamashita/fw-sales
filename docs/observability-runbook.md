@@ -1,21 +1,31 @@
-# 永続監査ログ — Issue #36 Phase 1
+# 永続監査ログ — Issue #36 Phase 1 / #320 AI調査レビュー
 
 ## 目的と記録範囲
 
 `public.event_logs` は、業務変更が成立した後に「誰が、いつ、どのStoreへ、何をしたか」を残す監査テーブルです。
-**Phase 1は次の2操作と、その入口での認可拒否だけです。すべての操作を監査するものではありません。**
+**記録するのは次の操作と、Phase 1の2操作の入口での認可拒否だけです。すべての操作を監査するものではありません。**
 
-| Action | event | payload |
-|---|---|---|
-| `updateSalesProgressAction` | `stores.salesProgress.update` | `changedFields`（実際に値が変わったキーのみ） |
-| `deleteStoreAction` | `stores.delete` | `deletionSucceeded: true` |
-| 上記の認可拒否 | `authz.denied` | `operation`, `reason`（`unauthenticated` / `not_admin`） |
+| Action | event | target | payload |
+|---|---|---|---|
+| `updateSalesProgressAction` | `stores.salesProgress.update` | store | `changedFields`（実際に値が変わったキーのみ） |
+| `deleteStoreAction` | `stores.delete` | store | `deletionSucceeded: true` |
+| 上記の認可拒否 | `authz.denied` | store（target_id/store_idはnull） | `operation`, `reason`（`unauthenticated` / `not_admin`） |
+| `startResearchRunAction` | `research.run.start` | research_run | `stuckRunFailedId`（期限切れで失敗扱いにした前回runのID。無ければnull） |
+| `recordReviewDecisionAction` | `research.review.decide` | research_run | `itemKey`, `decision`（`adopted` / `rejected` / `skipped`）。採用時は `effect`（`new` / `same` / `overwrite`）、`overwrittenOrigin`（上書き時の元の値の出どころ `places` / `typed` / `adopted`、それ以外はnull）、`edited`（編集して採用したか） |
+| `adoptBulkLaneAction` | `research.review.bulkAdopt` | research_run | `itemKeys`（まとめて採用した項目キー）, `effectCounts`（`new` / `same` / `overwrite` の件数） |
+| `completeReviewAction` / `adoptBulkLaneAction`（`complete: true`） | `research.review.complete` | research_run | `method`（`all_decided` / `skip_remaining` / `adopt_bulk`）, `adoptedCount` / `rejectedCount` / `skippedCount`（完了時点の全判断の内訳）, `autoSkippedCount`（完了操作がスキップ扱いにした件数）, `stageAdvanced`（未調査→調査済みへ進めたか） |
 
-`actor_user_id` / `actor_email` はserver側で確認したprofileのsnapshotです。営業担当者IDとは異なります。
+AI調査のイベント（`research.*`、#320）は `target_type = 'research_run'`、`target_id` = run ID、`store_id` = 店舗IDで記録します。店舗のイベントは `target_type = 'store'`、`target_id` = 店舗IDです。
+`effect` は画面の「新規 / 変更なし / 上書き」と同じ判定（`lib/domain/research-review.ts` の `classifyAdoptionEffect`、#319）です。`same` の採用は判断だけを記録し、基本情報は書き換えていません。
+「N件を採用して調査完了」は `research.review.bulkAdopt` と `research.review.complete` の2行になります。
+
+`actor_user_id` / `actor_email` はserver側で確認したprofileのsnapshotです（`research.*` はprofileを読まないActionのため、`getCurrentSession()` がSupabase Authで確認したユーザーのsnapshotです）。営業担当者IDとは異なります。
 profileを確認できない拒否ではactorはnullです。`unauthenticated` は既存guardでprofileが得られなかった状態を表し、未ログイン・profile欠落・認証取得失敗を細分化しません。
 `occurred_at` は監査呼出し時点のtimestamp with time zoneです。成功時は業務commit後になります。
 
 メモ本文、FormData、顧客入力全文、削除前Store、担当者の変更後ID、日付の値は保存しません。
+AI調査のイベントにも、基本情報の値（住所・電話番号など）、採用した値・編集して入れた値、上書き前の値、調査の根拠の文言は保存しません。項目キーは既知の調査項目（`lib/domain/research-policy.ts`）にあるものだけをwriterが受け付けます。
+上書き前の値は監査ログにも基本情報にも残りません（復元が要るかは別途判断）。
 成功mutationの`error`はnullです。任意payloadや未知のキーはwriterのruntime allowlist検証で拒否します。
 Store/profile/targetへFKを張らないため、Storeやprofileの削除後も監査行が残ります。既存reset/clearでもevent_logsを消しません。
 
@@ -23,6 +33,9 @@ Store/profile/targetへFKを張らないため、Storeやprofileの削除後も�
 
 - 営業進捗：既存transaction＋Store行ロックで比較・更新 → commit → 監査を最大1.5秒await → cache更新 → success。
 - 店舗削除：DELETE成功確認 → 監査を最大1.5秒await → cache更新 → redirect。
+- AI調査レビュー（採用・却下・スキップ・完了・まとめて採用）：run行ロック → 店舗行ロック → 更新 → commit → 監査を最大1.5秒await → cache更新 → success。「N件を採用して調査完了」は2行を順に書くため、監査DBが詰まったときの待ちは最大3秒です。
+- AI調査の起動：run作成 → Workflow起動 → 監査 → cache更新 → success。Workflowの起動に失敗した場合は監査しません。
+- 拒否されたレビュー操作（判断済み・完了済み・画面とサーバのずれなど）は書き込みも監査も行いません。
 - 同値・空patchは業務上の成功応答を維持しますが、UPDATEと成功監査を行いません。
 - not found・業務DB更新失敗・transaction失敗は成功監査を作りません。
 - cache失敗時は業務変更と監査が既に成立している場合があります。UIエラーだけでrollback済みと判断しないでください。
@@ -55,6 +68,7 @@ DB側を短くしてあるため、通常はPostgreSQLが先に`57014`でquery�
 - 中断後、監査プールの接続が解放され再利用できる
 - ブロック解除後の次の監査書込みが永続化される
 - 監査失敗がcallerへthrowされない
+- AI調査のイベントが `target_type = 'research_run'`、`target_id` = run IDで永続化される（#320）
 
 **保証しない範囲**: DB側boundは`statement_timeout`をstartup connection parameterとして送る方式です。この設定をSupabase Transaction Pooler経由で実測はしていません。poolerがこのparameterを拒否/無視する構成に当たった場合は`AUDIT_DB_STATEMENT_TIMEOUT_MS=0`で無効化できます。その場合もDB側boundが無くなるだけで、**専用プールによる業務プールからの隔離と1.5秒の外側境界は残ります**。無効時やpoolerが無視した場合は、timeoutしたINSERTが後から成功または失敗し得ます(`outcome: "unknown"`はこのための表現です)。
 
@@ -107,6 +121,27 @@ LIMIT 100;
 
 emailは操作時のsnapshotなので、変更前後のemailは別検索になります。Phase 1にemail専用indexはありません。
 
+### AI調査のrun
+
+```sql
+SELECT id, occurred_at, event, actor_email, payload
+FROM public.event_logs
+WHERE target_type = 'research_run'
+  AND target_id = 'research_run_example'
+ORDER BY occurred_at, id;
+```
+
+ある店舗で、上書きになった採用だけを探す場合:
+
+```sql
+SELECT id, occurred_at, actor_email, target_id AS run_id, payload->>'itemKey' AS item_key, payload->>'overwrittenOrigin' AS origin
+FROM public.event_logs
+WHERE store_id = 'store_example'
+  AND event = 'research.review.decide'
+  AND payload->>'effect' = 'overwrite'
+ORDER BY occurred_at DESC, id DESC;
+```
+
 ### event
 
 ```sql
@@ -123,7 +158,7 @@ LIMIT 100;
 
 ## 未実装・検証範囲
 
-Sentry、instrumentation/onRequestError、digest UI、correlation ID、Workflow/AI監査、bulk全面監査、全Action展開、viewer、retention cron、client telemetry、outboxは未実装です。
+Sentry、instrumentation/onRequestError、digest UI、correlation ID、Workflow内部（調査の実行・失敗）の監査、AI調査Actionの認可拒否の記録、bulk全面監査、全Action展開、viewer、retention cron、client telemetry、outboxは未実装です。
 自動削除もまだありません。90日で消えるとは想定しないでください。
 
 Vitestで実writer＋mock DBを通したAction挙動、Drizzle metadata/snapshot/SQLでFK・index・timestamptz・RLS・REVOKEを検証します。
