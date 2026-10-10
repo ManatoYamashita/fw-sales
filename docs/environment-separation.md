@@ -102,6 +102,7 @@ Vercel Developmentには`APP_ENV=dev`とdevのDB／Auth 4項目、`NEXT_PUBLIC_A
 ### migration・keepalive
 
 - GitHub Environment `Preview`の`DATABASE_URL`はdev、`Production`はprdへ限定します。repository-levelの本番SecretをPreviewの代替として使いません。環境Secretが未登録の場合、devの接続ガードが本番へのfallbackを拒否します。
+- CIの専用PostgreSQLとローカルベンチには`APP_ENV=local`、本番FK監査には`APP_ENV=prd`とProduction環境を明示します。通常のDB運用スクリプトでも接続先を検証します。
 - `migrate.yml`は`db:check-target`、適用、`db:verify-hashes`、`db:verify-fks`をdevで完了してからprdへ進みます。ワークフローの同時実行を抑止します。mainへのマージ前に両環境のSecret登録を確認してください。
 - 日次keepaliveは同じGitHub Environmentsでdev／prdへ別々に実行します。Vercel CronはProductionのみであり、devの代替にはなりません。`CRON_SECRET`を本番からdevへコピーしません。
 - Windowsで適用したDrizzle SQLはCRLFのため、LFのCIとハッシュが異なります。検証処理は改行コードだけの差を照合し、SQL変更・改行追加・未適用を引き続き検知します。既存DBの来歴を書き換えません。
