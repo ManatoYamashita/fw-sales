@@ -80,6 +80,53 @@ export interface DecideInput {
   editedValue?: string;
 }
 
+/**
+ * 処理中の判断がどのボタンから押されたか (#337)。
+ *
+ * 判断は全項目で 1 つの transition を共有しているので、`busy` だけではどのボタンを
+ * 押したかが分からない。押した操作を持ち回り、そのボタンにだけ処理中の表示を出す。
+ */
+export interface PendingDecision {
+  decision: ReviewDecisionType;
+  selectedCandidateId?: string;
+  /** 「編集内容で採用」から押されたか。同じ adopted でも「採用」とはボタンが違う。 */
+  edited: boolean;
+}
+
+/** `DecideInput` から、押されたボタンを表す `PendingDecision` を作る。 */
+export function toPendingDecision(input: DecideInput): PendingDecision {
+  return {
+    decision: input.decision,
+    selectedCandidateId: input.selectedCandidateId,
+    edited: input.editedValue !== undefined,
+  };
+}
+
+/**
+ * 項目 `itemKey` のカードへ渡す処理中の判断。項目の判断の transition (`busy`) の
+ * 間だけ、押した項目にだけ渡す。完了操作 (主ボタン) の処理中は渡さない。
+ * 押した操作の記録は transition の後も残るが、`busy` が終われば効かなくなる。
+ */
+export function pendingDecisionForItem(
+  itemKey: string,
+  decisionBusy: boolean,
+  pending: (PendingDecision & { itemKey: string }) | null,
+): PendingDecision | null {
+  return decisionBusy && pending?.itemKey === itemKey ? pending : null;
+}
+
+function isPending(
+  pending: PendingDecision | null,
+  target: PendingDecision,
+): boolean {
+  return (
+    pending !== null &&
+    pending.decision === target.decision &&
+    pending.selectedCandidateId === target.selectedCandidateId &&
+    pending.edited === target.edited
+  );
+}
+
 const EFFECT_TONES: Record<AdoptionEffect["kind"], "secondary" | "info" | "warning"> = {
   new: "info",
   same: "secondary",
@@ -92,6 +139,12 @@ interface Props {
   sourceRegistry: readonly SourceRegistryEntry[];
   decision: ReviewDecision | undefined;
   busy: boolean;
+  /**
+   * この項目で処理中の判断 (#337)。押したボタンだけに処理中の表示を出す。
+   * ほかのボタンと、ほかの項目のボタンは `busy` で押せなくなるだけ。
+   * 判断は応答の全項目分の結果で置き換えるので、並行して押せるようにはしない。
+   */
+  pendingDecision?: PendingDecision | null;
   onDecide: (input: DecideInput) => void;
   /** いま店舗に入っている基本情報の値。調査の値と比べて、採用した場合の結果を示す。 */
   current: BasicInfoField | undefined;
@@ -135,6 +188,7 @@ export function ResearchItemCard({
   sourceRegistry,
   decision,
   busy,
+  pendingDecision = null,
   onDecide,
   current,
   defaultOpen,
@@ -142,6 +196,9 @@ export function ResearchItemCard({
 }: Props) {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(item.value ?? "");
+  // 「編集内容で採用」の処理中は、押したボタンごと編集欄を残す。押した瞬間に閉じると、
+  // 処理中を示すボタンそのものが消えてしまう (#337)。
+  const editPending = isPending(pendingDecision, { decision: "adopted", edited: true });
 
   const isConflict = item.status === "conflict";
   const effect =
@@ -216,6 +273,11 @@ export function ResearchItemCard({
                           ? "primary"
                           : "outline"
                       }
+                      pending={isPending(pendingDecision, {
+                        decision: "adopted",
+                        selectedCandidateId: candidate.candidate_id,
+                        edited: false,
+                      })}
                       disabled={busy}
                       onClick={() => onDecide({ decision: "adopted", selectedCandidateId: candidate.candidate_id })}
                     >
@@ -256,7 +318,7 @@ export function ResearchItemCard({
           </p>
         ))}
 
-        {editing && !isConflict && (
+        {(editing || editPending) && !isConflict && (
           <div className="space-y-1.5 pt-1">
             <Textarea
               value={editValue}
@@ -272,6 +334,7 @@ export function ResearchItemCard({
                 type="button"
                 size="sm"
                 variant="primary"
+                pending={editPending}
                 disabled={busy}
                 onClick={() => {
                   onDecide({ decision: "adopted", editedValue: editValue });
@@ -284,7 +347,7 @@ export function ResearchItemCard({
           </div>
         )}
 
-        {!editing && (
+        {!editing && !editPending && (
           // 実運用の頻度順に並べる(採用 → 編集して採用 → 却下 → スキップ)。
           // 上書きになる項目では、採用は「上書きする」、却下は「いまの値を残す」と言い換え、
           // 押した結果が基本情報にどう効くかをボタン自体で示す (#319)。
@@ -294,6 +357,7 @@ export function ResearchItemCard({
                 type="button"
                 size="sm"
                 variant={decision?.decision === "adopted" ? "primary" : "outline"}
+                pending={isPending(pendingDecision, { decision: "adopted", edited: false })}
                 disabled={busy}
                 onClick={() => onDecide({ decision: "adopted" })}
               >
@@ -309,6 +373,7 @@ export function ResearchItemCard({
               type="button"
               size="sm"
               variant={decision?.decision === "rejected" ? "destructive" : "outline"}
+              pending={isPending(pendingDecision, { decision: "rejected", edited: false })}
               disabled={busy}
               onClick={() => onDecide({ decision: "rejected" })}
             >
@@ -318,6 +383,7 @@ export function ResearchItemCard({
               type="button"
               size="sm"
               variant={decision?.decision === "skipped" ? "secondary" : "ghost"}
+              pending={isPending(pendingDecision, { decision: "skipped", edited: false })}
               disabled={busy}
               onClick={() => onDecide({ decision: "skipped" })}
             >
