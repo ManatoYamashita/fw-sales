@@ -24,6 +24,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # .gitmodules の無い gitlink (mode 160000) があると、persist-credentials: false の
+      # checkout (migrate.yml) が `git submodule foreach` で落ち、本番への migration が
+      # 止まる。ほかのワークフローの checkout は通るため、ここで明示的に検出する。
+      - name: Reject gitlinks
+        run: |
+          gitlinks="$(git ls-files --stage | awk '$1 == "160000" { print $4 }' | tr '\n' ' ')"
+          if [ -n "$gitlinks" ]; then
+            echo "::error::gitlink (サブモジュール参照) は追跡できません: $gitlinks"
+            exit 1
+          fi
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
