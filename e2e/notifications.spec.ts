@@ -12,6 +12,23 @@ function bell(page: Page) {
   return page.locator("header").getByRole("button", { name: /^通知 \(/ });
 }
 
+/**
+ * 本文に通知 ID を含む既読化の Server Action の応答を待つ。
+ *
+ * 既読化は表示を楽観的に変え、Action の完了を待たない。リンクの通知では、Action は
+ * 画面遷移が終わってから送られる。応答の前に再読込すると送信中の Action が中断され、
+ * 既読が保存されないまま未読に戻る (#351)。再読込の前にこれを待つ。
+ */
+function waitForMarkRead(page: Page, notificationId: string) {
+  return page.waitForResponse(
+    (res) =>
+      res.request().method() === "POST" &&
+      res.request().headers()["next-action"] !== undefined &&
+      (res.request().postData() ?? "").includes(notificationId),
+    { timeout: 60_000 },
+  );
+}
+
 async function openPanel(page: Page) {
   await bell(page).click();
   const panel = page.getByRole("dialog", { name: "通知一覧" });
@@ -35,6 +52,7 @@ test("通知はクリックで既読になり、削除済み店舗へは遷移�
   });
   await expect(dead).toBeVisible();
   await expect(panel.locator('a[href*="store_e2e_deleted"]')).toHaveCount(0);
+  const deadRead = waitForMarkRead(page, "notif_e2e_dead");
   await dead.click();
   await expect(page).toHaveURL(/\/stores$/);
   await expect(bell(page)).toHaveAccessibleName("通知 (2 件未読)");
@@ -43,6 +61,7 @@ test("通知はクリックで既読になり、削除済み店舗へは遷移�
   ).toBeVisible();
 
   // 実在店舗を指す通知: 遷移し、既読になる
+  const aliveRead = waitForMarkRead(page, "notif_e2e_alive");
   await panel
     .getByRole("link", { name: "未読: E2E: 導楽の調査が完了しました" })
     .click();
@@ -52,6 +71,8 @@ test("通知はクリックで既読になり、削除済み店舗へは遷移�
   await expect(bell(page)).toHaveAccessibleName("通知 (1 件未読)");
 
   // 既読はサーバーへ保存されている (再読込しても戻らない)
+  await deadRead;
+  await aliveRead;
   await expect(async () => {
     await page.reload();
     await expect(bell(page)).toHaveAccessibleName("通知 (1 件未読)", {

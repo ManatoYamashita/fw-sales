@@ -93,7 +93,8 @@ test("失注と再アプローチ可否を営業記録に残すと、一覧と�
 
   await page.getByRole("button", { name: "絞り込み" }).click();
   await page.getByRole("dialog").getByLabel("営業状態で絞り込み").selectOption("lost");
-  await expect(page).toHaveURL(/state=lost/);
+  // 絞り込みは URL の書き換え (遷移) で反映する。負荷下では既定の 5 秒を超えることがある。
+  await expect(page).toHaveURL(/state=lost/, { timeout: 30_000 });
   const bodyRows = page.getByRole("table").locator("tbody tr");
   await expect(bodyRows).toHaveCount(1);
   await expect(bodyRows.first()).toContainText("らーめん 心");
