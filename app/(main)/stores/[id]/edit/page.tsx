@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
-import StoreLoading from "../loading";
+import StoreEditLoading from "./loading";
 import { StoreEditForm } from "./_components/store-edit-form";
 import { getStoreCached } from "@/lib/queries/stores";
 import { getAllProfiles } from "@/lib/queries/profiles";
@@ -21,7 +21,7 @@ export async function generateMetadata({
 
 export default function StoreEditPage({ params }: { params: Params }) {
   return (
-    <Suspense fallback={<StoreLoading />}>
+    <Suspense fallback={<StoreEditLoading />}>
       <StoreEditContent params={params} />
     </Suspense>
   );

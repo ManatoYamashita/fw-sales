@@ -8,7 +8,7 @@ import {
   StoreQuickFilters,
   StoreQuickFiltersFallback,
 } from "./_components/store-quick-filters";
-import { Spinner } from "@/components/ui/spinner";
+import { TableSkeleton } from "@/components/ui/skeleton";
 import { getAllProfiles } from "@/lib/queries/profiles";
 import { DEAL_STATUSES, type DealStatus } from "@/types/deal";
 import type { SortDirection } from "@/types/store";
@@ -97,8 +97,9 @@ async function StoresTableSlot({ searchParams }: { searchParams: Promise<SearchP
   </Suspense>;
 }
 
+/** 一覧表の骨組み。絞り込みや並べ替えのたびにも出るので、表の形のまま待たせる (#326)。 */
 function StoresTableFallback() {
-  return <div className="flex items-center gap-2 text-sm text-muted-foreground py-12 justify-center"><Spinner /> 読み込み中…</div>;
+  return <TableSkeleton rows={8} />;
 }
 
 /**

@@ -1,17 +1,26 @@
 import { Card } from "./card";
 import { cn } from "@/lib/utils/cn";
 
+/**
+ * 角の形は `shape` で選ぶ。`className="rounded-full"` で上書きすると、基底の
+ * `rounded-md` と同じプロパティを争って CSS の記述順で勝敗が決まる
+ * (`cn` は素の clsx。`class-conflicts.test.ts` が検出する)。
+ * `pill` はタブ (`Tabs variant="pill"`) やバッジの骨組みに使う。
+ */
 export function Skeleton({
   className,
   tone = "muted",
+  shape = "rounded",
 }: {
   className?: string;
   tone?: "muted" | "card";
+  shape?: "rounded" | "pill";
 }) {
   return (
     <div
       className={cn(
-        "animate-pulse rounded-md",
+        "animate-pulse",
+        shape === "pill" ? "rounded-full" : "rounded-md",
         tone === "card" ? "bg-card" : "bg-muted",
         className,
       )}
