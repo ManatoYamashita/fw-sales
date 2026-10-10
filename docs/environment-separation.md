@@ -76,7 +76,9 @@ pnpm local:stop
 5. DB変更はdevで検証後にprdへ適用します。本変更の`migrate.yml`は、同一コミットをPreview環境のdev DBで適用・検証した後、mainのpushに限りProduction環境のprd DBへ適用します。手動実行はmainを選択した場合のdevのみです。featureブランチからの実行はスキップします。
 6. 環境名だけで接続先を判断せず、実際のSupabaseプロジェクト・DB接続先を確認します。接続情報の値をログやGitへ記録しません。
 
-## クラウド設定と残作業（2026-10-10）
+## クラウド設定と検証履歴（2026-10-10、PR #338時点）
+
+以下はPR #338作成時点の検証記録です。mainへの反映と本番migrationの最新結果は[Issue #46](https://github.com/ManatoYamashita/fw-sales/issues/46)を参照してください。
 
 - devは`INACTIVE`から`ACTIVE_HEALTHY`へ復旧しました。復旧中の一時的な空クエリ結果を初期状態と扱わず、起動完了後に再確認しました。
 - 既存の29件のDrizzle来歴とGoogle認証ユーザー1名を保持し、0029・0030・0031をdevへ適用しました。店舗5件・商談2件・引き継ぎ1件の既存seedを投入しました。本番からのコピーは行っていません。
@@ -116,6 +118,17 @@ Vercel Developmentには`APP_ENV=dev`とdevのDB／Auth 4項目、`NEXT_PUBLIC_A
 - `migrate.yml`は`db:check-target`、適用、`db:verify-hashes`、`db:verify-fks`をdevで完了してからprdへ進みます。ワークフローの同時実行を抑止します。mainへのマージ前に両環境のSecret登録を確認してください。
 - 日次keepaliveは同じGitHub Environmentsでdev／prdへ別々に実行します。Vercel CronはProductionのみであり、devの代替にはなりません。`CRON_SECRET`を本番からdevへコピーしません。
 - Windowsで適用したDrizzle SQLはCRLFのため、LFのCIとハッシュが異なります。検証処理は改行コードだけの差を照合し、SQL変更・改行追加・未適用を引き続き検知します。既存DBの来歴を書き換えません。
+
+### main反映時の確認と復旧
+
+1. レビュー済みPRをmainへマージし、`Apply Migrations`の対象SHAを確認します。dev／prdのcheckoutはどちらも起動元の`github.sha`です。
+2. devの接続先照合・migration・来歴・FK検証が成功し、その後prdで同じ検証が成功したことを確認します。VercelのREADYやCIの成功だけではmigration完了と扱いません。
+3. `Supabase Keepalive`をmainから手動実行し、`Ping dev database`と`Ping prd database`の両方で実クエリの成功を確認します。workflowがactiveで、日次18:00 JST（09:00 UTC）のscheduleがmainに存在することも確認します。
+4. ProductionのデプロイSHA・READY・公開ルートを確認し、DB来歴とRLS、Auth triggerの参照先を読み取りで照合します。
+
+失敗時は最初にジョブとステップを特定します。checkout失敗はDB適用前の停止ですが、migrationステップの失敗ではDB来歴・スキーマを確認してから復旧します。mainからの手動migrationはdevだけを実行するため、prd未適用の復旧には使えません。一時障害なら元のpush実行の失敗ジョブを再実行し、コード修正が必要なら修正PRをmainへマージして新しいpush実行でdev→prdを検証します。
+
+作業用worktreeをGit管理へ加えません。`.claude/worktrees/`はignore対象です。`.gitmodules`に定義のないgitlinkは`actions/checkout`の認証除去時に`git submodule foreach`を失敗させます。`persist-credentials: false`を保持し、混入したgitlinkをGit管理から外します。
 
 ### Google OAuth
 
