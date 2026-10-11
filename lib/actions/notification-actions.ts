@@ -16,8 +16,7 @@ import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
 import { getCurrentProfile } from "@/lib/supabase/server";
 import { failure, success, type ActionResult } from "./_helpers";
-
-const UNAUTHENTICATED_MESSAGE = "ログインが必要です";
+import { UNAUTHENTICATED_MESSAGE } from "./_messages";
 
 /**
  * 指定通知を既読にする。既に既読・他人の通知・存在しない ID は何もしない

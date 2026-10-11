@@ -1,6 +1,6 @@
-import { execFileSync } from "node:child_process";
 import { expect, test, type Page, type Request } from "@playwright/test";
 import postgres from "postgres";
+import { e2eDatabaseUrl } from "./support/e2e-db";
 
 /**
  * 通知ベルの既読化 (#296)。
@@ -13,21 +13,7 @@ import postgres from "postgres";
 // 追加の通知が既存シナリオの未読件数へ混ざらないよう、同じファイル内で直列に流す。
 test.describe.configure({ mode: "serial" });
 
-let sql: ReturnType<typeof postgres>;
-
-test.beforeAll(() => {
-  let databaseUrl = process.env.E2E_DATABASE_URL;
-  if (!databaseUrl) {
-    const name = process.env.E2E_DB_CONTAINER?.trim() || "fw-sales-e2e-postgres";
-    const containers = JSON.parse(
-      execFileSync("container", ["list", "--all", "--format", "json"], { encoding: "utf8" }),
-    ) as Array<{ id: string; status?: { networks?: Array<{ ipv4Address?: string }> } }>;
-    const address = containers.find((c) => c.id === name)?.status?.networks?.[0]?.ipv4Address;
-    if (!address) throw new Error(`E2E用PostgreSQLコンテナ「${name}」の内部IPを取得できませんでした。`);
-    databaseUrl = `postgres://postgres:postgres@${address.split("/")[0]}:5432/postgres`;
-  }
-  sql = postgres(databaseUrl, { prepare: false, max: 1 });
-});
+const sql = postgres(e2eDatabaseUrl(), { prepare: false, max: 1 });
 
 test.afterEach(async () => {
   await sql`DELETE FROM notifications WHERE id LIKE 'notif_e2e_351_%'`;
@@ -204,6 +190,8 @@ test("通知の既読保存が完了するまで遷移せず、遷移直後の�
     // 保存中もパネルを残し、楽観更新後の再クリックでは保存や遷移を重複させない。
     const pending = panel.getByRole("link", { name: title, exact: true });
     await expect(pending).toHaveAttribute("aria-busy", "true");
+    // カーソルの変化が見えないタッチ端末でも分かるよう、行にスピナーを出す。
+    await expect(pending.getByLabel("読み込み中")).toBeVisible();
     expect(await savedReadAt(id)).toBeNull();
     await pending.click();
     expect(requests).toBe(1);
@@ -287,4 +275,20 @@ test("通知の別タブへのリンク操作を保ち、元の画面で既読�
   } finally {
     await popup.close();
   }
+});
+
+test("セッションが切れていると既読は保存されないが、リンク先へ移ってログイン画面へ送られる", async ({ page }) => {
+  test.slow();
+  const id = "notif_e2e_351_signed_out";
+  const title = await createLinkedNotification(id);
+  await openFixtureStores(page);
+  const panel = await openPanel(page);
+  const marking = page.waitForResponse((res) => isReadAction(res.request(), id), { timeout: 60_000 });
+  // 画面を開いたままセッションだけを失わせる。
+  await page.context().clearCookies();
+  await panel.getByRole("link", { name: `未読: ${title}`, exact: true }).click();
+  await marking;
+  // 再試行しても通らない失敗なので、その場に留めずに遷移させ、proxy にログイン画面へ送らせる。
+  await expect(page).toHaveURL(/\/login\?redirect=%2Fstores%2Fstore_001$/, { timeout: 30_000 });
+  expect(await savedReadAt(id)).toBeNull();
 });

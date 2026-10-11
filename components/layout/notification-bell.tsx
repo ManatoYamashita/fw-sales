@@ -8,7 +8,12 @@
  * - 外側クリック / Escape キーで閉じる
  * - 通知のクリックで既読化し、ヘッダーの「すべて既読にする」で一括既読化する (#296)。
  *   バッジはサーバー応答を待たずに楽観的に減らし、失敗したときだけ元へ戻す
- * - リンクの通知は既読保存後に遷移し、保存失敗時はその場で再試行できる (#351)
+ * - リンクの通知は既読保存後に遷移し、保存中は行にスピナーを出す。保存失敗時は
+ *   その場で再試行できる (#351)。
+ *   ただしセッション切れの失敗は再試行しても通らないため、従来どおり遷移させ、
+ *   遷移先で proxy にログイン画面へ送らせる。proxy は Action の POST もログイン画面へ
+ *   リダイレクトするので、クライアントには通信失敗と同じ例外として届く。例外のときは
+ *   リンク先がログイン画面へ送られるかを確かめて見分ける
  * - リンク先が無い通知 (参照先店舗が削除済みなど) は遷移させず、既読化だけ行う
  *
  * 親 RSC が `getRecentNotifications(userId, limit=10)` の結果を props で渡す前提。
@@ -21,16 +26,27 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Bell, Inbox } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
+import { Spinner } from "@/components/ui/spinner";
 import { runAction } from "@/lib/client/run-action";
 import {
   markAllNotificationsReadAction,
   markNotificationReadAction,
 } from "@/lib/actions/notification-actions";
+import { UNAUTHENTICATED_MESSAGE } from "@/lib/actions/_messages";
 import {
   OVERLAY_ANCHOR_CONTAINER,
   OVERLAY_PANEL_ALIGN_END,
 } from "@/components/ui/overlay-anchor-classes";
 import type { Notification, NotificationKind } from "@/types/notification";
+
+/**
+ * 1 件の既読化の結果。
+ *
+ * - `saved`: 保存できた (既読だった場合を含む)
+ * - `signed_out`: セッションが無く保存できなかった。遷移すればログイン画面へ送られる
+ * - `failed`: それ以外の失敗・例外。その場に留まり、再クリックで再試行させる
+ */
+type ReadOutcome = "saved" | "signed_out" | "failed";
 
 interface NotificationBellProps {
   notifications: readonly Notification[];
@@ -45,7 +61,7 @@ export function NotificationBell({ notifications }: NotificationBellProps) {
     () => new Set(),
   );
   const [isMarkingAll, startMarkAll] = useTransition();
-  const pendingReads = useRef(new Map<string, Promise<boolean>>());
+  const pendingReads = useRef(new Map<string, Promise<ReadOutcome>>());
 
   const isRead = useCallback(
     (n: Notification) => n.read_at !== null || locallyRead.has(n.id),
@@ -66,19 +82,25 @@ export function NotificationBell({ notifications }: NotificationBellProps) {
   }, []);
 
   const handleRead = useCallback(
-    (notification: Notification) => {
+    (notification: Notification): Promise<ReadOutcome> => {
       // 楽観表示が既読になっても、保存中なら同じ Promise を待つ (#351)。
       const pending = pendingReads.current.get(notification.id);
       if (pending) return pending;
-      if (isRead(notification)) return Promise.resolve(true);
+      if (isRead(notification)) return Promise.resolve("saved");
       markLocally([notification.id]);
       // 通知のクリックで既読化するため、成功はトーストではなく未読の印が
       // 消えることで伝える (#327 で決定)。失敗と例外はトーストで出す。
       const read = runAction(() => markNotificationReadAction(notification.id), {
         silentSuccess: true,
-      }).then((result) => {
-        if (!result?.ok) unmarkLocally([notification.id]);
-        return result?.ok === true;
+      }).then(async (result): Promise<ReadOutcome> => {
+        if (result?.ok) return "saved";
+        unmarkLocally([notification.id]);
+        if (result?.error === UNAUTHENTICATED_MESSAGE) return "signed_out";
+        const href = resolveLink(notification);
+        if (result === null && href && (await redirectsToLogin(href))) {
+          return "signed_out";
+        }
+        return "failed";
       }).finally(() => {
         pendingReads.current.delete(notification.id);
       });
@@ -205,7 +227,7 @@ export function NotificationBell({ notifications }: NotificationBellProps) {
 interface NotificationRowProps {
   notification: Notification;
   isUnread: boolean;
-  onRead: (notification: Notification) => Promise<boolean>;
+  onRead: (notification: Notification) => Promise<ReadOutcome>;
   onNavigate: () => void;
 }
 
@@ -226,7 +248,16 @@ function NotificationRow({
       )}
     >
       <div className="flex items-start gap-2">
-        {isUnread ? (
+        {isNavigating ? (
+          // 保存を待つ間の手がかり。カーソルの変化はタッチ端末では見えないため、
+          // 未読の印の位置に重ねて出す。印と同じ枠に収め、行の配置を動かさない (#351)。
+          <span className="relative mt-1.5 h-1.5 w-1.5 shrink-0">
+            <Spinner
+              size="sm"
+              className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
+            />
+          </span>
+        ) : isUnread ? (
           <span
             aria-hidden
             className="mt-1.5 inline-block h-1.5 w-1.5 rounded-full bg-destructive shrink-0"
@@ -267,7 +298,7 @@ function NotificationRow({
             // 別タブなどのブラウザ標準の操作は妨げず、元の画面で既読化する。
             if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
               startNavigation(async () => {
-                if (await read) onNavigate();
+                if ((await read) !== "failed") onNavigate();
               });
             }
           }}
@@ -276,7 +307,7 @@ function NotificationRow({
             if (isNavigating) return;
             startNavigation(async () => {
               // 遷移中に Action が後回しにならないよう、DB への保存を先に確定する。
-              if (await onRead(notification)) {
+              if ((await onRead(notification)) !== "failed") {
                 onNavigate();
                 router.push(href);
               }
@@ -302,6 +333,20 @@ function NotificationRow({
       </button>
     </li>
   );
+}
+
+/**
+ * リンク先を開くとログイン画面へ送られるか (セッション切れか) を確かめる。
+ * 既読化の Action が例外で終わったときだけ呼ぶ。通信できないときは false を返し、
+ * その場で再試行させる。
+ */
+async function redirectsToLogin(href: string): Promise<boolean> {
+  try {
+    const res = await fetch(href, { method: "HEAD", cache: "no-store" });
+    return res.redirected && new URL(res.url).pathname === "/login";
+  } catch {
+    return false;
+  }
 }
 
 function resolveLink(n: Notification): string | null {
