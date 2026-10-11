@@ -12,7 +12,11 @@ import {
 } from "./e2e-local.mjs";
 
 export const LOCAL_CONTAINER_NAME = "fw-sales-local-postgres";
-export const LOCAL_USER_ID = "00000000-0000-0000-0000-000000000002";
+// 監査ログの actor は `z.string().uuid()` で検証する (lib/observability/serialize.ts)。
+// zod 4 は UUID の版 (v1〜v8) と variant まで検査するので、v4 の形にしておく (#355)。
+export const LOCAL_USER_ID = "00000000-0000-4000-8000-000000000002";
+/** #355 より前の ID。版が 0 のため監査の検証を通らない。既存 DB は準備処理で移し替える。 */
+export const LEGACY_LOCAL_USER_ID = "00000000-0000-0000-0000-000000000002";
 const LOCAL_OWNER_LABEL = "fw-sales.environment=local-preview";
 const LOCAL_STATE_DIR = path.join(PROJECT_ROOT, ".local-preview");
 
@@ -100,6 +104,75 @@ function readLocalSecret() {
   return fs.readFileSync(secretPath, "utf8").trim();
 }
 
+/** @param {string} name */
+const quoteIdent = (name) => `"${name.replaceAll('"', '""')}"`;
+
+/**
+ * 旧 ID (`LEGACY_LOCAL_USER_ID`) のテストユーザーを、新 ID (`LOCAL_USER_ID`) へ移し替える (#355)。
+ *
+ * ローカル検証 DB はデータを持ち越すため、ID の定数を変えるだけでは、新 ID の `auth.users` を
+ * 作ったときにトリガー (`private.handle_new_user()`) が同じメールでプロフィールを作ろうとして
+ * `profiles.email` の一意制約に当たる。そこで次の順に移す。
+ *
+ * 1. 旧プロフィールのメールを空ける
+ * 2. 新 ID の `auth.users` を作り (トリガーがプロフィールを作る)、旧プロフィールの値を写す
+ * 3. `profiles.id` を参照する外部キーをカタログから列挙し、旧 ID を新 ID へ付け替える
+ * 4. 旧 `auth.users` を消す (旧プロフィールは ON DELETE CASCADE で消える)
+ *
+ * `event_logs.actor_user_id` は監査の証跡のため書き換えない (外部キーも無い)。
+ * 呼び出し側のトランザクション内で実行すること。旧 ID のプロフィールが無ければ何もしない。
+ *
+ * @param {import("postgres").TransactionSql} tx
+ * @returns {Promise<null | Array<{ table: string, column: string, count: number }>>}
+ *   移し替えなければ null。移し替えたら、付け替えた参照の件数。
+ */
+export async function migrateLegacyLocalUser(tx) {
+  const [legacy] = await tx`SELECT email FROM profiles WHERE id = ${LEGACY_LOCAL_USER_ID}`;
+  if (!legacy) return null;
+  const [current] = await tx`SELECT 1 FROM profiles WHERE id = ${LOCAL_USER_ID}`;
+  if (current) {
+    throw new Error(
+      `テストユーザーが旧ID(${LEGACY_LOCAL_USER_ID})と新ID(${LOCAL_USER_ID})の両方にあるため、移し替えを中止しました。`,
+    );
+  }
+
+  await tx`UPDATE profiles SET email = ${`legacy-${LEGACY_LOCAL_USER_ID}@local.invalid`}
+    WHERE id = ${LEGACY_LOCAL_USER_ID}`;
+  await tx`INSERT INTO auth.users (id, email, raw_user_meta_data)
+    SELECT ${LOCAL_USER_ID}, ${legacy.email}, raw_user_meta_data FROM auth.users
+    WHERE id = ${LEGACY_LOCAL_USER_ID}`;
+  const columns = await tx`SELECT column_name FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'profiles' AND column_name NOT IN ('id', 'email')`;
+  const assignments = columns
+    .map(({ column_name: name }) => `${quoteIdent(name)} = source.${quoteIdent(name)}`)
+    .join(", ");
+  await tx.unsafe(
+    `UPDATE profiles AS target SET ${assignments} FROM profiles AS source
+      WHERE target.id = $1 AND source.id = $2`,
+    [LOCAL_USER_ID, LEGACY_LOCAL_USER_ID],
+  );
+
+  const references = await tx`
+    SELECT c.conrelid::regclass::text AS "table", a.attname AS "column", cardinality(c.conkey) AS width
+    FROM pg_constraint c
+    JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = c.conkey[1]
+    WHERE c.contype = 'f' AND c.confrelid = 'public.profiles'::regclass
+    ORDER BY 1, 2`;
+  const moved = [];
+  for (const { table, column, width } of references) {
+    if (width !== 1) throw new Error(`${table} の複数列の外部キーは移し替えに対応していません。`);
+    // table は regclass の文字列表現で、必要な引用符を含む。
+    const result = await tx.unsafe(
+      `UPDATE ${table} SET ${quoteIdent(column)} = $1 WHERE ${quoteIdent(column)} = $2`,
+      [LOCAL_USER_ID, LEGACY_LOCAL_USER_ID],
+    );
+    if (result.count > 0) moved.push({ table, column, count: result.count });
+  }
+
+  await tx`DELETE FROM auth.users WHERE id = ${LEGACY_LOCAL_USER_ID}`;
+  return moved;
+}
+
 async function setupLocalDatabase(config) {
   runContainer(["system", "start"], true);
   const target = findContainer();
@@ -128,6 +201,11 @@ async function setupLocalDatabase(config) {
     const [{ count }] = await sql`SELECT count(*)::int AS count FROM stores`;
     // 再起動時のseed上書きを避け、初回の空DBにだけテストデータを投入します。
     if (count === 0) runPnpm(["seed"], env);
+    const moved = await sql.begin((tx) => migrateLegacyLocalUser(tx));
+    if (moved) {
+      const detail = moved.map((m) => `${m.table}.${m.column} ${m.count}件`).join("、") || "参照なし";
+      console.log(`[local] テストユーザーのIDを${LOCAL_USER_ID}へ移し替えました（${detail}）。起動中のdev:localは再起動してください。`);
+    }
     const today = new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Tokyo" }).format(new Date());
     await sql`INSERT INTO auth.users (id, email, raw_user_meta_data)
       VALUES (${LOCAL_USER_ID}, ${config.email}, ${JSON.stringify({ name: "Local Test User" })}::jsonb)
