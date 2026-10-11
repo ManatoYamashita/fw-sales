@@ -232,7 +232,7 @@ Tailwind v4 のクラス生成はソースの静的走査で、**走査された
 
 必要なら**variant を追加する**（`button.tsx` の `touch` / `icon-touch` がその例）。既存 variant の値は変えない（波及範囲は `button.tsx` の JSDoc にある。回帰面が読めなくなる）。**正方形のアイコンボタンは `size="icon"` / `icon-sm` / `icon-lg` / `icon-touch` を使う。** `size="sm"` に `h-9 w-9 p-0` を重ねると、`p-0` が `sm` の `px-3` に負けて左右 padding が 12px 残り、中のアイコンが潰れる。
 
-UI プリミティブのサイズ、幅、余白、色を利用側の `className` で上書きしない。`Select` は `width` と `density`、`Spinner` は `size` と `tone`、`Card.Body` は `padding`、`Skeleton` は `tone`、`Button` は `size` / `variant` / `gap` を使い、意図を props で表現する。`Card.Header` / `Card.Footer` は props を持たないので、**行の並べ方 (`flex-wrap` / 寄せ / 交差軸) を利用側から書き換えない** — 変えたいレイアウトは子側で組む (§4.5.1)。`cn` は `tailwind-merge` を持たないため、基底クラスと同じ CSS プロパティを `className` に書くと、どちらが勝つかは生成 CSS の順序次第になる。この 7 つのプリミティブについては `components/ui/__tests__/class-conflicts.test.ts` が `app/` と `components/` の JSX を走査して落とす（ガードは実装の基底クラスを直接読むので、プリミティブ側を変えれば検査範囲も自動で追従する）。`className` は**リテラルでも式でも読む**。式は取り出せた文字列リテラルを合併して検査するので、`className={editing ? undefined : "p-0"}` のように片方の枝だけが衝突する形も落ちる。変数参照のように**クラスを供給しうるのに中身を読めない部分があれば fail-closed で落とす**（#262）。落ちたらクラスを文字列リテラルで書くか、意図を props へ移すこと。新しい例外が必要なら、先にプリミティブへ軸を追加する（`gap-1.5` を通すために `Button` へ `gap` 軸を足したのがその例）。軸を足すときは**基底から同じプロパティのクラスを外す**こと。基底に残すと軸の値と基底が争い、同じ事故が起きる。
+UI プリミティブのサイズ、幅、余白、色を利用側の `className` で上書きしない。`Select` は `width` と `density`（44px を常に取るなら `density="touch"`。#334）、`Spinner` は `size` と `tone`、`Card.Body` は `padding`、`Skeleton` は `tone`、`Button` は `size` / `variant` / `gap` を使い、意図を props で表現する。`Card.Header` / `Card.Footer` は props を持たないので、**行の並べ方 (`flex-wrap` / 寄せ / 交差軸) を利用側から書き換えない** — 変えたいレイアウトは子側で組む (§4.5.1)。`cn` は `tailwind-merge` を持たないため、基底クラスと同じ CSS プロパティを `className` に書くと、どちらが勝つかは生成 CSS の順序次第になる。この 7 つのプリミティブについては `components/ui/__tests__/class-conflicts.test.ts` が `app/` と `components/` の JSX を走査して落とす（ガードは実装の基底クラスを直接読むので、プリミティブ側を変えれば検査範囲も自動で追従する）。`className` は**リテラルでも式でも読む**。式は取り出せた文字列リテラルを合併して検査するので、`className={editing ? undefined : "p-0"}` のように片方の枝だけが衝突する形も落ちる。変数参照のように**クラスを供給しうるのに中身を読めない部分があれば fail-closed で落とす**（#262）。落ちたらクラスを文字列リテラルで書くか、意図を props へ移すこと。新しい例外が必要なら、先にプリミティブへ軸を追加する（`gap-1.5` を通すために `Button` へ `gap` 軸を足したのがその例）。軸を足すときは**基底から同じプロパティのクラスを外す**こと。基底に残すと軸の値と基底が争い、同じ事故が起きる。
 
 ### 4.4 flex の子への `min-w-0` 付け忘れ
 
@@ -439,6 +439,7 @@ CI は typecheck / lint / vitest の 3 ジョブで、**`next build` を持た�
 | `components/ui/data-table-responsive.ts` | 閾値表そのもの、テーブル別の予算内訳、閾値を足すときの制約 |
 | `components/ui/modal-classes.ts` | モーダルのクラス契約と、そう書いた理由 |
 | `components/ui/overlay-anchor-classes.ts` | トリガ基準で開くパネルの位置基準。狭幅で viewport 基準へ切り替える理由 (#264) |
+| `components/ui/select.tsx` / `select-logic.ts` | 共通 Select の候補パネル (Popover API の top layer + 位置計算) とキー操作。API とプルダウンの利用方針は [form-controls.md](form-controls.md) (#334) |
 | `app/(main)/stores/_components/store-card.tsx` | `/stores` のコンパクト行に載せる項目・順序・省く重複ラベル、操作を DOM の最後に置く理由 (#330) |
 | `components/ui/card.tsx` | `Card.Header` / `Card.Footer` の折り返し契約。`flex-wrap` を入れた理由、`min-w-0` を入れない理由、2 行目の寄せを基底の `[&>*+*]:ml-auto` が持ち**消費者へ配らない**理由 (#270) |
 | 各ビューの `_components/__tests__/*-table-columns.test.tsx` | そのビューの決定表 (`EXPECTED`) と列単体予算 (`BUDGET`)、予算の実測値の採り方。**always 列の予算も含め `BUDGET` が唯一の出所**で、直値の定数を別に置かない (#244) |
@@ -473,6 +474,7 @@ Epic #225 の進行に伴って更新する。
 | `/dashboard` `/pipeline` `/actions` `/handoffs` `/kpi` | **ルート無効化中**（`lib/domain/nav-routes.ts`）。これらの閾値・レイアウトは無効化状態での暫定値で、**再有効化時に列構成ごと再測定する** |
 | `kanban-board.tsx` / `app/(main)/kpi/page.tsx` | **狭幅構造を是正済み**（#225 Phase 4）。Kanban はコンテナ 700px 未満で縦積み、KPI のバーはカード内容幅 430px 未満でラベル・数値の下へ移す。無効化中のため、再有効化時は実データで再測定する。検証用ビルドでは両ルートを一時的に有効化し、Phase 5 の 34 ケース（10 幅、768px 以上はサイドバー 2 状態）で横溢れ 0 を確認した |
 | `area-search-map.tsx` / `area-search-results.tsx` / `place-result-list.tsx` | **狭幅構造を是正済み**（#225 Phase 4）。結果領域 800px 未満で地図と一覧を縦積みし、地図高は 280px に保つ。候補カード 430px 未満では操作列を本文の下へ移し、選択ラベルを 44px にする。E2E 環境には Google Places の検索結果が無く、実検索後の状態は実描画テストで確認した |
+| プルダウンを開くとブラウザ / OS 標準の候補が出る（#234 のカードモード並び替えは、44px を確保するため生の `<select>` を採り、候補のタッチ領域を OS に委ねていた） | **解決済み**（#334）。全画面を共通 `Select` へ統一し、モバイルでも独自の候補パネルを出す。並び替えは `density="touch"`（トリガー・候補とも 44px）。ネイティブの `<select>` は `native-select-scan.test.ts` が走査で落とす（[form-controls.md](form-controls.md)） |
 | `/stores` の狭幅表示が「大きなカードの縦積み」で、見比べられる店舗数が少ない | **解決済み**（#330）。区切り線のコンパクト行へ組み直した（§3）。375px で 1 件の高さは 218〜239px から 86〜133px。10 幅（768px 以上はサイドバー 2 状態）と 200% ズームで、ページの横スクロール・リスト内のはみ出し・操作の重なりは 0 件 |
 | `research-review-section.tsx` と項目カード | **狭幅構造を是正済み**（#225 Phase 4）。長い値の折り返し、見出しとバッジの折り返し、完了操作の 70dvh 高さ上限と内部スクロールを追加。E2E seed にレビュー run が無いため、実データ入りのブラウザ確認は未実施 |
 

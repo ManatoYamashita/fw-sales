@@ -173,18 +173,19 @@ describe("アポ取得日の「未取得に戻す」", () => {
 
 describe("営業担当 Select", () => {
   it("未割当を選べる", () => {
-    expect(code).toContain('<option value="">未割当</option>');
+    expect(code).toContain('{ value: "", label: "未割当" }');
   });
 
-  it("profiles に無い現在値の受け皿 option を出す", () => {
-    // 一致する option が無いと <select> は先頭 (未割当) を表示し、
-    // ユーザーが触っていないのに保存で担当が消える。
+  it("profiles に無い現在値の受け皿を候補に出す", () => {
+    // 候補から消すと、利用者が触っていないのに担当が別の値へ置き換わって見える
+    // (ネイティブの select は先頭の「未割当」を表示し、保存で担当を消していた)。
     expect(code).toContain(
       "const unknownSalesId = store.assigned_sales_user_id && !profileMap.has(store.assigned_sales_user_id) ? store.assigned_sales_user_id : null",
     );
     expect(code).toContain(
-      "{unknownSalesId ? <option value={unknownSalesId}>不明な担当者</option> : null}",
+      '...(unknownSalesId ? [{ value: unknownSalesId, label: "不明な担当者" }] : [])',
     );
+    expect(code).toContain("options={salesOptions}");
   });
 
   it("draft は resetDraftFromStore で初期化・復元される", () => {

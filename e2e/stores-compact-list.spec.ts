@@ -73,7 +73,8 @@ test("並び替えを解除すると絞り込みを残して既定の並びに�
   await expect(page).toHaveURL((url) => !url.searchParams.has("sort") && !url.searchParams.has("dir"));
   expect(new URL(page.url()).searchParams.get("q")).toBe("トラットリア");
   await expect(reset).toHaveCount(0);
-  await expect(page.getByLabel("並び替えの基準")).toHaveValue("next");
+  // 共通 Select (#334) のトリガーは button なので、値ではなく表示中のラベルで確かめる。
+  await expect(page.getByRole("combobox", { name: "並び替えの基準" })).toHaveText("次回アクション");
 });
 
 test("幅を広げると同じ URL のまま表に切り替わる", async ({ page }) => {

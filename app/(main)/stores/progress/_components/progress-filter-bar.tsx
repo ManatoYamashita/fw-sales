@@ -22,6 +22,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
+import { optionsFromValues } from "@/components/ui/select-logic";
 import { cn } from "@/lib/utils/cn";
 import {
   OVERLAY_ANCHOR_CONTAINER,
@@ -43,6 +44,13 @@ import {
   isSalesSentinel,
   type SalesSentinel,
 } from "../../_components/store-quick-filter-params";
+
+const SALES_STATE_FILTER_OPTIONS = [
+  { value: "", label: "すべて" },
+  ...optionsFromValues(CURRENT_SALES_STATES, (value) => CURRENT_SALES_STATE_LABELS[value]),
+];
+const STAGE_FILTER_OPTIONS = [{ value: "", label: "すべて" }, ...optionsFromValues(STORE_RESEARCH_STATUSES)];
+const CHANNEL_FILTER_OPTIONS = [{ value: "", label: "すべて" }, ...optionsFromValues(CHANNELS)];
 
 /* ------------------------------------------------------------------ */
 /*  小さなポップオーバー (stores-filter-bar.tsx と同じ依存ゼロ実装)      */
@@ -596,10 +604,7 @@ function FilterPanel({
 
       <div className="px-4 py-3 space-y-4 max-h-[60vh] overflow-y-auto">
         <PanelGroup label="営業状態">
-          <Select width="full" value={state} onChange={(e) => onChange("state", e.target.value)} aria-label="営業状態で絞り込み">
-            <option value="">すべて</option>
-            {CURRENT_SALES_STATES.map((value) => <option key={value} value={value}>{CURRENT_SALES_STATE_LABELS[value]}</option>)}
-          </Select>
+          <Select width="full" options={SALES_STATE_FILTER_OPTIONS} value={state} onValueChange={(value) => onChange("state", value)} aria-label="営業状態で絞り込み" />
         </PanelGroup>
         <PanelGroup label="アポ取得">
           <ChipGroup
@@ -620,19 +625,15 @@ function FilterPanel({
         <PanelGroup label="営業担当">
           <Select
             width="full"
+            options={salesOptions}
+            placeholder="不明な担当者"
             value={sales}
-            onChange={(e) => onChange("sales", e.target.value)}
+            onValueChange={(value) => onChange("sales", value)}
             aria-label="営業担当で絞り込み"
-          >
-            {salesOptions.map(({ value, label }) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </Select>
+          />
         </PanelGroup>
-        <PanelGroup label="調査段階"><Select width="full" value={stage} onChange={(e) => onChange("stage", e.target.value)} aria-label="調査段階で絞り込み"><option value="">すべて</option>{STORE_RESEARCH_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}</Select></PanelGroup>
-        <PanelGroup label="チャネル"><Select width="full" value={channel} onChange={(e) => onChange("channel", e.target.value)} aria-label="チャネルで絞り込み"><option value="">すべて</option>{CHANNELS.map((value) => <option key={value} value={value}>{value}</option>)}</Select></PanelGroup>
+        <PanelGroup label="調査段階"><Select width="full" options={STAGE_FILTER_OPTIONS} value={stage} onValueChange={(value) => onChange("stage", value)} aria-label="調査段階で絞り込み" /></PanelGroup>
+        <PanelGroup label="チャネル"><Select width="full" options={CHANNEL_FILTER_OPTIONS} value={channel} onValueChange={(value) => onChange("channel", value)} aria-label="チャネルで絞り込み" /></PanelGroup>
       </div>
     </div>
   );

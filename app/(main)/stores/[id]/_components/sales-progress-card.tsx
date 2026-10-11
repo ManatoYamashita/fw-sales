@@ -55,6 +55,9 @@ export function SalesProgressCard({ store, deals, profiles }: { store: Store; de
   const profileMap = new Map(profiles.map((p) => [p.id, p.display_name]));
   // 現在の担当者が profiles に含まれない (削除済み / 取得漏れ) 場合の Select 受け皿。
   const unknownSalesId = store.assigned_sales_user_id && !profileMap.has(store.assigned_sales_user_id) ? store.assigned_sales_user_id : null;
+  // 現在の担当者が profiles に無い (削除済み等) 場合は「不明な担当者」として候補に残す。
+  // 候補から消すと、利用者が触っていないのに担当が別の値へ置き換わって見える。
+  const salesOptions = [{ value: "", label: "未割当" }, ...profiles.map((p) => ({ value: p.id, label: p.display_name })), ...(unknownSalesId ? [{ value: unknownSalesId, label: "不明な担当者" }] : [])];
   // deep link (?activity= / ?action=new) で開いた場合だけ URL を戻す。クエリがなければ
   // replace を発行しない (保存成功時の router.refresh と replace を無駄に重ねない)
   const clearFormQuery = () => { if (searchParams.get("activity") || searchParams.get("action")) router.replace(`/stores/${store.id}?tab=progress`); };
@@ -163,16 +166,7 @@ export function SalesProgressCard({ store, deals, profiles }: { store: Store; de
 
           <Info label="営業担当" htmlFor={editingCurrent ? "assigned-sales" : undefined}>
             {editingCurrent ? (
-              <Select width="full" id="assigned-sales" value={assignedSales} onChange={(e) => setAssignedSales(e.target.value)}>
-                <option value="">未割当</option>
-                {profiles.map((p) => <option key={p.id} value={p.id}>{p.display_name}</option>)}
-                {/*
-                  現在の担当者が profiles に無い (削除済み等) 場合の受け皿。
-                  一致する option が無いと <select> は先頭 (未割当) を表示し、
-                  ユーザーが触っていないのに保存で担当が消える。
-                */}
-                {unknownSalesId ? <option value={unknownSalesId}>不明な担当者</option> : null}
-              </Select>
+              <Select width="full" id="assigned-sales" options={salesOptions} value={assignedSales} onValueChange={setAssignedSales} />
             ) : (
               <span>{store.assigned_sales_user_id ? profileMap.get(store.assigned_sales_user_id) ?? "不明な担当者" : "未割当"}</span>
             )}

@@ -6,11 +6,14 @@ import { Card } from "@/components/ui/card";
 import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { optionsFromValues } from "@/components/ui/select-logic";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { runAction } from "@/lib/client/run-action";
 import { updateDealAction } from "@/lib/actions/deal-actions";
 import { DEAL_STATUSES, type Deal } from "@/types/deal";
+
+const DEAL_STATUS_OPTIONS = optionsFromValues(DEAL_STATUSES);
 
 export function DealStatusForm({ deal }: { deal: Deal }) {
   const [form, setForm] = useState({
@@ -31,8 +34,13 @@ export function DealStatusForm({ deal }: { deal: Deal }) {
 
   const onText =
     <K extends keyof typeof form>(key: K) =>
-    (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
+    (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
       set(key, e.target.value as (typeof form)[K]);
+
+  const onPick =
+    <K extends keyof typeof form>(key: K) =>
+    (value: string) =>
+      set(key, value as (typeof form)[K]);
 
   const submit = (formData: FormData) => {
     startTransition(async () => {
@@ -54,17 +62,12 @@ export function DealStatusForm({ deal }: { deal: Deal }) {
           <FormField label="ステータス" htmlFor="status">
             <Select
               width="full"
+              options={DEAL_STATUS_OPTIONS}
               id="status"
               name="status"
               value={form.status}
-              onChange={onText("status")}
-            >
-              {DEAL_STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </Select>
+              onValueChange={onPick("status")}
+            />
           </FormField>
           <FormField label="見積金額" htmlFor="estimate_amount">
             <Input

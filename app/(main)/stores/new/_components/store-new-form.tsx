@@ -12,6 +12,7 @@ import { useRouter } from "next/navigation";
 import { Card } from "@/components/ui/card";
 import { FormField } from "@/components/ui/form-field";
 import { Select } from "@/components/ui/select";
+import { optionsFromValues } from "@/components/ui/select-logic";
 import { Button } from "@/components/ui/button";
 import { MemoInput, MemoTextarea } from "./memo-input";
 import { ServiceCheckboxGroup } from "./service-checkbox-group";
@@ -25,6 +26,9 @@ import {
 import type { Profile } from "@/types/profile";
 import type { ApplyConfidence, ApplyResult } from "@/lib/url-parser/types";
 import { confidenceToBg } from "@/lib/url-parser/confidence-color";
+
+const CONTACT_FORM_OPTIONS = optionsFromValues(CONTACT_FORMS);
+const OPERATOR_TYPE_OPTIONS = optionsFromValues(OPERATOR_TYPES);
 
 type FormState = {
   name: string;
@@ -173,9 +177,7 @@ export function StoreNewForm({
     const out = {} as Record<
       keyof FormState,
       (
-        e: ChangeEvent<
-          HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
-        >,
+        e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
       ) => void
     >;
     (Object.keys(INITIAL) as Array<keyof FormState>).forEach((k) => {
@@ -183,6 +185,23 @@ export function StoreNewForm({
     });
     return out;
   }, [set]);
+
+  // Select 用。値を直接受け取る以外は handlers と同じ (React.memo を崩さないよう 1 度だけ生成)。
+  const pickers = useMemo(() => {
+    const out = {} as Record<keyof FormState, (value: string) => void>;
+    (Object.keys(INITIAL) as Array<keyof FormState>).forEach((k) => {
+      out[k] = (value) => set(k, value as FormState[typeof k]);
+    });
+    return out;
+  }, [set]);
+
+  const profileOptions = useMemo(
+    () => [
+      { value: "", label: "未割当" },
+      ...profiles.map((p) => ({ value: p.id, label: p.display_name })),
+    ],
+    [profiles],
+  );
 
   // 背景色再計算をタイピングの 1 frame 後に遅延させ、入力中の INP を稼ぐ。
   const deferredConfidence = useDeferredValue(confidence);
@@ -273,17 +292,12 @@ export function StoreNewForm({
           >
             <Select
               width="full"
+              options={OPERATOR_TYPE_OPTIONS}
               id="operator_type"
               name="operator_type"
               value={form.operator_type}
-              onChange={handlers.operator_type}
-            >
-              {OPERATOR_TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </Select>
+              onValueChange={pickers.operator_type}
+            />
           </FormField>
           <FormField
             label="運営者名"
@@ -356,17 +370,12 @@ export function StoreNewForm({
           >
             <Select
               width="full"
+              options={CONTACT_FORM_OPTIONS}
               id="has_contact_form"
               name="has_contact_form"
               value={form.has_contact_form}
-              onChange={handlers.has_contact_form}
-            >
-              {CONTACT_FORMS.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </Select>
+              onValueChange={pickers.has_contact_form}
+            />
           </FormField>
           <FormField
             label="想定チャネル"
@@ -401,34 +410,24 @@ export function StoreNewForm({
             <FormField label="プランナー" htmlFor="assigned_planner_user_id">
               <Select
                 width="full"
+                options={profileOptions}
+                placeholder="不明な担当者"
                 id="assigned_planner_user_id"
                 name="assigned_planner_user_id"
                 value={form.assigned_planner_user_id}
-                onChange={handlers.assigned_planner_user_id}
-              >
-                <option value="">未割当</option>
-                {profiles.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.display_name}
-                  </option>
-                ))}
-              </Select>
+                onValueChange={pickers.assigned_planner_user_id}
+              />
             </FormField>
             <FormField label="営業担当" htmlFor="assigned_sales_user_id">
               <Select
                 width="full"
+                options={profileOptions}
+                placeholder="不明な担当者"
                 id="assigned_sales_user_id"
                 name="assigned_sales_user_id"
                 value={form.assigned_sales_user_id}
-                onChange={handlers.assigned_sales_user_id}
-              >
-                <option value="">未割当</option>
-                {profiles.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.display_name}
-                  </option>
-                ))}
-              </Select>
+                onValueChange={pickers.assigned_sales_user_id}
+              />
             </FormField>
             <FormField label="口コミ件数" htmlFor="review_count">
               <MemoInput
