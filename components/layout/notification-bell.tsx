@@ -8,7 +8,8 @@
  * - 外側クリック / Escape キーで閉じる
  * - 通知のクリックで既読化し、ヘッダーの「すべて既読にする」で一括既読化する (#296)。
  *   バッジはサーバー応答を待たずに楽観的に減らし、失敗したときだけ元へ戻す
- * - リンクの通知は既読保存後に遷移し、保存失敗時はその場で再試行できる (#351)。
+ * - リンクの通知は既読保存後に遷移し、保存中は行にスピナーを出す。保存失敗時は
+ *   その場で再試行できる (#351)。
  *   ただしセッション切れの失敗は再試行しても通らないため、従来どおり遷移させ、
  *   遷移先で proxy にログイン画面へ送らせる。proxy は Action の POST もログイン画面へ
  *   リダイレクトするので、クライアントには通信失敗と同じ例外として届く。例外のときは
@@ -25,6 +26,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Bell, Inbox } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
+import { Spinner } from "@/components/ui/spinner";
 import { runAction } from "@/lib/client/run-action";
 import {
   markAllNotificationsReadAction,
@@ -246,7 +248,16 @@ function NotificationRow({
       )}
     >
       <div className="flex items-start gap-2">
-        {isUnread ? (
+        {isNavigating ? (
+          // 保存を待つ間の手がかり。カーソルの変化はタッチ端末では見えないため、
+          // 未読の印の位置に重ねて出す。印と同じ枠に収め、行の配置を動かさない (#351)。
+          <span className="relative mt-1.5 h-1.5 w-1.5 shrink-0">
+            <Spinner
+              size="sm"
+              className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
+            />
+          </span>
+        ) : isUnread ? (
           <span
             aria-hidden
             className="mt-1.5 inline-block h-1.5 w-1.5 rounded-full bg-destructive shrink-0"

@@ -190,6 +190,8 @@ test("通知の既読保存が完了するまで遷移せず、遷移直後の�
     // 保存中もパネルを残し、楽観更新後の再クリックでは保存や遷移を重複させない。
     const pending = panel.getByRole("link", { name: title, exact: true });
     await expect(pending).toHaveAttribute("aria-busy", "true");
+    // カーソルの変化が見えないタッチ端末でも分かるよう、行にスピナーを出す。
+    await expect(pending.getByLabel("読み込み中")).toBeVisible();
     expect(await savedReadAt(id)).toBeNull();
     await pending.click();
     expect(requests).toBe(1);
