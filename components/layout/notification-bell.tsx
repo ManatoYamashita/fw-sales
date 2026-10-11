@@ -8,6 +8,7 @@
  * - 外側クリック / Escape キーで閉じる
  * - 通知のクリックで既読化し、ヘッダーの「すべて既読にする」で一括既読化する (#296)。
  *   バッジはサーバー応答を待たずに楽観的に減らし、失敗したときだけ元へ戻す
+ * - リンクの通知は既読保存後に遷移し、保存失敗時はその場で再試行できる (#351)
  * - リンク先が無い通知 (参照先店舗が削除済みなど) は遷移させず、既読化だけ行う
  *
  * 親 RSC が `getRecentNotifications(userId, limit=10)` の結果を props で渡す前提。
@@ -17,6 +18,7 @@
 
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Bell, Inbox } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { runAction } from "@/lib/client/run-action";
@@ -43,6 +45,7 @@ export function NotificationBell({ notifications }: NotificationBellProps) {
     () => new Set(),
   );
   const [isMarkingAll, startMarkAll] = useTransition();
+  const pendingReads = useRef(new Map<string, Promise<boolean>>());
 
   const isRead = useCallback(
     (n: Notification) => n.read_at !== null || locallyRead.has(n.id),
@@ -64,15 +67,23 @@ export function NotificationBell({ notifications }: NotificationBellProps) {
 
   const handleRead = useCallback(
     (notification: Notification) => {
-      if (isRead(notification)) return;
+      // 楽観表示が既読になっても、保存中なら同じ Promise を待つ (#351)。
+      const pending = pendingReads.current.get(notification.id);
+      if (pending) return pending;
+      if (isRead(notification)) return Promise.resolve(true);
       markLocally([notification.id]);
-      // 既読化は一覧を開くと自動で行うため、成功はトーストではなく未読の印が
+      // 通知のクリックで既読化するため、成功はトーストではなく未読の印が
       // 消えることで伝える (#327 で決定)。失敗と例外はトーストで出す。
-      void runAction(() => markNotificationReadAction(notification.id), {
+      const read = runAction(() => markNotificationReadAction(notification.id), {
         silentSuccess: true,
       }).then((result) => {
         if (!result?.ok) unmarkLocally([notification.id]);
+        return result?.ok === true;
+      }).finally(() => {
+        pendingReads.current.delete(notification.id);
       });
+      pendingReads.current.set(notification.id, read);
+      return read;
     },
     [isRead, markLocally, unmarkLocally],
   );
@@ -194,7 +205,7 @@ export function NotificationBell({ notifications }: NotificationBellProps) {
 interface NotificationRowProps {
   notification: Notification;
   isUnread: boolean;
-  onRead: (notification: Notification) => void;
+  onRead: (notification: Notification) => Promise<boolean>;
   onNavigate: () => void;
 }
 
@@ -204,6 +215,8 @@ function NotificationRow({
   onRead,
   onNavigate,
 }: NotificationRowProps) {
+  const router = useRouter();
+  const [isNavigating, startNavigation] = useTransition();
   const href = resolveLink(notification);
   const body = (
     <article
@@ -243,11 +256,33 @@ function NotificationRow({
         <Link
           href={href}
           aria-label={label}
-          onClick={() => {
-            onRead(notification);
-            onNavigate();
+          aria-busy={isNavigating || undefined}
+          onClick={(event) => {
+            if (isNavigating) {
+              event.preventDefault();
+              return;
+            }
+            // 楽観表示は Transition の外ですぐ更新し、保存完了だけを待つ。
+            const read = onRead(notification);
+            // 別タブなどのブラウザ標準の操作は妨げず、元の画面で既読化する。
+            if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+              startNavigation(async () => {
+                if (await read) onNavigate();
+              });
+            }
           }}
-          className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+          onNavigate={(event) => {
+            event.preventDefault();
+            if (isNavigating) return;
+            startNavigation(async () => {
+              // 遷移中に Action が後回しにならないよう、DB への保存を先に確定する。
+              if (await onRead(notification)) {
+                onNavigate();
+                router.push(href);
+              }
+            });
+          }}
+          className="block aria-busy:cursor-wait focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
         >
           {body}
         </Link>
@@ -260,7 +295,7 @@ function NotificationRow({
       <button
         type="button"
         aria-label={label}
-        onClick={() => onRead(notification)}
+        onClick={() => { void onRead(notification); }}
         className="block w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       >
         {body}
