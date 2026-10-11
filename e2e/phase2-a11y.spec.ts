@@ -1,6 +1,9 @@
 import { expect, test } from "@playwright/test";
 
 test("メインコンテンツへキーボードで移動でき、320pxで横スクロールしない", async ({ page }) => {
+  // dev サーバはページを初回アクセス時にコンパイルする。並列実行中は 30 秒の既定を
+  // 超えることがあるため、持ち時間を 3 倍にする (sales-status.spec.ts と同じ)。
+  test.slow();
   await page.goto("/stores");
 
   await expect(
