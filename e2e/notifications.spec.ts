@@ -1,6 +1,6 @@
-import { execFileSync } from "node:child_process";
 import { expect, test, type Page, type Request } from "@playwright/test";
 import postgres from "postgres";
+import { e2eDatabaseUrl } from "./support/e2e-db";
 
 /**
  * 通知ベルの既読化 (#296)。
@@ -13,21 +13,7 @@ import postgres from "postgres";
 // 追加の通知が既存シナリオの未読件数へ混ざらないよう、同じファイル内で直列に流す。
 test.describe.configure({ mode: "serial" });
 
-let sql: ReturnType<typeof postgres>;
-
-test.beforeAll(() => {
-  let databaseUrl = process.env.E2E_DATABASE_URL;
-  if (!databaseUrl) {
-    const name = process.env.E2E_DB_CONTAINER?.trim() || "fw-sales-e2e-postgres";
-    const containers = JSON.parse(
-      execFileSync("container", ["list", "--all", "--format", "json"], { encoding: "utf8" }),
-    ) as Array<{ id: string; status?: { networks?: Array<{ ipv4Address?: string }> } }>;
-    const address = containers.find((c) => c.id === name)?.status?.networks?.[0]?.ipv4Address;
-    if (!address) throw new Error(`E2E用PostgreSQLコンテナ「${name}」の内部IPを取得できませんでした。`);
-    databaseUrl = `postgres://postgres:postgres@${address.split("/")[0]}:5432/postgres`;
-  }
-  sql = postgres(databaseUrl, { prepare: false, max: 1 });
-});
+const sql = postgres(e2eDatabaseUrl(), { prepare: false, max: 1 });
 
 test.afterEach(async () => {
   await sql`DELETE FROM notifications WHERE id LIKE 'notif_e2e_351_%'`;
