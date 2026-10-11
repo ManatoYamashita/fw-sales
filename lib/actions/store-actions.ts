@@ -189,7 +189,7 @@ function invalidateAllStoreScopes(id?: string) {
  * 保存直後に必ず読まれる 2 つ (`store:{id}` = 店舗詳細 / `stores` = 店舗一覧) だけを
  * 即時失効し、集計系は従来どおり背景更新に任せる。
  *
- * `invalidateAllStoreScopes` は create/update/delete/stage が使う既存の失効なので、
+ * `invalidateAllStoreScopes` は create/update/delete が使う既存の失効なので、
  * そちらの意味は変えずに本関数を別途用意している。
  */
 function invalidateStoreScopesImmediate(id: string) {
@@ -287,7 +287,10 @@ export async function updateStoreStageAction(
 ): Promise<ActionResult> {
   const updated = await repos.store.update(id, { stage });
   if (!updated) return failure("店舗が見つかりませんでした");
-  invalidateAllStoreScopes(id);
+  // 店舗詳細の調査段階 Select は選んだ値をその場で表示し続ける (#334)。
+  // stale-while-revalidate の失効だと、応答に載る再描画が旧値を返し、
+  // 選んだ直後に元の段階へ戻って見える。
+  invalidateStoreScopesImmediate(id);
   return success(undefined, `状態を「${stage}」に変更しました`);
 }
 
