@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { chooseOption } from "./support/select";
 
 /**
  * 営業結果の一覧表示と状態ラベルの統一 (#297)。
@@ -73,8 +74,8 @@ test("失注と再アプローチ可否を営業記録に残すと、一覧と�
   await page.getByRole("button", { name: "営業記録を追加" }).first().click();
 
   const form = page.locator("form").filter({ hasText: "営業記録を追加" }).last();
-  await form.getByLabel("営業状態").selectOption("失注");
-  await form.getByLabel("再アプローチ").selectOption("再アプローチ不可");
+  await chooseOption(form.getByLabel("営業状態"), "失注");
+  await chooseOption(form.getByLabel("再アプローチ"), "再アプローチ不可");
   await form.getByLabel("失注理由").fill("予算が合わず、今期は見送り");
   const saved = waitForServerAction(page, "予算が合わず、今期は見送り");
   await form.getByRole("button", { name: "営業記録を追加" }).click();
@@ -92,7 +93,7 @@ test("失注と再アプローチ可否を営業記録に残すと、一覧と�
   await expect(row.locator('[title="失注理由: 予算が合わず、今期は見送り"]')).toHaveCount(1);
 
   await page.getByRole("button", { name: "絞り込み" }).click();
-  await page.getByRole("dialog").getByLabel("営業状態で絞り込み").selectOption("lost");
+  await chooseOption(page.getByRole("dialog").getByLabel("営業状態で絞り込み"), "失注（ロスト）");
   // 絞り込みは URL の書き換え (遷移) で反映する。負荷下では既定の 5 秒を超えることがある。
   await expect(page).toHaveURL(/state=lost/, { timeout: 30_000 });
   const bodyRows = page.getByRole("table").locator("tbody tr");
