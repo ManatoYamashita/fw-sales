@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { optionsFromValues } from "@/components/ui/select-logic";
 import { FormField } from "@/components/ui/form-field";
 import { StarRating } from "@/components/ui/star-rating";
 import { ChannelBadge } from "@/components/feature/channel-badge";
@@ -24,6 +25,10 @@ import {
   type StorePatch,
 } from "@/types/store";
 import type { Profile } from "@/types/profile";
+
+const CONTACT_FORM_OPTIONS = optionsFromValues(CONTACT_FORMS);
+const CHANNEL_OPTIONS = optionsFromValues(CHANNELS);
+const OPERATOR_TYPE_OPTIONS = optionsFromValues(OPERATOR_TYPES);
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -75,9 +80,19 @@ export function BasicInfoCard({ store, profiles }: BasicInfoCardProps) {
   const onText =
     <K extends keyof typeof form>(key: K) =>
     (
-      e: ChangeEvent<HTMLInputElement | HTMLSelectElement>,
+      e: ChangeEvent<HTMLInputElement>,
     ) =>
       set(key, e.target.value as (typeof form)[K]);
+
+  const onPick =
+    <K extends keyof typeof form>(key: K) =>
+    (value: string) =>
+      set(key, value as (typeof form)[K]);
+
+  const profileOptions = [
+    { value: "", label: "未割当" },
+    ...profiles.map((p) => ({ value: p.id, label: p.display_name })),
+  ];
 
   const reset = () => {
     setForm({
@@ -180,30 +195,20 @@ export function BasicInfoCard({ store, profiles }: BasicInfoCardProps) {
             <FormField label="問い合わせフォーム" htmlFor="has_contact_form">
               <Select
                 width="full"
+                options={CONTACT_FORM_OPTIONS}
                 id="has_contact_form"
                 value={form.has_contact_form}
-                onChange={onText("has_contact_form")}
-              >
-                {CONTACT_FORMS.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </Select>
+                onValueChange={onPick("has_contact_form")}
+              />
             </FormField>
             <FormField label="想定チャネル" htmlFor="channel">
               <Select
                 width="full"
+                options={CHANNEL_OPTIONS}
                 id="channel"
                 value={form.channel}
-                onChange={onText("channel")}
-              >
-                {CHANNELS.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </Select>
+                onValueChange={onPick("channel")}
+              />
             </FormField>
             <FormField label="想定提案商材" className="md:col-span-2">
               <ServiceCheckboxGroup
@@ -214,16 +219,11 @@ export function BasicInfoCard({ store, profiles }: BasicInfoCardProps) {
             <FormField label="運営者種別" htmlFor="operator_type">
               <Select
                 width="full"
+                options={OPERATOR_TYPE_OPTIONS}
                 id="operator_type"
                 value={form.operator_type}
-                onChange={onText("operator_type")}
-              >
-                {OPERATOR_TYPES.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </Select>
+                onValueChange={onPick("operator_type")}
+              />
             </FormField>
             <FormField label="運営者名" htmlFor="operator_name">
               <Input
@@ -236,32 +236,22 @@ export function BasicInfoCard({ store, profiles }: BasicInfoCardProps) {
             <FormField label="プランナー" htmlFor="assigned_planner_user_id">
               <Select
                 width="full"
+                options={profileOptions}
+                placeholder="不明な担当者"
                 id="assigned_planner_user_id"
                 value={form.assigned_planner_user_id}
-                onChange={onText("assigned_planner_user_id")}
-              >
-                <option value="">未割当</option>
-                {profiles.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.display_name}
-                  </option>
-                ))}
-              </Select>
+                onValueChange={onPick("assigned_planner_user_id")}
+              />
             </FormField>
             <FormField label="営業担当" htmlFor="assigned_sales_user_id">
               <Select
                 width="full"
+                options={profileOptions}
+                placeholder="不明な担当者"
                 id="assigned_sales_user_id"
                 value={form.assigned_sales_user_id}
-                onChange={onText("assigned_sales_user_id")}
-              >
-                <option value="">未割当</option>
-                {profiles.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.display_name}
-                  </option>
-                ))}
-              </Select>
+                onValueChange={onPick("assigned_sales_user_id")}
+              />
             </FormField>
           </div>
         ) : (

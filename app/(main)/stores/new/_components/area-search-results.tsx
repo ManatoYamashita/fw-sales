@@ -40,12 +40,18 @@ import {
 } from "@/lib/places/ranking";
 import { buildTextSearchMeta, getAreaSearchMetaMessages } from "@/lib/places/search-meta";
 import { Select } from "@/components/ui/select";
+import { optionsFromValues } from "@/components/ui/select-logic";
 import type {
   AreaSearchDiscoverySource,
   AreaSearchMeta,
   AreaSearchPlaceViewModel,
   SearchCenter,
 } from "@/lib/places/types";
+
+const SORT_MODE_OPTIONS = optionsFromValues(
+  AREA_SEARCH_SORT_MODES,
+  (mode) => AREA_SEARCH_SORT_MODE_LABELS[mode],
+);
 
 /**
  * 一覧の絞り込み区分。
@@ -828,18 +834,13 @@ export function AreaSearchResults({
                 <Select
                   width="auto"
                   density="compact"
+                  options={SORT_MODE_OPTIONS}
                   value={sortMode}
-                  onChange={(e) =>
-                    setSortMode(e.target.value as AreaSearchSortMode)
+                  onValueChange={(value) =>
+                    setSortMode(value as AreaSearchSortMode)
                   }
                   aria-label="表示順を切り替え"
-                >
-                  {AREA_SEARCH_SORT_MODES.map((mode) => (
-                    <option key={mode} value={mode}>
-                      {AREA_SEARCH_SORT_MODE_LABELS[mode]}
-                    </option>
-                  ))}
-                </Select>
+                />
               </label>
             </div>
           )}

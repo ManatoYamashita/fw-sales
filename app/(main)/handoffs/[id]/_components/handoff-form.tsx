@@ -6,6 +6,7 @@ import { Card } from "@/components/ui/card";
 import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { optionsFromValues } from "@/components/ui/select-logic";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -17,6 +18,8 @@ import {
 } from "@/lib/actions/handoff-actions";
 import { OPS_MEMBERS } from "@/lib/domain/staff";
 import type { Handoff } from "@/types/handoff";
+
+const OPS_MEMBER_OPTIONS = [{ value: "", label: "未割当" }, ...optionsFromValues(OPS_MEMBERS)];
 
 export function HandoffForm({ handoff }: { handoff: Handoff }) {
   const [form, setForm] = useState({
@@ -40,8 +43,13 @@ export function HandoffForm({ handoff }: { handoff: Handoff }) {
 
   const onText =
     <K extends keyof typeof form>(key: K) =>
-    (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
+    (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
       setForm((prev) => ({ ...prev, [key]: e.target.value as (typeof form)[K] }));
+
+  const onPick =
+    <K extends keyof typeof form>(key: K) =>
+    (value: string) =>
+      setForm((prev) => ({ ...prev, [key]: value as (typeof form)[K] }));
 
   const submit = (formData: FormData) => {
     startTransition(async () => {
@@ -233,18 +241,12 @@ export function HandoffForm({ handoff }: { handoff: Handoff }) {
           <FormField label="運用担当" htmlFor="ops_assignee">
             <Select
               width="full"
+              options={OPS_MEMBER_OPTIONS}
               id="ops_assignee"
               name="ops_assignee"
               value={form.ops_assignee}
-              onChange={onText("ops_assignee")}
-            >
-              <option value="">未割当</option>
-              {OPS_MEMBERS.map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
-            </Select>
+              onValueChange={onPick("ops_assignee")}
+            />
           </FormField>
           <FormField label="納期" htmlFor="due_date">
             <Input

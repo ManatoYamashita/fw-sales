@@ -6,6 +6,7 @@ import { Card } from "@/components/ui/card";
 import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { optionsFromValues } from "@/components/ui/select-logic";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { ServiceCheckboxGroup } from "@/app/(main)/stores/new/_components/service-checkbox-group";
@@ -19,6 +20,10 @@ import {
 } from "@/types/store";
 import type { Store } from "@/types/store";
 import type { Profile } from "@/types/profile";
+
+const CONTACT_FORM_OPTIONS = optionsFromValues(CONTACT_FORMS);
+const CHANNEL_OPTIONS = optionsFromValues(CHANNELS);
+const OPERATOR_TYPE_OPTIONS = optionsFromValues(OPERATOR_TYPES);
 
 export interface StoreEditFormProps {
   store: Store;
@@ -73,8 +78,18 @@ export function StoreEditForm({
 
   const onText =
     <K extends keyof typeof form>(key: K) =>
-    (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
+    (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
       set(key, e.target.value as (typeof form)[K]);
+
+  const onPick =
+    <K extends keyof typeof form>(key: K) =>
+    (value: string) =>
+      set(key, value as (typeof form)[K]);
+
+  const profileOptions = [
+    { value: "", label: "未割当" },
+    ...profiles.map((p) => ({ value: p.id, label: p.display_name })),
+  ];
 
   const submit = (formData: FormData) => {
     // task 4.2 (PR3a): AiAnalysisPanel 撤去に伴い ai_analysis_result の編集経路はここから除去。
@@ -155,17 +170,12 @@ export function StoreEditForm({
           >
             <Select
               width="full"
+              options={OPERATOR_TYPE_OPTIONS}
               id="operator_type"
               name="operator_type"
               value={form.operator_type}
-              onChange={onText("operator_type")}
-            >
-              {OPERATOR_TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </Select>
+              onValueChange={onPick("operator_type")}
+            />
           </FormField>
           <FormField
             label="運営者名"
@@ -232,32 +242,22 @@ export function StoreEditForm({
           >
             <Select
               width="full"
+              options={CONTACT_FORM_OPTIONS}
               id="has_contact_form"
               name="has_contact_form"
               value={form.has_contact_form}
-              onChange={onText("has_contact_form")}
-            >
-              {CONTACT_FORMS.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </Select>
+              onValueChange={onPick("has_contact_form")}
+            />
           </FormField>
           <FormField label="想定チャネル" htmlFor="channel">
             <Select
               width="full"
+              options={CHANNEL_OPTIONS}
               id="channel"
               name="channel"
               value={form.channel}
-              onChange={onText("channel")}
-            >
-              {CHANNELS.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </Select>
+              onValueChange={onPick("channel")}
+            />
           </FormField>
         </Card.Body>
       </Card>
@@ -277,34 +277,24 @@ export function StoreEditForm({
             <FormField label="プランナー" htmlFor="assigned_planner_user_id">
               <Select
                 width="full"
+                options={profileOptions}
+                placeholder="不明な担当者"
                 id="assigned_planner_user_id"
                 name="assigned_planner_user_id"
                 value={form.assigned_planner_user_id}
-                onChange={onText("assigned_planner_user_id")}
-              >
-                <option value="">未割当</option>
-                {profiles.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.display_name}
-                  </option>
-                ))}
-              </Select>
+                onValueChange={onPick("assigned_planner_user_id")}
+              />
             </FormField>
             <FormField label="営業担当" htmlFor="assigned_sales_user_id">
               <Select
                 width="full"
+                options={profileOptions}
+                placeholder="不明な担当者"
                 id="assigned_sales_user_id"
                 name="assigned_sales_user_id"
                 value={form.assigned_sales_user_id}
-                onChange={onText("assigned_sales_user_id")}
-              >
-                <option value="">未割当</option>
-                {profiles.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.display_name}
-                  </option>
-                ))}
-              </Select>
+                onValueChange={onPick("assigned_sales_user_id")}
+              />
             </FormField>
             <FormField label="口コミ件数" htmlFor="review_count">
               <Input

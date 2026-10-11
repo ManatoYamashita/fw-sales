@@ -262,6 +262,12 @@ const RADIUS_OPTIONS = [
   { value: 3000, label: "3km" },
 ] as const;
 
+/** Select は文字列で値を扱うので、送受信の境界で数値と変換する。 */
+const RADIUS_SELECT_OPTIONS = RADIUS_OPTIONS.map((opt) => ({
+  value: String(opt.value),
+  label: opt.label,
+}));
+
 const DEFAULT_RADIUS_METERS = 1000;
 
 /** エリア検索1回分の結果。「もっと読み込む」で再検索する際に keyword/area/center/radius を引き継ぐ。 */
@@ -393,16 +399,11 @@ export function AreaSearchPanel({
         >
           <Select
             width="full"
+            options={RADIUS_SELECT_OPTIONS}
             id="radius"
-            value={radiusMeters}
-            onChange={(e) => setRadiusMeters(Number(e.target.value))}
-          >
-            {RADIUS_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </Select>
+            value={String(radiusMeters)}
+            onValueChange={(value) => setRadiusMeters(Number(value))}
+          />
         </FormField>
         {/* ボタン列: ラベル高さ分の透明スペーサーで Input 行に水平整列。
             モバイル(grid-cols-1)では下に積まれる。 */}

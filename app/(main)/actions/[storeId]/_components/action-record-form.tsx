@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/card";
 import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { optionsFromValues } from "@/components/ui/select-logic";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { runAction } from "@/lib/client/run-action";
@@ -23,6 +24,8 @@ const RESULTS = [
   "NG",
 ] as const;
 
+const RESULT_OPTIONS = optionsFromValues(RESULTS);
+
 export function ActionRecordForm({ storeId }: { storeId: string }) {
   const [form, setForm] = useState({
     date: today(),
@@ -34,8 +37,13 @@ export function ActionRecordForm({ storeId }: { storeId: string }) {
 
   const onText =
     <K extends keyof typeof form>(key: K) =>
-    (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
+    (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
       setForm((prev) => ({ ...prev, [key]: e.target.value as (typeof form)[K] }));
+
+  const onPick =
+    <K extends keyof typeof form>(key: K) =>
+    (value: string) =>
+      setForm((prev) => ({ ...prev, [key]: value as (typeof form)[K] }));
 
   const submit = (formData: FormData) => {
     startTransition(async () => {
@@ -71,17 +79,12 @@ export function ActionRecordForm({ storeId }: { storeId: string }) {
           <FormField label="結果" htmlFor="result">
             <Select
               width="full"
+              options={RESULT_OPTIONS}
               id="result"
               name="result"
               value={form.result}
-              onChange={onText("result")}
-            >
-              {RESULTS.map((r) => (
-                <option key={r} value={r}>
-                  {r}
-                </option>
-              ))}
-            </Select>
+              onValueChange={onPick("result")}
+            />
           </FormField>
           <FormField label="メモ" htmlFor="memo" className="md:col-span-2">
             <Textarea

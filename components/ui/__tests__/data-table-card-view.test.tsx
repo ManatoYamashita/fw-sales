@@ -156,12 +156,14 @@ describe("cardView 指定", () => {
     ];
     const html = render({ cardView: CARD_VIEW, columns: sortable });
     expect(html).toContain('aria-label="並び替え"');
-    expect(html).toContain("<select");
+    // 共通 Select (#334)。ネイティブの select は出さない。
+    expect(html).toMatch(/<button[^>]*id="card-sort-key"[^>]*role="combobox"/);
+    expect(html).not.toContain("<select");
   });
 
   it("ソート可能な列が無ければ並び替えを出さない", () => {
     // COLUMNS には sortKey が無い。
-    expect(render({ cardView: CARD_VIEW })).not.toContain("<select");
+    expect(render({ cardView: CARD_VIEW })).not.toContain('role="combobox"');
   });
 });
 
