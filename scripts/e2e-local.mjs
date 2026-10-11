@@ -10,7 +10,9 @@ export const DEFAULT_E2E_PASSWORD = "e2e-password-please-change";
 export const DEFAULT_E2E_SECRET = "local-e2e-only";
 export const DEFAULT_E2E_PORT = 3100;
 export const DEFAULT_E2E_DB_CONTAINER_NAME = "fw-sales-e2e-postgres";
-export const E2E_TEST_USER_ID = "00000000-0000-0000-0000-000000000001";
+// 監査ログの actor は `z.string().uuid()` で検証する (lib/observability/serialize.ts)。
+// zod 4 は UUID の版 (v1〜v8) と variant まで検査するので、v4 の形にしておく (#346)。
+export const E2E_TEST_USER_ID = "00000000-0000-4000-8000-000000000001";
 
 function commandExists(command) {
   return process.env.PATH?.split(path.delimiter).some((directory) => {

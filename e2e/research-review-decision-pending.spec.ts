@@ -1,4 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import postgres from "postgres";
+import { e2eDatabaseUrl } from "./support/e2e-db";
 
 /**
  * 調査レビューの項目ごとの判断で、押したボタンだけが処理中になる (#337)。
@@ -11,6 +13,8 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
  * 遅らせて観測する。
  */
 const RESEARCH_PATH = "/research/store_005";
+/** `scripts/e2e-setup.mjs` の `E2E_RESEARCH_RUN_ID`。 */
+const RUN_ID = "run_e2e_review_pending";
 const ACTION_DELAY_MS = 3_000;
 
 // 同じ調査結果を順に判断していくので、並列にしない。後のテストは、先に判断した項目の
@@ -22,6 +26,18 @@ test.describe.configure({ mode: "serial" });
 test.beforeEach(() => {
   test.slow();
 });
+
+const sql = postgres(e2eDatabaseUrl(), { prepare: false, max: 1 });
+
+test.afterAll(async () => {
+  await sql.end();
+});
+
+/** この調査の、項目 `itemKey` についての判断の監査ログ。 */
+const decideAuditRows = (itemKey: string) => sql`
+  SELECT actor_user_id, payload FROM event_logs
+  WHERE event = 'research.review.decide' AND target_id = ${RUN_ID} AND payload->>'itemKey' = ${itemKey}
+`;
 
 /** このページで送る Server Action (判断の記録) を `ms` だけ遅らせる。 */
 async function delayServerActions(page: Page, ms: number): Promise<void> {
@@ -82,6 +98,13 @@ test("「却下」を押すと、そのボタンだけが処理中になり、�
   await expect(phone.locator("summary")).toContainText("却下済み");
   await expect(seats.getByRole("button", { name: "却下", exact: true })).toBeEnabled();
   await expect(page.getByRole("button", { name: "候補Bを採用" })).toBeEnabled();
+
+  // 判断は監査ログにも残る。E2E ユーザーの ID が監査の検証を通らないと、判断は成功した
+  // まま監査の書き込みだけが失敗する (#346)。書き込みは応答の後なので、残るまで待つ。
+  await expect.poll(async () => (await decideAuditRows("phone")).length).toBe(1);
+  const [row] = await decideAuditRows("phone");
+  expect(row!.actor_user_id).not.toBeNull();
+  expect(row!.payload).toEqual({ itemKey: "phone", decision: "rejected" });
 });
 
 test("候補を選ぶ項目では、押した候補のボタンだけが処理中になる", async ({ page }) => {
