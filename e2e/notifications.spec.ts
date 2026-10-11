@@ -274,3 +274,19 @@ test("通知の別タブへのリンク操作を保ち、元の画面で既読�
     await popup.close();
   }
 });
+
+test("セッションが切れていると既読は保存されないが、リンク先へ移ってログイン画面へ送られる", async ({ page }) => {
+  test.slow();
+  const id = "notif_e2e_351_signed_out";
+  const title = await createLinkedNotification(id);
+  await openFixtureStores(page);
+  const panel = await openPanel(page);
+  const marking = page.waitForResponse((res) => isReadAction(res.request(), id), { timeout: 60_000 });
+  // 画面を開いたままセッションだけを失わせる。
+  await page.context().clearCookies();
+  await panel.getByRole("link", { name: `未読: ${title}`, exact: true }).click();
+  await marking;
+  // 再試行しても通らない失敗なので、その場に留めずに遷移させ、proxy にログイン画面へ送らせる。
+  await expect(page).toHaveURL(/\/login\?redirect=%2Fstores%2Fstore_001$/, { timeout: 30_000 });
+  expect(await savedReadAt(id)).toBeNull();
+});
