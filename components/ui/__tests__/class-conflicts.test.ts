@@ -47,7 +47,7 @@ import {
   buttonClasses,
 } from "../button";
 import { CardBody, CardFooter, CardHeader } from "../card";
-import { Select } from "../select";
+import { selectTriggerClasses } from "../select";
 import { Skeleton } from "../skeleton";
 import { Spinner } from "../spinner";
 import {
@@ -278,7 +278,7 @@ const PROP_VALUES: Record<string, readonly string[]> = {
   "Button.size": Object.keys(BUTTON_SIZE_CLASSES),
   "Button.gap": Object.keys(BUTTON_GAP_CLASSES),
   "Select.width": ["full", "auto"],
-  "Select.density": ["default", "compact"],
+  "Select.density": ["default", "compact", "touch"],
   "Card.Body.padding": ["default", "compact", "flush", "spacious"],
   "Skeleton.tone": ["muted", "card"],
   "Skeleton.shape": ["rounded", "pill"],
@@ -343,9 +343,11 @@ function baseClasses(
       for (const width of pick("width", "Select.width")) {
         for (const density of pick("density", "Select.density")) {
           out.push(
-            renderedClassName(
-              Select({ width: (width ?? "full") as never, density: density as never }),
-            ).split(/\s+/),
+            // コンポーネントと同じ resolver を通す (Select は状態を持つので関数として呼べない)。
+            selectTriggerClasses({
+              width: (width ?? "full") as never,
+              density: density as never,
+            }).split(/\s+/),
           );
         }
       }
@@ -691,10 +693,9 @@ const SELF_CONFLICT_CASES: Array<{ name: string; classes: () => string[] }> = [
     ),
   ),
   ...(["full", "auto"] as const).flatMap((width) =>
-    (["default", "compact"] as const).map((density) => ({
+    (["default", "compact", "touch"] as const).map((density) => ({
       name: `Select width=${width} density=${density}`,
-      classes: () =>
-        renderedClassName(Select({ width, density })).split(/\s+/),
+      classes: () => selectTriggerClasses({ width, density }).split(/\s+/),
     })),
   ),
   ...(["default", "compact", "flush", "spacious"] as const).map((padding) => ({
