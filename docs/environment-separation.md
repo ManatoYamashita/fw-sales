@@ -47,6 +47,7 @@ LOCAL_PREVIEW_PORT=3210
 - DB・Supabase Authの環境変数は子プロセスへ明示的に渡します。Next.jsとDBコマンドでは、この設定が`.env.local`より優先されます。
 - Gemini、Places、Maps、Google OAuth、Vercel OIDC、Cronのキーは空にして、本番の外部サービス設定を継承しません。そのためAI生成・エリア検索など外部APIを使う機能はこの環境の検証対象外です。
 - 管理者の全削除・seedリセットは専用ローカルDBで利用できます。
+- テストユーザーのIDは`00000000-0000-4000-8000-000000000002`です。監査ログのUUID検証を通るv4の形にしています。旧ID（`…-0000-0000-000000000002`）のDBは、準備処理（`local:setup`／`dev:local`）が1トランザクションで新IDへ移し替えます。担当者・調査の依頼者などの参照も付け替えます（[#355](https://github.com/ManatoYamashita/fw-sales/issues/355)）。移し替えた後は、起動中の`dev:local`を再起動してください。
 - `.local-preview/`にはローカル認証Secretと専用ブラウザのデータが保存されます。Git管理対象外です。
 
 Google OAuth・Supabase Authそのものとサインアウトの検証はdev Supabaseで行います。このローカル環境での画面・DB操作確認を、実認証の確認済みとして扱わないでください。

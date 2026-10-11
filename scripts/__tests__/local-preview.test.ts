@@ -4,6 +4,23 @@ import {
   getLocalPreviewConfig,
   LOCAL_USER_ID,
 } from "../local-preview.mjs";
+import { AUDIT_EVENTS } from "../../lib/observability/events";
+import { serializeAuditInput } from "../../lib/observability/serialize";
+
+describe("LOCAL_USER_ID (#355)", () => {
+  // ローカル検証環境で操作したときの監査ログは、この ID を actor にする。検証を通らないと、
+  // 操作は成功したまま監査の書き込みだけが失敗する。
+  it("監査ログの actor の検証を通る", () => {
+    expect(() =>
+      serializeAuditInput({
+        event: AUDIT_EVENTS.storeDelete,
+        actor: { userId: LOCAL_USER_ID, email: "local@example.test" },
+        storeId: "store_001",
+        payload: { deletionSucceeded: true },
+      }),
+    ).not.toThrow();
+  });
+});
 
 describe("ローカル検証環境の接続先分離", () => {
   it("本番設定を継承していてもDB・Auth・外部APIの接続情報を上書きする", () => {
