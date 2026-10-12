@@ -47,7 +47,6 @@ import {
   type CategoryKey,
 } from "@/lib/domain/basic-info-items";
 import {
-  formatReviewProgressLabel,
   getReviewableItems,
   isReviewableItem,
   planReviewLanes,
@@ -57,22 +56,25 @@ import {
 } from "@/lib/domain/research-review";
 import {
   deriveItemTrust,
+  hasIdentityMismatchWarning,
   ITEM_TRUST_LABELS,
-  toUserFacingRunWarning,
+  type ItemTrust,
 } from "@/lib/domain/research-item-notes";
 import { formatDateTime } from "@/lib/utils/date";
 import type { Store } from "@/types/store";
 import type { ResearchItem, StoreResearchRun } from "@/types/research-run";
 
 /**
- * 見出しの件数ラベル。レビュー対象の項目はカードのバッジと同じ `deriveItemTrust` の区分で数え、
- * 「確認済み 17」と数えた項目のカードに「登録済み」「注記あり」と出る食い違いを作らない (#301)。
+ * 見出しの件数。カードのバッジと同じ `deriveItemTrust` の区分で数え、「確認済み 17」と
+ * 数えた項目のカードに「登録済み」「注記あり」と出る食い違いを作らない (#301)。
+ *
+ * レビュー対象の区分だけを数える (#360)。確認できず・ヒアリング必要・外部データ必要は、
+ * 末尾の折りたたみ「調査で値が出なかった項目(N項目)」に件数ごと出ている。
+ * 推定の意味はここで 1 回だけ添える。以前は推定の各カードに同じ注意を出しており、
+ * 本番では 1 画面に 15 回並んでいた。
  */
-const STATUS_COUNT_LABELS: Record<string, string> = {
-  ...ITEM_TRUST_LABELS,
-  not_found: "確認できず",
-  hearing_required: "ヒアリング必要",
-  external_data_required: "外部データ必要",
+const TRUST_COUNT_NOTES: Partial<Record<ItemTrust, string>> = {
+  inferred: "AIによる分析で、断定はできません",
 };
 
 /* ------------------------------------------------------------------ */
@@ -283,14 +285,15 @@ export function ResearchReviewSection({ store, run, onUpdate, onRestart, restart
   const planSummary = useMemo(() => summarizeReviewPlan(plan), [plan]);
   const footer = useMemo(() => buildReviewFooterModel(planSummary), [planSummary]);
 
-  const statusCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
+  const trustCounts = useMemo(() => {
+    const counts = new Map<ItemTrust, number>();
     for (const item of items) {
-      const key = deriveItemTrust(item) ?? item.status;
-      counts[key] = (counts[key] ?? 0) + 1;
+      const trust = deriveItemTrust(item);
+      if (trust !== null) counts.set(trust, (counts.get(trust) ?? 0) + 1);
     }
     return counts;
   }, [items]);
+  const identityMismatch = hasIdentityMismatchWarning(run.warnings);
 
   /** レビュー対象の項目だけをカテゴリごとに並べる。値の出なかった項目は末尾に 1 つの折りたたみへまとめる。 */
   const grouped = useMemo(() => {
@@ -414,33 +417,24 @@ export function ResearchReviewSection({ store, run, onUpdate, onRestart, restart
               </Badge>
             </div>
             <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-              {Object.entries(statusCounts).map(([status, count]) => (
-                <span key={status}>
-                  {STATUS_COUNT_LABELS[status] ?? status} {count}
+              {Array.from(trustCounts.entries()).map(([trust, count]) => (
+                <span key={trust}>
+                  {ITEM_TRUST_LABELS[trust]} {count}
+                  {TRUST_COUNT_NOTES[trust] !== undefined && `（${TRUST_COUNT_NOTES[trust]}）`}
                 </span>
               ))}
             </div>
           </div>
         </Card.Header>
         <Card.Body className="space-y-4">
-          {run.warnings.length > 0 && (
-            <div className="space-y-1 rounded-md border border-warning/40 bg-warning/10 p-3">
-              {run.warnings.map((warning, i) => (
-                <p key={i} className="flex items-start gap-1.5 text-xs text-warning">
-                  <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-                  <span>{toUserFacingRunWarning(warning)}</span>
-                </p>
-              ))}
-            </div>
-          )}
-
-          {!reviewCompleted && (
-            <p className="text-sm text-muted-foreground">
-              {formatReviewProgressLabel(
-                items.length,
-                reviewableItems.length,
-                reviewableItems.length - plan.length,
-              )}
+          {/* run 全体の警告は店舗の不一致だけを出す (#359, #360)。本文取得の失敗などは
+              各項目の「未確認の情報源」と重なる。進捗は下部の固定バーに出ている。 */}
+          {identityMismatch && (
+            <p className="flex items-start gap-1.5 text-xs text-warning">
+              <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+              <span>
+                AIが調べた店舗の名前・住所が登録情報と一致しません。別の店舗の情報が混ざっている可能性があるため、採用する前に出典を確認してください。
+              </span>
             </p>
           )}
 
@@ -558,6 +552,9 @@ export function ReviewCompletionFooter({
   onCompleteDecidedOnly: () => void;
 }) {
   const disabled = busy || completing;
+  const breakdown = [model.bulkLine, model.remainingLine]
+    .filter((line): line is string => line !== null)
+    .join(" ／ ");
 
   return (
     <div
@@ -571,11 +568,23 @@ export function ReviewCompletionFooter({
           <span>
             判断済み {decidedCount} ・ 未対応 {undecidedCount}
           </span>
-          {model.bulkLine !== null && <span>{model.bulkLine}</span>}
-          {model.remainingLine !== null && <span>{model.remainingLine}</span>}
+          {/* 主ボタンが採る項目と、残る項目の内訳を 1 行で並べる (#360)。 */}
+          {breakdown !== "" && <span>{breakdown}</span>}
         </div>
 
-        <div className="ml-auto flex flex-col items-stretch gap-1 sm:items-end">
+        <div className="ml-auto flex w-full flex-col-reverse items-stretch gap-2 sm:w-auto sm:flex-row sm:items-center">
+          {model.skipLabel !== null && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="w-full sm:w-auto"
+              onClick={onCompleteDecidedOnly}
+              disabled={disabled}
+            >
+              {model.skipLabel}
+            </Button>
+          )}
           <Button
             type="button"
             variant="primary"
@@ -586,28 +595,6 @@ export function ReviewCompletionFooter({
           >
             {completing ? "処理中…" : model.primary.label}
           </Button>
-          {model.primary.kind === "bulk" && !model.primary.complete && (
-            <span className="text-xs text-muted-foreground sm:text-right">
-              上書きになる項目と推定の項目は、1件ずつ確認します
-            </span>
-          )}
-          {model.skipLabel !== null && (
-            <>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="w-full sm:w-auto"
-                onClick={onCompleteDecidedOnly}
-                disabled={disabled}
-              >
-                {model.skipLabel}
-              </Button>
-              <span className="text-xs text-muted-foreground sm:text-right">
-                未対応の項目は基本情報に反映されません（いまの値のまま）
-              </span>
-            </>
-          )}
         </div>
       </div>
     </div>

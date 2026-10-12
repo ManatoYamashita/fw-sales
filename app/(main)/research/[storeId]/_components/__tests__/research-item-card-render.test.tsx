@@ -225,3 +225,39 @@ describe("toPendingDecision (#337)", () => {
     expect(toPendingDecision({ decision: "adopted" }).edited).toBe(false);
   });
 });
+
+describe("ResearchItemCard: 繰り返しの表示を出さない (#360)", () => {
+  it("推定の項目に毎回の注意文を出さず、「推定」バッジのツールチップへ寄せる", () => {
+    const html = render(makeItem({ status: "inferred" }));
+    expect(html).not.toContain("⚠ AIによる分析です");
+    expect(html).toContain('title="AIによる分析です。断定はできません。">推定</span>');
+  });
+
+  it("いまの値が無い (新規) ときは採用の効果のバッジを出さない", () => {
+    expect(render(makeItem())).not.toContain("新規</span>");
+  });
+
+  it("上書きになるときは「上書き」のバッジを出す (例外だけをバッジにする)", () => {
+    const html = renderToStaticMarkup(
+      <ResearchItemCard
+        item={makeItem()}
+        label="項目"
+        sourceRegistry={[]}
+        decision={undefined}
+        busy={false}
+        onDecide={() => {}}
+        current={{ value: "045-000-0000", tier: "A", source_quote: "", filled_by: "manual", updated_at: "2026-09-01T00:00:00.000Z" }}
+        defaultOpen
+      />,
+    );
+    expect(html).toContain("上書き</span>");
+  });
+
+  it("枠付きのボタンは「採用」だけ (編集して採用・却下・スキップは枠なし)", () => {
+    const html = render(makeItem());
+    const bordered = Array.from(html.matchAll(/<button[^>]*class="([^"]*)"[^>]*>([^<]+)<\/button>/g))
+      .filter(([, cls]) => cls?.includes("border-input"))
+      .map(([, , label]) => label);
+    expect(bordered).toEqual(["採用"]);
+  });
+});

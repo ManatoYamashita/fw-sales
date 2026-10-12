@@ -83,3 +83,20 @@ describe("ResearchFlowSteps の表示契約 (#324)", () => {
     expect(render({ status: "running", review_completed_at: null }).split(SPINNER)).toHaveLength(2);
   });
 });
+
+describe("手順の説明文 (#360)", () => {
+  const GUIDE = "店舗名だけで始められます";
+
+  it("まだ調査していないときだけ出す", () => {
+    expect(render(null)).toContain(GUIDE);
+  });
+
+  it.each([
+    { status: "running", review_completed_at: null },
+    { status: "failed", review_completed_at: null },
+    { status: "succeeded", review_completed_at: null },
+    { status: "succeeded", review_completed_at: "2026-10-12T00:00:00.000Z" },
+  ] as const)("調査を始めた後は出さない (%o)", (run) => {
+    expect(render(run)).not.toContain(GUIDE);
+  });
+});

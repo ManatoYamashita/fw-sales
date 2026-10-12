@@ -154,6 +154,23 @@ const NON_WEB_SOURCE_LABELS: Partial<Record<EvidenceBasis, string>> = {
   existing_canonical: "登録済みの基本情報",
 };
 
+/**
+ * ページの中身まで確かめられた情報源か (#360)。バッジの ✓ と同じ範囲
+ * (`getBadgeDisplay` の success / info) を確認済みとする。
+ *
+ * 本文取得の失敗・検索結果のみ・店舗同定できず・無関係は確認できていない。本番では
+ * 全情報源の本文取得に失敗した調査で「✕ ページを確認できませんでした」が 1 画面に 22 回並び、
+ * 項目ごとの差が読めなくなっていた。確認できていない情報源は件数の 1 行に畳み、開けば
+ * これまでと同じバッジと候補タイトルを見せる。
+ */
+export function isConfirmedSource(entry: SourceRegistryEntry): boolean {
+  const { tone } = getBadgeDisplay(entry);
+  return tone === "success" || tone === "info";
+}
+
+/** 畳んだ未確認の情報源の見出し。件数を後ろに付ける。 */
+const UNCONFIRMED_SUMMARY_LABEL = "未確認の情報源";
+
 export function SourceBadgeList({
   sourceIds,
   sourceRegistry,
@@ -173,11 +190,30 @@ export function SourceBadgeList({
     return <span className="text-xs text-muted-foreground">{label}</span>;
   }
 
+  const confirmed = entries.filter(isConfirmedSource);
+  const unconfirmed = entries.filter((entry) => !isConfirmedSource(entry));
+
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      {entries.map((entry) => (
-        <SourceBadge key={entry.id} entry={entry} />
-      ))}
+    <div className="space-y-1.5">
+      {confirmed.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          {confirmed.map((entry) => (
+            <SourceBadge key={entry.id} entry={entry} />
+          ))}
+        </div>
+      )}
+      {unconfirmed.length > 0 && (
+        <details className="text-xs text-muted-foreground">
+          <summary className="cursor-pointer select-none">
+            {UNCONFIRMED_SUMMARY_LABEL} {unconfirmed.length}件
+          </summary>
+          <div className="flex flex-wrap items-center gap-2 pt-1.5">
+            {unconfirmed.map((entry) => (
+              <SourceBadge key={entry.id} entry={entry} />
+            ))}
+          </div>
+        </details>
+      )}
     </div>
   );
 }

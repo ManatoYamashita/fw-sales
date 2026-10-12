@@ -97,6 +97,7 @@ import type { UsageMetadataLike } from "@/lib/ai/research/client";
 import type { BasicInfo } from "@/types/basic-info";
 import type { StoreResearchRun, StoreResearchRunPatch } from "@/types/research-run";
 import { nowIso } from "@/lib/utils/date";
+import { IDENTITY_MISMATCH_RUN_WARNING } from "@/lib/domain/research-item-notes";
 
 /**
  * timeout / retry 構成は `lib/ai/research/run-timing.ts` を唯一のSource of Truthとする
@@ -1118,11 +1119,7 @@ export async function storeResearchWorkflow(
     // 調べていても恒久的に失敗していたため、warning へ緩和した。詳細は
     // `runStage2`(`lib/ai/research/pipeline.ts`)のコメント参照。
     if (stage2Result.identity.mismatch) {
-      warnings.push(
-        "AIが調査対象として同定した店舗名・住所が、登録されている店舗情報と一致しませんでした。" +
-          "別店舗の情報が混ざっている可能性があります。採用する前に各項目の出典を確認してください" +
-          "(登録情報の店舗名・住所が古い、または英語表記になっている場合もこの警告が出ます)。",
-      );
+      warnings.push(IDENTITY_MISMATCH_RUN_WARNING);
     }
     if (finalRegistry.length === 0) {
       warnings.push(

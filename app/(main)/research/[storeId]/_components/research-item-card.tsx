@@ -127,6 +127,14 @@ function isPending(
   );
 }
 
+/**
+ * 信頼度バッジのツールチップ。推定の項目に毎回出していた「AIによる分析です。断定はできません。」を
+ * バッジへ寄せた (#360)。本番では 1 画面に 15 回並んでいた。
+ */
+const TRUST_DESCRIPTIONS: Partial<Record<ItemTrust, string>> = {
+  inferred: "AIによる分析です。断定はできません。",
+};
+
 const EFFECT_TONES: Record<AdoptionEffect["kind"], "secondary" | "info" | "warning"> = {
   new: "info",
   same: "secondary",
@@ -233,18 +241,20 @@ export function ResearchItemCard({
               {decided}
             </Badge>
           )}
-          {effect !== null && (
+          {/* 「新規」はほぼ全項目に付く既定の結果で、見分ける役に立たないので出さない (#360)。
+              値が変わらない・上書きになる、という例外だけをバッジにする。 */}
+          {effect !== null && effect.kind !== "new" && (
             <Badge tone={EFFECT_TONES[effect.kind]}>{ADOPTION_EFFECT_LABELS[effect.kind]}</Badge>
           )}
-          {trust !== null && <Badge tone={TRUST_TONES[trust]}>{ITEM_TRUST_LABELS[trust]}</Badge>}
+          {trust !== null && (
+            <Badge tone={TRUST_TONES[trust]} title={TRUST_DESCRIPTIONS[trust]}>
+              {ITEM_TRUST_LABELS[trust]}
+            </Badge>
+          )}
         </span>
       </summary>
 
       <div className="space-y-2.5 px-4 pb-4">
-        {item.status === "inferred" && (
-          <p className="text-xs text-warning">⚠ AIによる分析です。断定はできません。</p>
-        )}
-
         {isConflict ? (
           <div className="space-y-3">
             <p className="text-xs text-warning">⚠ 情報源間で内容が一致しません</p>
@@ -351,6 +361,8 @@ export function ResearchItemCard({
 
         {!editing && !editPending && (
           // 実運用の頻度順に並べる(採用 → 編集して採用 → 却下 → スキップ)。
+          // 枠付きは「採用」だけにする。開いたカードが 15 枚並ぶと、全部が枠付きでは
+          // どれを押せば進むのかが埋もれていた (#360)。判断済みの色はこれまでどおり。
           // 上書きになる項目では、採用は「上書きする」、却下は「いまの値を残す」と言い換え、
           // 押した結果が基本情報にどう効くかをボタン自体で示す (#319)。
           <div className="flex flex-wrap items-center gap-2 pt-1">
@@ -367,14 +379,14 @@ export function ResearchItemCard({
               </Button>
             )}
             {!isConflict && (
-              <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => setEditing(true)}>
+              <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => setEditing(true)}>
                 編集して採用
               </Button>
             )}
             <Button
               type="button"
               size="sm"
-              variant={decision?.decision === "rejected" ? "destructive" : "outline"}
+              variant={decision?.decision === "rejected" ? "destructive" : "ghost"}
               pending={isPending(pendingDecision, { decision: "rejected", edited: false })}
               disabled={busy}
               onClick={() => onDecide({ decision: "rejected" })}
