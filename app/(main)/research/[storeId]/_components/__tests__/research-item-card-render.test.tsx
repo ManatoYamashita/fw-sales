@@ -256,7 +256,7 @@ describe("ResearchItemCard: 繰り返しの表示を出さない (#360)", () => 
   it("枠付きのボタンは「採用」だけ (編集して採用・却下・スキップは枠なし)", () => {
     const html = render(makeItem());
     const bordered = Array.from(html.matchAll(/<button[^>]*class="([^"]*)"[^>]*>([^<]+)<\/button>/g))
-      .filter(([, cls]) => cls.includes("border-input"))
+      .filter(([, cls]) => cls?.includes("border-input"))
       .map(([, , label]) => label);
     expect(bordered).toEqual(["採用"]);
   });
