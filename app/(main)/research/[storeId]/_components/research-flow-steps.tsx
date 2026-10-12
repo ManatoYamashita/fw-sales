@@ -87,9 +87,13 @@ export function ResearchFlowSteps({ steps }: { steps: readonly ResearchFlowStep[
           );
         })}
       </ol>
-      <p className="text-xs text-muted-foreground">
-        店舗名だけで始められます。レビューで採用した項目が基本情報に入り、営業資産の生成に使われます。外部で調べた情報は「営業資産を生成」の補足情報に貼り付けられます。
-      </p>
+      {/* 手順の説明は、まだ調査を始めていないときだけ出す (#360)。始めた後は各カードが
+          次の操作を示しており、毎回この 2 行を読ませる必要はない。 */}
+      {steps[0]?.status === "current" && (
+        <p className="text-xs text-muted-foreground">
+          店舗名だけで始められます。レビューで採用した項目が基本情報に入り、営業資産の生成に使われます。外部で調べた情報は「営業資産を生成」の補足情報に貼り付けられます。
+        </p>
+      )}
     </nav>
   );
 }

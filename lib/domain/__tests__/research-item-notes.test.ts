@@ -43,7 +43,8 @@ import {
   parseItemNotes,
   splitNoteSentences,
   stripLegacyEvidenceSupplement,
-  toUserFacingRunWarning,
+  hasIdentityMismatchWarning,
+  IDENTITY_MISMATCH_RUN_WARNING,
 } from "../research-item-notes";
 
 /**
@@ -381,21 +382,27 @@ describe("stripLegacyEvidenceSupplement", () => {
   });
 });
 
-describe("toUserFacingRunWarning", () => {
-  it("種別コードを取り除く (本番の原文)", () => {
-    expect(
-      toUserFacingRunWarning(
-        "Google Places候補が一意に特定できませんでした (places_search_no_match)。既存情報のみで調査を続行します。",
-      ),
-    ).toBe("Google Places候補が一意に特定できませんでした。既存情報のみで調査を続行します。");
-    expect(toUserFacingRunWarning("Google Places検索に失敗しました (api_error:500)。")).toBe(
-      "Google Places検索に失敗しました。",
-    );
+describe("hasIdentityMismatchWarning", () => {
+  it("店舗の不一致の警告があれば true (保存している原文)", () => {
+    expect(hasIdentityMismatchWarning([IDENTITY_MISMATCH_RUN_WARNING])).toBe(true);
   });
 
-  it("日本語の括弧書きは残す", () => {
-    const text =
-      "Google Placesの店舗情報を再取得できませんでした(該当なし)。既存情報のみで調査を続行します。";
-    expect(toUserFacingRunWarning(text)).toBe(text);
+  it("文末の補足が違う過去の run でも、先頭が同じなら true", () => {
+    expect(
+      hasIdentityMismatchWarning([
+        "AIが調査対象として同定した店舗名・住所が、登録されている店舗情報と一致しませんでした。",
+      ]),
+    ).toBe(true);
+  });
+
+  it("ほかの警告だけなら false (本番の原文)", () => {
+    expect(
+      hasIdentityMismatchWarning([
+        "Webページを確認できた情報源がありません(候補はありましたが、いずれも本文取得に失敗しました)。",
+        "Web情報源候補が1件も取得できませんでした(Gemini検索候補・登録済みURLともに0件)。",
+        "Google Places候補が一意に特定できませんでした (places_search_no_match)。既存情報のみで調査を続行します。",
+      ]),
+    ).toBe(false);
+    expect(hasIdentityMismatchWarning([])).toBe(false);
   });
 });

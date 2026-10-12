@@ -251,13 +251,26 @@ export function stripLegacyEvidenceSupplement(evidence: string): string {
 }
 
 /**
- * run 全体の警告(`run.warnings`)から、診断用の種別コードを取り除く。
- *
- * `lib/ai/research/places-stage0.ts` は「Google Places検索に失敗しました (api_error:500)。」の
- * ように種別を括弧で付ける。診断はログ側で行うため、画面には出さない。
+ * AI が同定した店舗が登録情報と一致しなかった run に保存する警告 (`workflows/store-research.ts`)。
+ * 画面はこの文で始まる警告を見分けるので、文言を変えるときは過去の run も考えること。
  */
-export function toUserFacingRunWarning(warning: string): string {
-  return warning.replace(/\s*\([a-z][a-z0-9_]*(?::[0-9]+)?\)/g, "");
+export const IDENTITY_MISMATCH_RUN_WARNING =
+  "AIが調査対象として同定した店舗名・住所が、登録されている店舗情報と一致しませんでした。" +
+  "別店舗の情報が混ざっている可能性があります。採用する前に各項目の出典を確認してください" +
+  "(登録情報の店舗名・住所が古い、または英語表記になっている場合もこの警告が出ます)。";
+
+/** 過去の run と見分けるための先頭部分。全文一致にすると、文末の補足を直しただけで拾えなくなる。 */
+const IDENTITY_MISMATCH_PREFIX = "AIが調査対象として同定した店舗名・住所が";
+
+/**
+ * run 全体の警告(`run.warnings`)のうち、画面に出すべきものがあるか (#359, #360)。
+ *
+ * 画面に出すのは店舗の不一致だけ。採用の判断を変える情報で、ほかの場所には出ていない。
+ * Places の失敗・情報源候補 0 件・本文取得の失敗は、各項目の出典表示と重なるので出さない
+ * (保存は続け、診断に使う)。
+ */
+export function hasIdentityMismatchWarning(warnings: readonly string[]): boolean {
+  return warnings.some((warning) => warning.startsWith(IDENTITY_MISMATCH_PREFIX));
 }
 
 /** レビュー対象の項目を、画面のバッジでどう見せるか。 */

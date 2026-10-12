@@ -15,6 +15,7 @@ import type { ResearchItem, ReviewDecisions, StoreResearchRun } from "@/types/re
 import type { ReviewPlanSummary } from "@/lib/domain/research-review";
 import type { Store } from "@/types/store";
 import type { BasicInfo, BasicInfoField } from "@/types/basic-info";
+import { IDENTITY_MISMATCH_RUN_WARNING } from "@/lib/domain/research-item-notes";
 
 vi.mock("server-only", () => ({}));
 
@@ -153,7 +154,6 @@ describe("主ボタン (#301: 推定を見ずに完了させない)", () => {
   it("副ボタンは未判断を反映せずに完了する", () => {
     const html = render(makeRun(ITEMS));
     expect(html).toContain("残り3件は反映せずに完了");
-    expect(html).toContain("未対応の項目は基本情報に反映されません（いまの値のまま）");
   });
 
   it("未判断が0件なら主ボタンは「レビュー完了」になり副ボタンは出さない", () => {
@@ -574,5 +574,59 @@ describe("ReviewCompletionFooter の busy / completing 挙動", () => {
     // 処理中を示すのは押した主ボタンだけ。副ボタンは押せないだけで処理中ではない (#326)。
     expect(buttonAttributes(html, "処理中…")).toContain(' aria-busy="true"');
     expect(buttonAttributes(html, "残り3件は反映せずに完了")).not.toContain("aria-busy=");
+  });
+});
+
+describe("重複表示の整理 (#360)", () => {
+  /** 本番 (2026-10-12, Brasserie NORMAN) の警告の原文。 */
+  const FETCH_FAILED =
+    "Webページを確認できた情報源がありません(候補はありましたが、いずれも本文取得に失敗しました)。";
+
+  it("「レビュー進捗」の行を出さない (#359)", () => {
+    expect(render(makeRun(ITEMS))).not.toContain("レビュー進捗");
+  });
+
+  it("本文取得の失敗・Places の失敗の警告は出さない (#359)", () => {
+    const html = render({
+      ...makeRun(ITEMS),
+      warnings: [
+        FETCH_FAILED,
+        "Google Places候補が一意に特定できませんでした (places_search_no_match)。既存情報のみで調査を続行します。",
+      ],
+    });
+    expect(html).not.toContain("本文取得に失敗しました");
+    expect(html).not.toContain("Google Places");
+    expect(html).not.toContain("登録情報と一致しません");
+  });
+
+  it("店舗が一致しない警告だけは 1 行で出す (#359)", () => {
+    const html = render({ ...makeRun(ITEMS), warnings: [FETCH_FAILED, IDENTITY_MISMATCH_RUN_WARNING] });
+    expect(html).toContain("登録情報と一致しません");
+    expect(html).not.toContain("本文取得に失敗しました");
+  });
+
+  it("見出しの件数はレビュー対象の区分だけで、推定の意味を 1 回だけ添える", () => {
+    const html = render(
+      makeRun([
+        ...ITEMS,
+        item("seats_private", "inferred"),
+        item("owner_profile", "not_found", { value: null }),
+        item("owner_career", "hearing_required", { value: null }),
+      ]),
+    );
+    expect(html).toContain("推定 2（AIによる分析で、断定はできません）");
+    expect(html.split("AIによる分析で、断定はできません").length - 1).toBe(1);
+    // カードには本文の注意文を出さない (ツールチップの title 属性だけ)。
+    expect(html).not.toContain("⚠ AIによる分析です");
+    // 値の出なかった項目は末尾の折りたたみの件数に出ている。
+    expect(html).toContain("調査で値が出なかった項目(2項目)");
+    expect(html).not.toMatch(/確認できず \d|ヒアリング必要 \d/);
+  });
+
+  it("固定バーの内訳は 1 行で、ボタンの補足文は出さない", () => {
+    const html = render(makeRun(ITEMS));
+    expect(html).toContain("<span>まとめて採用: 2件（新規 2） ／ 1件ずつ確認: 推定 1</span>");
+    expect(html).not.toContain("上書きになる項目と推定の項目は、1件ずつ確認します");
+    expect(html).not.toContain("未対応の項目は基本情報に反映されません");
   });
 });
