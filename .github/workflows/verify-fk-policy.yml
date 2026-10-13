@@ -60,8 +60,7 @@
 #   動かすときは `verify-store-cascade-fks.mjs` の出力文言とこの行を必ず一緒に更新すること
 #   (PR #243 の移設で一度この導線が切れ、指示先が実在しない状態になった)
 #
-# 前提: GitHub Secret `DATABASE_URL` に本番 Supabase connection string を登録
-#       (`migrate.yml` / `supabase-keepalive.yml` と共用。新規 secret は不要)。
+# 前提: GitHub Environment ProductionのDATABASE_URLに本番接続情報を登録 (#46)。
 
 name: Verify FK Policy
 
@@ -90,6 +89,10 @@ permissions:
 jobs:
   verify-fk-policy:
     name: Verify store FK policy against production
+    if: github.ref == 'refs/heads/main'
+    environment: Production
+    env:
+      APP_ENV: prd
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

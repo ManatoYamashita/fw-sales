@@ -12,9 +12,11 @@ import { useRouter } from "next/navigation";
 import { Card } from "@/components/ui/card";
 import { FormField } from "@/components/ui/form-field";
 import { Select } from "@/components/ui/select";
+import { optionsFromValues } from "@/components/ui/select-logic";
 import { Button } from "@/components/ui/button";
 import { MemoInput, MemoTextarea } from "./memo-input";
 import { ServiceCheckboxGroup } from "./service-checkbox-group";
+import { runAction } from "@/lib/client/run-action";
 import { createStoreAction } from "@/lib/actions/store-actions";
 import { decideChannel } from "@/lib/domain/channel";
 import {
@@ -22,9 +24,11 @@ import {
   OPERATOR_TYPES,
 } from "@/types/store";
 import type { Profile } from "@/types/profile";
-import { toast } from "@/components/ui/toast";
 import type { ApplyConfidence, ApplyResult } from "@/lib/url-parser/types";
 import { confidenceToBg } from "@/lib/url-parser/confidence-color";
+
+const CONTACT_FORM_OPTIONS = optionsFromValues(CONTACT_FORMS);
+const OPERATOR_TYPE_OPTIONS = optionsFromValues(OPERATOR_TYPES);
 
 type FormState = {
   name: string;
@@ -142,7 +146,7 @@ export function StoreNewForm({
   const router = useRouter();
 
   // task 4.2 (PR3a): AiAnalysisPanel 撤去に伴い、AI 結果 state / useBeforeUnload 連動を削除。
-  // 営業資産生成は登録後に店舗詳細の SalesAssetsGenerator から実行する設計に統一。
+  // 営業資産生成は登録後に /research/[storeId] の SalesAssetSection から実行する設計に統一 (#300)。
 
   const set = useCallback(
     <K extends keyof FormState>(key: K, value: FormState[K]) => {
@@ -173,9 +177,7 @@ export function StoreNewForm({
     const out = {} as Record<
       keyof FormState,
       (
-        e: ChangeEvent<
-          HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
-        >,
+        e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
       ) => void
     >;
     (Object.keys(INITIAL) as Array<keyof FormState>).forEach((k) => {
@@ -183,6 +185,23 @@ export function StoreNewForm({
     });
     return out;
   }, [set]);
+
+  // Select 用。値を直接受け取る以外は handlers と同じ (React.memo を崩さないよう 1 度だけ生成)。
+  const pickers = useMemo(() => {
+    const out = {} as Record<keyof FormState, (value: string) => void>;
+    (Object.keys(INITIAL) as Array<keyof FormState>).forEach((k) => {
+      out[k] = (value) => set(k, value as FormState[typeof k]);
+    });
+    return out;
+  }, [set]);
+
+  const profileOptions = useMemo(
+    () => [
+      { value: "", label: "未割当" },
+      ...profiles.map((p) => ({ value: p.id, label: p.display_name })),
+    ],
+    [profiles],
+  );
 
   // 背景色再計算をタイピングの 1 frame 後に遅延させ、入力中の INP を稼ぐ。
   const deferredConfidence = useDeferredValue(confidence);
@@ -198,12 +217,11 @@ export function StoreNewForm({
     // ai_analysis_result は task 4.2 (PR3a) で AiAnalysisPanel を撤去したため
     // 新規登録フォームからは送信せず、登録後に店舗詳細で生成する設計に統一。
     startTransition(async () => {
-      const result = await createStoreAction(null, formData);
-      if (result.ok) {
-        toast.success(result.message ?? "登録しました");
+      const result = await runAction(() => createStoreAction(null, formData), {
+        success: "登録しました",
+      });
+      if (result?.ok) {
         router.push(`/stores/${result.data.id}`);
-      } else {
-        toast.error(result.error);
       }
     });
   };
@@ -274,17 +292,12 @@ export function StoreNewForm({
           >
             <Select
               width="full"
+              options={OPERATOR_TYPE_OPTIONS}
               id="operator_type"
               name="operator_type"
               value={form.operator_type}
-              onChange={handlers.operator_type}
-            >
-              {OPERATOR_TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </Select>
+              onValueChange={pickers.operator_type}
+            />
           </FormField>
           <FormField
             label="運営者名"
@@ -357,17 +370,12 @@ export function StoreNewForm({
           >
             <Select
               width="full"
+              options={CONTACT_FORM_OPTIONS}
               id="has_contact_form"
               name="has_contact_form"
               value={form.has_contact_form}
-              onChange={handlers.has_contact_form}
-            >
-              {CONTACT_FORMS.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </Select>
+              onValueChange={pickers.has_contact_form}
+            />
           </FormField>
           <FormField
             label="想定チャネル"
@@ -402,34 +410,24 @@ export function StoreNewForm({
             <FormField label="プランナー" htmlFor="assigned_planner_user_id">
               <Select
                 width="full"
+                options={profileOptions}
+                placeholder="不明な担当者"
                 id="assigned_planner_user_id"
                 name="assigned_planner_user_id"
                 value={form.assigned_planner_user_id}
-                onChange={handlers.assigned_planner_user_id}
-              >
-                <option value="">未割当</option>
-                {profiles.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.display_name}
-                  </option>
-                ))}
-              </Select>
+                onValueChange={pickers.assigned_planner_user_id}
+              />
             </FormField>
             <FormField label="営業担当" htmlFor="assigned_sales_user_id">
               <Select
                 width="full"
+                options={profileOptions}
+                placeholder="不明な担当者"
                 id="assigned_sales_user_id"
                 name="assigned_sales_user_id"
                 value={form.assigned_sales_user_id}
-                onChange={handlers.assigned_sales_user_id}
-              >
-                <option value="">未割当</option>
-                {profiles.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.display_name}
-                  </option>
-                ))}
-              </Select>
+                onValueChange={pickers.assigned_sales_user_id}
+              />
             </FormField>
             <FormField label="口コミ件数" htmlFor="review_count">
               <MemoInput
@@ -481,7 +479,7 @@ export function StoreNewForm({
         >
           キャンセル
         </Button>
-        <Button type="submit" variant="primary" disabled={pending}>
+        <Button type="submit" variant="primary" pending={pending}>
           {pending ? "登録中…" : "登録する"}
         </Button>
       </Card.Footer>

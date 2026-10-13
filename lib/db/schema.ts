@@ -67,7 +67,7 @@ export const profiles = pgTable("profiles", {
   role: text("role").notNull().default("member"),
   created_at: text("created_at").notNull(),
   updated_at: text("updated_at").notNull(),
-});
+}).enableRLS();
 
 /**
  * notifications テーブル (auth-and-notifications spec, Issue #16)
@@ -99,7 +99,7 @@ export const notifications = pgTable("notifications", {
   read_at: text("read_at"),
   created_at: text("created_at").notNull(),
   updated_at: text("updated_at").notNull(),
-});
+}).enableRLS();
 
 /**
  * stores テーブル
@@ -175,7 +175,7 @@ export const stores = pgTable("stores", {
   updated_at: text("updated_at").notNull(),
 }, (table) => [
   index("stores_google_place_id_idx").on(table.google_place_id),
-]);
+]).enableRLS();
 
 /**
  * deals テーブル
@@ -200,6 +200,11 @@ export const deals = pgTable("deals", {
   estimate_amount: integer("estimate_amount").notNull(),
   order_amount: integer("order_amount"),
   lost_reason: text("lost_reason").notNull(),
+  /**
+   * 失注時の再アプローチ可否 (#297)。`'再アプローチ可' | '再アプローチ不可'` (`Reapproach`)。
+   * NULL = 未判断、または失注以外。値の妥当性は Action 層が担保する。
+   */
+  reapproach: text("reapproach"),
   status: text("status").notNull(),
   /**
    * 営業担当ユーザーへの参照 (auth-and-notifications spec)。
@@ -221,7 +226,7 @@ export const deals = pgTable("deals", {
   // store-cascade-delete (#152): FK 列インデックス。cascade 削除の子走査と
   // 削除影響カウント (getDeleteImpact) の seq scan を回避する。
   index("deals_store_id_idx").on(table.store_id),
-]);
+]).enableRLS();
 
 // Issue #110: 旧手入力調査テーブル `research` を撤去。
 // 書き込み UI (`research-form.tsx`) が #180 で消えて以降ゼロ参照になっていた。
@@ -271,7 +276,7 @@ export const handoffs = pgTable("handoffs", {
   // deal_id は deals 削除の cascade 走査も受けるため両列に張る。
   index("handoffs_store_id_idx").on(table.store_id),
   index("handoffs_deal_id_idx").on(table.deal_id),
-]);
+]).enableRLS();
 
 /**
  * ai_prompt_templates テーブル (Issue #42)
@@ -285,7 +290,7 @@ export const handoffs = pgTable("handoffs", {
  *   (下記「partial index と Drizzle」を参照)
  * - デフォルトテンプレート削除拒否は migration 0010 の DB trigger で保証
  * - `created_at` / `updated_at` は `YYYY-MM-DD` 形式 text (既存規約に揃える)
- * - RLS は Supabase 側で別途管理 (既存プロジェクトの規約に従う)
+ * - RLSはDrizzle migrationで管理し、Data API用のクライアントポリシーは作成しない (#46)
  *
  * ## partial index と Drizzle
  *
@@ -323,7 +328,7 @@ export const aiPromptTemplates = pgTable(
     // partial unique index (WHERE is_default = true) は migration 0010 に raw SQL で追加。
     // Drizzle でも .where() で表現できるが snapshot 未登録のため移行には注意 (上の JSDoc 参照)
   ],
-);
+).enableRLS();
 
 /**
  * app_settings テーブル (store-flow-guidance / Issue #122)
@@ -357,7 +362,7 @@ export const appSettings = pgTable("app_settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
   updated_at: text("updated_at").notNull(),
-});
+}).enableRLS();
 
 /**
  * place_candidates テーブル (エリア検索 候補DB保存の土台 / Issue #129 follow-up)
@@ -406,7 +411,7 @@ export const placeCandidates = pgTable("place_candidates", {
   // store-cascade-delete (#152): FK 列インデックス。店舗削除時の SET NULL 走査と
   // 削除影響カウント (getDeleteImpact) の seq scan を回避する。
   index("place_candidates_matched_store_id_idx").on(table.matched_store_id),
-]);
+]).enableRLS();
 
 /**
  * store_research_runs テーブル (AI 店舗調査再設計 Plan v3.2, PR1: データモデル基盤)
@@ -488,7 +493,7 @@ export const storeResearchRuns = pgTable(
     }),
   },
   (table) => [
-    // 店舗ごとの最新run取得用 (「要確認」判定・過去run一覧に使用)。
+    // 店舗ごとの最新run取得用 (「レビュー待ち」判定・過去run一覧に使用)。
     index("store_research_runs_store_started_idx").on(
       table.store_id,
       table.started_at,
@@ -498,4 +503,4 @@ export const storeResearchRuns = pgTable(
       .on(table.store_id)
       .where(sql`${table.status} = 'running'`),
   ],
-);
+).enableRLS();

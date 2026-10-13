@@ -1,16 +1,17 @@
 "use client";
 
-import { useState, useTransition, type ChangeEvent } from "react";
+import { useEffect, useRef, useState, useTransition, type ChangeEvent } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Pencil, X, Save } from "lucide-react";
+import { Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { FormField } from "@/components/ui/form-field";
-import { toast } from "@/components/ui/toast";
 import { IndividualStoreBadge } from "@/components/feature/individual-store-badge";
 import { ResearchPhaseBadge } from "./research-phase-badge";
 import { NextActionCta } from "./next-action-cta";
+import { TITLE_EDIT_BUTTON_ID, TitleEditActions } from "./title-edit-actions";
+import { runAction } from "@/lib/client/run-action";
 import { updateStorePatchAction } from "@/lib/actions/store-actions";
+import { splitStoreNameMemo } from "@/lib/domain/store-name-memo";
 import type { ResearchPhase } from "@/lib/domain/store-research-phase";
 import type { Store, StorePatch } from "@/types/store";
 
@@ -26,10 +27,20 @@ export function StoreTitleSection({
   const [pending, startTransition] = useTransition();
   const [form, setForm] = useState({ name: store.name, genre: store.genre });
   const [nameError, setNameError] = useState<string | undefined>();
+  const nameMemo = splitStoreNameMemo(store.name);
+  // 保存・キャンセルで操作グループが消えると、フォーカスが body へ落ちる。
+  // 編集を終えたら同じ位置に戻る鉛筆ボタンへ返す。
+  const restoreFocusRef = useRef(false);
+
+  useEffect(() => {
+    if (editing || !restoreFocusRef.current) return;
+    restoreFocusRef.current = false;
+    document.getElementById(TITLE_EDIT_BUTTON_ID)?.focus();
+  }, [editing]);
 
   const onText =
     (key: keyof typeof form) =>
-    (e: ChangeEvent<HTMLInputElement>) => {
+    (e: ChangeEvent<HTMLTextAreaElement>) => {
       setForm((prev) => ({ ...prev, [key]: e.target.value }));
       if (key === "name") setNameError(undefined);
     };
@@ -37,6 +48,7 @@ export function StoreTitleSection({
   const onCancel = () => {
     setForm({ name: store.name, genre: store.genre });
     setNameError(undefined);
+    restoreFocusRef.current = true;
     setEditing(false);
   };
 
@@ -49,94 +61,180 @@ export function StoreTitleSection({
     setNameError(undefined);
     const patch: StorePatch = { ...form };
     startTransition(async () => {
-      const result = await updateStorePatchAction(store.id, patch);
-      if (result.ok) {
-        toast.success(result.message ?? "更新しました");
+      const result = await runAction(() => updateStorePatchAction(store.id, patch), {
+        success: "更新しました",
+      });
+      if (result?.ok) {
+        restoreFocusRef.current = true;
         setEditing(false);
         router.refresh();
-      } else {
-        toast.error(result.error);
       }
     });
   };
 
-  if (editing) {
-    return (
-      <div className="space-y-2">
-        <h1 className="text-xl md:text-2xl font-bold text-foreground">
-          {store.name}
-        </h1>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-w-2xl">
-          <FormField
-            label="店舗名"
-            htmlFor="store_name"
-            required
-            error={nameError}
-          >
-            <Input
-              id="store_name"
-              value={form.name}
-              onChange={onText("name")}
-              required
-            />
-          </FormField>
-          <FormField label="業態" htmlFor="store_genre">
-            <Input
-              id="store_genre"
-              value={form.genre}
-              onChange={onText("genre")}
-            />
-          </FormField>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            type="button"
-            variant="primary"
-            size="sm"
-            onClick={onSave}
-            disabled={pending}
-          >
-            <Save className="h-3.5 w-3.5" />
-            {pending ? "保存中…" : "保存"}
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={onCancel}
-            disabled={pending}
-          >
-            <X className="h-3.5 w-3.5" /> キャンセル
-          </Button>
-        </div>
-      </div>
-    );
-  }
+  const location = [store.prefecture, store.city].filter(Boolean).join(" / ");
 
   return (
     <div>
-      <h1 className="text-xl md:text-2xl font-bold text-foreground inline-flex items-center gap-2 flex-wrap">
-        {store.name}
+      <h1 className="text-xl md:text-2xl font-bold text-foreground inline-flex items-center gap-2 flex-wrap max-w-full">
+        <InlineTitleField
+          id="store_name"
+          label="店舗名"
+          value={editing ? form.name : store.name}
+          editing={editing}
+          onChange={onText("name")}
+          required
+          error={nameError}
+          disabled={pending}
+          autoFocus
+        />
         <IndividualStoreBadge operatorType={store.operator_type} />
         <ResearchPhaseBadge phase={phase} />
-        <Button
-          type="button"
-          variant="ghost-muted"
-          size="sm"
-          onClick={() => setEditing(true)}
-          aria-label="店舗名・業態を編集"
-        >
-          <Pencil className="h-3.5 w-3.5" />
-        </Button>
+        <TitleEditActions
+          editing={editing}
+          pending={pending}
+          onEdit={() => {
+            setForm({ name: store.name, genre: store.genre });
+            setNameError(undefined);
+            setEditing(true);
+          }}
+          onSave={onSave}
+          onCancel={onCancel}
+        />
       </h1>
-      <p className="text-sm text-muted-foreground mt-0.5">
-        {[store.prefecture, store.city, store.genre]
-          .filter(Boolean)
-          .join(" / ") || "—"}
-      </p>
-      <div className="mt-3">
-        <NextActionCta phase={phase} storeId={store.id} />
+      {editing && nameError && (
+        <p id="store_name_error" className="text-xs text-destructive mt-1" role="alert">
+          {nameError}
+        </p>
+      )}
+      <div className="text-base md:text-sm text-muted-foreground mt-0.5 flex items-start flex-wrap gap-x-1">
+        {location && <span>{location}</span>}
+        {location && (store.genre || editing) && <span aria-hidden="true">/</span>}
+        {(store.genre || editing) && (
+          <InlineTitleField
+            id="store_genre"
+            label="業態"
+            value={editing ? form.genre : store.genre}
+            editing={editing}
+            onChange={onText("genre")}
+            disabled={pending}
+          />
+        )}
+        {!location && !store.genre && !editing && <span>—</span>}
       </div>
+      {!editing && (
+        <>
+          {/* 店舗名に営業メモがあるときの案内 (#297)。編集中は入力に集中できるよう、次アクション案内とともに隠す。 */}
+          {nameMemo ? (
+            <StoreNameMemoNotice
+              memo={nameMemo.memo}
+              suggestedName={nameMemo.name}
+              storeId={store.id}
+              onFix={() => {
+                // 保存はしない。インライン入力欄へ候補を入れるだけで、確定は人が行う。
+                setForm({ name: nameMemo.name, genre: store.genre });
+                setNameError(undefined);
+                setEditing(true);
+              }}
+            />
+          ) : null}
+          <div className="mt-3">
+            <NextActionCta phase={phase} storeId={store.id} />
+          </div>
+        </>
+      )}
     </div>
+  );
+}
+
+/**
+ * 店舗名に営業メモが入っているときの案内 (#297)。
+ *
+ * メモの行き先 (失注理由・再アプローチ / 顧客共有メモ) は内容次第なので自動では
+ * 移さない。先に営業記録へ書き写してもらい、店舗名は候補を入れた編集状態で直す。
+ */
+function StoreNameMemoNotice({
+  memo,
+  suggestedName,
+  storeId,
+  onFix,
+}: {
+  memo: string;
+  suggestedName: string;
+  storeId: string;
+  onFix: () => void;
+}) {
+  return (
+    <div
+      role="note"
+      aria-label="店舗名に含まれる営業メモ"
+      className="mt-3 max-w-2xl rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm"
+    >
+      <p>
+        店舗名に営業メモ「<span className="font-semibold">{memo}</span>」が含まれています。
+        検索や AI 調査の屋号照合に混ざるため、
+        <Link
+          href={`/stores/${storeId}?tab=progress`}
+          className="underline underline-offset-2 hover:text-foreground"
+        >
+          営業進捗
+        </Link>
+        の営業記録 (失注理由・再アプローチ) か顧客共有メモへ書き写してから、店舗名を直してください。
+      </p>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="mt-2"
+        onClick={onFix}
+      >
+        <Pencil className="h-3.5 w-3.5" />
+        店舗名を「{suggestedName}」に直す
+      </Button>
+    </div>
+  );
+}
+
+/** 表示と入力で同じ文字寸法を使い、長い値の折り返しにも追従する。 */
+function InlineTitleField({
+  id, label, value, editing, onChange, required, error, disabled, autoFocus,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  editing: boolean;
+  onChange: (event: ChangeEvent<HTMLTextAreaElement>) => void;
+  required?: boolean;
+  error?: string;
+  disabled?: boolean;
+  autoFocus?: boolean;
+}) {
+  return (
+    <span className="relative inline-block min-w-[3ch] max-w-full align-top">
+      {/* 同じフォントのミラーで寸法を保つ。field-sizing 未対応でも位置が変わらない。 */}
+      <span
+        aria-hidden={editing || undefined}
+        className={`block whitespace-pre-wrap break-words ${editing ? "invisible" : ""}`}
+      >
+        {value || label}{value.endsWith("\n") ? " " : ""}
+      </span>
+      {editing && (
+        <textarea
+          id={id}
+          aria-label={label}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={error ? `${id}_error` : undefined}
+          value={value}
+          onChange={onChange}
+          required={required}
+          disabled={disabled}
+          autoFocus={autoFocus}
+          rows={1}
+          placeholder={label}
+          className="absolute inset-0 block h-full w-full resize-none overflow-hidden whitespace-pre-wrap break-words rounded-sm border-0 bg-muted/30 p-0 text-foreground ring-1 ring-input focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 aria-invalid:ring-destructive"
+          style={{ font: "inherit", letterSpacing: "inherit" }}
+        />
+      )}
+    </span>
   );
 }

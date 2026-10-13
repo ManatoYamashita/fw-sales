@@ -81,11 +81,28 @@ describe("A: StoresPage の Suspense 構造", () => {
   });
 
   it("ページ本体で getAllProfiles を await しない (シェルのブロック防止)", () => {
-    // await は Suspense 境界の内側 (ProgressFilterBarSlot) にのみ存在する
-    const body = pageSource.slice(pageSource.indexOf("export default async function StoresPage"));
-    const slot = body.indexOf("async function ProgressFilterBarSlot");
+    // 担当者の取得は Suspense 境界の内側 (ProgressFilterBarSlot) でのみ待機する
+    const body = pageSource.slice(pageSource.indexOf("export default function StoresPage"));
+    const slot = body.indexOf("async function StoresTableSlot");
     expect(slot).toBeGreaterThan(-1);
     expect(body.slice(0, slot)).not.toContain("await getAllProfiles");
+  });
+
+  it("ページは同期シェルを返し、searchParams は一覧用境界の子で読む", () => {
+    const code = stripComments(pageSource);
+    expect(code).toContain("export default function StoresPage");
+    expect(code).not.toContain("export default async function StoresPage");
+    const start = code.indexOf("export default function StoresPage");
+    const slot = code.indexOf("async function StoresTableSlot");
+    expect(start).toBeGreaterThan(-1);
+    expect(slot).toBeGreaterThan(start);
+    const shell = code.slice(start, slot);
+    expect(shell).not.toContain("await");
+    expect(shell).toMatch(/<Suspense fallback=\{<StoresTableFallback \/>\}>\s*<StoresTableSlot searchParams=\{searchParams\} \/>\s*<\/Suspense>/);
+    const child = code.slice(slot, code.indexOf("function StoresTableFallback"));
+    expect(child).toContain("await searchParams");
+    expect(child).toContain("parseFilter(sp)");
+    expect(child).toContain("parseSort(sp)");
   });
 });
 

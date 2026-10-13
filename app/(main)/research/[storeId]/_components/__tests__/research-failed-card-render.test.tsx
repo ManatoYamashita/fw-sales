@@ -49,7 +49,12 @@ const FAILED_RUN: StoreResearchRun = {
 
 function render(): string {
   return renderToStaticMarkup(
-    <ResearchFailedCard run={FAILED_RUN} onRetry={() => {}} retrying={false} />,
+    <ResearchFailedCard
+      run={FAILED_RUN}
+      onRetry={() => {}}
+      retrying={false}
+      unavailableMessage={null}
+    />,
   );
 }
 
@@ -102,5 +107,61 @@ describe("ResearchFailedCard の admin 診断表示(監査指摘 C)", () => {
     const html = render();
     expect(html).not.toContain("診断コード");
     expect(html).not.toContain("retryable_exhausted:rate_limit");
+  });
+});
+
+/**
+ * 原因に合った案内と操作 (#324)。
+ *
+ * 案内文が「管理者に確認」なのに再調査を主ボタンで促す、AI 調査を実行できない環境で
+ * 再調査ボタンを出す、といった食い違いを防ぐ。
+ */
+describe("ResearchFailedCard の案内と操作 (#324)", () => {
+  function renderWith(
+    overrides: Partial<StoreResearchRun>,
+    unavailableMessage: string | null = null,
+  ): string {
+    mockUseIsAdmin.mockReturnValue({ isAdmin: false, loaded: true });
+    return renderToStaticMarkup(
+      <ResearchFailedCard
+        run={{ ...FAILED_RUN, ...overrides }}
+        onRetry={() => {}}
+        retrying={false}
+        unavailableMessage={unavailableMessage}
+      />,
+    );
+  }
+
+  it("一時的な障害は「再調査する」を主ボタンで出す", () => {
+    const html = renderWith({ error_kind: "retryable_exhausted:rate_limit" });
+    expect(html).toContain("再調査する");
+    expect(html).not.toContain("設定の確認後に再調査する");
+  });
+
+  it("実行基盤で開始直後に失敗した run は「開始できませんでした」と次の操作を示し、再調査できる", () => {
+    const html = renderWith({ error_kind: "workflow_run_failed", stage: null });
+    expect(html).toContain("調査を開始できませんでした。");
+    expect(html).toContain("繰り返し起きる場合は管理者に確認してください。");
+    expect(html).toContain("再調査する");
+  });
+
+  it("設定の不備は管理者への確認を案内し、再調査は主ボタンにしない", () => {
+    const html = renderWith({ error_kind: "fatal:auth_error" });
+    expect(html).toContain("管理者にご確認ください");
+    expect(html).toContain("設定の確認後に再調査する");
+  });
+
+  it("AI 調査を実行できない環境では、再調査ボタンを出さずに理由を示す", () => {
+    const reason = "この検証環境ではAI調査を実行できません。店舗情報の入力や画面の確認はできます。";
+    const html = renderWith({ error_kind: "retryable_exhausted:rate_limit" }, reason);
+    expect(html).toContain(reason);
+    expect(html).not.toContain("再調査する");
+    // 原因別の「時間をおいて再調査してください」も出さない (理由と食い違うため)
+    expect(html).not.toContain("再調査してください");
+    expect(html).not.toContain("<button");
+  });
+
+  it("失敗の案内は支援技術にも通知する (role=alert)", () => {
+    expect(renderWith({})).toContain('role="alert"');
   });
 });

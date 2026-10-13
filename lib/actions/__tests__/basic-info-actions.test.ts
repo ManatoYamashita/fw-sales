@@ -10,6 +10,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { BasicInfo } from "@/types/basic-info";
 
 vi.mock("server-only", () => ({}));
 
@@ -20,6 +21,7 @@ const {
   mockMergeBasicInfoRepo,
   mockTransaction,
   mockRevalidateTag,
+  mockUpdateTag,
 } = vi.hoisted(() => ({
   mockStoreGet: vi.fn(),
   mockStoreGetForUpdate: vi.fn(),
@@ -27,6 +29,7 @@ const {
   mockMergeBasicInfoRepo: vi.fn(),
   mockTransaction: vi.fn(),
   mockRevalidateTag: vi.fn(),
+  mockUpdateTag: vi.fn(),
 }));
 
 vi.mock("@/lib/repositories", () => ({
@@ -54,9 +57,11 @@ mockTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>)
   }),
 );
 
-vi.mock("next/cache", () => ({ revalidateTag: mockRevalidateTag }));
+vi.mock("next/cache", () => ({ revalidateTag: mockRevalidateTag, updateTag: mockUpdateTag }));
 
 const { updateBasicInfoFieldAction } = await import("../basic-info-actions");
+const { CACHE_TAGS } = await import("@/lib/cache");
+const { classifyBasicInfoTrust } = await import("@/lib/domain/basic-info-trust");
 
 beforeEach(() => {
   mockStoreGet.mockReset();
@@ -64,6 +69,7 @@ beforeEach(() => {
   mockStoreUpdate.mockReset();
   mockMergeBasicInfoRepo.mockReset();
   mockRevalidateTag.mockReset();
+  mockUpdateTag.mockReset();
   // `mockReset` だと `mockImplementation`(tx スコープの生成)まで消えるため clear のみ。
   mockTransaction.mockClear();
   mockStoreGetForUpdate.mockResolvedValue({ id: "store-1", basic_info: {} });
@@ -136,5 +142,46 @@ describe("updateBasicInfoFieldAction — 行ロック(承認レビュー指摘5)
     const result = await updateBasicInfoFieldAction("store-1", "concept", "x");
     expect(result.ok).toBe(false);
     expect(mockStoreUpdate).not.toHaveBeenCalled();
+  });
+});
+
+describe("updateBasicInfoFieldAction — 店舗詳細のインライン編集 (#335)", () => {
+  it("保存直後の再取得で新しい値を読めるよう、店舗詳細・一覧のタグを即時失効する", async () => {
+    const result = await updateBasicInfoFieldAction("store-1", "concept", "東北の郷土料理");
+    expect(result.ok).toBe(true);
+    expect(mockUpdateTag).toHaveBeenCalledWith(CACHE_TAGS.store("store-1"));
+    expect(mockUpdateTag).toHaveBeenCalledWith(CACHE_TAGS.stores);
+    // stale-while-revalidate だと旧値が返り、入力済み件数や信頼度が古いまま残る。
+    const swrTags = mockRevalidateTag.mock.calls.map(([tag]) => tag);
+    expect(swrTags).not.toContain(CACHE_TAGS.store("store-1"));
+    expect(swrTags).not.toContain(CACHE_TAGS.stores);
+  });
+
+  it("AI 調査から採用した値を手で直すと、元の確信度・出典を引き継がない", async () => {
+    mockStoreGetForUpdate.mockResolvedValue({
+      id: "store-1",
+      basic_info: {
+        concept: {
+          value: "炭火と地酒",
+          tier: "B",
+          confidence: 92,
+          source_urls: ["https://example.com/about"],
+          source_quote: "炭火と地酒の店",
+          filled_by: "manual",
+          updated_at: "2026-10-01T00:00:00.000Z",
+        },
+      },
+    });
+
+    await updateBasicInfoFieldAction("store-1", "concept", "炭火と日本酒");
+
+    const patch = mockStoreUpdate.mock.calls[0]![1] as { basic_info: BasicInfo };
+    const saved = patch.basic_info.concept!;
+    expect(saved.value).toBe("炭火と日本酒");
+    expect(saved.confidence).toBeUndefined();
+    expect(saved.source_urls).toBeUndefined();
+    expect(saved.source_quote).toBeUndefined();
+    // 画面の信頼度は「未評価」になり、元の 92 (緑) を付け直さない。
+    expect(classifyBasicInfoTrust(saved)).toEqual({ kind: "unrated" });
   });
 });

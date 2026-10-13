@@ -1131,18 +1131,30 @@ export function validateResearchItemStatus(
  *
  * 純関数。入力を変更しない。
  */
-const DOWNGRADE_REASON_ACQUISITION =
-  "AIはconfirmedと判定しましたが、根拠となる情報源の本文を取得できなかったため自動的に格下げしました。";
-const DOWNGRADE_REASON_IDENTITY_TARGET =
-  "AIはconfirmedと判定しましたが、引用された情報源が対象店舗のページであることを確認できなかったため自動的に格下げしました。";
-const DOWNGRADE_REASON_IDENTITY_COMPETITOR =
-  "AIはconfirmedと判定しましたが、引用された情報源を競合店舗の情報源として確認できなかったため自動的に格下げしました。";
-const DOWNGRADE_REASON_IDENTITY_CONTEXTUAL =
-  "AIはconfirmedと判定しましたが、引用された情報源を対象店舗または商圏・市場の情報源として確認できなかったため自動的に格下げしました。";
-const DOWNGRADE_REASON_SOURCE_ELIGIBILITY =
-  "AIはconfirmedと判定しましたが、確認済みとして扱うために必要な情報源の条件を満たさなかったため自動的に格下げしました。";
-const DOWNGRADE_REASON_PRIMARY_SOURCE =
-  "AIはconfirmedと判定しましたが、本人発信の一次情報として確認できなかったため自動的に格下げしました。";
+export const DOWNGRADE_REASON_ACQUISITION =
+  "根拠のページを読み込めなかったため、確認済みにはしていません。";
+export const DOWNGRADE_REASON_IDENTITY_TARGET =
+  "根拠のページがこの店舗のものだと確かめられなかったため、確認済みにはしていません。";
+export const DOWNGRADE_REASON_IDENTITY_COMPETITOR =
+  "根拠のページが競合店のものだと確かめられなかったため、確認済みにはしていません。";
+export const DOWNGRADE_REASON_IDENTITY_CONTEXTUAL =
+  "根拠のページがこの店舗や周辺の市場に関するものだと確かめられなかったため、確認済みにはしていません。";
+export const DOWNGRADE_REASON_SOURCE_ELIGIBILITY =
+  "根拠として使える種類の情報源が無かったため、確認済みにはしていません。";
+export const DOWNGRADE_REASON_PRIMARY_SOURCE =
+  "店舗自身の発信(公式サイト・公式SNS)で確かめられなかったため、確認済みにはしていません。";
+
+/**
+ * 電話番号の自己整合性チェック(`lib/ai/research/phone-evidence.ts`)が付ける降格理由。
+ *
+ * 判定ロジックは phone-evidence 側にあるが、文言は本ファイルに置く。phone-evidence は
+ * `server-only` の `identity-match` に依存しており、調査レビュー画面(Client Component)が
+ * 注記を利用者向けに分類する `lib/domain/research-item-notes.ts` から import できないため。
+ */
+export const PHONE_UNBACKED_WARNING =
+  "電話番号の一部が根拠の文中に見当たらないため、確認済みにはしていません。";
+export const PHONE_NOT_A_NUMBER_WARNING =
+  "電話番号として読み取れる値が無かったため、確認済みにはしていません。";
 
 /**
  * 層2(identity failure)の文言を item key に応じて選ぶ
@@ -1214,10 +1226,14 @@ export function deriveDowngradeReason(
 /*  conflict candidate の trust boundary (PR #180 BLOCKER 2)             */
 /* ------------------------------------------------------------------ */
 
-const UNTRUSTED_CANDIDATE_SOURCE_NOTE =
-  "対象店舗のページとして確認できない情報源のみに依拠した候補を除外しました。";
-const UNBACKED_CANDIDATE_EVIDENCE_NOTE =
-  "根拠(evidence)に現れない値を含む候補を除外しました。";
+export const UNTRUSTED_CANDIDATE_SOURCE_NOTE =
+  "この店舗のページだと確かめられない情報源だけに基づく候補を外しました。";
+export const UNBACKED_CANDIDATE_EVIDENCE_NOTE =
+  "根拠の文中に見当たらない値を含む候補を外しました。";
+/** 絞り込みの結果、候補が 1 件も残らなかったとき(項目は確認できず等へ下がる)。 */
+export const NO_CANDIDATE_LEFT_NOTE = "提示できる候補が残りませんでした。";
+/** 絞り込みの結果、残った候補の値が 1 種類だったとき(競合ではなくなる)。 */
+export const SINGLE_CANDIDATE_LEFT_NOTE = "残った候補が1つだったため、その値を調査の値にしました。";
 
 /**
  * conflict の各 candidate を、その item key の confirmed 根拠として使える source だけで
@@ -1312,7 +1328,7 @@ export function validateConflictCandidateTrust(
       status: fallback,
       warning: appendWarning(
         item.warning,
-        `${dropNote} 提示できる候補が残らなかったため${fallback}へ補正しました。`.trim(),
+        `${dropNote} ${NO_CANDIDATE_LEFT_NOTE}`.trim(),
       ),
     };
   }
@@ -1337,7 +1353,7 @@ export function validateConflictCandidateTrust(
       candidates: undefined,
       warning: appendWarning(
         item.warning,
-        `${dropNote} 残った候補が1つだったため競合を解消しました。`.trim(),
+        `${dropNote} ${SINGLE_CANDIDATE_LEFT_NOTE}`.trim(),
       ),
     };
   }
@@ -1642,6 +1658,9 @@ export function pruneUnverifiedSourceIds(
  */
 const EVIDENCE_SOURCE_ID_PATTERN = /\bS\d{2,3}\b/g;
 
+export const SOURCE_MARKER_MISMATCH_NOTE =
+  "根拠の文中で参照している情報源が、この項目の出典と一致しない可能性があります。";
+
 export function flagEvidenceSourceIdMismatch(item: ResearchItem): ResearchItem {
   if (!item.evidence) return item;
   const mentioned = item.evidence.match(EVIDENCE_SOURCE_ID_PATTERN);
@@ -1651,10 +1670,7 @@ export function flagEvidenceSourceIdMismatch(item: ResearchItem): ResearchItem {
   if (!hasStaleReference) return item;
   return {
     ...item,
-    warning: appendWarning(
-      item.warning,
-      "evidence内の出典表記がsource_idsと一致しない可能性があります。",
-    ),
+    warning: appendWarning(item.warning, SOURCE_MARKER_MISMATCH_NOTE),
   };
 }
 

@@ -31,6 +31,108 @@ async function ensureE2eProfile(localEnv, e2eConfig) {
   await sql.end();
 }
 
+// 通知ベルの既読化 E2E (#296) 用の固定データ。毎回作り直して冪等にする。
+// 参照先店舗の有無・リンク無し・既読済みの各ケースを 1 件ずつ用意する。
+const E2E_NOTIFICATIONS = [
+  {
+    id: "notif_e2e_alive",
+    title: "E2E: 導楽の調査が完了しました",
+    link_url: "/stores/store_001",
+    read_at: null,
+  },
+  {
+    id: "notif_e2e_dead",
+    title: "E2E: 削除済み店舗の通知",
+    link_url: "/stores/store_e2e_deleted#deep-research",
+    read_at: null,
+  },
+  {
+    id: "notif_e2e_nolink",
+    title: "E2E: リンクの無い通知",
+    link_url: null,
+    read_at: null,
+  },
+  {
+    id: "notif_e2e_read",
+    title: "E2E: 既読の通知",
+    link_url: null,
+    read_at: "2026-10-01",
+  },
+];
+
+async function ensureE2eNotifications(localEnv) {
+  const sql = postgres(localEnv.DATABASE_URL, { prepare: false, max: 1 });
+  await sql`DELETE FROM notifications WHERE user_id = ${E2E_TEST_USER_ID}`;
+  for (const [index, n] of E2E_NOTIFICATIONS.entries()) {
+    // 並び順 (created_at DESC) を固定するため、配列順に新しい日付を振る。
+    const createdAt = `2026-10-0${7 - index}`;
+    await sql`
+      INSERT INTO notifications (id, user_id, kind, title, body, link_url, read_at, created_at, updated_at)
+      VALUES (${n.id}, ${E2E_TEST_USER_ID}, ${"research_job_completed"}, ${n.title}, ${"E2E 用の通知です"}, ${n.link_url}, ${n.read_at}, ${createdAt}, ${createdAt})
+    `;
+  }
+  await sql.end();
+}
+
+// 調査レビューの E2E (#337) 用の、レビュー待ちの調査結果。毎回作り直して冪等にする。
+// 判断は一度記録すると変えられない (recordReviewDecisionAction) ので、E2E を流すたびに
+// 未判断へ戻す。ほかの spec が使わない store_005 に置く。
+// どの項目も個別に判断する欄 (individual / choose) に入るよう、基本情報が空の店舗に
+// 推測 (inferred) と競合 (conflict) だけを置く。
+const E2E_RESEARCH_RUN_ID = "run_e2e_review_pending";
+const E2E_RESEARCH_STORE_ID = "store_005";
+const E2E_RESEARCH_ITEMS = [
+  {
+    key: "phone",
+    research_policy: "FACT",
+    status: "inferred",
+    value: "03-0000-0001",
+    evidence: "E2E 用の推測値です。",
+    source_ids: [],
+  },
+  {
+    key: "business_hours_holidays",
+    research_policy: "FACT",
+    status: "conflict",
+    value: null,
+    evidence: "E2E 用の競合です。",
+    source_ids: [],
+    candidates: [
+      { candidate_id: "cand_a", label: "公式サイト", value: "11:30-22:00 / 月曜定休", evidence: "E2E 候補A", source_ids: [] },
+      { candidate_id: "cand_b", label: "Google Places", value: "11:00-23:00 / 無休", evidence: "E2E 候補B", source_ids: [] },
+    ],
+  },
+  {
+    key: "seat_count",
+    research_policy: "FACT",
+    status: "inferred",
+    value: "20席",
+    evidence: "E2E 用の推測値です。",
+    source_ids: [],
+  },
+];
+
+async function ensureE2eResearchRun(localEnv) {
+  const sql = postgres(localEnv.DATABASE_URL, { prepare: false, max: 1 });
+  await sql`DELETE FROM store_research_runs WHERE store_id = ${E2E_RESEARCH_STORE_ID}`;
+  // 採用した値が残っていると「上書き」の言い換えに変わるので、基本情報も空に戻す。
+  await sql`UPDATE stores SET basic_info = '{}'::jsonb WHERE id = ${E2E_RESEARCH_STORE_ID}`;
+  const now = new Date();
+  const startedAt = new Date(now.getTime() - 10 * 60 * 1000).toISOString();
+  await sql`
+    INSERT INTO store_research_runs (
+      id, store_id, requested_by_user_id, status, stage, result, source_registry,
+      review_decisions, review_completed_at, warnings, started_at, expires_at, finished_at
+    )
+    VALUES (
+      ${E2E_RESEARCH_RUN_ID}, ${E2E_RESEARCH_STORE_ID}, ${null}, ${"succeeded"}, ${"done"},
+      ${JSON.stringify(E2E_RESEARCH_ITEMS)}::jsonb, ${"[]"}::jsonb, ${"{}"}::jsonb, ${null},
+      ${"[]"}::jsonb, ${startedAt}, ${now.toISOString()}, ${now.toISOString()}
+    )
+  `;
+  await sql.end();
+}
+
 async function ensureE2eAuthSchema(localEnv) {
   const sql = postgres(localEnv.DATABASE_URL, { prepare: false, max: 1 });
   await sql`CREATE SCHEMA IF NOT EXISTS auth`;
@@ -55,6 +157,8 @@ async function main() {
   runPnpm(["db:migrate"], appEnv);
   runPnpm(["seed"], appEnv);
   await ensureE2eProfile(localEnv, e2eConfig);
+  await ensureE2eNotifications(localEnv);
+  await ensureE2eResearchRun(localEnv);
 
   console.log(`[e2e] local environment is ready: ${e2eConfig.baseUrl}`);
   console.log(`[e2e] test user: ${e2eConfig.email}`);

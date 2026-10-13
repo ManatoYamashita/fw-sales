@@ -1,10 +1,12 @@
 "use client";
 
-import { useTransition, type ChangeEvent } from "react";
+import { useOptimistic, useTransition } from "react";
 import { Select } from "@/components/ui/select";
+import { runAction } from "@/lib/client/run-action";
 import { updateStoreStageAction } from "@/lib/actions/store-actions";
 import { STAGES, type StageId } from "@/types/stage";
-import { toast } from "@/components/ui/toast";
+
+const STAGE_OPTIONS = STAGES.map((s) => ({ value: s.id, label: s.label }));
 
 export interface StageInlineSelectProps {
   storeId: string;
@@ -16,34 +18,29 @@ export function StageInlineSelect({
   current,
 }: StageInlineSelectProps) {
   const [pending, startTransition] = useTransition();
+  // 保存が終わるまで選んだ段階を表示する。失敗すれば遷移の終了とともに元の段階へ戻る。
+  const [shown, setShown] = useOptimistic(current);
 
-  const handleChange = (e: ChangeEvent<HTMLSelectElement>) => {
-    const next = e.target.value as StageId;
+  const handleChange = (value: string) => {
+    const next = value as StageId;
     if (next === current) return;
     startTransition(async () => {
-      const result = await updateStoreStageAction(storeId, next);
-      if (result.ok) {
-        toast.success(result.message ?? "更新しました");
-      } else {
-        toast.error(result.error);
-      }
+      setShown(next);
+      await runAction(() => updateStoreStageAction(storeId, next), {
+        success: "更新しました",
+      });
     });
   };
 
   return (
     <Select
       width="auto"
-      value={current}
-      onChange={handleChange}
+      options={STAGE_OPTIONS}
+      value={shown}
+      onValueChange={handleChange}
       disabled={pending}
-      aria-label="状態"
+      aria-label="調査段階"
       className="min-w-32"
-    >
-      {STAGES.map((s) => (
-        <option key={s.id} value={s.id}>
-          {s.label}
-        </option>
-      ))}
-    </Select>
+    />
   );
 }

@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import type { Metadata } from "next";
 import { KanbanBoard } from "./_components/kanban-board";
 import { PipelineFilters } from "./_components/pipeline-filters";
-import { Spinner } from "@/components/ui/spinner";
+import { KanbanSkeleton } from "@/components/ui/skeleton";
 import type { StoreFilter } from "@/types/store";
 import { getAllProfiles } from "@/lib/queries/profiles";
 
@@ -40,11 +40,7 @@ export default async function PipelinePage({ searchParams }: PageProps) {
       <PipelineFilters profiles={profiles} />
       <Suspense
         key={JSON.stringify(filter)}
-        fallback={
-          <div className="flex items-center justify-center py-16 text-muted-foreground gap-2">
-            <Spinner /> 読み込み中…
-          </div>
-        }
+        fallback={<KanbanSkeleton />}
       >
         <KanbanBoard filter={filter} />
       </Suspense>

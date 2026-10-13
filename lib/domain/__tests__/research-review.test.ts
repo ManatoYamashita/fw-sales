@@ -2,10 +2,15 @@ import { describe, expect, it } from "vitest";
 import {
   buildAdoptedBasicInfoField,
   classifyResearchQueue,
-  formatReviewProgressLabel,
   getReviewableItems,
   getUndecidedReviewableItems,
-  summarizeUndecided,
+  classifyAdoptionEffect,
+  describeBasicInfoOrigin,
+  EDITED_SOURCE_QUOTE,
+  isEditedAdoption,
+  normalizeBasicInfoValue,
+  planReviewLanes,
+  summarizeReviewPlan,
   isReviewableItem,
   isReviewFullyDecided,
   isRunStuck,
@@ -20,6 +25,7 @@ import type {
   StoreResearchRun,
 } from "@/types/research-run";
 import type { Store } from "@/types/store";
+import type { BasicInfo, BasicInfoField } from "@/types/basic-info";
 
 function makeStore(overrides: Partial<Store>): Store {
   return {
@@ -115,28 +121,6 @@ function makeRun(overrides: Partial<StoreResearchRun> = {}): StoreResearchRun {
     ...overrides,
   };
 }
-
-describe("formatReviewProgressLabel", () => {
-  it("not_foundが多いrunでも実際の除外件数を正しく表示する(バグ修正の回帰テスト、fix/ai-research-poc-like-retrieval)", () => {
-    const label = formatReviewProgressLabel(53, 0, 0);
-    expect(label).toContain("0 / 0 件");
-    expect(label).toContain("計53件はレビュー対象外");
-    expect(label).toContain("確認できず");
-    expect(label).toContain("ヒアリング必要");
-    expect(label).toContain("外部データ必要");
-  });
-
-  it("通常runの件数表示が正しい", () => {
-    const label = formatReviewProgressLabel(53, 36, 10);
-    expect(label).toContain("10 / 36 件");
-    expect(label).toContain("計17件はレビュー対象外");
-  });
-
-  it("旧文言の誤り(ヒアリング必要・外部データ必要のみ列挙)を含まない", () => {
-    const label = formatReviewProgressLabel(53, 0, 0);
-    expect(label).not.toBe("レビュー進捗: 0 / 0 件 (ヒアリング必要・外部データ必要 計53件は対象外)");
-  });
-});
 
 describe("isReviewableItem / getReviewableItems", () => {
   it.each(["confirmed", "inferred", "conflict"] as const)("%s は reviewable", (status) => {
@@ -279,6 +263,42 @@ describe("resolveSourceUrls", () => {
 
   it("registryに存在しないidは無視する", () => {
     expect(resolveSourceUrls(["S99"], registry)).toEqual([]);
+  });
+});
+
+describe("isEditedAdoption (#320)", () => {
+  const conflict = makeItem({
+    status: "conflict",
+    value: null,
+    candidates: [
+      { candidate_id: "c1", label: "候補A", value: "17:00〜24:00", evidence: "e1", source_ids: [] },
+      { candidate_id: "c2", label: "候補B", value: "18:00〜23:00", evidence: "e2", source_ids: [] },
+    ],
+  });
+
+  it("editedValue が無ければ編集していない", () => {
+    expect(isEditedAdoption(makeItem({}))).toBe(false);
+  });
+
+  it("調査の値と同じ editedValue は編集とみなさない(根拠を引き継ぐ側と同じ判定)", () => {
+    expect(isEditedAdoption(makeItem({}), { editedValue: "17:00〜24:00" })).toBe(false);
+  });
+
+  it("調査の値と異なる editedValue は編集とみなす", () => {
+    expect(isEditedAdoption(makeItem({}), { editedValue: "10:00〜18:00" })).toBe(true);
+  });
+
+  it("競合は選んだ候補の値と比べる", () => {
+    expect(isEditedAdoption(conflict, { selectedCandidateId: "c2", editedValue: "18:00〜23:00" })).toBe(false);
+    expect(isEditedAdoption(conflict, { selectedCandidateId: "c1", editedValue: "18:00〜23:00" })).toBe(true);
+  });
+
+  it("buildAdoptedBasicInfoField の出典の扱いと一致する", () => {
+    const registry = [makeSource({ id: "S01" })];
+    for (const editedValue of [undefined, "17:00〜24:00", "10:00〜18:00"]) {
+      const field = buildAdoptedBasicInfoField(makeItem({}), registry, "2026-10-10T00:00:00.000Z", { editedValue });
+      expect(field.source_quote === EDITED_SOURCE_QUOTE).toBe(isEditedAdoption(makeItem({}), { editedValue }));
+    }
   });
 });
 
@@ -451,77 +471,172 @@ describe("classifyResearchQueue", () => {
   });
 });
 
-/**
- * Primary CTA の内訳表示(feat/ai-research-quality-ux-hardening、Plan §12.1.1)。
- *
- * 「残りを採用して調査完了」で**何が採用されるか**をユーザーが押す前に見えるようにする。
- * `conflict` は Primary の採用対象ではないため内訳に混ぜず、別枠で数える。
- */
-describe("summarizeUndecided", () => {
-  const item = (key: string, status: ResearchItem["status"]): ResearchItem => ({
-    key,
-    research_policy: "FACT",
-    status,
-    value: "v",
-    evidence: "e",
-    source_ids: [],
+/* ------------------------------------------------------------------ */
+/*  採用した場合の結果と振り分け (#301, #319)                            */
+/* ------------------------------------------------------------------ */
+
+/** 調査結果から採用した値(`buildAdoptedBasicInfoField` が根拠を source_quote に入れる)。 */
+function adoptedField(value: string): BasicInfoField {
+  return {
+    value,
+    tier: "A",
+    source_quote: "公式サイトに明記",
+    filled_by: "manual",
+    updated_at: "2026-09-01T00:00:00.000Z",
+  };
+}
+
+/** 店舗詳細で人が入力した値(`updateBasicInfoFieldAction` は source_quote を持たない)。 */
+function typedField(value: string): BasicInfoField {
+  return { value, tier: "A", filled_by: "manual", updated_at: "2026-09-01T00:00:00.000Z" };
+}
+
+describe("normalizeBasicInfoValue", () => {
+  it("全角英数・全角空白・連続空白・前後の空白の違いは同じ値にする", () => {
+    expect(normalizeBasicInfoValue("　１７：００〜２４：００  ")).toBe(normalizeBasicInfoValue("17:00〜24:00"));
+    expect(normalizeBasicInfoValue("居酒屋  焼き鳥")).toBe("居酒屋 焼き鳥");
   });
 
-  it("未判断のconfirmed / inferred / conflict を status別に数える", () => {
+  it("言い換えや情報の欠落は同じ値にしない(#319 の本番例)", () => {
+    expect(normalizeBasicInfoValue("居酒屋、燻製料理、焼き鳥")).not.toBe(
+      normalizeBasicInfoValue("居酒屋、焼き鳥、燻製"),
+    );
+    expect(normalizeBasicInfoValue("〒231-0007 神奈川県横浜市中区弁天通2-28")).not.toBe(
+      normalizeBasicInfoValue("神奈川県横浜市中区弁天通2-28"),
+    );
+  });
+});
+
+describe("describeBasicInfoOrigin", () => {
+  it("Places / 手入力 / 調査から採用 を区別する", () => {
+    expect(describeBasicInfoOrigin({ ...typedField("v"), filled_by: "places" })).toBe("places");
+    expect(describeBasicInfoOrigin(typedField("v"))).toBe("typed");
+    expect(describeBasicInfoOrigin(adoptedField("v"))).toBe("adopted");
+  });
+
+  it("「編集して採用」で人が書き換えた値は手入力として扱う", () => {
+    expect(describeBasicInfoOrigin({ ...adoptedField("v"), source_quote: EDITED_SOURCE_QUOTE })).toBe(
+      "typed",
+    );
+  });
+});
+
+describe("classifyAdoptionEffect", () => {
+  it("いまの値が無い・空なら新規", () => {
+    expect(classifyAdoptionEffect(undefined, "20席")).toEqual({ kind: "new" });
+    expect(classifyAdoptionEffect({ ...typedField(""), value: null }, "20席")).toEqual({ kind: "new" });
+    expect(classifyAdoptionEffect(typedField("  "), "20席")).toEqual({ kind: "new" });
+  });
+
+  it("正規化して一致すれば変更なし", () => {
+    expect(classifyAdoptionEffect(adoptedField("17:00〜24:00"), "１７:００〜２４:００ ")).toEqual({
+      kind: "same",
+    });
+  });
+
+  it("異なれば上書き。いまの値と出どころを返す", () => {
+    expect(
+      classifyAdoptionEffect(adoptedField("リーズナブル帯（2,000円〜3,000円）"), "3,000円〜4,000円"),
+    ).toEqual({ kind: "overwrite", currentValue: "リーズナブル帯（2,000円〜3,000円）", origin: "adopted" });
+  });
+
+  it("手入力の値を上書きする場合は、出どころが手入力になる", () => {
+    expect(classifyAdoptionEffect(typedField("居酒屋、燻製料理、焼き鳥"), "居酒屋、焼き鳥、燻製")).toEqual({
+      kind: "overwrite",
+      currentValue: "居酒屋、燻製料理、焼き鳥",
+      origin: "typed",
+    });
+  });
+});
+
+describe("planReviewLanes", () => {
+  const confirmed = (key: string, value: string, overrides: Partial<ResearchItem> = {}) =>
+    makeItem({ key, value, status: "confirmed", ...overrides });
+  const inferred = (key: string, value: string) => makeItem({ key, value, status: "inferred" });
+
+  it("注記の無い確認済みの新規はまとめて採用、推定の新規は 1 件ずつ", () => {
+    const plan = planReviewLanes([confirmed("a", "1"), inferred("b", "2")], {}, {});
+    expect(plan.map((e) => [e.item.key, e.lane, e.reason])).toEqual([
+      ["a", "bulk", "new"],
+      ["b", "individual", "inferred"],
+    ]);
+  });
+
+  it("同じ値は推定でもまとめて採用(採用しても基本情報が変わらない)", () => {
+    const basicInfo: BasicInfo = { a: adoptedField("1"), b: adoptedField("2") };
+    const plan = planReviewLanes([confirmed("a", "1"), inferred("b", "2")], {}, basicInfo);
+    expect(plan.map((e) => [e.lane, e.reason])).toEqual([
+      ["bulk", "same"],
+      ["bulk", "same"],
+    ]);
+  });
+
+  it("上書きになる値は確認済みでも 1 件ずつ(#319)", () => {
+    const plan = planReviewLanes([confirmed("a", "新しい値")], {}, { a: adoptedField("いまの値") });
+    expect(plan[0]).toMatchObject({ lane: "individual", reason: "overwrite" });
+    expect(plan[0]!.effect).toEqual({ kind: "overwrite", currentValue: "いまの値", origin: "adopted" });
+  });
+
+  it("AI の注記が付いた確認済みは 1 件ずつ(#301 の電話番号)", () => {
+    const plan = planReviewLanes(
+      [confirmed("phone", "045-305-6536", { warning: "情報源間で電話番号の末尾表記に不一致があります。" })],
+      {},
+      {},
+    );
+    expect(plan[0]).toMatchObject({ lane: "individual", reason: "noted" });
+  });
+
+  it("競合は候補を選ぶ(effect は候補ごとに変わるので null)", () => {
+    const plan = planReviewLanes([makeItem({ key: "a", status: "conflict", value: null })], {}, {});
+    expect(plan[0]).toMatchObject({ lane: "choose", reason: "conflict", effect: null });
+  });
+
+  it("判断済みとレビュー対象外は含めない", () => {
+    const items = [confirmed("a", "1"), confirmed("b", "2"), makeItem({ key: "c", status: "not_found", value: null })];
+    const decisions: ReviewDecisions = { a: { decision: "rejected", decided_at: "2026-10-10T00:00:00.000Z" } };
+    expect(planReviewLanes(items, decisions, {}).map((e) => e.item.key)).toEqual(["b"]);
+  });
+});
+
+describe("summarizeReviewPlan", () => {
+  it("#319 の本番の形(新規 1・同値 5・上書き 25)では、主ボタンが上書きを含まない", () => {
+    const items: ResearchItem[] = [];
+    const basicInfo: BasicInfo = {};
+    items.push(makeItem({ key: "n0", value: "新" }));
+    for (let i = 0; i < 5; i++) {
+      items.push(makeItem({ key: `s${i}`, value: `同${i}` }));
+      basicInfo[`s${i}`] = adoptedField(`同${i}`);
+    }
+    for (let i = 0; i < 25; i++) {
+      items.push(makeItem({ key: `o${i}`, value: `新${i}` }));
+      basicInfo[`o${i}`] = adoptedField(`旧${i}`);
+    }
+
+    const summary = summarizeReviewPlan(planReviewLanes(items, {}, basicInfo));
+
+    expect(summary.total).toBe(31);
+    expect(summary.bulk).toEqual({ new: 1, same: 5 });
+    expect(summary.bulkKeys).toHaveLength(6);
+    expect(summary.bulkKeys.some((key) => key.startsWith("o"))).toBe(false);
+    expect(summary.individual.overwrite).toBe(25);
+    expect(summary.remainingKeys).toHaveLength(25);
+  });
+
+  it("理由ごとに数え、残りの key は項目の順を保つ", () => {
     const items = [
-      item("a", "confirmed"),
-      item("b", "confirmed"),
-      item("c", "inferred"),
-      item("d", "conflict"),
-      item("e", "not_found"),
-      item("f", "hearing_required"),
+      makeItem({ key: "x", status: "inferred", value: "1" }),
+      makeItem({ key: "y", status: "conflict", value: null }),
+      makeItem({ key: "z", warning: "表記差があります。" }),
     ];
-    expect(summarizeUndecided(items, {})).toEqual({
-      confirmed: 2,
-      inferred: 1,
-      conflict: 1,
-      adoptable: 3,
-      total: 4,
-    });
+    const summary = summarizeReviewPlan(planReviewLanes(items, {}, {}));
+    expect(summary.individual).toEqual({ overwrite: 0, noted: 1, inferred: 1, registered: 0 });
+    expect(summary.choose).toBe(1);
+    expect(summary.remainingKeys).toEqual(["x", "y", "z"]);
+    expect(summary.bulkKeys).toEqual([]);
   });
 
-  it("判断済みの項目は数えない", () => {
-    const items = [item("a", "confirmed"), item("b", "inferred")];
-    const decisions = { a: { decision: "adopted" as const, decided_at: "2026-08-12T00:00:00.000Z" } };
-    expect(summarizeUndecided(items, decisions)).toEqual({
-      confirmed: 0,
-      inferred: 1,
-      conflict: 0,
-      adoptable: 1,
-      total: 1,
-    });
-  });
-
-  it("adoptableにconflictを含めない(Primaryで自動採用しないため)", () => {
-    const items = [item("a", "conflict"), item("b", "conflict")];
-    const summary = summarizeUndecided(items, {});
-    expect(summary.adoptable).toBe(0);
-    expect(summary.conflict).toBe(2);
-    expect(summary.total).toBe(2);
-  });
-
-  it("reviewableでない項目(not_found等)は一切数えない", () => {
-    const items = [
-      item("a", "not_found"),
-      item("b", "hearing_required"),
-      item("c", "external_data_required"),
-    ];
-    expect(summarizeUndecided(items, {})).toEqual({
-      confirmed: 0,
-      inferred: 0,
-      conflict: 0,
-      adoptable: 0,
-      total: 0,
-    });
-  });
-
-  it("空配列でも安全に0を返す", () => {
-    expect(summarizeUndecided([], {}).total).toBe(0);
+  it("空なら 0", () => {
+    expect(summarizeReviewPlan([])).toMatchObject({ total: 0, bulkKeys: [], remainingKeys: [], choose: 0 });
   });
 });
 

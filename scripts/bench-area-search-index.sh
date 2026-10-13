@@ -221,7 +221,7 @@ SQL
 
 # `pnpm db:migrate` は --env-file-if-exists=.env.local を含み本番 URL を読むため使わない。
 echo "==> migration チェーンを適用"
-DATABASE_URL="$BENCH_DATABASE_URL" node ./node_modules/drizzle-kit/bin.cjs migrate
+APP_ENV=local DATABASE_URL="$BENCH_DATABASE_URL" node ./node_modules/drizzle-kit/bin.cjs migrate
 
 echo "==> ベンチ実行"
 echo ""

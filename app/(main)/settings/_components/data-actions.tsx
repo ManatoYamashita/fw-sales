@@ -3,18 +3,28 @@
 import { useTransition, type ChangeEvent } from "react";
 import { Download, Upload, RotateCcw, Trash2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
+import { Text } from "@/components/ui/typography";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalContent, ModalFooter } from "@/components/ui/modal";
 import { useState } from "react";
+import { runAction } from "@/lib/client/run-action";
 import {
   clearAllAction,
   importJsonAction,
   resetToSeedAction,
 } from "@/lib/actions/data-actions";
-import { toast } from "@/components/ui/toast";
 import { useIsAdmin } from "@/components/layout/current-user-provider";
 
-export function DataActions() {
+/**
+ * @param dataResetAllowed シードリセット / 全削除を出すか (#298)。
+ *   page.tsx が `isDataResetAllowed()` で判定して渡す。本番では false になり両ボタンを描画しない。
+ *   真の防御はサーバ側 (`lib/actions/data-actions.ts`) で、ここは誤操作の入口を消すだけ。
+ */
+export function DataActions({
+  dataResetAllowed,
+}: {
+  dataResetAllowed: boolean;
+}) {
   const [resetOpen, setResetOpen] = useState(false);
   const [clearOpen, setClearOpen] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -26,18 +36,20 @@ export function DataActions() {
 
   const reset = () => {
     startTransition(async () => {
-      const r = await resetToSeedAction();
-      if (r.ok) toast.success(r.message ?? "リセットしました");
-      else toast.error(r.error);
+      await runAction(() => resetToSeedAction(), { success: "リセットしました" });
       setResetOpen(false);
     });
   };
 
   const clearAll = () => {
     startTransition(async () => {
-      const r = await clearAllAction();
-      if (r.ok) toast.warn(r.message ?? "全データを削除しました");
-      else toast.error(r.error);
+      await runAction(() => clearAllAction(), {
+        // 取り消せない操作の結果なので、成功でも注意の色で出す。
+        success: (_, message) => ({
+          message: message ?? "全データを削除しました",
+          tone: "warning",
+        }),
+      });
       setClearOpen(false);
     });
   };
@@ -48,9 +60,9 @@ export function DataActions() {
     const formData = new FormData();
     formData.set("file", file);
     startTransition(async () => {
-      const r = await importJsonAction(null, formData);
-      if (r.ok) toast.success(r.message ?? "インポートしました");
-      else toast.error(r.error);
+      await runAction(() => importJsonAction(null, formData), {
+        success: "インポートしました",
+      });
       e.target.value = "";
     });
   };
@@ -60,92 +72,106 @@ export function DataActions() {
       <Card.Header>
         <Card.Title>データ管理</Card.Title>
       </Card.Header>
-      <Card.Body className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <a
-          href="/api/export"
-          className="inline-flex items-center justify-center gap-2 h-11 rounded-lg border border-border bg-card text-sm font-medium hover:bg-muted/40"
-          download
-        >
-          <Download className="h-4 w-4" />
-          JSON エクスポート
-        </a>
-
-        <label
-          title={adminOnlyTitle}
-          className="inline-flex items-center justify-center gap-2 h-11 rounded-lg border border-border bg-card text-sm font-medium hover:bg-muted/40 cursor-pointer has-[:disabled]:opacity-40 has-[:disabled]:cursor-not-allowed has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring"
-        >
-          <Upload className="h-4 w-4" />
-          JSON インポート
-          <input
-            type="file"
-            accept="application/json,.json"
-            onChange={importFile}
-            disabled={pending || denyDestructive}
-            className="sr-only"
-          />
-        </label>
-
-        <Modal open={resetOpen} onOpenChange={setResetOpen}>
-          <Button
-            variant="outline"
-            size="touch"
-            onClick={() => setResetOpen(true)}
-            disabled={denyDestructive}
-            title={adminOnlyTitle}
+      <Card.Body className="space-y-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <a
+            href="/api/export"
+            className="inline-flex items-center justify-center gap-2 h-11 rounded-lg border border-border bg-card text-sm font-medium hover:bg-muted/40"
+            download
           >
-            <RotateCcw className="h-4 w-4" />
-            シードデータに戻す
-          </Button>
-          <ModalContent title="シードデータにリセット" size="sm">
-            <p className="text-sm text-foreground">
-              現在のデータをすべて破棄し、初期サンプルデータに戻します。
-              この操作は元に戻せません。
-            </p>
-            <ModalFooter>
-              <Button
-                variant="ghost"
-                onClick={() => setResetOpen(false)}
-                disabled={pending}
-              >
-                キャンセル
-              </Button>
-              <Button variant="primary" onClick={reset} disabled={pending}>
-                {pending ? "処理中…" : "リセット"}
-              </Button>
-            </ModalFooter>
-          </ModalContent>
-        </Modal>
+            <Download className="h-4 w-4" />
+            JSON エクスポート
+          </a>
 
-        <Modal open={clearOpen} onOpenChange={setClearOpen}>
-          <Button
-            size="touch"
-            onClick={() => setClearOpen(true)}
-            disabled={denyDestructive}
+          <label
             title={adminOnlyTitle}
-            variant="ghost-destructive"
+            className="inline-flex items-center justify-center gap-2 h-11 rounded-lg border border-border bg-card text-sm font-medium hover:bg-muted/40 cursor-pointer has-[:disabled]:opacity-40 has-[:disabled]:cursor-not-allowed has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring"
           >
-            <Trash2 className="h-4 w-4" />
-            全データを削除
-          </Button>
-          <ModalContent title="全データを削除" size="sm">
-            <p className="text-sm text-foreground">
-              すべての店舗・調査・商談・引き継ぎを削除します。
-              復元はインポートからのみ可能です。
-            </p>
-            <ModalFooter>
-              <Button
-                variant="ghost"
-                onClick={() => setClearOpen(false)}
-                disabled={pending}
-              >
-                キャンセル
-              </Button>
-              <Button variant="danger" onClick={clearAll} disabled={pending}>
-                {pending ? "削除中…" : "削除する"}
-              </Button>
-            </ModalFooter>
-          </ModalContent>
-        </Modal>
+            <Upload className="h-4 w-4" />
+            JSON インポート
+            <input
+              type="file"
+              accept="application/json,.json"
+              onChange={importFile}
+              disabled={pending || denyDestructive}
+              className="sr-only"
+            />
+          </label>
+
+          {dataResetAllowed && (
+            <>
+              <Modal open={resetOpen} onOpenChange={setResetOpen}>
+                <Button
+                  variant="outline"
+                  size="touch"
+                  onClick={() => setResetOpen(true)}
+                  disabled={denyDestructive}
+                  title={adminOnlyTitle}
+                >
+                  <RotateCcw className="h-4 w-4" />
+                  シードデータに戻す
+                </Button>
+                <ModalContent title="シードデータにリセット" size="sm">
+                  <p className="text-sm text-foreground">
+                    現在のデータをすべて破棄し、初期サンプルデータに戻します。
+                    この操作は元に戻せません。
+                  </p>
+                  <ModalFooter>
+                    <Button
+                      variant="ghost"
+                      onClick={() => setResetOpen(false)}
+                      disabled={pending}
+                    >
+                      キャンセル
+                    </Button>
+                    <Button variant="danger" onClick={reset} pending={pending}>
+                      {pending ? "処理中…" : "リセット"}
+                    </Button>
+                  </ModalFooter>
+                </ModalContent>
+              </Modal>
+
+              <Modal open={clearOpen} onOpenChange={setClearOpen}>
+                <Button
+                  size="touch"
+                  onClick={() => setClearOpen(true)}
+                  disabled={denyDestructive}
+                  title={adminOnlyTitle}
+                  variant="ghost-destructive"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  全データを削除
+                </Button>
+                <ModalContent title="全データを削除" size="sm">
+                  <p className="text-sm text-foreground">
+                    すべての店舗・調査・商談・引き継ぎを削除します。
+                    復元はインポートからのみ可能です。
+                  </p>
+                  <ModalFooter>
+                    <Button
+                      variant="ghost"
+                      onClick={() => setClearOpen(false)}
+                      disabled={pending}
+                    >
+                      キャンセル
+                    </Button>
+                    <Button
+                      variant="danger"
+                      onClick={clearAll}
+                      pending={pending}
+                    >
+                      {pending ? "削除中…" : "削除する"}
+                    </Button>
+                  </ModalFooter>
+                </ModalContent>
+              </Modal>
+            </>
+          )}
+        </div>
+        <Text variant="muted">
+          JSON インポートは、同じ ID
+          のデータを上書きし、それ以外を追加します。既存のデータは削除されません。
+        </Text>
       </Card.Body>
     </Card>
   );

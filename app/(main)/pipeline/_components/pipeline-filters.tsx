@@ -5,9 +5,15 @@ import { useTransition, type ChangeEvent } from "react";
 import { Search, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { optionsFromValues } from "@/components/ui/select-logic";
 import { Button } from "@/components/ui/button";
 import { PRIORITIES } from "@/types/store";
 import type { Profile } from "@/types/profile";
+
+const PRIORITY_OPTIONS = [
+  { value: "", label: "優先度すべて" },
+  ...optionsFromValues(PRIORITIES),
+];
 
 export interface PipelineFiltersProps {
   /** 担当者選択肢 (RSC で `getAllProfiles()` 経由で取得) */
@@ -44,32 +50,24 @@ export function PipelineFilters({ profiles }: PipelineFiltersProps) {
       </div>
       <Select
         width="auto"
+        options={PRIORITY_OPTIONS}
         defaultValue={params.get("priority") ?? ""}
-        onChange={(e) => update("priority", e.target.value)}
+        onValueChange={(value) => update("priority", value)}
         aria-label="優先度"
         className="min-w-32"
-      >
-        <option value="">優先度すべて</option>
-        {PRIORITIES.map((p) => (
-          <option key={p} value={p}>
-            {p}
-          </option>
-        ))}
-      </Select>
+      />
       <Select
         width="auto"
+        options={[
+          { value: "", label: "担当者すべて" },
+          ...profiles.map((p) => ({ value: p.id, label: p.display_name })),
+        ]}
+        placeholder="不明な担当者"
         defaultValue={params.get("sales") ?? ""}
-        onChange={(e) => update("sales", e.target.value)}
+        onValueChange={(value) => update("sales", value)}
         aria-label="営業担当"
         className="min-w-32"
-      >
-        <option value="">担当者すべて</option>
-        {profiles.map((p) => (
-          <option key={p.id} value={p.id}>
-            {p.display_name}
-          </option>
-        ))}
-      </Select>
+      />
       {params.size > 0 ? (
         <Button
           variant="ghost"

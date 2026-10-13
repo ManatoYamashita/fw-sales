@@ -6,21 +6,47 @@
  * - 未読件数バッジを表示し、クリックで最新通知 (default 10 件) を展開
  * - 通知の `kind` に応じてリンク先を決定 (通常は `link_url` に店舗 URL が埋め込まれる)
  * - 外側クリック / Escape キーで閉じる
+ * - 通知のクリックで既読化し、ヘッダーの「すべて既読にする」で一括既読化する (#296)。
+ *   バッジはサーバー応答を待たずに楽観的に減らし、失敗したときだけ元へ戻す
+ * - リンクの通知は既読保存後に遷移し、保存中は行にスピナーを出す。保存失敗時は
+ *   その場で再試行できる (#351)。
+ *   ただしセッション切れの失敗は再試行しても通らないため、従来どおり遷移させ、
+ *   遷移先で proxy にログイン画面へ送らせる。proxy は Action の POST もログイン画面へ
+ *   リダイレクトするので、クライアントには通信失敗と同じ例外として届く。例外のときは
+ *   リンク先がログイン画面へ送られるかを確かめて見分ける
+ * - リンク先が無い通知 (参照先店舗が削除済みなど) は遷移させず、既読化だけ行う
  *
  * 親 RSC が `getRecentNotifications(userId, limit=10)` の結果を props で渡す前提。
  *
  * 関連: requirements.md §4.1, §4.2, §4.3
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Bell, Inbox } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
+import { Spinner } from "@/components/ui/spinner";
+import { runAction } from "@/lib/client/run-action";
+import {
+  markAllNotificationsReadAction,
+  markNotificationReadAction,
+} from "@/lib/actions/notification-actions";
+import { UNAUTHENTICATED_MESSAGE } from "@/lib/actions/_messages";
 import {
   OVERLAY_ANCHOR_CONTAINER,
   OVERLAY_PANEL_ALIGN_END,
 } from "@/components/ui/overlay-anchor-classes";
 import type { Notification, NotificationKind } from "@/types/notification";
+
+/**
+ * 1 件の既読化の結果。
+ *
+ * - `saved`: 保存できた (既読だった場合を含む)
+ * - `signed_out`: セッションが無く保存できなかった。遷移すればログイン画面へ送られる
+ * - `failed`: それ以外の失敗・例外。その場に留まり、再クリックで再試行させる
+ */
+type ReadOutcome = "saved" | "signed_out" | "failed";
 
 interface NotificationBellProps {
   notifications: readonly Notification[];
@@ -29,8 +55,72 @@ interface NotificationBellProps {
 export function NotificationBell({ notifications }: NotificationBellProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  // サーバー応答前に既読として扱う通知 ID (楽観更新)。props が最新化された後も
+  // 残るが、そのときは read_at と一致するだけなので害はない。
+  const [locallyRead, setLocallyRead] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const [isMarkingAll, startMarkAll] = useTransition();
+  const pendingReads = useRef(new Map<string, Promise<ReadOutcome>>());
 
-  const unreadCount = notifications.filter((n) => !n.read_at).length;
+  const isRead = useCallback(
+    (n: Notification) => n.read_at !== null || locallyRead.has(n.id),
+    [locallyRead],
+  );
+  const unreadIds = notifications.filter((n) => !isRead(n)).map((n) => n.id);
+  const unreadCount = unreadIds.length;
+
+  const markLocally = useCallback((ids: readonly string[]) => {
+    setLocallyRead((prev) => new Set([...prev, ...ids]));
+  }, []);
+  const unmarkLocally = useCallback((ids: readonly string[]) => {
+    setLocallyRead((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) next.delete(id);
+      return next;
+    });
+  }, []);
+
+  const handleRead = useCallback(
+    (notification: Notification): Promise<ReadOutcome> => {
+      // 楽観表示が既読になっても、保存中なら同じ Promise を待つ (#351)。
+      const pending = pendingReads.current.get(notification.id);
+      if (pending) return pending;
+      if (isRead(notification)) return Promise.resolve("saved");
+      markLocally([notification.id]);
+      // 通知のクリックで既読化するため、成功はトーストではなく未読の印が
+      // 消えることで伝える (#327 で決定)。失敗と例外はトーストで出す。
+      const read = runAction(() => markNotificationReadAction(notification.id), {
+        silentSuccess: true,
+      }).then(async (result): Promise<ReadOutcome> => {
+        if (result?.ok) return "saved";
+        unmarkLocally([notification.id]);
+        if (result?.error === UNAUTHENTICATED_MESSAGE) return "signed_out";
+        const href = resolveLink(notification);
+        if (result === null && href && (await redirectsToLogin(href))) {
+          return "signed_out";
+        }
+        return "failed";
+      }).finally(() => {
+        pendingReads.current.delete(notification.id);
+      });
+      pendingReads.current.set(notification.id, read);
+      return read;
+    },
+    [isRead, markLocally, unmarkLocally],
+  );
+
+  const handleMarkAll = useCallback(() => {
+    if (unreadIds.length === 0) return;
+    const ids = unreadIds;
+    markLocally(ids);
+    startMarkAll(async () => {
+      const result = await runAction(() => markAllNotificationsReadAction(), {
+        silentSuccess: true,
+      });
+      if (!result?.ok) unmarkLocally(ids);
+    });
+  }, [unreadIds, markLocally, unmarkLocally]);
 
   // 外側クリックで閉じる
   useEffect(() => {
@@ -92,11 +182,23 @@ export function NotificationBell({ notifications }: NotificationBellProps) {
             OVERLAY_PANEL_ALIGN_END,
           )}
         >
-          <div className="border-b border-border px-3 py-2 flex items-center justify-between">
-            <span className="text-sm font-medium">通知</span>
-            <span className="text-xs text-muted-foreground">
-              {unreadCount > 0 ? `${unreadCount} 件未読` : "未読なし"}
-            </span>
+          <div className="border-b border-border px-3 py-2 flex items-center justify-between gap-2">
+            <div className="flex items-baseline gap-2 min-w-0">
+              <span className="text-sm font-medium">通知</span>
+              <span className="text-xs text-muted-foreground">
+                {unreadCount > 0 ? `${unreadCount} 件未読` : "未読なし"}
+              </span>
+            </div>
+            {unreadCount > 0 ? (
+              <button
+                type="button"
+                onClick={handleMarkAll}
+                disabled={isMarkingAll}
+                className="shrink-0 inline-flex min-h-8 items-center rounded-sm px-1.5 text-xs font-medium text-foreground underline-offset-4 hover:underline disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                すべて既読にする
+              </button>
+            ) : null}
           </div>
           <ul className="max-h-80 overflow-y-auto">
             {notifications.length === 0 ? (
@@ -109,6 +211,8 @@ export function NotificationBell({ notifications }: NotificationBellProps) {
                 <NotificationRow
                   key={n.id}
                   notification={n}
+                  isUnread={!isRead(n)}
+                  onRead={handleRead}
                   onNavigate={handleNavigate}
                 />
               ))
@@ -122,21 +226,38 @@ export function NotificationBell({ notifications }: NotificationBellProps) {
 
 interface NotificationRowProps {
   notification: Notification;
+  isUnread: boolean;
+  onRead: (notification: Notification) => Promise<ReadOutcome>;
   onNavigate: () => void;
 }
 
-function NotificationRow({ notification, onNavigate }: NotificationRowProps) {
+function NotificationRow({
+  notification,
+  isUnread,
+  onRead,
+  onNavigate,
+}: NotificationRowProps) {
+  const router = useRouter();
+  const [isNavigating, startNavigation] = useTransition();
   const href = resolveLink(notification);
-  const isUnread = notification.read_at === null;
   const body = (
     <article
       className={cn(
-        "px-3 py-2 border-b border-border last:border-b-0 hover:bg-accent transition-colors",
+        "px-3 py-2 hover:bg-accent transition-colors",
         isUnread ? "bg-info-soft/30" : null,
       )}
     >
       <div className="flex items-start gap-2">
-        {isUnread ? (
+        {isNavigating ? (
+          // 保存を待つ間の手がかり。カーソルの変化はタッチ端末では見えないため、
+          // 未読の印の位置に重ねて出す。印と同じ枠に収め、行の配置を動かさない (#351)。
+          <span className="relative mt-1.5 h-1.5 w-1.5 shrink-0">
+            <Spinner
+              size="sm"
+              className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
+            />
+          </span>
+        ) : isUnread ? (
           <span
             aria-hidden
             className="mt-1.5 inline-block h-1.5 w-1.5 rounded-full bg-destructive shrink-0"
@@ -159,16 +280,73 @@ function NotificationRow({ notification, onNavigate }: NotificationRowProps) {
     </article>
   );
 
+  const label = `${isUnread ? "未読: " : ""}${notification.title}`;
   if (href) {
     return (
-      <li>
-        <Link href={href} onClick={onNavigate} className="block">
+      <li className="border-b border-border last:border-b-0">
+        <Link
+          href={href}
+          aria-label={label}
+          aria-busy={isNavigating || undefined}
+          onClick={(event) => {
+            if (isNavigating) {
+              event.preventDefault();
+              return;
+            }
+            // 楽観表示は Transition の外ですぐ更新し、保存完了だけを待つ。
+            const read = onRead(notification);
+            // 別タブなどのブラウザ標準の操作は妨げず、元の画面で既読化する。
+            if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+              startNavigation(async () => {
+                if ((await read) !== "failed") onNavigate();
+              });
+            }
+          }}
+          onNavigate={(event) => {
+            event.preventDefault();
+            if (isNavigating) return;
+            startNavigation(async () => {
+              // 遷移中に Action が後回しにならないよう、DB への保存を先に確定する。
+              if ((await onRead(notification)) !== "failed") {
+                onNavigate();
+                router.push(href);
+              }
+            });
+          }}
+          className="block aria-busy:cursor-wait focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        >
           {body}
         </Link>
       </li>
     );
   }
-  return <li>{body}</li>;
+  // 遷移先が無い通知 (参照先が削除済みなど) は遷移させず、既読化だけ行う。
+  return (
+    <li className="border-b border-border last:border-b-0">
+      <button
+        type="button"
+        aria-label={label}
+        onClick={() => { void onRead(notification); }}
+        className="block w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+      >
+        {body}
+      </button>
+    </li>
+  );
+}
+
+/**
+ * リンク先を開くとログイン画面へ送られるか (セッション切れか) を確かめる。
+ * 既読化の Action が例外で終わったときだけ呼ぶ。通信できないときは false を返し、
+ * その場で再試行させる。
+ */
+async function redirectsToLogin(href: string): Promise<boolean> {
+  try {
+    const res = await fetch(href, { method: "HEAD", cache: "no-store" });
+    return res.redirected && new URL(res.url).pathname === "/login";
+  } catch {
+    return false;
+  }
 }
 
 function resolveLink(n: Notification): string | null {

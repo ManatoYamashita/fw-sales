@@ -9,18 +9,17 @@ import { DataTable, type ColumnDef } from "@/components/ui/data-table";
 import { type SortDir } from "@/components/ui/sortable-header-params";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { Spinner } from "@/components/ui/spinner";
-import { StageBadge } from "@/components/feature/stage-badge";
+import { StoreResearchStatusBadge } from "@/components/feature/stage-badge";
 import { ChannelBadge } from "@/components/feature/channel-badge";
-import { SalesStateBadge } from "@/components/feature/sales-state-badge";
+import { SalesStateSummary } from "@/components/feature/sales-state-badge";
 import { IndividualStoreBadge } from "@/components/feature/individual-store-badge";
 import { formatDate } from "@/lib/utils/date";
-import { toast } from "@/components/ui/toast";
-import { type SalesProgressRow } from "@/lib/domain/sales-progress";
+import { DEFAULT_PROGRESS_SORT, type SalesProgressRow } from "@/lib/domain/sales-progress";
 import { StoreCard, renderNextAction } from "./store-card";
 import { StoreRowActions } from "./store-row-actions";
 import { StoreDeleteConfirmDialog } from "./store-delete-confirm-dialog";
 import { buildStoreLocationColumn } from "./store-location-column";
+import { runAction } from "@/lib/client/run-action";
 import { bulkDeleteStoresAction } from "@/lib/actions/store-actions";
 
 export interface StoresTableViewProps {
@@ -35,7 +34,7 @@ export interface StoresTableViewProps {
   activeSortKey?: string;
   /**
    * 現在のソート方向 (`page.tsx` の `parseSort` がサーバで確定させた値)。
-   * カードモードの並び替えコントロールが現在値を表示するために使う。
+   * 狭幅のコンパクト表示の並び替えコントロールが現在値を表示するために使う。
    */
   activeSortDir?: SortDir;
   /**
@@ -108,9 +107,12 @@ const storeDetailHref = (row: SalesProgressRow) =>
  *
  * `minContainerWidth` は「その列を出すのに要るコンテナ幅 (px)」で、列単体の実測
  * min-content 幅 (cap を持つ列は cap そのもの) の累計から決めている。always 列
- * (店舗名 / 次回アクション / 操作) = 632px を土台に、狭い順へ 状態 → 現在の営業状態 →
+ * (店舗名 / 次回アクション / 操作) = 632px を土台に、狭い順へ 営業状態 → 調査段階 →
  * 営業担当 → 最寄駅 → チャネル → 最終営業日 → 業態 と積む。落とす順は「直近の
  * 意思決定が乗っていない列から」で、最寄駅 (#175 / #177) は業態より上位に置く。
+ * 営業状態 (受注 / 失注 / 追客…) を調査段階より上に置くのは #297。営業状態は
+ * 営業記録が無い店舗では調査段階から導出される (`deriveCurrentSalesState`) ため、
+ * 調査段階の列が落ちても「未着手」は読み取れる。逆は成り立たない。
  * 単体予算の内訳と積み直しの検算は `__tests__/stores-table-columns.test.tsx` (#237)。
  *
  * テストから配分表を固定するため export している。
@@ -160,27 +162,28 @@ export function buildColumns(canDelete: boolean): ColumnDef<SalesProgressRow>[] 
       truncate: true,
       maxWidth: "160px",
       title: (r) => r.store.genre || undefined,
-      minContainerWidth: 1582,
+      minContainerWidth: 1606,
       cell: (r) => r.store.genre || "—",
     },
-    { key: "salesState", header: "現在の営業状態", minContainerWidth: 874, cell: (r) => <SalesStateBadge state={r.currentSalesState} /> },
-    // 描画は store-card.tsx の renderNextAction が単一の真実 (カードと共有)。
+    { key: "salesState", header: "営業状態", minContainerWidth: 778, cell: (r) => <SalesStateSummary state={r.currentSalesState} latestDeal={r.latestDeal} /> },
+    // 描画は store-card.tsx の renderNextAction が単一の真実 (狭幅のコンパクト行と共有)。
     // max-w-[240px] は列予算 272px (= 240 + padding 32) を確定させるための cap。
     { key: "next", header: "次回アクション", sortKey: "next", sortDefaultDir: "asc", cell: (r) => <div className="max-w-[240px]">{renderNextAction(r)}</div> },
     {
       key: "stage",
-      header: "状態",
+      // 「状態」だと営業状態と区別がつかない (#297)。絞り込みと詳細の呼び名に揃える。
+      header: "調査段階",
       sortKey: "stage",
       sortDefaultDir: "asc",
-      minContainerWidth: 728,
-      cell: (r) => <StageBadge stage={r.store.stage} />,
+      minContainerWidth: 898,
+      cell: (r) => <StoreResearchStatusBadge status={r.researchStatus} />,
     },
     {
       key: "channel",
       header: "チャネル",
       sortKey: "channel",
       sortDefaultDir: "asc",
-      minContainerWidth: 1312,
+      minContainerWidth: 1336,
       cell: (r) => <ChannelBadge channel={r.store.channel} />,
     },
     {
@@ -193,7 +196,7 @@ export function buildColumns(canDelete: boolean): ColumnDef<SalesProgressRow>[] 
       // 閾値がすべてずれるため 100px まで締める。列予算はこの cap そのもの
       // (#237。短いデータでの実測 97px を予算にすると cap 一杯の値で 3px 溢れる)。
       maxWidth: "100px",
-      minContainerWidth: 974,
+      minContainerWidth: 998,
       title: (r) => r.salesName ?? undefined,
       cell: (r) => r.salesName ?? "—",
     },
@@ -202,7 +205,7 @@ export function buildColumns(canDelete: boolean): ColumnDef<SalesProgressRow>[] 
       header: "最終営業日",
       sortKey: "meeting",
       sortDefaultDir: "desc",
-      minContainerWidth: 1422,
+      minContainerWidth: 1446,
       cell: (r) => (
         <span className="text-xs text-muted-foreground whitespace-nowrap">
           {r.latestMeetingDate ? formatDate(r.latestMeetingDate) : "—"}
@@ -243,19 +246,22 @@ export function StoresTableView({
     if (selectedVisibleIds.length === 0) return;
     const targetIds = selectedVisibleIds;
     startDelete(async () => {
-      const result = await bulkDeleteStoresAction(targetIds);
-      if (!result.ok) {
-        toast.error(result.error ?? "一括削除に失敗しました");
-        return;
-      }
-      const { deletedCount, requestedCount } = result.data;
-      if (deletedCount === 0) {
-        toast.warn("削除対象が見つかりませんでした");
-      } else if (deletedCount < requestedCount) {
-        toast.warn(`${deletedCount}/${requestedCount} 件を削除しました`);
-      } else {
-        toast.success(`${deletedCount} 件を削除しました`);
-      }
+      const result = await runAction(() => bulkDeleteStoresAction(targetIds), {
+        // 一部だけ削除できた場合は、成功ではなく注意として件数を出す。
+        success: ({ deletedCount, requestedCount }) => {
+          if (deletedCount === 0) {
+            return { message: "削除対象が見つかりませんでした", tone: "warning" };
+          }
+          if (deletedCount < requestedCount) {
+            return {
+              message: `${deletedCount}/${requestedCount} 件を削除しました`,
+              tone: "warning",
+            };
+          }
+          return `${deletedCount} 件を削除しました`;
+        },
+      });
+      if (!result?.ok) return;
       setBulkOpen(false);
       setSelectedIds((prev) => prev.filter((id) => !targetIds.includes(id)));
       router.refresh();
@@ -278,14 +284,18 @@ export function StoresTableView({
           rowHref={storeDetailHref}
           activeSortKey={activeSortKey}
           activeSortDir={activeSortDir}
+          // コンパクト表示の並び替えに「解除」を出す基準 (#330)。page.tsx の parseSort と同じ既定値。
+          defaultSort={{ sortKey: DEFAULT_PROGRESS_SORT.key, dir: DEFAULT_PROGRESS_SORT.dir }}
           /*
-            コンテナ 640px 未満 (admin は 688px 未満) では <table> を捨ててカードに
-            切り替える (#234 / PR3/3)。always 列の min-content は非 admin 632px /
-            admin 680px あり、375px viewport のコンテナ 341px では列を落としきっても
-            収まらないため、ビューごと差し替える以外に横スクロールを消す手段がない。
+            コンテナ 640px 未満 (admin は 688px 未満) では <table> を捨てて店舗ごとの
+            コンパクト行に切り替える (#234 で導入、#330 で行表示へ組み直し)。always 列の
+            min-content は非 admin 632px / admin 680px あり、375px viewport のコンテナ 341px
+            では列を落としきっても収まらないため、ビューごと差し替える以外に横スクロールを
+            消す手段がない。行の中身は表の列と同じ順 (店舗名 → 営業状態 → 次回アクション →
+            調査段階・営業担当 → 操作) に並べる。
           */
           cardView={{
-            label: "店舗一覧 (カード表示)",
+            label: "店舗一覧 (コンパクト表示)",
             render: (r) => (
               <StoreCard
                 row={r}
@@ -333,10 +343,10 @@ export function StoresTableView({
             size="touch"
             gap="tight"
             onClick={() => setBulkOpen(true)}
-            disabled={isDeleting}
+            pending={isDeleting}
             className="ml-auto"
           >
-            {isDeleting ? <Spinner /> : <Trash2 className="h-3.5 w-3.5" />}
+            <Trash2 className="h-3.5 w-3.5" />
             削除
           </Button>
         </div>

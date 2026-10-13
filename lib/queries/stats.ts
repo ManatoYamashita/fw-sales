@@ -2,6 +2,7 @@ import "server-only";
 import { repos } from "@/lib/repositories";
 import { CONTACTED_STAGES } from "@/lib/domain/stages";
 import { NAV_ITEMS } from "@/lib/domain/nav";
+import { getResearchReviewCount } from "@/lib/queries/research";
 
 export interface DashboardStats {
   total: number;
@@ -57,21 +58,28 @@ export interface NavBadgeCounts {
   handoffs: number;
 }
 
-export async function getNavBadgeCounts(): Promise<NavBadgeCounts> {
+function enabledNavBadgeKeys(): Set<keyof NavBadgeCounts> {
   // disabled な menu のバッジは表示されないため、対応する list クエリも発火させない。
   // `NAV_ITEMS` を単一の真実として参照し、disable 解除時に自動的にバッジが復活する。
-  const enabledBadgeKeys = new Set(
+  return new Set(
     NAV_ITEMS.filter((item) => !item.disabled && item.badgeKey).map(
       (item) => item.badgeKey as keyof NavBadgeCounts,
     ),
   );
+}
 
-  // task 4.2 (PR3a): deep-research-pipeline 撤去に伴い `research` バッジを
-  // stage="未調査" の store 数 (手動貼付経路のキュー) に戻す (#121 整合)。
+/** `'use cache'` で包んでよいバッジ件数 (research 以外)。 */
+export type CacheableNavBadgeCounts = Omit<NavBadgeCounts, "research">;
+
+/**
+ * research 以外のバッジ件数。すべて stores / deals / handoffs タグで失効する
+ * テーブルだけから数えるため、呼び出し側でキャッシュしてよい
+ * (`components/layout/nav-badges.tsx`)。
+ */
+export async function getCacheableNavBadgeCounts(): Promise<CacheableNavBadgeCounts> {
+  const enabledBadgeKeys = enabledNavBadgeKeys();
   const needsStores =
-    enabledBadgeKeys.has("stores") ||
-    enabledBadgeKeys.has("pipeline") ||
-    enabledBadgeKeys.has("research");
+    enabledBadgeKeys.has("stores") || enabledBadgeKeys.has("pipeline");
   const needsDeals = enabledBadgeKeys.has("deals");
   const needsHandoffs = enabledBadgeKeys.has("handoffs");
 
@@ -83,9 +91,6 @@ export async function getNavBadgeCounts(): Promise<NavBadgeCounts> {
 
   return {
     stores: enabledBadgeKeys.has("stores") ? stores.length : 0,
-    research: enabledBadgeKeys.has("research")
-      ? stores.filter((s) => s.stage === "未調査").length
-      : 0,
     pipeline: enabledBadgeKeys.has("pipeline")
       ? stores.filter((s) => s.stage !== "架電済み").length
       : 0,
@@ -96,4 +101,19 @@ export async function getNavBadgeCounts(): Promise<NavBadgeCounts> {
       ? handoffs.filter((h) => h.status === "運用確認待ち").length
       : 0,
   };
+}
+
+/**
+ * 「調査」バッジ = `/research` の「レビュー待ち」タブの件数 (#299)。
+ *
+ * #121 以降は `stage === "未調査"` を数えていたが、`/research` のタブは未レビューの
+ * AI 調査結果を優先して分類するため、両者が食い違っていた。タブと同じ関数
+ * (`getResearchReviewCount`) を通すことで一致を構造的に保証する。
+ *
+ * 未レビューかどうかは Vercel Workflow の step が書き込み、`revalidateTag` が
+ * 効く経路に乗らないため、この件数は**キャッシュしない** (`getResearchQueue` と同じ扱い)。
+ */
+export async function getResearchNavBadgeCount(): Promise<number> {
+  if (!enabledNavBadgeKeys().has("research")) return 0;
+  return getResearchReviewCount();
 }

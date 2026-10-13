@@ -64,8 +64,8 @@ describe("表示モードと編集モードで行が消えない", () => {
 
   it("7 行を定義順どおりに描画する", () => {
     expect(infoLabels(cardBody)).toEqual([
-      "現在の営業状態",
-      "調査・架電段階",
+      "営業状態",
+      "調査段階",
       "アポ取得日",
       "営業担当",
       "現在の次回アクション",
@@ -92,12 +92,12 @@ describe("直接編集できるのは 3 項目だけ", () => {
   });
 
   it("derived 項目に入力要素を置かない", () => {
-    // 現在の営業状態 / 調査・架電段階 / 現在の次回アクション / 最終営業日 の
+    // 営業状態 / 調査段階 / 現在の次回アクション / 最終営業日 の
     // 各セルに Input / Select / Textarea が現れないこと。
     const labels = infoLabels(cardBody);
     const derived = [
-      "現在の営業状態",
-      "調査・架電段階",
+      "営業状態",
+      "調査段階",
       "現在の次回アクション",
       "最終営業日",
     ];
@@ -118,8 +118,8 @@ describe("直接編集できるのは 3 項目だけ", () => {
 
 describe("derived の補助文は編集モードだけ", () => {
   it.each([
-    ["現在の営業状態", "営業記録から自動"],
-    ["調査・架電段階", "画面上部で変更"],
+    ["営業状態", "営業記録から自動"],
+    ["調査段階", "画面上部で変更"],
     ["現在の次回アクション", "営業記録で設定"],
   ])("%s の補助文は editingCurrent のときだけ渡す", (_label, note) => {
     // 通常表示にも出すと読むものが増えて一覧性が落ちる。
@@ -173,18 +173,19 @@ describe("アポ取得日の「未取得に戻す」", () => {
 
 describe("営業担当 Select", () => {
   it("未割当を選べる", () => {
-    expect(code).toContain('<option value="">未割当</option>');
+    expect(code).toContain('{ value: "", label: "未割当" }');
   });
 
-  it("profiles に無い現在値の受け皿 option を出す", () => {
-    // 一致する option が無いと <select> は先頭 (未割当) を表示し、
-    // ユーザーが触っていないのに保存で担当が消える。
+  it("profiles に無い現在値の受け皿を候補に出す", () => {
+    // 候補から消すと、利用者が触っていないのに担当が別の値へ置き換わって見える
+    // (ネイティブの select は先頭の「未割当」を表示し、保存で担当を消していた)。
     expect(code).toContain(
       "const unknownSalesId = store.assigned_sales_user_id && !profileMap.has(store.assigned_sales_user_id) ? store.assigned_sales_user_id : null",
     );
     expect(code).toContain(
-      "{unknownSalesId ? <option value={unknownSalesId}>不明な担当者</option> : null}",
+      '...(unknownSalesId ? [{ value: unknownSalesId, label: "不明な担当者" }] : [])',
     );
+    expect(code).toContain("options={salesOptions}");
   });
 
   it("draft は resetDraftFromStore で初期化・復元される", () => {
@@ -233,9 +234,9 @@ describe("営業担当 Select", () => {
     const guardEnd = noop.indexOf("startTransition");
     expect(guardEnd).toBeGreaterThan(-1);
     expect(noop.slice(0, guardEnd)).not.toContain("updateSalesProgressAction");
-    // action 呼び出しは差分ありの経路 1 箇所だけ。
+    // action 呼び出しは差分ありの経路 1 箇所だけ (runAction 経由で呼ぶため await は付かない。#327)。
     expect(
-      saveCurrentBody.match(/await updateSalesProgressAction\(/g) ?? [],
+      saveCurrentBody.match(/\bupdateSalesProgressAction\(/g) ?? [],
     ).toHaveLength(1);
   });
 });

@@ -25,5 +25,10 @@ export interface NotificationRepository {
    * 戻り値は更新が発生した場合 true。
    */
   markAsRead(notificationId: string, userId: string): Promise<boolean>;
+  /**
+   * 当該ユーザー宛の未読通知をすべて既読化する (#296)。
+   * 戻り値は既読化した件数 (既に既読の通知は数えない)。
+   */
+  markAllAsRead(userId: string): Promise<number>;
   insert(input: NotificationInput): Promise<Notification>;
 }

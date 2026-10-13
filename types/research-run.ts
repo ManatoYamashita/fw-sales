@@ -83,7 +83,7 @@ export interface StoreResearchRun {
   result: import("@/lib/ai/research-result-schema").ResearchItem[] | null;
   source_registry: import("@/lib/ai/research-result-schema").SourceRegistryEntry[];
   review_decisions: import("@/lib/ai/research-result-schema").ReviewDecisions;
-  /** 明示的な「レビュー完了」操作の記録。null = レビュー未完了(Plan §6 の「要確認」判定に使用)。 */
+  /** 明示的な「レビュー完了」操作の記録。null = レビュー未完了(Plan §6 の「レビュー待ち」判定に使用)。 */
   review_completed_at: string | null;
   /** Stage毎のトークン使用量記録(コスト監視用)。形状は PR2 のパイプライン実装側で確定する。 */
   token_usage: Record<string, unknown> | null;

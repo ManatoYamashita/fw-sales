@@ -1,4 +1,5 @@
 import { type ButtonHTMLAttributes } from "react";
+import { Loader2 } from "lucide-react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils/cn";
 
@@ -111,6 +112,8 @@ const buttonVariants = cva(
     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
     "disabled:cursor-not-allowed disabled:opacity-50",
     "active:translate-y-px",
+    // 処理中は押せないことより「進んでいること」を見せたいので、半透明にしない。
+    "aria-busy:disabled:opacity-100 aria-busy:disabled:cursor-wait",
   ),
   {
     variants: {
@@ -130,7 +133,16 @@ export type ButtonVariantProps = VariantProps<typeof buttonVariants>;
 
 export interface ButtonProps
   extends ButtonHTMLAttributes<HTMLButtonElement>,
-    ButtonVariantProps {}
+    ButtonVariantProps {
+  /**
+   * 処理中の表示。スピナー・`disabled`・`aria-busy` をまとめて出す (#326)。
+   *
+   * 処理を起動したボタンにだけ渡す。同じ処理の間押せなくしたいだけの隣のボタン
+   * (キャンセルなど) は従来どおり `disabled` を使う。スピナーを子要素へ手で
+   * 置くのは禁止で、`button-pending-scan.test.ts` が検出する。
+   */
+  pending?: boolean;
+}
 
 /**
  * 箱を持たない variant。size の寸法を**一切適用しない**。
@@ -163,14 +175,30 @@ export function Button({
   size,
   gap,
   type = "button",
+  pending = false,
+  disabled,
+  children,
   ...props
 }: ButtonProps) {
   return (
     <button
       type={type}
       className={cn(buttonClasses({ variant, size, gap }), className)}
+      disabled={disabled || pending}
+      aria-busy={pending || undefined}
       {...props}
-    />
+    >
+      {pending ? (
+        // 1em にして文字の大きさへ追従させる。size ごとに先頭アイコンの寸法が違うため。
+        // 直後の先頭アイコンは globals.css の `[data-slot="button-spinner"] + svg` で隠す。
+        <Loader2
+          data-slot="button-spinner"
+          aria-hidden
+          className="size-[1em] shrink-0 animate-spin"
+        />
+      ) : null}
+      {children}
+    </button>
   );
 }
 

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ArrowDown, ArrowUp } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
+import { Select } from "./select";
 import {
   buildSortHref,
   readSortState,
@@ -38,12 +39,13 @@ export interface DataTableSortSelectProps {
  * **並び順を知覚できず、変更もできず、解除もできない**状態に陥る。
  * ブックマーク・共有 URL・端末回転で普通に起きる (#220 要件 5)。
  *
- * ## 生の `<select>` を使う理由
- * `components/ui/select.tsx` は `h-9` (36px) 固定で、`className="h-11"` を重ねると
- * `cn` (素の clsx / tailwind-merge なし) では CSS の記述順で勝敗が決まる。
- * `Select` に size を足すのは全画面に効く変更なので #225 Phase 1 の領分。
- * ここでは 44px を確実に取るため生の `<select>` にリテラルのクラスを当てる。
- * ネイティブ picker なので、選択肢側のタッチターゲットは OS が保証する。
+ * ## 共通 Select を使う (#334)
+ *
+ * #234 の初版は、`Select` が 36px 固定で 44px を確保できなかったため生の `<select>` を
+ * 置き、選択肢側のタッチ領域を OS の picker に委ねていた。#334 で「デスクトップ・
+ * モバイルとも、ブラウザ / OS 標準のプルダウンを出さない」方針になり、共通 `Select` の
+ * `density="touch"` (常に 44px、候補も 44px) へ移した。候補パネルの配置・キー操作は
+ * `select.tsx` が受け持つ。
  */
 export function DataTableSortSelect({
   options,
@@ -63,6 +65,7 @@ export function DataTableSortSelect({
   const currentDir: SortDir = activeSortDir ?? fromUrl.dir;
   const selected = options.find((o) => o.sortKey === currentKey);
   const flippedDir: SortDir = currentDir === "asc" ? "desc" : "asc";
+  const selectOptions = options.map((o) => ({ value: o.sortKey, label: o.label }));
 
   return (
     <div
@@ -74,11 +77,15 @@ export function DataTableSortSelect({
       <label htmlFor="card-sort-key" className="sr-only">
         並び替えの基準
       </label>
-      <select
+      <Select
         id="card-sort-key"
+        width="auto"
+        density="touch"
+        options={selectOptions}
         value={selected ? selected.sortKey : ""}
-        onChange={(e) => {
-          const opt = options.find((o) => o.sortKey === e.currentTarget.value);
+        placeholder="並び替え"
+        onValueChange={(value) => {
+          const opt = options.find((o) => o.sortKey === value);
           if (!opt) return;
           // 別の列を選んだらその列の既定方向から始める (SortableHeader と同じ規則)。
           router.replace(
@@ -86,19 +93,8 @@ export function DataTableSortSelect({
             { scroll: false },
           );
         }}
-        className="h-11 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        {!selected ? (
-          <option value="" disabled>
-            並び替え
-          </option>
-        ) : null}
-        {options.map((o) => (
-          <option key={o.sortKey} value={o.sortKey}>
-            {o.label}
-          </option>
-        ))}
-      </select>
+        className="min-w-0 flex-1"
+      />
 
       {selected ? (
         <Link

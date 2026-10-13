@@ -14,7 +14,9 @@
 
 import { Badge } from "@/components/ui/badge";
 import { deriveDisplaySourceName, isSourceLinkClickable } from "@/types/research-run";
-import type { SourceRegistryEntry } from "@/types/research-run";
+import type { ResearchItem, SourceRegistryEntry } from "@/types/research-run";
+
+type EvidenceBasis = NonNullable<ResearchItem["evidence_basis"]>;
 
 interface BadgeDisplay {
   icon: string;
@@ -140,26 +142,78 @@ export function SourceBadge({ entry }: { entry: SourceRegistryEntry }) {
   );
 }
 
+/**
+ * Web の出典を持たない項目で、「出典なし」の代わりに出す取得元 (#301)。
+ *
+ * Google Places 由来の項目と、登録済みの値を折り返した項目は `source_ids` が空になる
+ * (存在しない出典 URL を帰属させないため、`lib/ai/research/pipeline.ts`)。そこで
+ * 「出典なし」と出すと、同じカードの「📍 Google Placesで確認」と矛盾して見えていた。
+ */
+const NON_WEB_SOURCE_LABELS: Partial<Record<EvidenceBasis, string>> = {
+  places: "Google Places",
+  existing_canonical: "登録済みの基本情報",
+};
+
+/**
+ * ページの中身まで確かめられた情報源か (#360)。バッジの ✓ と同じ範囲
+ * (`getBadgeDisplay` の success / info) を確認済みとする。
+ *
+ * 本文取得の失敗・検索結果のみ・店舗同定できず・無関係は確認できていない。本番では
+ * 全情報源の本文取得に失敗した調査で「✕ ページを確認できませんでした」が 1 画面に 22 回並び、
+ * 項目ごとの差が読めなくなっていた。確認できていない情報源は件数の 1 行に畳み、開けば
+ * これまでと同じバッジと候補タイトルを見せる。
+ */
+export function isConfirmedSource(entry: SourceRegistryEntry): boolean {
+  const { tone } = getBadgeDisplay(entry);
+  return tone === "success" || tone === "info";
+}
+
+/** 畳んだ未確認の情報源の見出し。件数を後ろに付ける。 */
+const UNCONFIRMED_SUMMARY_LABEL = "未確認の情報源";
+
 export function SourceBadgeList({
   sourceIds,
   sourceRegistry,
+  evidenceBasis,
 }: {
   sourceIds: readonly string[];
   sourceRegistry: readonly SourceRegistryEntry[];
+  /** 項目の根拠の由来。出典が 0 件のときの表示に使う。 */
+  evidenceBasis?: ResearchItem["evidence_basis"];
 }) {
   const entries = sourceIds
     .map((id) => sourceRegistry.find((e) => e.id === id))
     .filter((e): e is SourceRegistryEntry => e !== undefined);
 
   if (entries.length === 0) {
-    return <span className="text-xs text-muted-foreground">出典なし</span>;
+    const label = (evidenceBasis && NON_WEB_SOURCE_LABELS[evidenceBasis]) ?? "出典なし";
+    return <span className="text-xs text-muted-foreground">{label}</span>;
   }
 
+  const confirmed = entries.filter(isConfirmedSource);
+  const unconfirmed = entries.filter((entry) => !isConfirmedSource(entry));
+
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      {entries.map((entry) => (
-        <SourceBadge key={entry.id} entry={entry} />
-      ))}
+    <div className="space-y-1.5">
+      {confirmed.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          {confirmed.map((entry) => (
+            <SourceBadge key={entry.id} entry={entry} />
+          ))}
+        </div>
+      )}
+      {unconfirmed.length > 0 && (
+        <details className="text-xs text-muted-foreground">
+          <summary className="cursor-pointer select-none">
+            {UNCONFIRMED_SUMMARY_LABEL} {unconfirmed.length}件
+          </summary>
+          <div className="flex flex-wrap items-center gap-2 pt-1.5">
+            {unconfirmed.map((entry) => (
+              <SourceBadge key={entry.id} entry={entry} />
+            ))}
+          </div>
+        </details>
+      )}
     </div>
   );
 }

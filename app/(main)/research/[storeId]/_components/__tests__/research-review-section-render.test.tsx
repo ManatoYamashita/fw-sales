@@ -12,13 +12,16 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { ResearchItem, ReviewDecisions, StoreResearchRun } from "@/types/research-run";
+import type { ReviewPlanSummary } from "@/lib/domain/research-review";
 import type { Store } from "@/types/store";
+import type { BasicInfo, BasicInfoField } from "@/types/basic-info";
+import { IDENTITY_MISMATCH_RUN_WARNING } from "@/lib/domain/research-item-notes";
 
 vi.mock("server-only", () => ({}));
 
 // Server Action を含むモジュールは DB 接続を要求するため、呼び出し面だけをモックする。
 vi.mock("@/lib/actions/research-run-actions", () => ({
-  adoptRemainingAndCompleteReviewAction: vi.fn(),
+  adoptBulkLaneAction: vi.fn(),
   completeReviewAction: vi.fn(),
   recordReviewDecisionAction: vi.fn(),
 }));
@@ -46,7 +49,19 @@ function item(
 const STORE: Store = {
   id: "store-1",
   name: "炉端ジュン",
+  basic_info: {},
 } as unknown as Store;
+
+/** 調査結果から採用済みの基本情報の値。 */
+function adoptedField(value: string): BasicInfoField {
+  return {
+    value,
+    tier: "A",
+    source_quote: "前回の根拠",
+    filled_by: "manual",
+    updated_at: "2026-09-01T00:00:00.000Z",
+  };
+}
 
 function makeRun(items: ResearchItem[], decisions: ReviewDecisions = {}): StoreResearchRun {
   return {
@@ -75,16 +90,25 @@ function makeRun(items: ResearchItem[], decisions: ReviewDecisions = {}): StoreR
  * className には Tailwind の `disabled:opacity-50` 等が常に含まれるため、
  * `html.includes("disabled")` では検知能力がゼロになる(常に true になる)。
  */
-function hasDisabledAttribute(html: string, label: string): boolean {
-  const match = html.match(new RegExp(`<button([^>]*)>${label}</button>`));
+function buttonAttributes(html: string, label: string): string {
+  // 処理中のボタンはラベルの前に `pending` のスピナー (svg) を持つ (#326)。
+  const match = html.match(
+    new RegExp(
+      `<button([^>]*)>(?:<svg[^>]*data-slot="button-spinner"[^>]*>.*?</svg>)?${label}</button>`,
+    ),
+  );
   if (match === null) throw new Error(`button not found: ${label}`);
-  return / disabled(=|>|\s|$)/.test(`${match[1]!} `);
+  return `${match[1]!} `;
 }
 
-function render(run: StoreResearchRun): string {
+function hasDisabledAttribute(html: string, label: string): boolean {
+  return / disabled(=|>|\s|$)/.test(buttonAttributes(html, label));
+}
+
+function render(run: StoreResearchRun, basicInfo: BasicInfo = {}): string {
   return renderToStaticMarkup(
     <ResearchReviewSection
-      store={STORE}
+      store={{ ...STORE, basic_info: basicInfo }}
       run={run}
       onUpdate={() => {}}
       onRestart={() => {}}
@@ -93,75 +117,169 @@ function render(run: StoreResearchRun): string {
   );
 }
 
-describe("Primary CTA(Plan §12.1 / §12.1.1)", () => {
-  const ITEMS = [
-    item("business_hours_holidays", "confirmed"),
-    item("seat_count", "confirmed"),
-    item("main_target", "inferred"),
-  ];
+/** `<details>` 要素(カード)の開始タグを id で取り出す。 */
+function cardTag(html: string, key: string): string {
+  const tag = html.match(new RegExp(`<details[^>]*id="research-item-${key}"[^>]*>`))?.[0];
+  if (tag === undefined) throw new Error(`card not found: ${key}`);
+  return tag;
+}
 
-  it("Primary CTA は「残り N 件を採用して調査完了」", () => {
+const ITEMS = [
+  item("business_hours_holidays", "confirmed"),
+  item("seat_count", "confirmed"),
+  item("main_target", "inferred"),
+];
+
+describe("主ボタン (#301: 推定を見ずに完了させない)", () => {
+  it("確認済みの新規だけをまとめて採用し、推定は 1 件ずつに残す", () => {
     const html = render(makeRun(ITEMS));
-    expect(html).toContain("残り3件を採用して調査完了");
-    expect(html).not.toContain("未確認項目をスキップしてレビュー完了");
+    expect(html).toContain("2件をまとめて採用");
+    expect(html).toContain("まとめて採用: 2件（新規 2）");
+    expect(html).toContain("1件ずつ確認: 推定 1");
+    // 推定まで含めた 3 件を採用する主ボタン(旧「残り3件を採用して調査完了」)は出さない。
+    expect(html).not.toMatch(/3件を採用|3件をまとめて採用/);
   });
 
-  it("採用対象の内訳(確認済み / 推定)を押す前に表示する", () => {
-    const html = render(makeRun(ITEMS));
-    expect(html).toContain("残り: 確認済み 2・推定 1");
+  it("推定しか残っていなければ、主ボタンは採用ではなく「次の未判断の項目へ」", () => {
+    const html = render(makeRun([item("main_target", "inferred")]));
+    expect(html).toContain(">次の未判断の項目へ</button>");
+    expect(html).not.toMatch(/件をまとめて採用|件を採用して調査完了/);
   });
 
-  it("Secondary CTA と未対応件数の補足を出す", () => {
-    const html = render(makeRun(ITEMS));
-    expect(html).toContain("判断済みの内容だけで完了");
-    expect(html).toContain("未対応3件は反映されません");
+  it("まとめて採用した後に何も残らないなら「N件を採用して調査完了」", () => {
+    const html = render(makeRun(ITEMS.slice(0, 2)));
+    expect(html).toContain("2件を採用して調査完了");
   });
 
-  it("未判断が0件なら Primary は「レビュー完了」になり Secondary は出さない", () => {
+  it("副ボタンは未判断を反映せずに完了する", () => {
+    const html = render(makeRun(ITEMS));
+    expect(html).toContain("残り3件は反映せずに完了");
+  });
+
+  it("未判断が0件なら主ボタンは「レビュー完了」になり副ボタンは出さない", () => {
     const decisions: ReviewDecisions = {
       business_hours_holidays: { decision: "adopted", decided_at: "2026-08-12T00:00:00.000Z" },
       seat_count: { decision: "rejected", decided_at: "2026-08-12T00:00:00.000Z" },
       main_target: { decision: "skipped", decided_at: "2026-08-12T00:00:00.000Z" },
     };
     const html = render(makeRun(ITEMS, decisions));
-    expect(html).toContain("レビュー完了");
-    expect(html).not.toContain("判断済みの内容だけで完了");
+    expect(html).toContain(">レビュー完了</button>");
+    expect(html).not.toContain("反映せずに完了");
+  });
+
+  it("競合が残っていても主ボタンは押せる(競合はまとめて採用しないため)", () => {
+    const html = render(
+      makeRun([
+        item("business_hours_holidays", "confirmed"),
+        item("average_spend_day_night", "conflict", {
+          research_policy: "ANALYSIS",
+          candidates: [
+            { candidate_id: "c1", label: "候補A", value: "4,000円", evidence: "e", source_ids: [] },
+            { candidate_id: "c2", label: "候補B", value: "5,000円", evidence: "e", source_ids: [] },
+          ],
+        }),
+      ]),
+    );
+    expect(hasDisabledAttribute(html, "1件をまとめて採用")).toBe(false);
+    expect(html).toContain("1件ずつ確認: 候補の選択 1");
   });
 });
 
-describe("conflict による Primary block(Plan §12.1)", () => {
-  const WITH_CONFLICT = [
-    item("business_hours_holidays", "confirmed"),
-    item("average_spend_day_night", "conflict", {
-      research_policy: "ANALYSIS",
-      candidates: [
-        { candidate_id: "c1", label: "候補A", value: "4,000円", evidence: "e", source_ids: [] },
-        { candidate_id: "c2", label: "候補B", value: "5,000円", evidence: "e", source_ids: [] },
-      ],
-    }),
-  ];
-
-  it("conflictが未判断なら Primary を disabled にする", () => {
-    const html = render(makeRun(WITH_CONFLICT));
-    // Primary ボタン**そのもの**が disabled 属性付きで描画されることを確認する。
-    // className に Tailwind の `disabled:opacity-50` 等が常に含まれるため、
-    // 単なる部分文字列 "disabled" ではなく **属性**(`disabled=""`)を見る。
-    expect(hasDisabledAttribute(html, "残り1件を採用して調査完了")).toBe(true);
+describe("上書きの事前表示 (#319)", () => {
+  it("主ボタンを押す前に、上書きされる件数と内容が分かる", () => {
+    const html = render(makeRun(ITEMS), { seat_count: adoptedField("18席") });
+    expect(html).toContain("1件ずつ確認: 上書き 1・推定 1");
+    expect(html).toContain("1件をまとめて採用");
+    expect(html).toContain("いまの値（前回の調査で採用）: 18席");
+    expect(html).toContain("調査の値: 値");
   });
 
-  it("conflictが無ければ Primary は disabled にならない(テストの検知能力の確認)", () => {
-    const html = render(makeRun([item("business_hours_holidays", "confirmed")]));
-    expect(hasDisabledAttribute(html, "残り1件を採用して調査完了")).toBe(false);
+  it("上書きになる項目のボタンは「上書きする」「いまの値を残す」", () => {
+    const html = render(makeRun([item("seat_count", "confirmed")]), { seat_count: adoptedField("18席") });
+    expect(html).toContain(">上書きする</button>");
+    expect(html).toContain(">いまの値を残す</button>");
   });
 
-  it("要選択件数を表示する", () => {
-    const html = render(makeRun(WITH_CONFLICT));
-    expect(html).toContain("要選択 1");
+  it("同じ値の項目は、採用しても基本情報が変わらないことが分かる", () => {
+    const html = render(makeRun([item("seat_count", "confirmed")]), { seat_count: adoptedField("値") });
+    expect(html).toContain("変更なし");
+    expect(html).toContain("いまの値と同じです。採用しても基本情報は変わりません。");
+    expect(html).toContain("まとめて採用: 1件（変更なし 1）");
   });
 
-  it("conflict は採用件数の内訳に含めない", () => {
-    const html = render(makeRun(WITH_CONFLICT));
-    expect(html).toContain("残り: 確認済み 1・推定 0");
+  it("同じ値は推定でもまとめて採用に入る", () => {
+    const html = render(makeRun([item("main_target", "inferred")]), { main_target: adoptedField("値") });
+    expect(html).toContain("1件を採用して調査完了");
+  });
+});
+
+describe("折りたたみ (#301)", () => {
+  it("まとめて採用する項目は閉じ、1 件ずつ確認する項目は開いておく", () => {
+    const html = render(makeRun(ITEMS));
+    expect(cardTag(html, "seat_count")).not.toMatch(/ open=""/);
+    expect(cardTag(html, "main_target")).toMatch(/ open=""/);
+  });
+
+  it("判断済みの項目は閉じる", () => {
+    const html = render(
+      makeRun(ITEMS, { main_target: { decision: "rejected", decided_at: "2026-08-12T00:00:00.000Z" } }),
+    );
+    expect(cardTag(html, "main_target")).not.toMatch(/ open=""/);
+  });
+
+  it("値の出なかった項目は 1 つの閉じた折りたたみにまとめる", () => {
+    const html = render(makeRun([...ITEMS, item("budget_range", "not_found", { value: null })]));
+    expect(html).toContain("調査で値が出なかった項目(1項目)");
+    expect(html).toMatch(/<details class="[^"]*">\s*<summary[^>]*>調査で値が出なかった項目/);
+  });
+});
+
+describe("buildReviewFooterModel", () => {
+  const summary = (overrides: Partial<ReviewPlanSummary> = {}): ReviewPlanSummary => ({
+    total: 0,
+    bulkKeys: [],
+    bulk: { new: 0, same: 0 },
+    individual: { overwrite: 0, noted: 0, inferred: 0, registered: 0 },
+    choose: 0,
+    remainingKeys: [],
+    ...overrides,
+  });
+
+  it("#319 の本番の形(新規 1・変更なし 5・上書き 25)", () => {
+    const model = buildReviewFooterModel(
+      summary({
+        total: 31,
+        bulkKeys: ["a", "b", "c", "d", "e", "f"],
+        bulk: { new: 1, same: 5 },
+        individual: { overwrite: 25, noted: 0, inferred: 0, registered: 0 },
+        remainingKeys: Array.from({ length: 25 }, (_, i) => `o${i}`),
+      }),
+    );
+    expect(model.bulkLine).toBe("まとめて採用: 6件（新規 1・変更なし 5）");
+    expect(model.remainingLine).toBe("1件ずつ確認: 上書き 25");
+    expect(model.primary).toEqual({
+      kind: "bulk",
+      label: "6件をまとめて採用",
+      keys: ["a", "b", "c", "d", "e", "f"],
+      complete: false,
+    });
+    expect(model.skipLabel).toBe("残り31件は反映せずに完了");
+  });
+
+  it("まとめて採用が無く残りがあれば、先頭の残り項目へ移動する", () => {
+    const model = buildReviewFooterModel(
+      summary({ total: 2, individual: { overwrite: 0, noted: 0, inferred: 2, registered: 0 }, remainingKeys: ["x", "y"] }),
+    );
+    expect(model.primary).toEqual({ kind: "next", label: "次の未判断の項目へ", targetKey: "x" });
+    expect(model.bulkLine).toBeNull();
+  });
+
+  it("未判断が無ければ完了だけ", () => {
+    const model = buildReviewFooterModel(summary());
+    expect(model.primary).toEqual({ kind: "complete", label: "レビュー完了" });
+    expect(model.bulkLine).toBeNull();
+    expect(model.remainingLine).toBeNull();
+    expect(model.skipLabel).toBeNull();
   });
 });
 
@@ -170,7 +288,7 @@ describe("完了後の状態", () => {
     const run = { ...makeRun([item("seat_count", "confirmed")]), review_completed_at: "2026-08-12T01:00:00.000Z" };
     const html = render(run);
     expect(html).not.toContain("レビュー完了操作");
-    expect(html).not.toContain("判断済みの内容だけで完了");
+    expect(html).not.toContain("反映せずに完了");
     expect(html).toContain("再調査する");
   });
 });
@@ -188,8 +306,6 @@ describe("狭い画面の完了操作", () => {
 describe("項目カードのボタン優先順位(Plan §12.3)", () => {
   it("採用 → 編集して採用 → 却下 → スキップ の順で描画する", () => {
     const html = render(makeRun([item("seat_count", "confirmed")]));
-    const order = ["採用", "編集して採用", "却下", "スキップ"].map((label) => html.indexOf(label));
-    expect(order.every((i) => i >= 0)).toBe(true);
     // 「編集して採用」は「採用」を部分文字列に含むため、文字列位置ではなく出現順で比較する
     const buttons = [...html.matchAll(/>([^<>]+)<\/button>/g)].map((m) => m[1]);
     const reviewButtons = buttons.filter((b) =>
@@ -223,124 +339,16 @@ describe("existing_canonical の provenance 表示(Plan §7.3)", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/*  完了ブロッカーUX(conflict が残っている間の案内とジャンプ)            */
+/*  項目へのジャンプと footer                                           */
 /* ------------------------------------------------------------------ */
 
 const {
   ReviewCompletionFooter,
-  buildConflictGuidance,
-  buildSkipRemainingNote,
-  handleConflictJump,
+  buildReviewFooterModel,
+  handleItemJump,
   researchItemAnchorId,
   scrollToResearchItem,
 } = await import("../research-review-section");
-
-/** 「営業時間・定休日」= business_hours_holidays / 「客単価（昼・夜）」= average_spend_day_night。 */
-function conflictItem(key: string): ResearchItem {
-  return item(key, "conflict", {
-    research_policy: "ANALYSIS",
-    candidates: [
-      { candidate_id: "c1", label: "候補A", value: "A案", evidence: "e", source_ids: [] },
-      { candidate_id: "c2", label: "候補B", value: "B案", evidence: "e", source_ids: [] },
-    ],
-  });
-}
-
-const DECIDED = { decision: "adopted", decided_at: "2026-08-12T00:00:00.000Z" } as const;
-
-describe("buildConflictGuidance(文言の組み立て)", () => {
-  it("未解決 conflict が無ければ null(= ブロックしていない)", () => {
-    expect(buildConflictGuidance([], 30)).toBeNull();
-  });
-
-  it("1件: 項目名・残件数・次の操作を1文で説明する", () => {
-    const g = buildConflictGuidance([{ key: "business_hours_holidays", label: "営業時間・定休日" }], 30);
-    expect(g).not.toBeNull();
-    expect(g!.count).toBe(1);
-    expect(g!.targetKey).toBe("business_hours_holidays");
-    expect(g!.headline).toBe("あと1件の候補選択で完了できます");
-    expect(g!.detail).toBe(
-      "「営業時間・定休日」の情報源が一致していません。候補を選ぶと、残り30件をまとめて採用できます。",
-    );
-    expect(g!.jumpLabel).toBe("営業時間・定休日を確認");
-  });
-
-  it("headline は残項目数ではなく「候補選択の回数」であることを明示する", () => {
-    // footer には同時に「未対応 31」「残り30件を採用して調査完了」が出るため、
-    // 「調査完了まであと1件」だと残項目数と誤読される(独立レビュー m1)。
-    const g = buildConflictGuidance([{ key: "business_hours_holidays", label: "営業時間・定休日" }], 30);
-    expect(g!.headline).toContain("候補選択");
-    expect(g!.headline).not.toBe("調査完了まであと1件");
-  });
-
-  it("2件以上: 先頭 + ほかN件に畳み、全項目名を並べない", () => {
-    const g = buildConflictGuidance(
-      [
-        { key: "business_hours_holidays", label: "営業時間・定休日" },
-        { key: "average_spend_day_night", label: "客単価（昼・夜）" },
-      ],
-      30,
-    );
-    expect(g!.count).toBe(2);
-    expect(g!.targetKey).toBe("business_hours_holidays");
-    expect(g!.headline).toBe("あと2件の候補選択で完了できます");
-    expect(g!.detail).toContain("「営業時間・定休日」ほか1件の情報源が一致していません");
-    expect(g!.detail).toContain("残り30件をまとめて採用できます");
-    expect(g!.detail).not.toContain("客単価");
-    expect(g!.jumpLabel).toBe("競合2件を確認");
-  });
-
-  it("detail の「候補を1つ選ぶと」は headline と重複するため使わない", () => {
-    const g = buildConflictGuidance([{ key: "business_hours_holidays", label: "営業時間・定休日" }], 30);
-    expect(g!.detail).toContain("候補を選ぶと");
-    expect(g!.detail).not.toContain("候補を1つ選ぶと");
-  });
-
-  it("採用対象が0件なら「調査を完了できます」へ切り替える(残り0件と書かない)", () => {
-    const g = buildConflictGuidance([{ key: "business_hours_holidays", label: "営業時間・定休日" }], 0);
-    expect(g!.detail).toBe("「営業時間・定休日」の情報源が一致していません。候補を選ぶと、調査を完了できます。");
-    expect(g!.detail).not.toContain("残り0件");
-  });
-
-  it("先頭の conflict を解決すると targetKey / jumpLabel が次の conflict へ前進する", () => {
-    // 既存テストは2番目を先に解決していたため、**先頭が残ったまま**で前進を検証できて
-    // いなかった(独立レビュー m2)。ここでは先頭を解決した側を固定する。
-    const all = [
-      { key: "business_hours_holidays", label: "営業時間・定休日" },
-      { key: "average_spend_day_night", label: "客単価（昼・夜）" },
-    ];
-
-    const before = buildConflictGuidance(all, 30);
-    expect(before!.targetKey).toBe("business_hours_holidays");
-    expect(before!.jumpLabel).toBe("競合2件を確認");
-
-    // 先頭(business_hours_holidays)を採用 → 残りは average_spend_day_night のみ。
-    const after = buildConflictGuidance(all.slice(1), 30);
-    expect(after!.count).toBe(1);
-    expect(after!.targetKey).toBe("average_spend_day_night");
-    expect(after!.jumpLabel).toBe("客単価（昼・夜）を確認");
-    expect(after!.detail).toContain("「客単価（昼・夜）」の情報源が一致していません");
-    expect(after!.detail).not.toContain("営業時間・定休日");
-  });
-
-  it("失敗表現ではなく残作業として提示する", () => {
-    const g = buildConflictGuidance([{ key: "business_hours_holidays", label: "営業時間・定休日" }], 30);
-    const text = `${g!.headline}${g!.detail}${g!.jumpLabel}`;
-    for (const ng of ["エラー", "処理できません", "失敗"]) {
-      expect(text).not.toContain(ng);
-    }
-  });
-});
-
-describe("buildSkipRemainingNote(Secondary CTA の補足)", () => {
-  it("競合が残っていれば内数として明示する", () => {
-    expect(buildSkipRemainingNote(31, 1)).toBe("未対応31件（競合1件を含む）は反映されません");
-  });
-
-  it("競合が無ければ件数のみ", () => {
-    expect(buildSkipRemainingNote(30, 0)).toBe("未対応30件は反映されません");
-  });
-});
 
 describe("researchItemAnchorId / scrollToResearchItem", () => {
   it("anchor id は日本語ラベルではなく canonical key から決まる", () => {
@@ -505,8 +513,8 @@ describe("scrollToResearchItem — 折りたたまれた <details>(M1)", () => {
   });
 });
 
-describe("handleConflictJump(filter ON → 対象itemへ移動)", () => {
-  it("「要確認のみ表示」を ON にしてから対象keyへスクロールする", () => {
+describe("handleItemJump(filter ON → 対象itemへ移動)", () => {
+  it("「未判断の項目のみ表示」を ON にしてから対象keyへスクロールする", () => {
     const calls: string[] = [];
     const setFilter = vi.fn((next: boolean) => {
       calls.push(`filter:${next}`);
@@ -515,7 +523,7 @@ describe("handleConflictJump(filter ON → 対象itemへ移動)", () => {
       calls.push(`scroll:${key}`);
     });
 
-    handleConflictJump("business_hours_holidays", setFilter, scroll);
+    handleItemJump("business_hours_holidays", setFilter, scroll);
 
     expect(setFilter).toHaveBeenCalledWith(true);
     expect(scroll).toHaveBeenCalledWith("business_hours_holidays");
@@ -524,144 +532,101 @@ describe("handleConflictJump(filter ON → 対象itemへ移動)", () => {
   });
 });
 
-describe("ブロック時の sticky footer 表示", () => {
-  const ONE_CONFLICT = [
-    item("seat_count", "confirmed"),
-    item("main_target", "inferred"),
-    conflictItem("business_hours_holidays"),
-  ];
-
-  it("実際の項目名を出す(件数だけにしない)", () => {
-    const html = render(makeRun(ONE_CONFLICT));
-    expect(html).toContain("営業時間・定休日");
-    expect(html).toContain("あと1件の候補選択で完了できます");
-  });
-
-  it("「候補を選ぶと、残りN件をまとめて採用できます」を明示する", () => {
-    const html = render(makeRun(ONE_CONFLICT));
-    expect(html).toContain("候補を選ぶと、残り2件をまとめて採用できます");
-  });
-
-  it("ジャンプCTAを描画する(hoverしないと分からない設計にしない)", () => {
-    const html = render(makeRun(ONE_CONFLICT));
-    expect(html).toContain("営業時間・定休日を確認");
-    expect(html).not.toContain("競合1件へ移動");
-  });
-
-  it("disabled 理由をボタン近傍へ常時表示し、aria-describedby で結び付ける", () => {
-    const html = render(makeRun(ONE_CONFLICT));
-    expect(html).toContain("競合を解決すると有効になります");
-    const hintId = html.match(/id="([^"]+)"[^>]*>競合を解決すると有効になります/)?.[1];
-    expect(hintId).toBeDefined();
-    expect(html).toContain(`aria-describedby="${hintId}"`);
-  });
-
-  it("ジャンプ先itemに安定した DOM anchor と tabindex がある", () => {
-    const html = render(makeRun(ONE_CONFLICT));
-    expect(html).toContain('id="research-item-business_hours_holidays"');
-    expect(html).toContain('tabindex="-1"');
-  });
-
-  it("Secondary CTA はブロック中も使用可能(競合を解決しない別ルート)", () => {
-    const html = render(makeRun(ONE_CONFLICT));
-    expect(hasDisabledAttribute(html, "判断済みの内容だけで完了")).toBe(false);
-    expect(html).toContain("未対応3件（競合1件を含む）は反映されません");
-  });
-});
-
-describe("複数 conflict", () => {
-  const TWO_CONFLICTS = [
-    item("seat_count", "confirmed"),
-    conflictItem("business_hours_holidays"),
-    conflictItem("average_spend_day_night"),
-  ];
-
-  it("件数と畳んだ項目名を出す", () => {
-    const html = render(makeRun(TWO_CONFLICTS));
-    expect(html).toContain("あと2件の候補選択で完了できます");
-    expect(html).toContain("「営業時間・定休日」ほか1件の情報源が一致していません");
-    expect(html).toContain("競合2件を確認");
-  });
-
-  it("2件目を解決してもまだ残っていれば block を維持する", () => {
-    const html = render(makeRun(TWO_CONFLICTS, { average_spend_day_night: DECIDED }));
-    expect(html).toContain("あと1件の候補選択で完了できます");
-    expect(hasDisabledAttribute(html, "残り1件を採用して調査完了")).toBe(true);
-  });
-
-  it("**先頭**を解決すると案内とジャンプCTAが次の conflict へ前進する", () => {
-    // 2番目を解決するケースだけでは先頭が残り続けるため、前進を検証できない(m2)。
-    const html = render(makeRun(TWO_CONFLICTS, { business_hours_holidays: DECIDED }));
-    expect(html).toContain("あと1件の候補選択で完了できます");
-    expect(html).toContain("「客単価（昼・夜）」の情報源が一致していません");
-    expect(html).toContain("客単価（昼・夜）を確認");
-    // 解決済みの先頭項目はもう案内にもジャンプCTAにも出ない。
-    expect(html).not.toContain("「営業時間・定休日」の情報源が一致していません");
-    expect(html).not.toContain("営業時間・定休日を確認");
-    expect(hasDisabledAttribute(html, "残り1件を採用して調査完了")).toBe(true);
-  });
-
-  it("最後の conflict を解決すると block 表示が消えて Primary が有効になる", () => {
-    const html = render(
-      makeRun(TWO_CONFLICTS, {
-        average_spend_day_night: DECIDED,
-        business_hours_holidays: DECIDED,
-      }),
-    );
-    expect(html).not.toContain("の候補選択で完了できます");
-    expect(html).not.toContain("競合を解決すると有効になります");
-    expect(html).not.toContain("を確認</button>");
-    expect(hasDisabledAttribute(html, "残り1件を採用して調査完了")).toBe(false);
-  });
-});
-
 describe("ReviewCompletionFooter の busy / completing 挙動", () => {
-  const SUMMARY = { confirmed: 2, inferred: 1, conflict: 0, adoptable: 3, total: 3 };
-  const GUIDANCE = buildConflictGuidance(
-    [{ key: "business_hours_holidays", label: "営業時間・定休日" }],
-    3,
-  );
+  const MODEL = {
+    bulkLine: "まとめて採用: 2件（新規 2）",
+    remainingLine: "1件ずつ確認: 推定 1",
+    primary: { kind: "bulk" as const, label: "2件をまとめて採用", keys: ["a", "b"], complete: false },
+    skipLabel: "残り3件は反映せずに完了",
+  };
 
   function renderFooter(overrides: Record<string, unknown> = {}): string {
     return renderToStaticMarkup(
       <ReviewCompletionFooter
-        summary={SUMMARY}
-        conflictGuidance={null}
+        model={MODEL}
         decidedCount={0}
+        undecidedCount={3}
         busy={false}
         completing={false}
-        onAdoptRemaining={() => {}}
+        onPrimary={() => {}}
         onCompleteDecidedOnly={() => {}}
-        onJumpToConflict={() => {}}
         {...overrides}
       />,
     );
   }
 
-  it("idle なら Primary / Secondary とも有効", () => {
+  it("idle なら主ボタン / 副ボタンとも有効", () => {
     const html = renderFooter();
-    expect(hasDisabledAttribute(html, "残り3件を採用して調査完了")).toBe(false);
-    expect(hasDisabledAttribute(html, "判断済みの内容だけで完了")).toBe(false);
+    expect(hasDisabledAttribute(html, "2件をまとめて採用")).toBe(false);
+    expect(hasDisabledAttribute(html, "残り3件は反映せずに完了")).toBe(false);
   });
 
   it("busy 中は両方 disabled", () => {
     const html = renderFooter({ busy: true });
-    expect(hasDisabledAttribute(html, "残り3件を採用して調査完了")).toBe(true);
-    expect(hasDisabledAttribute(html, "判断済みの内容だけで完了")).toBe(true);
+    expect(hasDisabledAttribute(html, "2件をまとめて採用")).toBe(true);
+    expect(hasDisabledAttribute(html, "残り3件は反映せずに完了")).toBe(true);
   });
 
-  it("completing 中は Primary が「処理中…」になり両方 disabled", () => {
+  it("completing 中は主ボタンが「処理中…」になり両方 disabled", () => {
     const html = renderFooter({ completing: true });
     expect(hasDisabledAttribute(html, "処理中…")).toBe(true);
-    expect(hasDisabledAttribute(html, "判断済みの内容だけで完了")).toBe(true);
+    expect(hasDisabledAttribute(html, "残り3件は反映せずに完了")).toBe(true);
+    // 処理中を示すのは押した主ボタンだけ。副ボタンは押せないだけで処理中ではない (#326)。
+    expect(buttonAttributes(html, "処理中…")).toContain(' aria-busy="true"');
+    expect(buttonAttributes(html, "残り3件は反映せずに完了")).not.toContain("aria-busy=");
+  });
+});
+
+describe("重複表示の整理 (#360)", () => {
+  /** 本番 (2026-10-12, Brasserie NORMAN) の警告の原文。 */
+  const FETCH_FAILED =
+    "Webページを確認できた情報源がありません(候補はありましたが、いずれも本文取得に失敗しました)。";
+
+  it("「レビュー進捗」の行を出さない (#359)", () => {
+    expect(render(makeRun(ITEMS))).not.toContain("レビュー進捗");
   });
 
-  it("conflict ブロック中でも Secondary だけは有効なまま", () => {
-    const html = renderFooter({
-      conflictGuidance: GUIDANCE,
-      summary: { ...SUMMARY, conflict: 1, adoptable: 3, total: 4 },
+  it("本文取得の失敗・Places の失敗の警告は出さない (#359)", () => {
+    const html = render({
+      ...makeRun(ITEMS),
+      warnings: [
+        FETCH_FAILED,
+        "Google Places候補が一意に特定できませんでした (places_search_no_match)。既存情報のみで調査を続行します。",
+      ],
     });
-    expect(hasDisabledAttribute(html, "残り3件を採用して調査完了")).toBe(true);
-    expect(hasDisabledAttribute(html, "判断済みの内容だけで完了")).toBe(false);
+    expect(html).not.toContain("本文取得に失敗しました");
+    expect(html).not.toContain("Google Places");
+    expect(html).not.toContain("登録情報と一致しません");
+  });
+
+  it("店舗が一致しない警告だけは 1 行で出す (#359)", () => {
+    const html = render({ ...makeRun(ITEMS), warnings: [FETCH_FAILED, IDENTITY_MISMATCH_RUN_WARNING] });
+    expect(html).toContain("登録情報と一致しません");
+    expect(html).not.toContain("本文取得に失敗しました");
+  });
+
+  it("見出しの件数はレビュー対象の区分だけで、推定の意味を 1 回だけ添える", () => {
+    const html = render(
+      makeRun([
+        ...ITEMS,
+        item("seats_private", "inferred"),
+        item("owner_profile", "not_found", { value: null }),
+        item("owner_career", "hearing_required", { value: null }),
+      ]),
+    );
+    expect(html).toContain("推定 2（AIによる分析で、断定はできません）");
+    expect(html.split("AIによる分析で、断定はできません").length - 1).toBe(1);
+    // カードには本文の注意文を出さない (ツールチップの title 属性だけ)。
+    expect(html).not.toContain("⚠ AIによる分析です");
+    // 値の出なかった項目は末尾の折りたたみの件数に出ている。
+    expect(html).toContain("調査で値が出なかった項目(2項目)");
+    expect(html).not.toMatch(/確認できず \d|ヒアリング必要 \d/);
+  });
+
+  it("固定バーの内訳は 1 行で、ボタンの補足文は出さない", () => {
+    const html = render(makeRun(ITEMS));
+    expect(html).toContain("<span>まとめて採用: 2件（新規 2） ／ 1件ずつ確認: 推定 1</span>");
+    expect(html).not.toContain("上書きになる項目と推定の項目は、1件ずつ確認します");
+    expect(html).not.toContain("未対応の項目は基本情報に反映されません");
   });
 });

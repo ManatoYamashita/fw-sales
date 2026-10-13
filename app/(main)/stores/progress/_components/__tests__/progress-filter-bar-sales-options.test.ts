@@ -101,10 +101,10 @@ describe("Select / チップへの配線", () => {
     code = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
   });
 
-  it("営業担当 Select は buildSalesOptions の結果から option を描画する", () => {
+  it("営業担当 Select は buildSalesOptions の結果を候補にする", () => {
     // profileEntries を直接 map する旧実装へ戻ると sentinel が選べなくなる。
-    expect(code).toContain("{salesOptions.map(({ value, label }) => (");
-    expect(code).not.toMatch(/<option value="">すべての担当<\/option>/);
+    expect(code).toContain("options={salesOptions}");
+    expect(code).not.toContain('label: "すべての担当" }, ...profile');
   });
 
   it("適用中チップは Select と同じ配列からラベルを引く", () => {

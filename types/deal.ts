@@ -14,6 +14,16 @@ export const DEAL_STATUSES: readonly DealStatus[] = [
   "受注",
 ];
 
+/**
+ * 失注した店舗へ再アプローチしてよいか (#297)。
+ *
+ * 現場が店舗名に「（Rアポ）」「（確バツ）」と書き込んでいた情報の受け皿。
+ * 失注の営業記録にだけ意味を持ち、それ以外の状態では常に null に正規化する
+ * (`normalizeDealStatusAmounts`)。null は「未判断」。
+ */
+export const REAPPROACH_OPTIONS = ["再アプローチ可", "再アプローチ不可"] as const;
+export type Reapproach = (typeof REAPPROACH_OPTIONS)[number];
+
 export const NEXT_ACTION_TYPES = ["電話", "DM", "メール", "対面", "オンライン", "訪問", "資料送付", "見積確認", "社内確認", "その他"] as const;
 export type NextActionType = (typeof NEXT_ACTION_TYPES)[number];
 
@@ -28,6 +38,8 @@ export interface Deal {
   estimate_amount: number;
   order_amount: number | null;
   lost_reason: string;
+  /** 失注時の再アプローチ可否 (#297)。失注以外と未判断は null。 */
+  reapproach: Reapproach | null;
   status: DealStatus;
   /**
    * 営業担当ユーザー参照 (auth-and-notifications)。

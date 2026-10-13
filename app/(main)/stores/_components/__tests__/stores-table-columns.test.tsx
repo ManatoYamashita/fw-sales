@@ -50,7 +50,7 @@ const BUDGET = {
   next: 272,
   // 操作は admin (削除ボタンあり) で 100、member で 92。always は広い方で積む。
   actions: 100,
-  stage: 96,
+  stage: 120, // #299: 「レビュー待ち」6 文字 (実測 120.00)
   salesState: 146,
   sales: 100, // cap
   location: 200, // cap
@@ -64,8 +64,9 @@ const ALWAYS = ["name", "next", "actions"] as const;
 
 /** always の上に積む順 = 優先度の高い順。`/dashboard` (#224) の落とす順と整合させている。 */
 const LADDER = [
-  "stage",
+  // #297: 営業状態 (受注 / 失注 / 追客…) を調査段階より上位に置く。
   "salesState",
+  "stage",
   "sales",
   "location",
   "channel",
@@ -81,19 +82,19 @@ const EXPECTED: Record<string, ColumnMinContainerWidth | undefined> = {
   name: undefined, // 店舗名 260 ┐
   next: undefined, // 次回アクション 272 ├ always 計 632
   actions: undefined, // 操作 100 ┘
-  stage: 728, // + 状態 96
-  salesState: 874, // + 現在の営業状態 146
-  sales: 974, // + 営業担当 100
-  location: 1174, // + 最寄駅 200
-  channel: 1312, // + チャネル 138
-  updated: 1422, // + 最終営業日 110
-  genre: 1582, // + 業態 160
+  salesState: 778, // + 営業状態 146 (#297 で調査段階と順序を入れ替え)
+  stage: 898, // + 調査段階 120 (#299)
+  sales: 998, // + 営業担当 100
+  location: 1198, // + 最寄駅 200
+  channel: 1336, // + チャネル 138
+  updated: 1446, // + 最終営業日 110
+  genre: 1606, // + 業態 160
 };
 
 /**
  * `/stores` のコンテナ幅の上限 (viewport 2000px 以上・サイドバー展開時の実測。PR #223)。
  * 1920px では `main` の max-width に頭打ちされてコンテナは 1486px しかないため、
- * 業態 (admin で 1582 + 48 = 1630) は 2000px 以上でのみ表示される。
+ * 業態 (admin で 1606 + 48 = 1654) は 2000px 以上でのみ表示される。
  */
 const WIDEST_CONTAINER = 1710;
 

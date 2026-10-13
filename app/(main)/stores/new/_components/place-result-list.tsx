@@ -5,7 +5,6 @@ import { ExternalLink, MapPin, Phone } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { Spinner } from "@/components/ui/spinner";
 import { StarRating } from "@/components/ui/star-rating";
 import { AddStoreButton } from "./add-store-button";
 import { mapGenre } from "@/lib/places/to-store-input";
@@ -235,14 +234,10 @@ export function PlaceResultList({
                             e.stopPropagation();
                             onFetchDetails(place.placeId);
                           }}
-                          disabled={isDetailsLoading || isDetailsLoaded}
+                          pending={isDetailsLoading}
+                          disabled={isDetailsLoaded}
                         >
-                          {isDetailsLoading ? (
-                            <>
-                              <Spinner size="sm" />
-                              取得中…
-                            </>
-                          ) : isDetailsLoaded ? (
+                          {isDetailsLoading ? "取得中…" : isDetailsLoaded ? (
                             "詳細取得済み"
                           ) : (
                             "詳細取得"

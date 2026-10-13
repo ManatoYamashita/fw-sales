@@ -37,10 +37,11 @@ function makeStore(overrides: Partial<Store>): Store {
 
 vi.mock("server-only", () => ({}));
 
-const { mockFindAll, mockStoreList, mockDealList } = vi.hoisted(() => ({
+const { mockFindAll, mockStoreList, mockDealList, mockNeedsReview } = vi.hoisted(() => ({
   mockFindAll: vi.fn(),
   mockStoreList: vi.fn(),
   mockDealList: vi.fn(),
+  mockNeedsReview: vi.fn(),
 }));
 
 vi.mock("@/lib/repositories", () => ({
@@ -48,6 +49,7 @@ vi.mock("@/lib/repositories", () => ({
     profile: { findAll: mockFindAll },
     store: { list: mockStoreList },
     deal: { list: mockDealList },
+    researchRun: { listStoreIdsNeedingReview: mockNeedsReview },
   },
 }));
 
@@ -64,6 +66,7 @@ beforeEach(() => {
   mockFindAll.mockResolvedValue([]);
   mockStoreList.mockResolvedValue([]);
   mockDealList.mockResolvedValue([]);
+  mockNeedsReview.mockResolvedValue([]);
 });
 
 describe("listSalesProgressRows の getAllProfiles 呼び出し", () => {
@@ -96,6 +99,21 @@ describe("listSalesProgressRows の getAllProfiles 呼び出し", () => {
     await listSalesProgressRows();
     expect(mockStoreList).toHaveBeenCalledTimes(1);
     expect(mockDealList).toHaveBeenCalledTimes(1);
+  });
+
+  it("未レビューの AI 調査結果がある店舗は調査状態がレビュー待ちになる (#299)", async () => {
+    // ここで id 集合を配線し忘れると、全行が stage 表示に戻り /research と食い違う。
+    mockStoreList.mockResolvedValue([
+      makeStore({ id: "store_1", stage: "調査済み" }),
+      makeStore({ id: "store_2", stage: "調査済み" }),
+    ]);
+    mockNeedsReview.mockResolvedValue(["store_1"]);
+
+    const rows = await listSalesProgressRows();
+
+    const byId = new Map(rows.map((r) => [r.store.id, r.researchStatus]));
+    expect(byId.get("store_1")).toBe("レビュー待ち");
+    expect(byId.get("store_2")).toBe("調査済み");
   });
 
   it("店舗 0 件でも例外を投げず空配列を返す", async () => {

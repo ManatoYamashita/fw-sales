@@ -8,11 +8,11 @@ import {
   StoreQuickFilters,
   StoreQuickFiltersFallback,
 } from "./_components/store-quick-filters";
-import { Spinner } from "@/components/ui/spinner";
+import { TableSkeleton } from "@/components/ui/skeleton";
 import { getAllProfiles } from "@/lib/queries/profiles";
 import { DEAL_STATUSES, type DealStatus } from "@/types/deal";
 import type { SortDirection } from "@/types/store";
-import { STAGE_IDS, type StageId } from "@/types/stage";
+import { isStoreResearchStatus } from "@/lib/domain/store-research-status";
 import { CHANNELS, type Channel } from "@/types/store";
 import {
   CURRENT_SALES_STATES,
@@ -38,7 +38,7 @@ function parseFilter(p: SearchParams): SalesProgressFilter {
   if (p.sales) filter.sales = p.sales;
   if (p.next && (NEXT_ACTION_URGENCIES as readonly string[]).includes(p.next)) filter.next = p.next as NextActionUrgency;
   if (p.state && (CURRENT_SALES_STATES as readonly string[]).includes(p.state)) filter.state = p.state as CurrentSalesState;
-  if (p.stage && (STAGE_IDS as readonly string[]).includes(p.stage)) filter.stage = p.stage as StageId;
+  if (p.stage && isStoreResearchStatus(p.stage)) filter.stage = p.stage;
   if (p.channel && (CHANNELS as readonly string[]).includes(p.channel)) filter.channel = p.channel as Channel;
   return filter;
 }
@@ -49,13 +49,10 @@ function parseSort(p: SearchParams): ProgressSort {
   return { key: p.sort as ProgressSortKey, dir };
 }
 
-export default async function StoresPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  const sp = await searchParams;
-  const filter = parseFilter(sp);
-  const sort = parseSort(sp);
+export default function StoresPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   return <div className="space-y-4">
     <div className="flex items-center justify-between gap-2 flex-wrap [&>*+*]:ml-auto">
-      <div><h1 className="text-xl md:text-2xl font-bold text-foreground">店舗・営業一覧</h1><p className="text-sm text-muted-foreground">現在の営業状態と次に行うことを店舗単位で確認できます。</p></div>
+      <div><h1 className="text-xl md:text-2xl font-bold text-foreground">店舗・営業一覧</h1><p className="text-sm text-muted-foreground">営業状態と次に行うことを店舗単位で確認できます。</p></div>
       <Link href="/stores/new" className="inline-flex items-center gap-1.5 h-10 px-4 rounded-lg border border-transparent bg-primary text-primary-foreground text-sm font-medium hover:bg-background hover:text-foreground hover:border-foreground"><Plus className="h-4 w-4" />店舗を登録</Link>
     </div>
     {/*
@@ -83,11 +80,26 @@ export default async function StoresPage({ searchParams }: { searchParams: Promi
       <ProgressFilterBarSlot />
     </Suspense>
 
-    {/* 一覧側は filter/sort ごとに fallback を出したいので key を維持する。 */}
-    <Suspense key={JSON.stringify({ filter, sort })} fallback={<div className="flex items-center gap-2 text-sm text-muted-foreground py-12 justify-center"><Spinner /> 読み込み中…</div>}>
-      <StoresTable filter={filter} sort={sort} />
+    {/* Request-time Promise は境界の子で読む。ページの静的シェルを待たせない。 */}
+    <Suspense fallback={<StoresTableFallback />}>
+      <StoresTableSlot searchParams={searchParams} />
     </Suspense>
   </div>;
+}
+
+async function StoresTableSlot({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  const sp = await searchParams;
+  const filter = parseFilter(sp);
+  const sort = parseSort(sp);
+  // 一覧だけを filter/sort ごとにリセットし、フィルタバーの入力状態は保持する。
+  return <Suspense key={JSON.stringify({ filter, sort })} fallback={<StoresTableFallback />}>
+    <StoresTable filter={filter} sort={sort} />
+  </Suspense>;
+}
+
+/** 一覧表の骨組み。絞り込みや並べ替えのたびにも出るので、表の形のまま待たせる (#326)。 */
+function StoresTableFallback() {
+  return <TableSkeleton rows={8} />;
 }
 
 /**

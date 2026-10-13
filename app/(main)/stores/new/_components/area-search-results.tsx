@@ -7,11 +7,11 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Separator } from "@/components/ui/separator";
-import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "@/components/ui/toast";
 import { PlaceResultList } from "./place-result-list";
 import { AreaSearchMap } from "./area-search-map";
+import { runAction } from "@/lib/client/run-action";
 import {
   bulkAddStoresFromPlacesAction,
   getPlaceDetailsForAreaSearchAction,
@@ -40,12 +40,18 @@ import {
 } from "@/lib/places/ranking";
 import { buildTextSearchMeta, getAreaSearchMetaMessages } from "@/lib/places/search-meta";
 import { Select } from "@/components/ui/select";
+import { optionsFromValues } from "@/components/ui/select-logic";
 import type {
   AreaSearchDiscoverySource,
   AreaSearchMeta,
   AreaSearchPlaceViewModel,
   SearchCenter,
 } from "@/lib/places/types";
+
+const SORT_MODE_OPTIONS = optionsFromValues(
+  AREA_SEARCH_SORT_MODES,
+  (mode) => AREA_SEARCH_SORT_MODE_LABELS[mode],
+);
 
 /**
  * 一覧の絞り込み区分。
@@ -501,19 +507,26 @@ export function AreaSearchResults({
     setError(null);
     const ids = [...selectedIds];
     startBulkTransition(async () => {
-      const result = await bulkAddStoresFromPlacesAction(ids);
+      const result = await runAction(() => bulkAddStoresFromPlacesAction(ids), {
+        success: ({ added, failed }) => {
+          if (added === 0) {
+            return { message: `${failed}件すべて登録できませんでした`, tone: "warning" };
+          }
+          if (failed > 0) {
+            return { message: `${added}件を登録しました（${failed}件は失敗）`, tone: "warning" };
+          }
+          return `${added}件を登録しました`;
+        },
+      });
+      if (!result) return;
       if (!result.ok) {
+        // トーストに加えて一覧の上にも残す。どの操作が失敗したかを見失わないため。
         setError(result.error);
         return;
       }
       const { added, failed, failedPlaceIds } = result.data;
       if (added > 0) {
-        // 1 件でも追加できたら登録店舗一覧へ遷移する (失敗分は toast で通知)。
-        toast.success(
-          failed > 0
-            ? `${added}件を登録しました（${failed}件は失敗）`
-            : `${added}件を登録しました`,
-        );
+        // 1 件でも追加できたら登録店舗一覧へ遷移する (失敗分はトーストで通知済み)。
         router.push("/stores");
         return;
       }
@@ -629,15 +642,10 @@ export function AreaSearchResults({
                   size="sm"
                   gap="tight"
                   onClick={handleLoadMore}
-                  disabled={isLoadingMore}
+                  pending={isLoadingMore}
                   className="shrink-0"
                 >
-                  {isLoadingMore ? (
-                    <>
-                      <Spinner />
-                      読み込み中…
-                    </>
-                  ) : (
+                  {isLoadingMore ? "読み込み中…" : (
                     "さらに候補を読み込む"
                   )}
                 </Button>
@@ -684,11 +692,9 @@ export function AreaSearchResults({
                       size="sm"
                       gap="tight"
                       onClick={() => handleExplore("keyword", chip)}
-                      disabled={
-                        explorationPendingId !== null || exploredRunIds.has(runId)
-                      }
+                      pending={explorationPendingId === runId}
+                      disabled={explorationPendingId !== null || exploredRunIds.has(runId)}
                     >
-                      {explorationPendingId === runId && <Spinner size="sm" />}
                       {chip}
                       {exploredRunIds.has(runId) && (
                         <span className="text-xs text-muted-foreground">探索済み</span>
@@ -718,11 +724,9 @@ export function AreaSearchResults({
                       size="sm"
                       gap="tight"
                       onClick={() => handleExplore("center", chip)}
-                      disabled={
-                        explorationPendingId !== null || exploredRunIds.has(runId)
-                      }
+                      pending={explorationPendingId === runId}
+                      disabled={explorationPendingId !== null || exploredRunIds.has(runId)}
                     >
-                      {explorationPendingId === runId && <Spinner size="sm" />}
                       {chip}
                       {exploredRunIds.has(runId) && (
                         <span className="text-xs text-muted-foreground">探索済み</span>
@@ -748,11 +752,9 @@ export function AreaSearchResults({
                       size="sm"
                       gap="tight"
                       onClick={() => handleExplore("radius", chip)}
-                      disabled={
-                        explorationPendingId !== null || exploredRunIds.has(runId)
-                      }
+                      pending={explorationPendingId === runId}
+                      disabled={explorationPendingId !== null || exploredRunIds.has(runId)}
                     >
-                      {explorationPendingId === runId && <Spinner size="sm" />}
                       {label}
                       {exploredRunIds.has(runId) && (
                         <span className="text-xs text-muted-foreground">探索済み</span>
@@ -832,18 +834,13 @@ export function AreaSearchResults({
                 <Select
                   width="auto"
                   density="compact"
+                  options={SORT_MODE_OPTIONS}
                   value={sortMode}
-                  onChange={(e) =>
-                    setSortMode(e.target.value as AreaSearchSortMode)
+                  onValueChange={(value) =>
+                    setSortMode(value as AreaSearchSortMode)
                   }
                   aria-label="表示順を切り替え"
-                >
-                  {AREA_SEARCH_SORT_MODES.map((mode) => (
-                    <option key={mode} value={mode}>
-                      {AREA_SEARCH_SORT_MODE_LABELS[mode]}
-                    </option>
-                  ))}
-                </Select>
+                />
               </label>
             </div>
           )}
@@ -965,15 +962,10 @@ export function AreaSearchResults({
                 size="sm"
                 gap="tight"
                 onClick={handleBulkAdd}
-                disabled={isBulkPending}
+                pending={isBulkPending}
                 className="ml-auto"
               >
-                {isBulkPending ? (
-                  <>
-                    <Spinner tone="primary" />
-                    登録中…
-                  </>
-                ) : (
+                {isBulkPending ? "登録中…" : (
                   "選択した店舗を登録"
                 )}
               </Button>

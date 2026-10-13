@@ -49,7 +49,12 @@
  */
 
 import { normalizePhone, normalizePhoneText } from "./identity-match";
-import type { ResearchItem, ResearchItemCandidate } from "@/lib/ai/research-result-schema";
+import {
+  PHONE_NOT_A_NUMBER_WARNING,
+  PHONE_UNBACKED_WARNING,
+  type ResearchItem,
+  type ResearchItemCandidate,
+} from "@/lib/ai/research-result-schema";
 
 /** 日本の電話番号として妥当な桁数レンジ(市外局番込み)。 */
 const MIN_PHONE_DIGITS = 10;
@@ -91,10 +96,6 @@ export function extractPhoneNumbers(text: string | null | undefined): string[] {
   return [...found];
 }
 
-const UNBACKED_PHONE_WARNING =
-  "value に含まれる電話番号の一部が根拠(evidence)に現れないため自動的に格下げしました。";
-const NO_PHONE_NUMBER_WARNING =
-  "電話番号として解釈できる値が含まれていないため自動的に格下げしました。";
 
 /** `checkPhoneEvidence` の不合格理由。合格時は `null` を返す。 */
 type PhoneEvidenceFailure = "no_phone_number" | "unbacked_number";
@@ -178,7 +179,7 @@ export function enforcePhoneNumbersBackedByEvidence(item: ResearchItem): Researc
   const failure = checkPhoneEvidence(item.value, item.evidence);
   if (failure === null) return item;
 
-  const note = failure === "no_phone_number" ? NO_PHONE_NUMBER_WARNING : UNBACKED_PHONE_WARNING;
+  const note = failure === "no_phone_number" ? PHONE_NOT_A_NUMBER_WARNING : PHONE_UNBACKED_WARNING;
   return {
     ...item,
     status: "not_found",

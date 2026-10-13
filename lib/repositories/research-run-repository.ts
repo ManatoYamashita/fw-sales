@@ -9,7 +9,7 @@
  * - `create` は `status="running"` で行を作成する。`expires_at` はリポジトリ側で
  *   `started_at` + 既定マージンを計算する (呼び出し側は指定しない)。
  * - `getLatestForStore` は `started_at` 降順で最新1件を返す (Plan §6 の
- *   「要確認」判定 — 最新の成功run選定 — に使用する想定)。
+ *   「レビュー待ち」判定 — 最新の成功run選定 — に使用する想定)。
  * - `update` は不変列 (`id` / `store_id` / `requested_by_user_id` / `started_at` /
  *   `expires_at`) を変更しない。存在しない `id` の場合は `null` を返す。
  * - `update` の jsonb 列 (`result` / `source_registry` / `review_decisions` /
@@ -50,7 +50,7 @@ export interface ResearchRunRepository {
 
   /**
    * `status==="succeeded"` かつ `review_completed_at IS NULL` を満たすrunが
-   * 1件以上存在する店舗のidを重複なく返す(PR5, Plan v3.2 §6「要確認」判定)。
+   * 1件以上存在する店舗のidを重複なく返す(PR5, Plan v3.2 §6「レビュー待ち」判定。#299 以前の呼び名は「要確認」)。
    *
    * 「最新runだけを見る」のではなく、該当条件を満たすrunの**存在**を店舗単位で
    * 判定する(新しい失敗runが古い未レビューのsucceeded runを隠さないため、Plan §6)。

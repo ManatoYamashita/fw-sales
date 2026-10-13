@@ -10,9 +10,9 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Modal, ModalContent, ModalFooter } from "@/components/ui/modal";
-import { toast } from "@/components/ui/toast";
 import { DealStatusBadge } from "@/components/feature/deal-status-badge";
-import { SalesStateBadge } from "@/components/feature/sales-state-badge";
+import { SalesStateSummary } from "@/components/feature/sales-state-badge";
+import { runAction } from "@/lib/client/run-action";
 import { updateSalesProgressAction } from "@/lib/actions/store-actions";
 import { deleteSalesActivityAction } from "@/lib/actions/deal-actions";
 import { formatDate, todayInTimeZone } from "@/lib/utils/date";
@@ -55,6 +55,9 @@ export function SalesProgressCard({ store, deals, profiles }: { store: Store; de
   const profileMap = new Map(profiles.map((p) => [p.id, p.display_name]));
   // 現在の担当者が profiles に含まれない (削除済み / 取得漏れ) 場合の Select 受け皿。
   const unknownSalesId = store.assigned_sales_user_id && !profileMap.has(store.assigned_sales_user_id) ? store.assigned_sales_user_id : null;
+  // 現在の担当者が profiles に無い (削除済み等) 場合は「不明な担当者」として候補に残す。
+  // 候補から消すと、利用者が触っていないのに担当が別の値へ置き換わって見える。
+  const salesOptions = [{ value: "", label: "未割当" }, ...profiles.map((p) => ({ value: p.id, label: p.display_name })), ...(unknownSalesId ? [{ value: unknownSalesId, label: "不明な担当者" }] : [])];
   // deep link (?activity= / ?action=new) で開いた場合だけ URL を戻す。クエリがなければ
   // replace を発行しない (保存成功時の router.refresh と replace を無駄に重ねない)
   const clearFormQuery = () => { if (searchParams.get("activity") || searchParams.get("action")) router.replace(`/stores/${store.id}?tab=progress`); };
@@ -63,9 +66,10 @@ export function SalesProgressCard({ store, deals, profiles }: { store: Store; de
     const target = deleteTarget;
     if (!target || deleting) return;
     startDeleteTransition(async () => {
-      const result = await deleteSalesActivityAction(target.id);
-      if (!result.ok) return toast.error(result.error);
-      toast.success(result.message ?? "営業記録を削除しました");
+      const result = await runAction(() => deleteSalesActivityAction(target.id), {
+        success: "営業記録を削除しました",
+      });
+      if (!result?.ok) return;
       setDeleteTarget(null);
       if (formTarget === target.id) setFormTarget(null);
       // URL に削除済みの activity ID を残さない。replace しない場合のみ refresh を発行する
@@ -109,9 +113,12 @@ export function SalesProgressCard({ store, deals, profiles }: { store: Store; de
     startTransition(async () => {
       const data = new FormData();
       for (const [name, value] of changed) data.set(name, value);
-      const result = await updateSalesProgressAction(store.id, data);
-      if (!result.ok) return toast.error(result.error);
-      toast.success("現在の営業状況を更新しました"); setEditingCurrent(false); router.refresh();
+      const result = await runAction(() => updateSalesProgressAction(store.id, data), {
+        success: () => "現在の営業状況を更新しました",
+      });
+      if (!result?.ok) return;
+      setEditingCurrent(false);
+      router.refresh();
     });
   };
   return <div className="space-y-4">
@@ -128,11 +135,11 @@ export function SalesProgressCard({ store, deals, profiles }: { store: Store; de
       */}
       <Card.Body className="space-y-4">
         <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-          <Info label="現在の営業状態" note={editingCurrent ? "営業記録から自動" : undefined}>
-            <SalesStateBadge state={deriveCurrentSalesState(store, latest)} />
+          <Info label="営業状態" note={editingCurrent ? "営業記録から自動" : undefined}>
+            <SalesStateSummary state={deriveCurrentSalesState(store, latest)} latestDeal={latest} />
           </Info>
 
-          <Info label="調査・架電段階" note={editingCurrent ? "画面上部で変更" : undefined}>
+          <Info label="調査段階" note={editingCurrent ? "画面上部で変更" : undefined}>
             <span>{store.stage}</span>
           </Info>
 
@@ -143,7 +150,7 @@ export function SalesProgressCard({ store, deals, profiles }: { store: Store; de
                 {/*
                   日付が入っているときだけ出す。「クリア」だと入力欄を空にするだけの
                   操作に読めるが、実際は保存で appointment_acquired_date が null =
-                  アポ未取得の状態に戻る (現在の営業状態の判定からも外れる) ため、
+                  アポ未取得の状態に戻る (営業状態の判定からも外れる) ため、
                   結果を語る文言にする。押した時点では draft を空にするだけで保存しない。
                 */}
                 {appointmentDate ? (
@@ -159,16 +166,7 @@ export function SalesProgressCard({ store, deals, profiles }: { store: Store; de
 
           <Info label="営業担当" htmlFor={editingCurrent ? "assigned-sales" : undefined}>
             {editingCurrent ? (
-              <Select width="full" id="assigned-sales" value={assignedSales} onChange={(e) => setAssignedSales(e.target.value)}>
-                <option value="">未割当</option>
-                {profiles.map((p) => <option key={p.id} value={p.id}>{p.display_name}</option>)}
-                {/*
-                  現在の担当者が profiles に無い (削除済み等) 場合の受け皿。
-                  一致する option が無いと <select> は先頭 (未割当) を表示し、
-                  ユーザーが触っていないのに保存で担当が消える。
-                */}
-                {unknownSalesId ? <option value={unknownSalesId}>不明な担当者</option> : null}
-              </Select>
+              <Select width="full" id="assigned-sales" options={salesOptions} value={assignedSales} onValueChange={setAssignedSales} />
             ) : (
               <span>{store.assigned_sales_user_id ? profileMap.get(store.assigned_sales_user_id) ?? "不明な担当者" : "未割当"}</span>
             )}
@@ -247,13 +245,13 @@ export function SalesProgressCard({ store, deals, profiles }: { store: Store; de
         <p className="mt-3 text-sm text-muted-foreground leading-relaxed">
           {latest?.id === deleteTarget.id
             ? history.length
-              ? "最新の営業記録を削除すると、一つ前の記録が最新の営業状態として表示されます。"
+              ? "最新の営業記録を削除すると、一つ前の記録の内容が営業状態として表示されます。"
               : "この店舗の最後の営業記録です。削除すると「営業記録はまだありません」と表示されます。"
-            : "過去の履歴のため、最新の営業状態には影響しません。"}
+            : "過去の履歴のため、営業状態には影響しません。"}
         </p>
         <ModalFooter>
           <Button variant="ghost" onClick={() => setDeleteTarget(null)} disabled={deleting}>キャンセル</Button>
-          <Button variant="danger" onClick={confirmDelete} disabled={deleting}>{deleting ? "削除中…" : "削除する"}</Button>
+          <Button variant="danger" onClick={confirmDelete} pending={deleting}>{deleting ? "削除中…" : "削除する"}</Button>
         </ModalFooter>
       </ModalContent> : null}
     </Modal>
@@ -292,4 +290,4 @@ function NextActionCta({ label, onClick }: { label: string; onClick: () => void 
     <Plus className="h-3.5 w-3.5" />{label}
   </Button>;
 }
-function ActivityDetails({ deal, profileName }: { deal: Deal; profileName?: string }) { const items: Array<[string, React.ReactNode]> = [["営業担当", profileName ?? "未割当"], ["営業メモ", deal.activity_memo], ["提案内容", deal.proposal], ["ヒアリング内容", deal.discussion], ["見積金額", deal.estimate_amount ? formatYen(deal.estimate_amount) : null], ["受注金額", deal.order_amount !== null ? formatYen(deal.order_amount) : null], ["失注理由", deal.lost_reason], ["当時設定した次回アクション", [deal.next_action_date ? formatDate(deal.next_action_date) : null, deal.next_action_type, deal.next_action_note].filter(Boolean).join(" / ") || null]]; return <dl className="space-y-3 text-sm">{items.filter(([, value]) => value).map(([label, value]) => <div key={label}><dt className="text-xs font-semibold text-muted-foreground">{label}</dt><dd className="whitespace-pre-wrap break-words leading-6">{value}</dd></div>)}</dl>; }
+function ActivityDetails({ deal, profileName }: { deal: Deal; profileName?: string }) { const items: Array<[string, React.ReactNode]> = [["営業担当", profileName ?? "未割当"], ["営業メモ", deal.activity_memo], ["提案内容", deal.proposal], ["ヒアリング内容", deal.discussion], ["見積金額", deal.estimate_amount ? formatYen(deal.estimate_amount) : null], ["受注金額", deal.order_amount !== null ? formatYen(deal.order_amount) : null], ["再アプローチ", deal.status === "失注" ? (deal.reapproach ?? "未判断") : null], ["失注理由", deal.lost_reason], ["当時設定した次回アクション", [deal.next_action_date ? formatDate(deal.next_action_date) : null, deal.next_action_type, deal.next_action_note].filter(Boolean).join(" / ") || null]]; return <dl className="space-y-3 text-sm">{items.filter(([, value]) => value).map(([label, value]) => <div key={label}><dt className="text-xs font-semibold text-muted-foreground">{label}</dt><dd className="whitespace-pre-wrap break-words leading-6">{value}</dd></div>)}</dl>; }

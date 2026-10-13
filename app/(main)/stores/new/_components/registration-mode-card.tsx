@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { FormField } from "@/components/ui/form-field";
-import { Spinner } from "@/components/ui/spinner";
 import { toast } from "@/components/ui/toast";
 import { importFromUrlAction } from "@/lib/actions/url-parse-actions";
 import { Select } from "@/components/ui/select";
@@ -238,15 +237,10 @@ export function UrlSearchPanel({ onLoaded }: UrlSearchPanelProps) {
         <Button
           variant="primary"
           onClick={importNow}
-          disabled={pending}
+          pending={pending}
           className="sm:w-32 gap-2"
         >
-          {pending ? (
-            <>
-              <Spinner tone="primary" />
-              読込中…
-            </>
-          ) : (
+          {pending ? "読込中…" : (
             <>
               <Download className="h-4 w-4" />
               読込
@@ -267,6 +261,12 @@ const RADIUS_OPTIONS = [
   { value: 2000, label: "2km" },
   { value: 3000, label: "3km" },
 ] as const;
+
+/** Select は文字列で値を扱うので、送受信の境界で数値と変換する。 */
+const RADIUS_SELECT_OPTIONS = RADIUS_OPTIONS.map((opt) => ({
+  value: String(opt.value),
+  label: opt.label,
+}));
 
 const DEFAULT_RADIUS_METERS = 1000;
 
@@ -399,16 +399,11 @@ export function AreaSearchPanel({
         >
           <Select
             width="full"
+            options={RADIUS_SELECT_OPTIONS}
             id="radius"
-            value={radiusMeters}
-            onChange={(e) => setRadiusMeters(Number(e.target.value))}
-          >
-            {RADIUS_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </Select>
+            value={String(radiusMeters)}
+            onValueChange={(value) => setRadiusMeters(Number(value))}
+          />
         </FormField>
         {/* ボタン列: ラベル高さ分の透明スペーサーで Input 行に水平整列。
             モバイル(grid-cols-1)では下に積まれる。 */}
@@ -422,15 +417,10 @@ export function AreaSearchPanel({
           <Button
             variant="primary"
             onClick={handleSearch}
-            disabled={pending}
+            pending={pending}
             className="gap-2 w-full md:w-auto"
           >
-            {pending ? (
-              <>
-                <Spinner tone="primary" />
-                検索中…
-              </>
-            ) : (
+            {pending ? "検索中…" : (
               <>
                 <Search className="h-4 w-4" />
                 店舗を検索

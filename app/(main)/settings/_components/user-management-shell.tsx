@@ -7,7 +7,7 @@ import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalContent, ModalFooter } from "@/components/ui/modal";
-import { toast } from "@/components/ui/toast";
+import { runAction } from "@/lib/client/run-action";
 import { updateProfileRoleAction } from "@/lib/actions/profile-actions";
 import type { Profile, ProfileRole } from "@/types/profile";
 
@@ -15,13 +15,14 @@ import type { Profile, ProfileRole } from "@/types/profile";
  * ユーザー管理カードの client Shell (#155)。admin 判定は server 側
  * (user-management-card.tsx) 済み。認可の真の防御は Server Action の requireAdmin。
  *
- * - 各行の role を native <Select> で member↔admin 変更 → 即時 updateProfileRoleAction。
+ * - 各行の role を共通 Select で member↔admin 変更 → 即時 updateProfileRoleAction。
  * - 楽観更新: 選択値を即反映し (controlled select の revert ちらつき回避)、失敗時は戻す。
  * - 自分自身の admin→member のみ確認ダイアログを挟む (管理画面へのアクセスを失うため)。
  */
 
 const ASSIGNABLE: readonly ProfileRole[] = ["member", "admin"];
 const ROLE_LABEL: Record<string, string> = { member: "メンバー", admin: "管理者" };
+const ROLE_OPTIONS = ASSIGNABLE.map((role) => ({ value: role, label: ROLE_LABEL[role] ?? role }));
 
 export function UserManagementShell({
   users,
@@ -44,12 +45,12 @@ export function UserManagementShell({
     setOptimistic((prev) => ({ ...prev, [userId]: role }));
     setChangingId(userId);
     startTransition(async () => {
-      const result = await updateProfileRoleAction(userId, role);
-      if (result.ok) {
-        toast.success(result.message ?? "ロールを更新しました");
+      const result = await runAction(() => updateProfileRoleAction(userId, role), {
+        success: "ロールを更新しました",
+      });
+      if (result?.ok) {
         router.refresh();
       } else {
-        toast.error(result.error);
         setOptimistic((prev) => {
           const next = { ...prev };
           delete next[userId];
@@ -106,15 +107,13 @@ export function UserManagementShell({
                 </Badge>
                 <Select
                   width="auto"
+                  options={ROLE_OPTIONS}
                   value={role}
                   disabled={pending}
                   aria-label={`${u.display_name} のロール`}
                   className="w-32"
-                  onChange={(e) => onSelect(u, e.target.value as ProfileRole)}
-                >
-                  <option value="member">メンバー</option>
-                  <option value="admin">管理者</option>
-                </Select>
+                  onValueChange={(value) => onSelect(u, value as ProfileRole)}
+                />
               </li>
             );
           })}

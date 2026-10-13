@@ -22,6 +22,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
+import { optionsFromValues } from "@/components/ui/select-logic";
 import { cn } from "@/lib/utils/cn";
 import {
   OVERLAY_ANCHOR_CONTAINER,
@@ -29,7 +30,7 @@ import {
   OVERLAY_PANEL_ALIGN_START,
 } from "@/components/ui/overlay-anchor-classes";
 import { DEAL_STATUSES } from "@/types/deal";
-import { STAGES } from "@/types/stage";
+import { STORE_RESEARCH_STATUSES } from "@/lib/domain/store-research-status";
 import { CHANNELS } from "@/types/store";
 import {
   CURRENT_SALES_STATES,
@@ -43,6 +44,13 @@ import {
   isSalesSentinel,
   type SalesSentinel,
 } from "../../_components/store-quick-filter-params";
+
+const SALES_STATE_FILTER_OPTIONS = [
+  { value: "", label: "すべて" },
+  ...optionsFromValues(CURRENT_SALES_STATES, (value) => CURRENT_SALES_STATE_LABELS[value]),
+];
+const STAGE_FILTER_OPTIONS = [{ value: "", label: "すべて" }, ...optionsFromValues(STORE_RESEARCH_STATUSES)];
+const CHANNEL_FILTER_OPTIONS = [{ value: "", label: "すべて" }, ...optionsFromValues(CHANNELS)];
 
 /* ------------------------------------------------------------------ */
 /*  小さなポップオーバー (stores-filter-bar.tsx と同じ依存ゼロ実装)      */
@@ -114,6 +122,15 @@ const APPT_OPTIONS = [
   { value: "none", label: "未取得" },
 ] as const;
 
+/**
+ * `deal` (最新の営業記録の状態) の表示名。
+ *
+ * 絞り込みパネルからは #297 で外した。「現在の営業状態」と「最新の営業状態」が並び、
+ * 違いが読み取れなかったため。営業状態 (`state`) は最新の営業記録の状態をそのまま
+ * 引き継ぎ、記録が無い店舗だけアポ取得日と調査段階から補うので、`deal` の各値は
+ * `state` で代替できる。既存のブックマークや旧 /stores/progress からの転送で
+ * `deal` が付いて来たときに適用中チップで解除できるよう、表示名だけ残している。
+ */
 const DEAL_OPTIONS = [
   ...DEAL_STATUSES.map((s) => ({ value: s, label: s })),
   { value: "none", label: "営業記録なし" },
@@ -370,7 +387,6 @@ export function ProgressFilterBar({ profileEntries }: ProgressFilterBarProps) {
             <FilterPanel
               state={state}
               appt={appt}
-              deal={deal}
               next={next}
               sales={sales}
               stage={stage}
@@ -407,7 +423,7 @@ export function ProgressFilterBar({ profileEntries }: ProgressFilterBarProps) {
             </Chip>
           ) : null}
           {deal ? (
-            <Chip onClear={() => setKey("deal", "")} label="営業記録">
+            <Chip onClear={() => setKey("deal", "")} label="最新の営業記録">
               {labelOf(DEAL_OPTIONS, deal)}
             </Chip>
           ) : null}
@@ -548,7 +564,6 @@ function Chip({ label, onClear, children }: ChipProps) {
 interface FilterPanelProps {
   state: string;
   appt: string;
-  deal: string;
   next: string;
   sales: string;
   stage: string;
@@ -563,7 +578,6 @@ interface FilterPanelProps {
 function FilterPanel({
   state,
   appt,
-  deal,
   next,
   sales,
   stage,
@@ -589,25 +603,14 @@ function FilterPanel({
       </div>
 
       <div className="px-4 py-3 space-y-4 max-h-[60vh] overflow-y-auto">
-        <PanelGroup label="現在の営業状態">
-          <Select width="full" value={state} onChange={(e) => onChange("state", e.target.value)} aria-label="現在の営業状態で絞り込み">
-            <option value="">すべて</option>
-            {CURRENT_SALES_STATES.map((value) => <option key={value} value={value}>{CURRENT_SALES_STATE_LABELS[value]}</option>)}
-          </Select>
+        <PanelGroup label="営業状態">
+          <Select width="full" options={SALES_STATE_FILTER_OPTIONS} value={state} onValueChange={(value) => onChange("state", value)} aria-label="営業状態で絞り込み" />
         </PanelGroup>
         <PanelGroup label="アポ取得">
           <ChipGroup
             value={appt}
             onChange={(v) => onChange("appt", v)}
             options={[...APPT_OPTIONS]}
-          />
-        </PanelGroup>
-
-        <PanelGroup label="最新の営業状態">
-          <ChipGroup
-            value={deal}
-            onChange={(v) => onChange("deal", v)}
-            options={DEAL_OPTIONS}
           />
         </PanelGroup>
 
@@ -622,19 +625,15 @@ function FilterPanel({
         <PanelGroup label="営業担当">
           <Select
             width="full"
+            options={salesOptions}
+            placeholder="不明な担当者"
             value={sales}
-            onChange={(e) => onChange("sales", e.target.value)}
+            onValueChange={(value) => onChange("sales", value)}
             aria-label="営業担当で絞り込み"
-          >
-            {salesOptions.map(({ value, label }) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </Select>
+          />
         </PanelGroup>
-        <PanelGroup label="調査段階"><Select width="full" value={stage} onChange={(e) => onChange("stage", e.target.value)} aria-label="調査段階で絞り込み"><option value="">すべて</option>{STAGES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</Select></PanelGroup>
-        <PanelGroup label="チャネル"><Select width="full" value={channel} onChange={(e) => onChange("channel", e.target.value)} aria-label="チャネルで絞り込み"><option value="">すべて</option>{CHANNELS.map((value) => <option key={value} value={value}>{value}</option>)}</Select></PanelGroup>
+        <PanelGroup label="調査段階"><Select width="full" options={STAGE_FILTER_OPTIONS} value={stage} onValueChange={(value) => onChange("stage", value)} aria-label="調査段階で絞り込み" /></PanelGroup>
+        <PanelGroup label="チャネル"><Select width="full" options={CHANNEL_FILTER_OPTIONS} value={channel} onValueChange={(value) => onChange("channel", value)} aria-label="チャネルで絞り込み" /></PanelGroup>
       </div>
     </div>
   );

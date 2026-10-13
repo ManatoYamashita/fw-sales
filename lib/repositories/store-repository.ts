@@ -65,9 +65,9 @@ export interface StoreRepository {
    *
    * `update` / `mergeBasicInfo` はいずれも「現在値 read -> マージ -> **全列 SET** write」
    * であり、read と write の間に行ロックが無い。`stores.basic_info` を書く経路は
-   * 複数あり(手動編集 / 個別採用 / 一括採用 / 残りを採用して完了)、
+   * 複数あり(手動編集 / 個別採用 / まとめて採用)、
    * これらが並行実行されると後着が先着を丸ごと巻き戻す lost update が起こる。
-   * とくに「残りを採用して調査完了」は約30 key を一度に書くため、失われる量が大きい。
+   * とくに「まとめて採用」は多数の key を一度に書くため、失われる量が大きい。
    *
    * run 行ロック(`ResearchRunRepository.getForUpdate`)は `runId` 単位のため、
    * 別 run・別経路からの `stores` 書込みとは直列化されない。

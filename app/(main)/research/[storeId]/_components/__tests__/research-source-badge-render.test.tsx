@@ -19,7 +19,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { SourceRegistryEntry } from "@/types/research-run";
 import { deriveDisplaySourceName, isSourceLinkClickable } from "@/types/research-run";
-import { SourceBadge, shouldShowCandidateTitle } from "../research-source-badge";
+import {
+  SourceBadge,
+  SourceBadgeList,
+  isConfirmedSource,
+  shouldShowCandidateTitle,
+} from "../research-source-badge";
 
 const CANDIDATE_TITLE = "告膳(所沢駅/和食) - ホットペッパーグルメ";
 
@@ -128,5 +133,48 @@ describe("trust boundary は変更していない", () => {
     const html = render(makeEntry({ identity_status: "target_match" }));
     expect(html).toContain("<a ");
     expect(html).toContain("noopener");
+  });
+});
+
+describe("SourceBadgeList: 未確認の情報源を畳む (#360)", () => {
+  const failed = makeEntry({ id: "S01", url_context_status: "error" });
+  const uncertain = makeEntry({ id: "S02" });
+  const confirmed = makeEntry({
+    id: "S03",
+    identity_status: "target_match",
+    resolved_url: "https://www.hotpepper.jp/strJ000000000/",
+  });
+  const renderList = (ids: string[]) =>
+    renderToStaticMarkup(
+      <SourceBadgeList sourceIds={ids} sourceRegistry={[failed, uncertain, confirmed]} />,
+    );
+
+  it("✓ のバッジだけを確認済みとする", () => {
+    expect(isConfirmedSource(confirmed)).toBe(true);
+    expect(isConfirmedSource(makeEntry({ identity_status: "contextual" }))).toBe(true);
+    expect(isConfirmedSource(failed)).toBe(false);
+    expect(isConfirmedSource(uncertain)).toBe(false);
+    expect(isConfirmedSource(makeEntry({ identity_status: "unrelated" }))).toBe(false);
+    expect(isConfirmedSource(makeEntry({ url_context_status: "not_attempted" }))).toBe(false);
+  });
+
+  it("未確認の情報源は件数の 1 行に畳み、開けばバッジと候補タイトルが見える", () => {
+    const html = renderList(["S01", "S02"]);
+    expect(html).toMatch(/<details[^>]*><summary[^>]*>未確認の情報源 2件<\/summary>/);
+    // 開いた中身はこれまでと同じ。
+    expect(html).toContain("ページを確認できませんでした");
+    expect(html).toContain(`検索候補(未確認): ${CANDIDATE_TITLE}`);
+    // 閉じた <details> の外には何も出さない。
+    expect(html.indexOf("ページを確認できませんでした")).toBeGreaterThan(html.indexOf("</summary>"));
+  });
+
+  it("確認済みの情報源は畳まずに出す", () => {
+    const html = renderList(["S03", "S01"]);
+    expect(html.indexOf("対象店舗のページを確認")).toBeLessThan(html.indexOf("<details"));
+    expect(html).toContain("未確認の情報源 1件");
+  });
+
+  it("確認済みだけなら折りたたみを出さない", () => {
+    expect(renderList(["S03"])).not.toContain("<details");
   });
 });

@@ -7,11 +7,12 @@ import { Card } from "@/components/ui/card";
 import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { optionsFromValues } from "@/components/ui/select-logic";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { runAction } from "@/lib/client/run-action";
 import { recordActionAction } from "@/lib/actions/action-actions";
 import { today } from "@/lib/utils/date";
-import { toast } from "@/components/ui/toast";
 
 const RESULTS = [
   "未実施",
@@ -22,6 +23,8 @@ const RESULTS = [
   "商談化",
   "NG",
 ] as const;
+
+const RESULT_OPTIONS = optionsFromValues(RESULTS);
 
 export function ActionRecordForm({ storeId }: { storeId: string }) {
   const [form, setForm] = useState({
@@ -34,20 +37,25 @@ export function ActionRecordForm({ storeId }: { storeId: string }) {
 
   const onText =
     <K extends keyof typeof form>(key: K) =>
-    (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
+    (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
       setForm((prev) => ({ ...prev, [key]: e.target.value as (typeof form)[K] }));
+
+  const onPick =
+    <K extends keyof typeof form>(key: K) =>
+    (value: string) =>
+      setForm((prev) => ({ ...prev, [key]: value as (typeof form)[K] }));
 
   const submit = (formData: FormData) => {
     startTransition(async () => {
-      const result = await recordActionAction(storeId, null, formData);
-      if (result.ok) {
-        toast.success(result.message ?? "記録しました");
+      const result = await runAction(
+        () => recordActionAction(storeId, null, formData),
+        { success: "記録しました" },
+      );
+      if (result?.ok) {
         router.refresh();
         if (form.result === "商談化") {
           router.push(`/deals/new?store=${storeId}`);
         }
-      } else {
-        toast.error(result.error);
       }
     });
   };
@@ -71,17 +79,12 @@ export function ActionRecordForm({ storeId }: { storeId: string }) {
           <FormField label="結果" htmlFor="result">
             <Select
               width="full"
+              options={RESULT_OPTIONS}
               id="result"
               name="result"
               value={form.result}
-              onChange={onText("result")}
-            >
-              {RESULTS.map((r) => (
-                <option key={r} value={r}>
-                  {r}
-                </option>
-              ))}
-            </Select>
+              onValueChange={onPick("result")}
+            />
           </FormField>
           <FormField label="メモ" htmlFor="memo" className="md:col-span-2">
             <Textarea
@@ -107,7 +110,7 @@ export function ActionRecordForm({ storeId }: { storeId: string }) {
           >
             商談化する
           </Link>
-          <Button type="submit" variant="success" disabled={pending}>
+          <Button type="submit" variant="success" pending={pending}>
             {pending ? "記録中…" : "記録を保存"}
           </Button>
         </Card.Footer>

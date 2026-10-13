@@ -6,11 +6,14 @@ import { Card } from "@/components/ui/card";
 import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { optionsFromValues } from "@/components/ui/select-logic";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { runAction } from "@/lib/client/run-action";
 import { updateDealAction } from "@/lib/actions/deal-actions";
 import { DEAL_STATUSES, type Deal } from "@/types/deal";
-import { toast } from "@/components/ui/toast";
+
+const DEAL_STATUS_OPTIONS = optionsFromValues(DEAL_STATUSES);
 
 export function DealStatusForm({ deal }: { deal: Deal }) {
   const [form, setForm] = useState({
@@ -31,18 +34,21 @@ export function DealStatusForm({ deal }: { deal: Deal }) {
 
   const onText =
     <K extends keyof typeof form>(key: K) =>
-    (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
+    (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
       set(key, e.target.value as (typeof form)[K]);
+
+  const onPick =
+    <K extends keyof typeof form>(key: K) =>
+    (value: string) =>
+      set(key, value as (typeof form)[K]);
 
   const submit = (formData: FormData) => {
     startTransition(async () => {
-      const result = await updateDealAction(deal.id, null, formData);
-      if (result.ok) {
-        toast.success(result.message ?? "更新しました");
-        router.refresh();
-      } else {
-        toast.error(result.error);
-      }
+      const result = await runAction(
+        () => updateDealAction(deal.id, null, formData),
+        { success: "更新しました" },
+      );
+      if (result?.ok) router.refresh();
     });
   };
 
@@ -56,17 +62,12 @@ export function DealStatusForm({ deal }: { deal: Deal }) {
           <FormField label="ステータス" htmlFor="status">
             <Select
               width="full"
+              options={DEAL_STATUS_OPTIONS}
               id="status"
               name="status"
               value={form.status}
-              onChange={onText("status")}
-            >
-              {DEAL_STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </Select>
+              onValueChange={onPick("status")}
+            />
           </FormField>
           <FormField label="見積金額" htmlFor="estimate_amount">
             <Input
@@ -141,7 +142,7 @@ export function DealStatusForm({ deal }: { deal: Deal }) {
           </FormField>
         </Card.Body>
         <Card.Footer>
-          <Button type="submit" variant="primary" disabled={pending}>
+          <Button type="submit" variant="primary" pending={pending}>
             {pending ? "保存中…" : "更新する"}
           </Button>
         </Card.Footer>

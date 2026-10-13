@@ -4,6 +4,10 @@ import { Topbar } from "../topbar";
 
 // Server Action は import しただけで lib/db へ到達するため遮断する。
 vi.mock("@/lib/actions/auth-actions", () => ({ signOutAction: vi.fn() }));
+vi.mock("@/lib/actions/notification-actions", () => ({
+  markNotificationReadAction: vi.fn(),
+  markAllNotificationsReadAction: vi.fn(),
+}));
 
 vi.mock("next/navigation", () => ({
   usePathname: () => "/stores/new",

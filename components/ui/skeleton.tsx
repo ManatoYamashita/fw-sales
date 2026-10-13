@@ -1,18 +1,32 @@
 import { Card } from "./card";
 import { cn } from "@/lib/utils/cn";
 
+/**
+ * 角の形は `shape` で選ぶ。`className="rounded-full"` で上書きすると、基底の
+ * `rounded-md` と同じプロパティを争って CSS の記述順で勝敗が決まる
+ * (`cn` は素の clsx。`class-conflicts.test.ts` が検出する)。
+ * `pill` はタブ (`Tabs variant="pill"`) やバッジの骨組みに使う。
+ */
 export function Skeleton({
   className,
   tone = "muted",
+  shape = "rounded",
 }: {
   className?: string;
   tone?: "muted" | "card";
+  shape?: "rounded" | "pill";
 }) {
   return (
     <div
       className={cn(
-        "animate-pulse rounded-md",
-        tone === "card" ? "bg-card" : "bg-muted",
+        "animate-pulse",
+        shape === "pill" ? "rounded-full" : "rounded-md",
+        // `muted` は文字色の 10% を重ねる。`bg-muted` はライトでページ背景
+        // (--background) と同じ色 (#f1f5f9) で、カードの外に置くと見えなかった (#326)。
+        // ダークではカード色が --secondary と同じなので、単色のトークンはどれも
+        // 「ページ背景とカードの両方の上で見える」を満たさない。半透明の前景色なら
+        // どの面に載っても一段濃く (明るく) 見える。
+        tone === "card" ? "bg-card" : "bg-foreground/10",
         className,
       )}
       aria-hidden

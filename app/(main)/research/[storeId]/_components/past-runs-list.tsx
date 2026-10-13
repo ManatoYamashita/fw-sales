@@ -24,7 +24,7 @@ export function PastRunsList({ runs }: { runs: readonly StoreResearchRun[] }) {
             <span className="text-muted-foreground">{formatDateTime(run.started_at)}</span>
             <div className="flex items-center gap-2">
               {run.status === "succeeded" && run.review_completed_at === null && (
-                <Badge tone="warning">要確認</Badge>
+                <Badge tone="warning">レビュー未完了</Badge>
               )}
               <Badge tone={run.status === "succeeded" ? "success" : run.status === "failed" ? "destructive" : "secondary"}>
                 {STATUS_LABELS[run.status] ?? run.status}

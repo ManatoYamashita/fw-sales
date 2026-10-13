@@ -30,6 +30,7 @@
  * 接続文字列の値はログに出力しない。
  */
 import postgres from "postgres";
+import { assertDatabaseTarget } from "../lib/environment-isolation.mjs";
 
 /** Places 1 ページの最大件数。IN リストの長さを実運用に合わせる。 */
 const IN_LIST_SIZE = 20;
@@ -72,6 +73,8 @@ if (!url) {
   console.error("ERROR: DATABASE_URL is not set.");
   process.exit(1);
 }
+
+assertDatabaseTarget();
 
 const sql = postgres(url, {
   prepare: false,

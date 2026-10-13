@@ -22,8 +22,8 @@ import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger, TabsPanel } from "@/components/ui/tabs";
-import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils/cn";
+import { runAction } from "@/lib/client/run-action";
 import {
   createPromptTemplateAction,
   updatePromptTemplateAction,
@@ -107,14 +107,11 @@ export function AiPromptTemplatesShell({ templates, isLoggedIn }: ShellProps) {
   const handleSetDefault = (id: string) => {
     if (changingDefaultId !== null) return;
     setChangingDefaultId(id);
-    setDefaultPromptTemplateAction(id)
+    void runAction(() => setDefaultPromptTemplateAction(id), {
+      success: () => "デフォルトテンプレートを変更しました",
+    })
       .then((result) => {
-        if (result.ok) {
-          toast.success("デフォルトテンプレートを変更しました");
-          router.refresh();
-        } else {
-          toast.error(result.error);
-        }
+        if (result?.ok) router.refresh();
       })
       .finally(() => {
         setChangingDefaultId(null);
@@ -269,6 +266,7 @@ function TemplateRow({
             size="sm"
             variant="ghost"
             onClick={() => onSetDefault(t.id)}
+            pending={isChangingThis}
             disabled={isAnyChanging}
             title={isChangingThis ? "変更中…" : "デフォルトにする"}
             aria-label={isChangingThis ? "変更中…" : "デフォルトにする"}
@@ -331,13 +329,12 @@ function DeleteConfirmDialog({
   const handleDelete = () => {
     setError(null);
     startTransition(async () => {
-      const result = await deletePromptTemplateAction(template.id);
-      if (result.ok) {
-        toast.success("テンプレートを削除しました");
-        onSuccess();
-      } else {
-        setError(result.error);
-      }
+      const result = await runAction(() => deletePromptTemplateAction(template.id), {
+        success: () => "テンプレートを削除しました",
+      });
+      if (result?.ok) onSuccess();
+      // 失敗はトーストに加えてダイアログ内にも残す。閉じずにやり直す判断材料にするため。
+      else if (result) setError(result.error);
     });
   };
 
@@ -357,7 +354,7 @@ function DeleteConfirmDialog({
           <Button variant="ghost" onClick={onClose} disabled={isPending}>
             キャンセル
           </Button>
-          <Button variant="danger" onClick={handleDelete} disabled={isPending}>
+          <Button variant="danger" onClick={handleDelete} pending={isPending}>
             {isPending ? "削除中…" : "削除する"}
           </Button>
         </ModalFooter>
@@ -446,18 +443,16 @@ function TemplateDialog({ dialogMode, onSuccess, onClose }: TemplateDialogProps)
     }
 
     startTransition(async () => {
-      const result = isEdit
-        ? await updatePromptTemplateAction(fd)
-        : await createPromptTemplateAction(fd);
-
-      if (result.ok) {
-        toast.success(
-          isEdit ? "テンプレートを更新しました" : "テンプレートを作成しました",
-        );
-        onSuccess();
-      } else {
-        setError(result.error);
-      }
+      const result = await runAction(
+        () => (isEdit ? updatePromptTemplateAction(fd) : createPromptTemplateAction(fd)),
+        {
+          success: () =>
+            isEdit ? "テンプレートを更新しました" : "テンプレートを作成しました",
+        },
+      );
+      if (result?.ok) onSuccess();
+      // 入力内容の誤りはトーストに加えてフォームの近くにも残す (直す場所が分かるように)。
+      else if (result) setError(result.error);
     });
   };
 
@@ -616,7 +611,8 @@ function TemplateDialog({ dialogMode, onSuccess, onClose }: TemplateDialogProps)
             <Button
               variant="primary"
               onClick={handleSubmit}
-              disabled={isPending || !canSubmit}
+              pending={isPending}
+              disabled={!canSubmit}
             >
               {isPending ? "保存中…" : isEdit ? "更新する" : "作成する"}
             </Button>

@@ -1,4 +1,4 @@
-import { Search } from "lucide-react";
+import { FileText } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
   RESEARCH_PHASE_META,
@@ -6,17 +6,18 @@ import {
 } from "@/lib/domain/store-research-phase";
 
 /**
- * 調査フェーズ (基本情報待ち / 調査可 / 生成済み) を示すバッジ。
+ * 営業資産の状態 (未生成 / 生成済み) を示すバッジ。
  *
- * 虫眼アイコンで「調査の進み具合」軸であることを明示し、営業ステージ (types/stage.ts) の
- * バッジ・select と混同されないようにする。cron ジョブ状態用の `research-status-badge`
- * とも意味が異なる別物。
+ * #300 以前は虫眼鏡アイコンに「生成済み」とだけ書いており、調査の完了か営業資産の生成かが
+ * 読み取れなかった。ラベルに「営業資産」を含め、アイコンも文書 (資産) に替えた。
+ * 調査の進み具合は `/research/[storeId]` の手順表示が持つ。営業ステージ (types/stage.ts)
+ * のバッジや cron ジョブ状態用の `research-status-badge` とは別物。
  */
 export function ResearchPhaseBadge({ phase }: { phase: ResearchPhase }) {
   const meta = RESEARCH_PHASE_META[phase];
   return (
     <Badge tone={meta.badgeTone}>
-      <Search className="h-3 w-3" aria-hidden />
+      <FileText className="h-3 w-3" aria-hidden />
       {meta.badgeLabel}
     </Badge>
   );

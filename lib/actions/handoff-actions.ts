@@ -4,6 +4,7 @@ import { revalidateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
+import { clipForLog } from "@/lib/utils/log-sanitize";
 import { type HandoffInput, type HandoffStatus } from "@/types/handoff";
 import { today } from "@/lib/utils/date";
 import {
@@ -79,7 +80,11 @@ export async function createHandoffAction(
     invalidate(created.id, deal.store_id);
     return success({ id: created.id }, "引き継ぎシートを作成しました");
   } catch (err) {
-    return failure(err instanceof Error ? err.message : "作成に失敗しました");
+    console.error("[handoff.create] failed", {
+      dealId,
+      message: clipForLog(err instanceof Error ? err.message : String(err)),
+    });
+    return failure("引き継ぎシートを作成できませんでした。時間をおいて、もう一度お試しください。");
   }
 }
 
@@ -130,7 +135,11 @@ export async function completeHandoffAction(
     invalidate(handoffId, current.store_id);
     return success(undefined, "運用への引き継ぎを完了しました");
   } catch (err) {
-    return failure(err instanceof Error ? err.message : "完了に失敗しました");
+    console.error("[handoff.complete] failed", {
+      handoffId,
+      message: clipForLog(err instanceof Error ? err.message : String(err)),
+    });
+    return failure("引き継ぎを完了にできませんでした。時間をおいて、もう一度お試しください。");
   }
 }
 

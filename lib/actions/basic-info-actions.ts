@@ -19,11 +19,12 @@
  * 関連: requirements.md §6.1 §6.2, design.md §UI / BasicInfoCard §System Flows 充填マージ
  */
 
-import { revalidateTag } from "next/cache";
+import { updateTag } from "next/cache";
 import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
 import { BASIC_INFO_ITEM_BY_KEY } from "@/lib/domain/basic-info-items";
 import { mergeBasicInfo } from "@/lib/domain/basic-info-merge";
+import { clipForLog } from "@/lib/utils/log-sanitize";
 import type { BasicInfo, BasicInfoField } from "@/types/basic-info";
 import { failure, success, type ActionResult } from "./_helpers";
 
@@ -48,7 +49,9 @@ export async function updateBasicInfoFieldAction(
   // key 検証 (BASIC_INFO_ITEMS が単一の真実)
   const def = BASIC_INFO_ITEM_BY_KEY.get(key);
   if (!def) {
-    return failure(`未知の項目キーです: ${key}`);
+    // 項目キーは内部の識別子なので画面には出さず、ログにだけ残す (#327)。
+    console.warn("[basicInfo.update] unknown key", { key: clipForLog(key) });
+    return failure("この項目は編集できません。ページを再読み込みしてから、もう一度お試しください。");
   }
 
   // value: trim 後空なら未充足 (value=null)、それ以外は trim 済み文字列
@@ -72,9 +75,9 @@ export async function updateBasicInfoFieldAction(
     //
     // 旧実装は `repos.store.mergeBasicInfo`(トランザクション外・行ロック無しの
     // read-merge-write)を直接呼んでいた。`stores` の更新は**全列 SET** のため、
-    // review 側の書込み(個別採用 / 一括採用 / 「残りを採用して調査完了」)と
+    // review 側の書込み(個別採用 / 「まとめて採用」)と
     // 並行実行されると後着が先着を丸ごと巻き戻す lost update が発生しうる。
-    // とくに「残りを採用して調査完了」は約30 key を一度に書くため被害が大きい。
+    // とくに「まとめて採用」は多数の key を一度に書くため被害が大きい。
     //
     // ロック順は `stores` のみ(review 系は run -> store)。
     // `stores` -> `store_research_runs` の順で明示ロックを取る経路は存在しないため、
@@ -85,14 +88,20 @@ export async function updateBasicInfoFieldAction(
       const merged = mergeBasicInfo(store.basic_info, incoming, "manual", new Date().toISOString());
       await tx.store.update(storeId, { basic_info: merged });
     });
-    // store 詳細 / 一覧キャッシュを無効化
-    revalidateTag(CACHE_TAGS.store(storeId), "max");
-    revalidateTag(CACHE_TAGS.stores, "max");
+    // 店舗詳細 / 一覧のキャッシュを即時失効する (#335)。
+    // 店舗詳細は保存直後に `router.refresh()` で読み直し、入力済み件数・信頼度・根拠を
+    // 更新する。`revalidateTag(_, "max")` (stale-while-revalidate) だと旧値が返り、
+    // 未入力へ戻したのに件数が減らない (E2E で検出)。`updateStorePatchAction` と同じ規約。
+    updateTag(CACHE_TAGS.store(storeId));
+    updateTag(CACHE_TAGS.stores);
     return success(undefined, `「${def.label}」を更新しました`);
   } catch (err) {
-    // 未存在 id 等を failure に正規化
-    const message =
-      err instanceof Error ? err.message : "基本情報の更新に失敗しました";
-    return failure(message);
+    // 例外の文 (英語・内部の名前を含みうる) は画面に出さず、ログにだけ残す (#327)。
+    console.error("[basicInfo.update] failed", {
+      storeId,
+      key,
+      message: clipForLog(err instanceof Error ? err.message : String(err)),
+    });
+    return failure("基本情報を更新できませんでした。ページを再読み込みしてから、もう一度お試しください。");
   }
 }

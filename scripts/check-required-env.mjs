@@ -3,6 +3,8 @@
 // Vercel で NEXT_PUBLIC_* が後付けされた既存デプロイが古いバンドル (値 undefined)
 // のまま配信され続ける事故を防ぐためのプリチェック。
 
+import { assertEnvironmentIsolation } from "../lib/environment-isolation.mjs";
+
 const REQUIRED = [
   "NEXT_PUBLIC_SUPABASE_URL",
   "NEXT_PUBLIC_SUPABASE_ANON_KEY",
@@ -23,6 +25,13 @@ const missing = REQUIRED.filter((name) => {
 });
 
 const scope = process.env.VERCEL_ENV ?? process.env.NODE_ENV ?? "unknown";
+
+try {
+  assertEnvironmentIsolation();
+} catch (error) {
+  console.error(`[check-env] FAIL: ${error.message}`);
+  process.exit(1);
+}
 
 if (missing.length > 0) {
   console.error(

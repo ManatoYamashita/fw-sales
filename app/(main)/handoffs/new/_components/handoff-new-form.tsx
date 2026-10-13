@@ -6,13 +6,16 @@ import { Card } from "@/components/ui/card";
 import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { optionsFromValues } from "@/components/ui/select-logic";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { runAction } from "@/lib/client/run-action";
 import { createHandoffAction } from "@/lib/actions/handoff-actions";
 import { OPS_MEMBERS } from "@/lib/domain/staff";
 import { today } from "@/lib/utils/date";
-import { toast } from "@/components/ui/toast";
 import type { Deal } from "@/types/deal";
+
+const OPS_MEMBER_OPTIONS = [{ value: "", label: "未割当" }, ...optionsFromValues(OPS_MEMBERS)];
 
 export function HandoffNewForm({ deal }: { deal: Deal }) {
   const [form, setForm] = useState({
@@ -35,18 +38,21 @@ export function HandoffNewForm({ deal }: { deal: Deal }) {
 
   const onText =
     <K extends keyof typeof form>(key: K) =>
-    (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
+    (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
       setForm((prev) => ({ ...prev, [key]: e.target.value as (typeof form)[K] }));
+
+  const onPick =
+    <K extends keyof typeof form>(key: K) =>
+    (value: string) =>
+      setForm((prev) => ({ ...prev, [key]: value as (typeof form)[K] }));
 
   const submit = (formData: FormData) => {
     startTransition(async () => {
-      const result = await createHandoffAction(deal.id, null, formData);
-      if (result.ok) {
-        toast.success(result.message ?? "作成しました");
-        router.push(`/handoffs/${result.data.id}`);
-      } else {
-        toast.error(result.error);
-      }
+      const result = await runAction(
+        () => createHandoffAction(deal.id, null, formData),
+        { success: "作成しました" },
+      );
+      if (result?.ok) router.push(`/handoffs/${result.data.id}`);
     });
   };
 
@@ -110,18 +116,12 @@ export function HandoffNewForm({ deal }: { deal: Deal }) {
           <FormField label="運用担当" htmlFor="ops_assignee">
             <Select
               width="full"
+              options={OPS_MEMBER_OPTIONS}
               id="ops_assignee"
               name="ops_assignee"
               value={form.ops_assignee}
-              onChange={onText("ops_assignee")}
-            >
-              <option value="">未割当</option>
-              {OPS_MEMBERS.map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
-            </Select>
+              onValueChange={onPick("ops_assignee")}
+            />
           </FormField>
           <FormField label="納期" htmlFor="due_date">
             <Input
@@ -176,7 +176,7 @@ export function HandoffNewForm({ deal }: { deal: Deal }) {
           <Button type="button" variant="ghost" onClick={() => router.back()}>
             キャンセル
           </Button>
-          <Button type="submit" variant="primary" disabled={pending}>
+          <Button type="submit" variant="primary" pending={pending}>
             {pending ? "作成中…" : "引き継ぎを作成"}
           </Button>
         </Card.Footer>

@@ -6,17 +6,20 @@ import { Card } from "@/components/ui/card";
 import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { optionsFromValues } from "@/components/ui/select-logic";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CheckCircle2 } from "lucide-react";
+import { runAction } from "@/lib/client/run-action";
 import {
   completeHandoffAction,
   updateHandoffAction,
 } from "@/lib/actions/handoff-actions";
 import { OPS_MEMBERS } from "@/lib/domain/staff";
-import { toast } from "@/components/ui/toast";
 import type { Handoff } from "@/types/handoff";
+
+const OPS_MEMBER_OPTIONS = [{ value: "", label: "未割当" }, ...optionsFromValues(OPS_MEMBERS)];
 
 export function HandoffForm({ handoff }: { handoff: Handoff }) {
   const [form, setForm] = useState({
@@ -40,30 +43,30 @@ export function HandoffForm({ handoff }: { handoff: Handoff }) {
 
   const onText =
     <K extends keyof typeof form>(key: K) =>
-    (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
+    (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
       setForm((prev) => ({ ...prev, [key]: e.target.value as (typeof form)[K] }));
+
+  const onPick =
+    <K extends keyof typeof form>(key: K) =>
+    (value: string) =>
+      setForm((prev) => ({ ...prev, [key]: value as (typeof form)[K] }));
 
   const submit = (formData: FormData) => {
     startTransition(async () => {
-      const result = await updateHandoffAction(handoff.id, null, formData);
-      if (result.ok) {
-        toast.success(result.message ?? "更新しました");
-        router.refresh();
-      } else {
-        toast.error(result.error);
-      }
+      const result = await runAction(
+        () => updateHandoffAction(handoff.id, null, formData),
+        { success: "更新しました" },
+      );
+      if (result?.ok) router.refresh();
     });
   };
 
   const complete = () => {
     startCompletion(async () => {
-      const result = await completeHandoffAction(handoff.id);
-      if (result.ok) {
-        toast.success(result.message ?? "完了にしました");
-        router.refresh();
-      } else {
-        toast.error(result.error);
-      }
+      const result = await runAction(() => completeHandoffAction(handoff.id), {
+        success: "完了にしました",
+      });
+      if (result?.ok) router.refresh();
     });
   };
 
@@ -98,7 +101,7 @@ export function HandoffForm({ handoff }: { handoff: Handoff }) {
               type="button"
               variant="success"
               onClick={complete}
-              disabled={completing}
+              pending={completing}
             >
               {completing ? "処理中…" : "引き継ぎを完了"}
             </Button>
@@ -238,18 +241,12 @@ export function HandoffForm({ handoff }: { handoff: Handoff }) {
           <FormField label="運用担当" htmlFor="ops_assignee">
             <Select
               width="full"
+              options={OPS_MEMBER_OPTIONS}
               id="ops_assignee"
               name="ops_assignee"
               value={form.ops_assignee}
-              onChange={onText("ops_assignee")}
-            >
-              <option value="">未割当</option>
-              {OPS_MEMBERS.map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
-            </Select>
+              onValueChange={onPick("ops_assignee")}
+            />
           </FormField>
           <FormField label="納期" htmlFor="due_date">
             <Input
@@ -262,7 +259,7 @@ export function HandoffForm({ handoff }: { handoff: Handoff }) {
           </FormField>
         </Card.Body>
         <Card.Footer>
-          <Button type="submit" variant="primary" disabled={pending}>
+          <Button type="submit" variant="primary" pending={pending}>
             {pending ? "保存中…" : "更新する"}
           </Button>
         </Card.Footer>

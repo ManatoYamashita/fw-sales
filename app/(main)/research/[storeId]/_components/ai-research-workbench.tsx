@@ -6,21 +6,39 @@
  * 主表示run(`selectPrimaryResearchRun`)の状態に応じて、開始カード / 進捗カード /
  * 失敗カード / レビューセクションのいずれかを描画する。営業資産生成セクションは
  * 常に表示する(Primary/Secondary導線の切替はセクション内部で行う、Plan §14)。
+ *
+ * Issue #300: 見出し直下に推奨手順 (① AI調査 → ② レビュー → ③ 営業資産を生成) と
+ * 現在地を出す。営業資産の生成はこのページの ③ が唯一の入口。
+ *
+ * Issue #322: ③ は ①② が完了するまで閉じて始める。完了の判定は手順表示と同じ
+ * `flowSteps` から取る (`isGenerateStepReached`)。
+ *
+ * Issue #324: 期限超過の判定 (`useRunOverdue`) はここで 1 回だけ行い、上部の手順表示と
+ * 本文の進捗カードへ同じ値を渡す。AI 調査を実行できない環境では、その理由
+ * (`researchUnavailableMessage`) を開始・再調査の位置に出し、ボタンで促さない。
  */
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Modal, ModalContent, ModalFooter } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
-import { toast } from "@/components/ui/toast";
+import { runAction } from "@/lib/client/run-action";
 import {
   getResearchRunStatusAction,
   startResearchRunAction,
 } from "@/lib/actions/research-run-actions";
-import { isRunStuck, selectPrimaryResearchRun } from "@/lib/domain/research-review";
+import { selectPrimaryResearchRun } from "@/lib/domain/research-review";
+import {
+  getResearchFlowSteps,
+  getSalesAssetGenerationContext,
+  isGenerateStepReached,
+} from "@/lib/domain/research-flow";
+import { decodeHashId } from "@/lib/utils/hash-id";
+import { ResearchFlowSteps } from "./research-flow-steps";
 import { StartResearchCard } from "./start-research-card";
 import { ResearchProgressCard } from "./research-progress-card";
+import { useRunOverdue } from "./use-research-run-polling";
 import { ResearchFailedCard } from "./research-failed-card";
 import { ResearchReviewSection } from "./research-review-section";
 import { PastRunsList } from "./past-runs-list";
@@ -28,12 +46,20 @@ import { SalesAssetSection } from "./sales-asset-section";
 import type { Store } from "@/types/store";
 import type { StoreResearchRun } from "@/types/research-run";
 
+/** ② レビューの着地点。生成セクションの「レビューへ戻る」が使う。 */
+const REVIEW_SECTION_ID = "research-review";
+
 export function AiResearchWorkbench({
   store,
   initialRuns,
+  isApiKeyConfigured,
+  researchUnavailableMessage,
 }: {
   store: Store;
   initialRuns: StoreResearchRun[];
+  isApiKeyConfigured: boolean;
+  /** AI 調査を実行できない理由 (`getResearchAvailability`)。実行できるなら null。 */
+  researchUnavailableMessage: string | null;
 }) {
   const router = useRouter();
   const [runs, setRuns] = useState<StoreResearchRun[]>(initialRuns);
@@ -42,6 +68,16 @@ export function AiResearchWorkbench({
 
   const primaryRun = selectPrimaryResearchRun(runs);
   const pastRuns = primaryRun ? runs.filter((r) => r.id !== primaryRun.id) : runs;
+  const primaryRunOverdue = useRunOverdue(primaryRun);
+  const flowSteps = getResearchFlowSteps(
+    primaryRun,
+    store.ai_analysis_result !== null,
+    primaryRunOverdue,
+  );
+  const generationContext = getSalesAssetGenerationContext(
+    primaryRun,
+    runs.some((r) => r.review_completed_at !== null),
+  );
   const hasUnreviewedSucceeded = runs.some(
     (r) => r.status === "succeeded" && r.review_completed_at === null,
   );
@@ -58,14 +94,13 @@ export function AiResearchWorkbench({
 
   const doStart = () => {
     startStarting(async () => {
-      const res = await startResearchRunAction(store.id);
-      if (!res.ok) {
-        toast.error(res.error);
-        return;
-      }
-      toast.success("AI店舗調査を開始しました");
-      const statusRes = await getResearchRunStatusAction(res.data.runId);
-      if (statusRes.ok) onRunUpdate(statusRes.data);
+      const res = await runAction(() => startResearchRunAction(store.id), {
+        success: () => "AI店舗調査を開始しました",
+      });
+      if (!res?.ok) return;
+      // 状態の取得に失敗しても調査自体は始まっている。画面の再取得とポーリングに任せる。
+      const statusRes = await getResearchRunStatusAction(res.data.runId).catch(() => null);
+      if (statusRes?.ok) onRunUpdate(statusRes.data);
       router.refresh();
     });
   };
@@ -74,7 +109,8 @@ export function AiResearchWorkbench({
     // running中でも、想定時間を超えた stuck run(Plan §17)なら再調査を許可する。
     // サーバ側(startResearchRunAction)も同じ判定でstuck runをfailedへ倒してから
     // 新規runを作成するため、ここでの早期returnは単なるUXの無駄クリック防止。
-    if (primaryRun?.status === "running" && !isRunStuck(primaryRun, new Date().toISOString())) {
+    if (researchUnavailableMessage !== null) return;
+    if (primaryRun?.status === "running" && !primaryRunOverdue) {
       return;
     }
     if (hasUnreviewedSucceeded) {
@@ -82,6 +118,24 @@ export function AiResearchWorkbench({
       return;
     }
     doStart();
+  };
+
+  // 店舗詳細の「営業資産を更新」などが付ける `#sales-assets` へ着地させる。
+  // ③ が閉じて始まる店舗でも、`SalesAssetSection` がハッシュを読んで開いた状態で描く (#322)。
+  // このセグメントは loading.tsx の Suspense 越しに描画されるため、遷移時点では対象要素が
+  // まだ無く、Next.js のハッシュスクロールが空振りする (実測で scrollY 0 のまま)。
+  useEffect(() => {
+    const id = decodeHashId(window.location.hash);
+    if (id === null) return;
+    document.getElementById(id)?.scrollIntoView({ block: "start" });
+  }, []);
+
+  const onJumpToReview = () => {
+    const el = document.getElementById(REVIEW_SECTION_ID);
+    if (!el) return;
+    el.scrollIntoView({ block: "start" });
+    // 視線だけでなくフォーカスも移し、キーボード・支援技術の利用者を同じ場所へ運ぶ。
+    el.focus({ preventScroll: true });
   };
 
   return (
@@ -93,36 +147,63 @@ export function AiResearchWorkbench({
         <h1 className="text-xl md:text-2xl font-bold text-foreground mt-1">{store.name}</h1>
       </div>
 
-      {!primaryRun && <StartResearchCard onStart={onStartClick} starting={starting} />}
+      <ResearchFlowSteps steps={flowSteps} />
+
+      {!primaryRun && (
+        <StartResearchCard
+          onStart={onStartClick}
+          starting={starting}
+          unavailableMessage={researchUnavailableMessage}
+        />
+      )}
 
       {primaryRun?.status === "running" && (
         <ResearchProgressCard
+          // run ごとに作り直し、前の run の「進捗を確認できません」を持ち越さない。
+          key={primaryRun.id}
           run={primaryRun}
           onUpdate={onRunUpdate}
-          onRetryStuck={onStartClick}
+          overdue={primaryRunOverdue}
+          onRetry={onStartClick}
           retrying={starting}
+          unavailableMessage={researchUnavailableMessage}
         />
       )}
 
       {primaryRun?.status === "failed" && (
-        <ResearchFailedCard run={primaryRun} onRetry={onStartClick} retrying={starting} />
+        <ResearchFailedCard
+          run={primaryRun}
+          onRetry={onStartClick}
+          retrying={starting}
+          unavailableMessage={researchUnavailableMessage}
+        />
       )}
 
       {primaryRun?.status === "succeeded" && (
-        <ResearchReviewSection
-          store={store}
-          run={primaryRun}
-          onUpdate={onRunUpdate}
-          onRestart={onStartClick}
-          restarting={starting}
-        />
+        <section
+          id={REVIEW_SECTION_ID}
+          tabIndex={-1}
+          aria-label="② レビュー"
+          className="scroll-mt-24 focus:outline-none"
+        >
+          <ResearchReviewSection
+            store={store}
+            run={primaryRun}
+            onUpdate={onRunUpdate}
+            onRestart={onStartClick}
+            restarting={starting}
+          />
+        </section>
       )}
 
       {pastRuns.length > 0 && <PastRunsList runs={pastRuns} />}
 
       <SalesAssetSection
         store={store}
-        reviewCompleted={primaryRun?.status === "succeeded" && primaryRun.review_completed_at !== null}
+        context={generationContext}
+        isApiKeyConfigured={isApiKeyConfigured}
+        generateStepReached={isGenerateStepReached(flowSteps)}
+        onJumpToReview={onJumpToReview}
       />
 
       <Modal open={confirmRestartOpen} onOpenChange={setConfirmRestartOpen}>

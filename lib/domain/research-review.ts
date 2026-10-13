@@ -6,11 +6,12 @@
  * (`lib/queries/research.ts`)から呼ばれる、副作用のないドメインロジックのみを集約する。
  * DB I/O・Gemini呼び出しは一切行わない。
  *
- * 関連: Plan v3.2 §4(採用即時反映)、§6(一覧の要確認判定)、§13(tier決定ルール)、
- *       §15(reviewable item定義、レビュー完了条件、要確認runの選定)
+ * 関連: Plan v3.2 §4(採用即時反映)、§6(一覧のレビュー待ち判定)、§13(tier決定ルール)、
+ *       §15(reviewable item定義、レビュー完了条件、レビュー待ちrunの選定)
  */
 
-import type { BasicInfoField } from "@/types/basic-info";
+import type { BasicInfo, BasicInfoField } from "@/types/basic-info";
+import { deriveItemTrust } from "@/lib/domain/research-item-notes";
 // `types/research-run.ts` は `lib/ai/research-result-schema.ts` の re-export ハブ
 // (同ファイル冒頭のJSDoc参照)。上位レイヤーが `lib/ai/*` へ直接依存しないための
 // 既定経路であり、本ファイルは既に同じ specifier へ型依存している。
@@ -25,6 +26,10 @@ import type {
   StoreResearchRun,
 } from "@/types/research-run";
 import type { Store } from "@/types/store";
+import {
+  getStoreResearchStatus,
+  RESEARCH_REVIEW_PENDING,
+} from "@/lib/domain/store-research-status";
 
 /**
  * reviewable item の定義(Plan v3.2 §15): AIが具体的な値候補を出した項目のみ。
@@ -41,22 +46,6 @@ export function getReviewableItems(items: readonly ResearchItem[]): ResearchItem
   return items.filter(isReviewableItem);
 }
 
-/**
- * レビュー進捗文言を組み立てる(fix/ai-research-poc-like-retrieval でバグ修正)。
- *
- * 旧文言「ヒアリング必要・外部データ必要 計N件は対象外」は、Nに`not_found`
- * (確認できず)も含まれるにもかかわらずカテゴリ名を2つしか列挙しておらず、
- * 実態と乖離していた(`not_found`が多いrunほど顕在化する表示バグ)。
- */
-export function formatReviewProgressLabel(
-  totalItemCount: number,
-  reviewableCount: number,
-  decidedCount: number,
-): string {
-  const excludedCount = totalItemCount - reviewableCount;
-  return `レビュー進捗: ${decidedCount} / ${reviewableCount} 件 (確認できず・ヒアリング必要・外部データ必要 計${excludedCount}件はレビュー対象外)`;
-}
-
 /** reviewable item のうちまだ `review_decisions` に記録が無いものを返す。 */
 export function getUndecidedReviewableItems(
   items: readonly ResearchItem[],
@@ -65,45 +54,178 @@ export function getUndecidedReviewableItems(
   return getReviewableItems(items).filter((item) => decisions[item.key] === undefined);
 }
 
+/* ------------------------------------------------------------------ */
+/*  採用した場合の結果と、まとめて採用してよい項目の振り分け (#301, #319)  */
+/* ------------------------------------------------------------------ */
+
 /**
- * 未判断 reviewable item の status 別内訳
- * (feat/ai-research-quality-ux-hardening、Plan §12.1.1)。
+ * 基本情報の値を比べるための正規化。
+ *
+ * NFKC(全角英数・全角空白を半角へ)→ 連続する空白を 1 つに → 前後の空白を除去。
+ * **これ以上は崩さない。** 言い換え(「居酒屋、燻製料理、焼き鳥」→「居酒屋、焼き鳥、燻製」)や
+ * 情報の欠落(郵便番号の無い住所)は、利用者が判断すべき「上書き」として残す。
  */
-export interface UndecidedSummary {
-  confirmed: number;
-  inferred: number;
-  conflict: number;
-  /**
-   * Primary CTA(「残りを採用して調査完了」)で自動採用される件数。
-   * **`conflict` は含まない**(候補選択なしで自動採用してはいけないため)。
-   */
-  adoptable: number;
-  /** 未判断 reviewable item の総数(`conflict` を含む)。 */
-  total: number;
+export function normalizeBasicInfoValue(value: string): string {
+  return value.normalize("NFKC").replace(/\s+/g, " ").trim();
+}
+
+/** いま入っている基本情報の値の出どころ。上書きになるときに画面で示す。 */
+export type BasicInfoOrigin = "places" | "typed" | "adopted";
+
+export const BASIC_INFO_ORIGIN_LABELS: Record<BasicInfoOrigin, string> = {
+  places: "Google Places",
+  typed: "手入力",
+  adopted: "前回の調査で採用",
+};
+
+/**
+ * 既存の値の出どころを、保存されている field から判定する。
+ *
+ * - `filled_by === "places"` → Google Places
+ * - `source_quote` が無い、または「編集して採用」の固定文 → 人が入力した値(手入力)。
+ *   `updateBasicInfoFieldAction`(店舗詳細の手入力)は `source_quote` を持たない
+ * - それ以外の `manual` → 調査結果から採用した値(`buildAdoptedBasicInfoField` は根拠を `source_quote` に入れる)
+ */
+export function describeBasicInfoOrigin(field: BasicInfoField): BasicInfoOrigin {
+  if (field.filled_by === "places") return "places";
+  if (!field.source_quote || field.source_quote === EDITED_SOURCE_QUOTE) return "typed";
+  return "adopted";
+}
+
+/** 調査の値を採用したとき、基本情報がどう変わるか。 */
+export type AdoptionEffect =
+  | { kind: "new" }
+  | { kind: "same" }
+  | { kind: "overwrite"; currentValue: string; origin: BasicInfoOrigin };
+
+export const ADOPTION_EFFECT_LABELS: Record<AdoptionEffect["kind"], string> = {
+  new: "新規",
+  same: "変更なし",
+  overwrite: "上書き",
+};
+
+/**
+ * 調査の値 `candidate` を採用した場合の結果を判定する。
+ *
+ * - 現在値が無い・空 → `new`
+ * - 正規化して一致 → `same`(採用しても基本情報を書き換えない。`isSameBasicInfoValue` 参照)
+ * - それ以外 → `overwrite`
+ */
+export function classifyAdoptionEffect(
+  current: BasicInfoField | undefined,
+  candidate: string,
+): AdoptionEffect {
+  const currentValue = current?.value ?? null;
+  if (currentValue === null || currentValue.trim() === "") return { kind: "new" };
+  if (normalizeBasicInfoValue(currentValue) === normalizeBasicInfoValue(candidate)) {
+    return { kind: "same" };
+  }
+  return { kind: "overwrite", currentValue, origin: describeBasicInfoOrigin(current!) };
+}
+
+/** 採用処理側の判定。`same` のときは基本情報へ書き込まない(出典や更新日時も含めて既存値を保つ)。 */
+export function isSameBasicInfoValue(current: BasicInfoField | undefined, candidate: string): boolean {
+  return classifyAdoptionEffect(current, candidate).kind === "same";
 }
 
 /**
- * 未判断 reviewable item を status 別に集計する。
+ * 未判断の項目の振り分け先。
  *
- * Primary CTA を押す前に「何が採用されるか」を画面に出すための純関数
- * (「残り: 確認済み 11・推定 7」「[残り18件を採用して調査完了]」)。
- * `conflict` は採用対象ではないため `adoptable` から除外し、別枠で数える。
+ * - `bulk`       : 主ボタンでまとめて採用してよい
+ * - `individual` : 1 件ずつ確認する
+ * - `choose`     : 競合。候補を選ぶ
  */
-export function summarizeUndecided(
+export type ReviewLane = "bulk" | "individual" | "choose";
+
+/**
+ * `individual` / `choose` になった理由。画面の内訳表示に使う。
+ * 1 つの項目が複数に当てはまるときは、基本情報への影響が大きい順
+ * (上書き → 注記あり → 推定 → 登録済み)に 1 つだけ選ぶ。
+ */
+export type ReviewLaneReason = "new" | "same" | "overwrite" | "noted" | "inferred" | "registered" | "conflict";
+
+export interface PlannedReviewItem {
+  item: ResearchItem;
+  lane: ReviewLane;
+  reason: ReviewLaneReason;
+  /** 採用した場合の結果。競合は候補ごとに変わるため `null`。 */
+  effect: AdoptionEffect | null;
+}
+
+/**
+ * 未判断のレビュー対象項目を、まとめて採用してよいか・1 件ずつ見るべきかに振り分ける。
+ *
+ * **画面の主ボタンとサーバ(`adoptBulkLaneAction`)の両方がこの関数に従う。**
+ * サーバはロックした `stores.basic_info` で計算し直し、画面が送ってきた対象と照合する。
+ *
+ * - 競合 → `choose`
+ * - 採用しても基本情報が変わらない(`same`)→ `bulk`(推定でも安全)
+ * - 注記の無い確認済みで、新規 → `bulk`
+ * - それ以外(推定・上書き・注記あり・登録済みの値の再追加)→ `individual`
+ *
+ * **推定の値と上書きになる値は、`bulk` に入らない**(#301 / #319 の受け入れ条件)。
+ * 返り値の順序は `items` の順序を保つ。純関数。
+ */
+export function planReviewLanes(
   items: readonly ResearchItem[],
   decisions: ReviewDecisions,
-): UndecidedSummary {
-  const undecided = getUndecidedReviewableItems(items, decisions);
-  const confirmed = undecided.filter((item) => item.status === "confirmed").length;
-  const inferred = undecided.filter((item) => item.status === "inferred").length;
-  const conflict = undecided.filter((item) => item.status === "conflict").length;
-  return {
-    confirmed,
-    inferred,
-    conflict,
-    adoptable: confirmed + inferred,
-    total: undecided.length,
+  basicInfo: BasicInfo,
+): PlannedReviewItem[] {
+  return getUndecidedReviewableItems(items, decisions).map((item): PlannedReviewItem => {
+    if (item.status === "conflict" || item.value === null) {
+      return { item, lane: "choose", reason: "conflict", effect: null };
+    }
+    const effect = classifyAdoptionEffect(basicInfo[item.key], item.value);
+    if (effect.kind === "same") return { item, lane: "bulk", reason: "same", effect };
+    const trust = deriveItemTrust(item);
+    if (effect.kind === "overwrite") return { item, lane: "individual", reason: "overwrite", effect };
+    if (trust === "confirmed") return { item, lane: "bulk", reason: "new", effect };
+    const reason: ReviewLaneReason =
+      trust === "noted" ? "noted" : trust === "registered" ? "registered" : "inferred";
+    return { item, lane: "individual", reason, effect };
+  });
+}
+
+/** 振り分けの件数。フッターの内訳と主ボタンの文言に使う。 */
+export interface ReviewPlanSummary {
+  /** 未判断の総数。 */
+  total: number;
+  /** 主ボタンでまとめて採用する項目の key(`items` の順)。 */
+  bulkKeys: string[];
+  bulk: { new: number; same: number };
+  individual: { overwrite: number; noted: number; inferred: number; registered: number };
+  choose: number;
+  /** 主ボタンの後もまだ判断が要る項目(`individual` と `choose`)の key(`items` の順)。 */
+  remainingKeys: string[];
+}
+
+export function summarizeReviewPlan(plan: readonly PlannedReviewItem[]): ReviewPlanSummary {
+  const summary: ReviewPlanSummary = {
+    total: plan.length,
+    bulkKeys: [],
+    bulk: { new: 0, same: 0 },
+    individual: { overwrite: 0, noted: 0, inferred: 0, registered: 0 },
+    choose: 0,
+    remainingKeys: [],
   };
+  for (const entry of plan) {
+    if (entry.lane === "bulk") {
+      summary.bulkKeys.push(entry.item.key);
+      if (entry.reason === "same") summary.bulk.same++;
+      else summary.bulk.new++;
+      continue;
+    }
+    summary.remainingKeys.push(entry.item.key);
+    if (entry.lane === "choose") {
+      summary.choose++;
+      continue;
+    }
+    if (entry.reason === "overwrite") summary.individual.overwrite++;
+    else if (entry.reason === "noted") summary.individual.noted++;
+    else if (entry.reason === "registered") summary.individual.registered++;
+    else summary.individual.inferred++;
+  }
+  return summary;
 }
 
 /**
@@ -124,7 +246,7 @@ export function isReviewFullyDecided(
  * 優先順位:
  * 1. `status==="running"` の run のうち最新のもの(未レビュー結果がある状態で
  *    「それでも再調査する」(Plan §5.9)を選んだ直後でも、進行中の調査が必ず
- *    主表示になる。running中のrunは「要確認」条件に該当しないため、これを
+ *    主表示になる。running中のrunは「レビュー待ち」条件に該当しないため、これを
  *    最優先にしても Plan §6 の一覧分類とは矛盾しない)。
  * 2. `status==="succeeded"` かつ `review_completed_at===null` を満たす run のうち
  *    最新のもの(未レビュー結果を再調査の失敗等で隠さない、Plan §6 と同じ考え方)。
@@ -165,21 +287,25 @@ export function isRunStuck(
 }
 
 export interface ResearchQueueBuckets {
-  /** 要確認: 未レビューのsucceeded runが1件以上存在する店舗。 */
+  /** レビュー待ち: 未レビューのsucceeded runが1件以上存在する店舗。 */
   needsReview: Store[];
-  /** 調査待ち: 要確認に該当せず、`stage==="未調査"` の店舗。 */
+  /** 調査待ち: レビュー待ちに該当せず、`stage==="未調査"` の店舗。 */
   waiting: Store[];
-  /** 調査済み: 要確認に該当せず、`stage∈{"調査済み","架電済み"}` の店舗。 */
+  /** 調査済み: レビュー待ちに該当せず、`stage∈{"調査済み","架電済み"}` の店舗。 */
   done: Store[];
 }
 
 /**
  * `/research` 一覧の3タブ分類(Plan v3.2 §6)。相互排他になるよう
- * 「要確認 → 調査待ち → 調査済み」の優先順位で判定する。
+ * 「レビュー待ち → 調査待ち → 調査済み」の優先順位で判定する。
+ *
+ * 店舗ごとの判定は `getStoreResearchStatus` (`lib/domain/store-research-status.ts`) に
+ * 委ねる。サイドバーのバッジ・`/stores` の調査段階列も同じ関数を通るため、
+ * 画面ごとに件数や状態が食い違わない (#299)。
  *
  * `needsReviewStoreIds` は `ResearchRunRepository.listStoreIdsNeedingReview()` の
  * 結果(succeeded かつ review_completed_at IS NULL のrunが存在する店舗id集合)を渡す。
- * これにより、再調査が失敗しても古い未レビューのsucceeded runが「要確認」から
+ * これにより、再調査が失敗しても古い未レビューのsucceeded runが「レビュー待ち」から
  * 消えない(Plan §6)。
  *
  * 純関数。`stores` の順序を保ったまま3バケットに振り分ける。
@@ -190,9 +316,10 @@ export function classifyResearchQueue(
 ): ResearchQueueBuckets {
   const buckets: ResearchQueueBuckets = { needsReview: [], waiting: [], done: [] };
   for (const store of stores) {
-    if (needsReviewStoreIds.has(store.id)) {
+    const status = getStoreResearchStatus(store.stage, needsReviewStoreIds.has(store.id));
+    if (status === RESEARCH_REVIEW_PENDING) {
       buckets.needsReview.push(store);
-    } else if (store.stage === "未調査") {
+    } else if (status === "未調査") {
       buckets.waiting.push(store);
     } else {
       buckets.done.push(store);
@@ -320,7 +447,25 @@ export interface AdoptOptions {
  * (`isSourceLinkClickable`)だけに限定する。上記と同じ「canonical の出典として
  * 提示してよいURLだけを書く」という方針の、identity 側からの補完である。
  */
-const EDITED_SOURCE_QUOTE = "人間が編集した値です(直接の出典URLはありません)。";
+export const EDITED_SOURCE_QUOTE = "人間が編集した値です(直接の出典URLはありません)。";
+
+/**
+ * 「編集して採用」で、調査の値(競合なら選んだ候補の値)と異なる値を入れたか。
+ *
+ * `buildAdoptedBasicInfoField` が根拠(confidence / source_urls / source_quote)を
+ * 引き継ぐかどうかと、監査ログ(`research.review.decide` の `edited`)が同じ判定を使う。
+ * 競合で候補が見つからない場合は `false`(採用自体は `buildAdoptedBasicInfoField` が拒否する)。
+ */
+export function isEditedAdoption(item: ResearchItem, options: AdoptOptions = {}): boolean {
+  if (options.editedValue === undefined) return false;
+  if (item.status === "conflict") {
+    const candidate = (item.candidates ?? []).find(
+      (c) => c.candidate_id === options.selectedCandidateId,
+    );
+    return candidate !== undefined && options.editedValue !== candidate.value;
+  }
+  return options.editedValue !== item.value;
+}
 
 export function buildAdoptedBasicInfoField(
   item: ResearchItem,
@@ -338,7 +483,7 @@ export function buildAdoptedBasicInfoField(
     if (!candidate) {
       throw new Error(`候補が見つかりません: ${options.selectedCandidateId}`);
     }
-    const wasEdited = options.editedValue !== undefined && options.editedValue !== candidate.value;
+    const wasEdited = isEditedAdoption(item, options);
     return {
       value: options.editedValue ?? candidate.value,
       tier: "A",
@@ -352,7 +497,7 @@ export function buildAdoptedBasicInfoField(
     };
   }
 
-  const wasEdited = options.editedValue !== undefined && options.editedValue !== item.value;
+  const wasEdited = isEditedAdoption(item, options);
   return {
     value: options.editedValue ?? item.value,
     tier: item.status === "confirmed" ? "A" : "B",

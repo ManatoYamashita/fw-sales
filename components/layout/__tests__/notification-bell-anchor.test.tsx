@@ -9,8 +9,14 @@
  */
 
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { NotificationBell } from "../notification-bell";
+
+// Server Action は import しただけで lib/db へ到達するため遮断する。
+vi.mock("@/lib/actions/notification-actions", () => ({
+  markNotificationReadAction: vi.fn(),
+  markAllNotificationsReadAction: vi.fn(),
+}));
 import { OVERLAY_ANCHOR_CONTAINER } from "@/components/ui/overlay-anchor-classes";
 import type { Notification } from "@/types/notification";
 

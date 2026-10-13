@@ -27,12 +27,39 @@ import {
   deriveDowngradeReason,
   isSourceLinkClickable,
   flagEvidenceSourceIdMismatch,
+  DOWNGRADE_REASON_ACQUISITION,
+  DOWNGRADE_REASON_IDENTITY_COMPETITOR,
+  DOWNGRADE_REASON_IDENTITY_CONTEXTUAL,
+  DOWNGRADE_REASON_IDENTITY_TARGET,
+  DOWNGRADE_REASON_PRIMARY_SOURCE,
+  DOWNGRADE_REASON_SOURCE_ELIGIBILITY,
+  SOURCE_MARKER_MISMATCH_NOTE,
   type ResearchItem,
   type ResearchItemCandidate,
   type SourceRegistryEntry,
   type ReviewDecision,
 } from "../research-result-schema";
 import { RESEARCH_POLICY_ITEMS } from "@/lib/domain/research-policy";
+
+/**
+ * 降格理由の固定文言すべて。「降格していない」ことは、これらのどれも含まないことで確かめる。
+ * 以前は `not.toContain("格下げ")` で確かめていたが、#301 で文言から「格下げ」が消えたため、
+ * 部分文字列のままだと降格していても緑になる(空振りする)。文言ではなく定数で比べる。
+ */
+const ALL_DOWNGRADE_REASONS = [
+  DOWNGRADE_REASON_ACQUISITION,
+  DOWNGRADE_REASON_IDENTITY_TARGET,
+  DOWNGRADE_REASON_IDENTITY_COMPETITOR,
+  DOWNGRADE_REASON_IDENTITY_CONTEXTUAL,
+  DOWNGRADE_REASON_SOURCE_ELIGIBILITY,
+  DOWNGRADE_REASON_PRIMARY_SOURCE,
+];
+
+function expectNoDowngradeReason(warning: string | null | undefined): void {
+  for (const reason of ALL_DOWNGRADE_REASONS) {
+    expect(warning ?? "").not.toContain(reason);
+  }
+}
 
 function makeSource(
   overrides: Partial<SourceRegistryEntry> = {},
@@ -453,7 +480,7 @@ describe("validateResearchItemStatus (confirmed の deterministic validation)", 
     const registry = [makeSource({ id: "S01", url_context_status: "error" })];
     const result = validateResearchItemStatus(item, { sourceRegistry: registry });
     expect(result.status).toBe("not_found");
-    expect(result.warning).toContain("格下げ");
+    expect(result.warning).toContain(DOWNGRADE_REASON_ACQUISITION);
     expect(result.value).toBeNull();
     expect(result.confidence).toBeNull();
     expect(result.candidates).toBeUndefined();
@@ -1479,7 +1506,7 @@ describe("flagEvidenceSourceIdMismatch (fix/ai-research-source-identity-integrit
   it("evidence本文に含まれるsource ID表記がsource_idsに存在しなければwarningを付与する", () => {
     const item = makeItem({ evidence: "S05ぐるなびによると4,000円です", source_ids: ["S01"] });
     const result = flagEvidenceSourceIdMismatch(item);
-    expect(result.warning).toContain("evidence内の出典表記");
+    expect(result.warning).toContain(SOURCE_MARKER_MISMATCH_NOTE);
   });
 
   it("evidence本文のsource ID表記がsource_idsに含まれていればwarningを付与しない", () => {
@@ -2001,16 +2028,15 @@ describe("isVerifiedSourceForItem (confirmed と conflict candidate で共通の
  * そのまま再利用し、drift させない。
  */
 describe("deriveDowngradeReason (PR #180、3層 + 層2 の key-aware 文言)", () => {
-  const ACQUISITION = "情報源の本文を取得できなかった";
+  const ACQUISITION = DOWNGRADE_REASON_ACQUISITION;
   /** 層2 の既定文言(自店項目 = required identity が target_match のみ)。 */
-  const IDENTITY = "対象店舗のページであることを確認できなかった";
+  const IDENTITY = DOWNGRADE_REASON_IDENTITY_TARGET;
   /** 層2 の競合項目文言(F1)。 */
-  const IDENTITY_COMPETITOR = "引用された情報源を競合店舗の情報源として確認できなかった";
+  const IDENTITY_COMPETITOR = DOWNGRADE_REASON_IDENTITY_COMPETITOR;
   /** 層2 の文脈項目文言(F1)。 */
-  const IDENTITY_CONTEXTUAL =
-    "引用された情報源を対象店舗または商圏・市場の情報源として確認できなかった";
-  const ELIGIBILITY = "確認済みとして扱うために必要な情報源の条件を満たさなかった";
-  const PRIMARY = "本人発信の一次情報として確認できなかった";
+  const IDENTITY_CONTEXTUAL = DOWNGRADE_REASON_IDENTITY_CONTEXTUAL;
+  const ELIGIBILITY = DOWNGRADE_REASON_SOURCE_ELIGIBILITY;
+  const PRIMARY = DOWNGRADE_REASON_PRIMARY_SOURCE;
 
   const cite = (key: string, ids: string[]) => ({ key, source_ids: ids });
 
@@ -2216,8 +2242,8 @@ describe("validateResearchItemStatus の降格文言が source 状態を反映�
       sourceRegistry: registry,
     });
     expect(result.status).toBe("not_found");
-    expect(result.warning).toContain("対象店舗のページであることを確認できなかった");
-    expect(result.warning).not.toContain("本文を取得できなかった");
+    expect(result.warning).toContain(DOWNGRADE_REASON_IDENTITY_TARGET);
+    expect(result.warning).not.toContain(DOWNGRADE_REASON_ACQUISITION);
   });
 
   it("A. 本文取得失敗 → acquisition wording(従来の意味を維持)", () => {
@@ -2228,8 +2254,8 @@ describe("validateResearchItemStatus の降格文言が source 状態を反映�
       sourceRegistry: registry,
     });
     expect(result.status).toBe("not_found");
-    expect(result.warning).toContain("本文を取得できなかった");
-    expect(result.warning).not.toContain("対象店舗のページであることを確認できなかった");
+    expect(result.warning).toContain(DOWNGRADE_REASON_ACQUISITION);
+    expect(result.warning).not.toContain(DOWNGRADE_REASON_IDENTITY_TARGET);
   });
 
   it("C. 通常 FACT + success + target_match → 降格せず confirmed を維持する", () => {
@@ -2240,7 +2266,7 @@ describe("validateResearchItemStatus の降格文言が source 状態を反映�
       sourceRegistry: registry,
     });
     expect(result.status).toBe("confirmed");
-    expect(result.warning ?? "").not.toContain("格下げ");
+    expectNoDowngradeReason(result.warning);
   });
 
   it("D. 一次情報必須 key + success + target_match + gourmet_site → 一次情報 wording", () => {
@@ -2259,8 +2285,8 @@ describe("validateResearchItemStatus の降格文言が source 状態を反映�
       { sourceRegistry: registry },
     );
     expect(result.status).toBe("hearing_required");
-    expect(result.warning).toContain("本人発信の一次情報として確認できなかった");
-    expect(result.warning).not.toContain("対象店舗のページであることを確認できなかった");
+    expect(result.warning).toContain(DOWNGRADE_REASON_PRIMARY_SOURCE);
+    expect(result.warning).not.toContain(DOWNGRADE_REASON_IDENTITY_TARGET);
   });
 
   it("E. 一次情報必須 key + trusted official source → confirmed 維持", () => {
@@ -2278,7 +2304,7 @@ describe("validateResearchItemStatus の降格文言が source 状態を反映�
       { sourceRegistry: registry },
     );
     expect(result.status).toBe("confirmed");
-    expect(result.warning ?? "").not.toContain("格下げ");
+    expectNoDowngradeReason(result.warning);
   });
 
   it("降格時の status / value / source_ids は従来と同一(文言のみ変更)", () => {
@@ -2476,7 +2502,7 @@ describe("competitor item の key-aware trust guard (PR #180 competitor false-ne
     expect(result.status).toBe("confirmed");
     expect(result.value).toBe("鮨 ほそ川、鮨 山浦、鮨処 九十九 西武所沢店");
     expect(result.evidence_basis).toBe("url_context");
-    expect(result.warning ?? "").not.toContain("格下げ");
+    expectNoDowngradeReason(result.warning);
     expect(result.source_ids).toEqual(["S01"]);
   });
 
@@ -2485,7 +2511,7 @@ describe("competitor item の key-aware trust guard (PR #180 competitor false-ne
       sourceRegistry: [competitorSource()],
     });
     expect(result.status).not.toBe("inferred");
-    expect(result.warning ?? "").not.toContain("対象店舗のページであることを確認できなかった");
+    expect(result.warning ?? "").not.toContain(DOWNGRADE_REASON_IDENTITY_TARGET);
   });
 });
 
@@ -2513,13 +2539,12 @@ describe("competitor item の key-aware trust guard (PR #180 competitor false-ne
  * 文言側で二重定義していないことも下の drift ガードで固定する。
  */
 describe("層2 identity 文言の key-aware 化 (PR #180 F1)", () => {
-  const ACQUISITION = "情報源の本文を取得できなかった";
-  const IDENTITY_TARGET = "対象店舗のページであることを確認できなかった";
-  const IDENTITY_COMPETITOR = "引用された情報源を競合店舗の情報源として確認できなかった";
-  const IDENTITY_CONTEXTUAL =
-    "引用された情報源を対象店舗または商圏・市場の情報源として確認できなかった";
-  const ELIGIBILITY = "確認済みとして扱うために必要な情報源の条件を満たさなかった";
-  const PRIMARY = "本人発信の一次情報として確認できなかった";
+  const ACQUISITION = DOWNGRADE_REASON_ACQUISITION;
+  const IDENTITY_TARGET = DOWNGRADE_REASON_IDENTITY_TARGET;
+  const IDENTITY_COMPETITOR = DOWNGRADE_REASON_IDENTITY_COMPETITOR;
+  const IDENTITY_CONTEXTUAL = DOWNGRADE_REASON_IDENTITY_CONTEXTUAL;
+  const ELIGIBILITY = DOWNGRADE_REASON_SOURCE_ELIGIBILITY;
+  const PRIMARY = DOWNGRADE_REASON_PRIMARY_SOURCE;
 
   const COMPETITOR_KEYS = ["competitor_stores", "competitor_benchmark", "competitor_paid_ads"];
   const CONTEXTUAL_KEYS = ["trade_area", "market_demand"];

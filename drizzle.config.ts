@@ -1,4 +1,8 @@
 import { defineConfig } from "drizzle-kit";
+import { assertDatabaseTarget } from "./lib/environment-isolation.mjs";
+
+// migrate/studioをローカル設定で実行した際も、本番への誤接続を拒否します。
+if (process.env.DATABASE_URL) assertDatabaseTarget();
 
 /**
  * Drizzle Kit 設定ファイル

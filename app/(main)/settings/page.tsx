@@ -15,6 +15,7 @@ import { AiPromptTemplatesCard } from "./_components/ai-prompt-templates-card";
 import { KeepaliveStatusCard } from "./_components/keepalive-status-card";
 import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
+import { isDataResetAllowed } from "@/lib/data-reset-policy";
 import {
   Store as StoreIcon,
   Search,
@@ -80,7 +81,8 @@ export default function SettingsPage() {
 
       <ThemeToggleCard />
 
-      <DataActions />
+      {/* 本番ではシードリセット / 全削除を出さない (#298)。判定は環境変数のみで動的 API は読まない。 */}
+      <DataActions dataResetAllowed={isDataResetAllowed()} />
 
       {/* admin のみ表示。getCurrentProfile() で cookies を読むため隔離 (#155)。 */}
       <Suspense fallback={null}>
