@@ -17,6 +17,8 @@ import {
 
 const EMAIL = "local@example.test";
 const OTHER_USER_ID = "33333333-3333-4333-8333-333333333333";
+/** migration 0032 が固定値で作る Firstweb テナントの ID (#366)。 */
+const FIRSTWEB_TENANT_ID = "cfe871a5-8fc7-42da-9677-3a050665cafb";
 
 /** `work` を実行した後、必ず ROLLBACK する。 */
 async function inRolledBackTransaction(
@@ -38,6 +40,8 @@ async function seedLegacyUser(tx: postgres.TransactionSql): Promise<void> {
     VALUES (${LEGACY_LOCAL_USER_ID}, ${EMAIL}, ${JSON.stringify({ name: "Local Test User" })}::jsonb)`;
   await tx`UPDATE profiles SET role = 'admin', display_name = 'Local Test User', created_at = '2026-10-01'
     WHERE id = ${LEGACY_LOCAL_USER_ID}`;
+  // トリガーは所属を member で作る。新 ID に残るのが旧 ID から移した所属だと分かるよう、旧 ID の側を admin にする。
+  await tx`UPDATE memberships SET role = 'admin' WHERE user_id = ${LEGACY_LOCAL_USER_ID}`;
   await tx`INSERT INTO auth.users (id, email, raw_user_meta_data)
     VALUES (${OTHER_USER_ID}, 'other@example.test', '{}'::jsonb)`;
   await tx`INSERT INTO notifications (id, user_id, kind, title, body, created_at, updated_at) VALUES
@@ -69,8 +73,13 @@ describe("migrateLegacyLocalUser (#355)", () => {
 
       expect(moved).toEqual(expect.arrayContaining([
         { table: "ai_prompt_templates", column: "user_id", count: 1 },
+        { table: "memberships", column: "user_id", count: 1 },
         { table: "notifications", column: "user_id", count: 1 },
       ]));
+      // トリガーが新 ID に作った member の所属ではなく、旧 ID の所属 (admin) が移っている
+      expect(await tx`SELECT user_id, tenant_id, role FROM memberships
+        WHERE user_id IN (${LEGACY_LOCAL_USER_ID}, ${LOCAL_USER_ID})`)
+        .toEqual([{ user_id: LOCAL_USER_ID, tenant_id: FIRSTWEB_TENANT_ID, role: "admin" }]);
       const profiles = await tx`SELECT id, email, display_name, role, created_at FROM profiles
         WHERE id IN (${LEGACY_LOCAL_USER_ID}, ${LOCAL_USER_ID})`;
       expect(profiles).toEqual([{
@@ -91,7 +100,7 @@ describe("migrateLegacyLocalUser (#355)", () => {
         FROM pg_constraint c
         JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = c.conkey[1]
         WHERE c.contype = 'f' AND c.confrelid = 'public.profiles'::regclass`;
-      expect(references.length).toBeGreaterThanOrEqual(6);
+      expect(references.length).toBeGreaterThanOrEqual(7);
       for (const { table, column } of references) {
         const rows = await tx.unsafe(
           `SELECT count(*)::int AS n FROM ${table} WHERE "${column}" = $1`,
