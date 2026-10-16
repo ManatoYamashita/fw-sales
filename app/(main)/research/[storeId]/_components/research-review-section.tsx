@@ -194,7 +194,23 @@ export interface ReviewFooterModel {
   primary: ReviewPrimaryAction;
   /** 副ボタン(未判断を反映せずに完了)の文言。未判断が無ければ null。 */
   skipLabel: string | null;
+  /**
+   * 幅 640px 未満で出す 1 行の要約 (#364)。「未対応 17（まとめて採用 2・1件ずつ確認 15）」。
+   * 副ボタンを「反映せずに完了」に縮めても、未対応の件数がここに残る。
+   */
+  compactLine: string;
+  /**
+   * 幅 640px 未満で主ボタンに出す短い文言。null なら `primary.label` のまま (#364)。
+   * 「12件を採用して調査完了」は幅 375px で「反映せずに完了」の隣に収まらなかった (E2E で実測)。
+   */
+  primaryCompactLabel: string | null;
 }
+
+/**
+ * 幅 640px 未満の副ボタンの文言 (#364)。主ボタンと横に並べるため件数を落とす。
+ * 件数は要約の「未対応 N」に出ており、読み上げでは `skipLabel` を名前に使う。
+ */
+export const SKIP_SHORT_LABEL = "反映せずに完了";
 
 function joinCounts(parts: [string, number][]): string {
   return parts
@@ -243,11 +259,21 @@ export function buildReviewFooterModel(summary: ReviewPlanSummary): ReviewFooter
     primary = { kind: "complete", label: "レビュー完了" };
   }
 
+  const primaryCompactLabel =
+    primary.kind === "bulk" && primary.complete ? `${bulkCount}件を採用して完了` : null;
+
+  const compactParts = joinCounts([
+    ["まとめて採用", bulkCount],
+    ["1件ずつ確認", summary.remainingKeys.length],
+  ]);
+
   return {
     bulkLine,
     remainingLine,
     primary,
     skipLabel: summary.total > 0 ? `残り${summary.total}件は反映せずに完了` : null,
+    compactLine: `未対応 ${summary.total}${compactParts === "" ? "" : `（${compactParts}）`}`,
+    primaryCompactLabel,
   };
 }
 
@@ -564,36 +590,58 @@ export function ReviewCompletionFooter({
     >
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex flex-col gap-0.5 text-xs text-muted-foreground" aria-live="polite">
+          {/* 幅 640px 未満は 1 行の要約だけにする (#364)。2 行の要約とボタン 2 つを縦に
+              積んでいた頃は、固定バーが 163px あり、375×667 の画面の 24% を占めていた。 */}
+          <span className="sm:hidden">{model.compactLine}</span>
           {/* 「採用済み」ではなく「判断済み」。採用だけでなく却下・スキップも含む。 */}
-          <span>
+          <span className="max-sm:hidden">
             判断済み {decidedCount} ・ 未対応 {undecidedCount}
           </span>
           {/* 主ボタンが採る項目と、残る項目の内訳を 1 行で並べる (#360)。 */}
-          {breakdown !== "" && <span>{breakdown}</span>}
+          {breakdown !== "" && <span className="max-sm:hidden">{breakdown}</span>}
         </div>
 
-        <div className="ml-auto flex w-full flex-col-reverse items-stretch gap-2 sm:w-auto sm:flex-row sm:items-center">
+        {/* 幅 640px 未満でもボタンは横に並べる (#364)。副ボタンは文言の幅だけを取り、
+            主ボタンが残りの幅を使う。主ボタンは文言より狭くしない。「12件を採用して調査完了」は
+            幅 344px 以下で副ボタンの隣に収まらず、縮めると文言が欠けた (E2E で実測)。
+            収まらないときは折り返し、`flex-wrap-reverse` で主ボタンを上の段に置く。 */}
+        <div className="ml-auto flex w-full flex-wrap-reverse items-center gap-2 sm:w-auto">
           {model.skipLabel !== null && (
             <Button
               type="button"
               variant="ghost"
               size="sm"
-              className="w-full sm:w-auto"
+              className="shrink-0"
+              // 短い文言でも、読み上げでは何件を反映しないのかが分かるようにする。
+              // 名前は見えている文言を含むので、音声入力で「反映せずに完了」と言っても押せる。
+              aria-label={model.skipLabel}
               onClick={onCompleteDecidedOnly}
               disabled={disabled}
             >
-              {model.skipLabel}
+              <span className="sm:hidden">{SKIP_SHORT_LABEL}</span>
+              <span className="max-sm:hidden">{model.skipLabel}</span>
             </Button>
           )}
           <Button
             type="button"
             variant="primary"
-            className="w-full sm:w-auto"
+            className="flex-auto sm:flex-none"
+            // 短い文言を出すときも、読み上げでは元の文言を名前にする (副ボタンと同じ)。
+            aria-label={!completing && model.primaryCompactLabel !== null ? model.primary.label : undefined}
             onClick={onPrimary}
             pending={completing}
             disabled={disabled}
           >
-            {completing ? "処理中…" : model.primary.label}
+            {completing ? (
+              "処理中…"
+            ) : model.primaryCompactLabel === null ? (
+              model.primary.label
+            ) : (
+              <>
+                <span className="sm:hidden">{model.primaryCompactLabel}</span>
+                <span className="max-sm:hidden">{model.primary.label}</span>
+              </>
+            )}
           </Button>
         </div>
       </div>
