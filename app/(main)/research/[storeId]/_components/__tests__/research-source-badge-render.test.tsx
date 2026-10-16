@@ -110,8 +110,12 @@ describe("SourceBadge — uncertain source の候補タイトル表示", () => {
     expect(html).not.toContain("検索候補");
   });
 
-  it("長いタイトルは truncate クラスで抑制する", () => {
-    expect(render(makeEntry())).toContain("truncate");
+  it("長い検索候補タイトルを省略せず、折り返して全文を読める", () => {
+    const title = "検証用の非常に長い検索候補タイトル".repeat(10);
+    const html = render(makeEntry({ title }));
+    expect(html).toContain(title);
+    expect(html).not.toContain("truncate");
+    expect(html).toContain("overflow-wrap:anywhere");
   });
 });
 

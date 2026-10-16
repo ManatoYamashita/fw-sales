@@ -191,7 +191,7 @@ describe("上書きの事前表示 (#319)", () => {
     expect(html).toContain("1件ずつ確認: 上書き 1・推定 1");
     expect(html).toContain("1件をまとめて採用");
     expect(html).toContain("いまの値（前回の調査で採用）: 18席");
-    expect(html).toContain("調査の値: 値");
+    expect(html.replace(/<[^>]*>/g, "")).toContain("調査の値: 値");
   });
 
   it("上書きになる項目のボタンは「上書きする」「いまの値を残す」", () => {
@@ -298,7 +298,7 @@ describe("狭い画面の完了操作", () => {
     const html = render(makeRun([item("seat_count", "confirmed")]));
     const footer = html.match(/<div[^>]*role="region"[^>]*aria-label="レビュー完了操作"[^>]*>/)?.[0];
     expect(footer).toBeDefined();
-    expect(footer).toContain("max-h-[70dvh]");
+    expect(footer).toContain("max-h-[50dvh]");
     expect(footer).toContain("overflow-y-auto");
   });
 });
@@ -348,6 +348,7 @@ const {
   handleItemJump,
   researchItemAnchorId,
   scrollToResearchItem,
+  scrollToReviewElement,
 } = await import("../research-review-section");
 
 describe("researchItemAnchorId / scrollToResearchItem", () => {
@@ -370,6 +371,38 @@ describe("researchItemAnchorId / scrollToResearchItem", () => {
       expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "center" });
       // スクロール位置を二重に動かさない。
       expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("動きを減らす設定では即時に移動する", () => {
+    const scrollIntoView = vi.fn();
+    vi.stubGlobal("window", { matchMedia: () => ({ matches: true }) });
+    vi.stubGlobal("document", { getElementById: () => ({ scrollIntoView, focus: vi.fn() }) });
+    try {
+      scrollToResearchItem("main_target");
+      expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "instant", block: "center" });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("カテゴリ自体が閉じていても開いてからフォーカスを移す", () => {
+    const calls: string[] = [];
+    const category = {
+      open: false,
+      closest: () => category,
+      parentElement: null,
+      scrollIntoView: vi.fn(() => calls.push(`scroll:${category.open}`)),
+      focus: vi.fn(() => calls.push("focus")),
+    };
+    const getElementById = vi.fn(() => category);
+    vi.stubGlobal("document", { getElementById });
+    try {
+      expect(scrollToReviewElement("research-category-category_1_basic")).toBe(true);
+      expect(getElementById).toHaveBeenCalledWith("research-category-category_1_basic");
+      expect(calls).toEqual(["scroll:true", "focus"]);
     } finally {
       vi.unstubAllGlobals();
     }
@@ -614,7 +647,7 @@ describe("重複表示の整理 (#360)", () => {
         item("owner_career", "hearing_required", { value: null }),
       ]),
     );
-    expect(html).toContain("推定 2（AIによる分析で、断定はできません）");
+    expect(html.replace(/<[^>]*>/g, "")).toContain("推定 2件AIによる分析で、断定はできません");
     expect(html.split("AIによる分析で、断定はできません").length - 1).toBe(1);
     // カードには本文の注意文を出さない (ツールチップの title 属性だけ)。
     expect(html).not.toContain("⚠ AIによる分析です");

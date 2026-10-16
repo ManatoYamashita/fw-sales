@@ -27,12 +27,13 @@
  * (`completeReviewAction` の skipRemaining)。本番で再調査した 2 店舗はこの操作で閉じている。
  */
 
-import { useMemo, useState, useTransition } from "react";
+import { useId, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, ChevronDown, Check } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Select } from "@/components/ui/select";
 import { ResearchItemCard, type DecideInput, toPendingDecision, pendingDecisionForItem, type PendingDecision } from "./research-item-card";
 import { NonReviewItemCard } from "./research-nonreview-card";
 import { runAction } from "@/lib/client/run-action";
@@ -130,8 +131,13 @@ export function researchItemAnchorId(key: string): string {
  * `focus({ preventScroll: true })` はスクロール位置を二重に動かさないため。
  */
 export function scrollToResearchItem(key: string): boolean {
+  return scrollToReviewElement(researchItemAnchorId(key));
+}
+
+/** 閉じたカテゴリも開いて移動し、キーボードの操作位置も合わせます。 */
+export function scrollToReviewElement(id: string): boolean {
   if (typeof document === "undefined") return false;
-  const el = document.getElementById(researchItemAnchorId(key));
+  const el = document.getElementById(id);
   if (el === null) return false;
 
   let ancestor: Element | null = el.closest?.("details") ?? null;
@@ -140,7 +146,8 @@ export function scrollToResearchItem(key: string): boolean {
     ancestor = ancestor.parentElement?.closest?.("details") ?? null;
   }
 
-  el.scrollIntoView?.({ behavior: "smooth", block: "center" });
+  const reducedMotion = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  el.scrollIntoView?.({ behavior: reducedMotion ? "instant" : "smooth", block: "center" });
   el.focus?.({ preventScroll: true });
   return true;
 }
@@ -261,6 +268,7 @@ interface Props {
 
 export function ResearchReviewSection({ store, run, onUpdate, onRestart, restarting }: Props) {
   const router = useRouter();
+  const categorySelectId = useId();
   const items = useMemo(() => run.result ?? [], [run.result]);
   const [filterUnresolved, setFilterUnresolved] = useState(false);
   const [busy, startTransition] = useTransition();
@@ -309,6 +317,15 @@ export function ResearchReviewSection({ store, run, onUpdate, onRestart, restart
   const nonReviewItems = useMemo(() => items.filter((item) => !isReviewableItem(item)), [items]);
 
   const isUndecided = (item: ResearchItem): boolean => laneByKey.has(item.key);
+  const visibleGroups = Array.from(grouped.entries())
+    .map(([category, categoryItems]) => ({
+      category,
+      categoryItems,
+      visibleItems: filterUnresolved ? categoryItems.filter(isUndecided) : categoryItems,
+      remaining: categoryItems.filter(isUndecided).length,
+    }))
+    .filter(({ visibleItems }) => visibleItems.length > 0);
+  const decidedCount = reviewableItems.length - plan.length;
 
   const onDecide = (item: ResearchItem, input: DecideInput) => {
     if (reviewCompleted) return;
@@ -402,114 +419,170 @@ export function ResearchReviewSection({ store, run, onUpdate, onRestart, restart
 
   return (
     <>
-      <Card>
-        {/* 見出しは 2 段組みだが、箱 (padding / 区切り線) は Card.Header を呼ぶ。
-            クラスを逐語コピーするとプリミティブの修正が届かなくなる (#270)。
-            縦積みは w-full の子 1 枚に閉じ込め、Card.Header 側の行レイアウトは触らない。 */}
-        <Card.Header>
-          <div className="flex flex-col items-start gap-2 w-full">
-            <div className="flex w-full flex-wrap items-center gap-2 [&>*+*]:ml-auto">
-              <Card.Title>
-                AI店舗調査結果({formatDateTime(run.started_at)} 実施)
-              </Card.Title>
-              <Badge tone={reviewCompleted ? "success" : "warning"}>
-                {reviewCompleted ? "レビュー完了" : "レビュー未完了"}
-              </Badge>
+      <div className="grid items-start gap-5 xl:grid-cols-[13rem_minmax(0,1fr)] xl:gap-6">
+        <aside className="min-w-0 xl:sticky xl:top-24">
+          <div className="hidden space-y-4 xl:block">
+            <div className="space-y-2 px-3">
+              <p className="text-sm font-semibold text-foreground">レビューの進捗</p>
+              <p className="text-sm text-muted-foreground tabular-nums">
+                判断済み <span className="font-semibold text-foreground">{decidedCount}</span> / {reviewableItems.length}件
+              </p>
+              <progress aria-label="レビューの進捗" value={decidedCount} max={reviewableItems.length || 1} className="h-1.5 w-full accent-primary" />
             </div>
-            <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-              {Array.from(trustCounts.entries()).map(([trust, count]) => (
-                <span key={trust}>
-                  {ITEM_TRUST_LABELS[trust]} {count}
-                  {TRUST_COUNT_NOTES[trust] !== undefined && `（${TRUST_COUNT_NOTES[trust]}）`}
-                </span>
-              ))}
-            </div>
+            <nav aria-label="調査カテゴリ">
+              <ul className="space-y-1">
+                {visibleGroups.map(({ category, categoryItems, remaining }) => (
+                  <li key={category}>
+                    <a
+                      href={`#research-category-${category}`}
+                      onClick={() => {
+                        const target = document.getElementById(`research-category-${category}`);
+                        if (target && "open" in target) (target as HTMLDetailsElement).open = true;
+                      }}
+                      className="flex min-h-11 items-start justify-between gap-3 rounded-md px-3 py-2.5 text-sm leading-relaxed text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+                    >
+                      <span>{CATEGORY_LABELS[category]}</span>
+                      <span className="shrink-0 tabular-nums">
+                        {remaining === 0 ? <Check aria-label="判断済み" className="mt-0.5 size-4" /> : remaining}
+                        <span className="sr-only"> / {categoryItems.length}項目</span>
+                      </span>
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </nav>
+            {!reviewCompleted && <p className="px-3 text-xs leading-relaxed text-muted-foreground">数字は未判断の項目数です。</p>}
           </div>
-        </Card.Header>
-        <Card.Body className="space-y-4">
-          {/* run 全体の警告は店舗の不一致だけを出す (#359, #360)。本文取得の失敗などは
-              各項目の「未確認の情報源」と重なる。進捗は下部の固定バーに出ている。 */}
-          {identityMismatch && (
-            <p className="flex items-start gap-1.5 text-xs text-warning">
-              <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-              <span>
-                AIが調べた店舗の名前・住所が登録情報と一致しません。別の店舗の情報が混ざっている可能性があるため、採用する前に出典を確認してください。
-              </span>
-            </p>
-          )}
-
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              type="button"
-              size="sm"
-              variant={filterUnresolved ? "primary" : "outline"}
-              onClick={() => setFilterUnresolved((v) => !v)}
-            >
-              未判断の項目のみ表示
-            </Button>
+          <div className="space-y-2 xl:hidden">
+            <label htmlFor={categorySelectId} className="block text-sm font-medium text-foreground">カテゴリへ移動</label>
+            <Select
+              id={categorySelectId}
+              width="full"
+              value=""
+              disabled={visibleGroups.length === 0}
+              onValueChange={scrollToReviewElement}
+              placeholder={visibleGroups.length > 0 ? "確認したいカテゴリを選択" : "未判断の項目はありません"}
+              options={visibleGroups.map(({ category, remaining }) => ({
+                value: `research-category-${category}`,
+                label: `${CATEGORY_LABELS[category]}（未判断 ${remaining}件）`,
+              }))}
+            />
           </div>
-
-          {Array.from(grouped.entries()).map(([category, categoryItems]) => {
-            const visibleItems = filterUnresolved ? categoryItems.filter(isUndecided) : categoryItems;
-            if (visibleItems.length === 0) return null;
-            return (
-              <details key={category} className="border border-border rounded-lg" open>
-                <summary className="cursor-pointer select-none px-4 py-2.5 text-sm font-medium text-foreground bg-muted/30 rounded-lg">
-                  {CATEGORY_LABELS[category]}({categoryItems.length}項目)
-                </summary>
-                <div className="p-4 space-y-3">
-                  {visibleItems.map((item) => {
-                    const lane = laneByKey.get(item.key);
-                    return (
-                      <ResearchItemCard
-                        key={item.key}
-                        item={item}
-                        label={BASIC_INFO_ITEM_BY_KEY.get(item.key)?.label ?? item.key}
-                        anchorId={researchItemAnchorId(item.key)}
-                        sourceRegistry={run.source_registry}
-                        decision={run.review_decisions[item.key]}
-                        current={store.basic_info[item.key]}
-                        defaultOpen={!reviewCompleted && (lane === "individual" || lane === "choose")}
-                        busy={busy || completing}
-                        pendingDecision={pendingDecisionForItem(item.key, busy, pendingDecision)}
-                        onDecide={(input) => onDecide(item, input)}
-                      />
-                    );
-                  })}
-                </div>
-              </details>
-            );
-          })}
-
-          {nonReviewItems.length > 0 && (
-            <details className="border border-border rounded-lg">
-              <summary className="cursor-pointer select-none px-4 py-2.5 text-sm font-medium text-foreground bg-muted/30 rounded-lg">
-                調査で値が出なかった項目({nonReviewItems.length}項目)
-              </summary>
-              <div className="p-4 space-y-3">
-                {nonReviewItems.map((item) => (
-                  <NonReviewItemCard
-                    key={item.key}
-                    item={item}
-                    label={BASIC_INFO_ITEM_BY_KEY.get(item.key)?.label ?? item.key}
-                  />
+        </aside>
+        <Card>
+          <Card.Header>
+            <div className="w-full space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-3 [&>*+*]:ml-auto">
+                <h2 className="text-lg font-semibold leading-snug tracking-tight text-foreground">
+                  {reviewCompleted ? "調査結果" : "調査結果をレビュー"}
+                </h2>
+                <Badge tone={reviewCompleted ? "success" : "warning"}>
+                  {reviewCompleted ? "レビュー完了" : "レビュー未完了"}
+                </Badge>
+              </div>
+              <p className="text-xs text-muted-foreground">{formatDateTime(run.started_at)} 実施</p>
+              <div className="flex flex-wrap gap-x-4 gap-y-2 text-sm text-muted-foreground">
+                {Array.from(trustCounts.entries()).map(([trust, count]) => (
+                  <span key={trust}>
+                    {ITEM_TRUST_LABELS[trust]} <span className="font-medium text-foreground tabular-nums">{count}件</span>
+                    {TRUST_COUNT_NOTES[trust] !== undefined && <span className="block text-xs leading-relaxed">{TRUST_COUNT_NOTES[trust]}</span>}
+                  </span>
                 ))}
               </div>
-            </details>
-          )}
+            </div>
+          </Card.Header>
+          <Card.Body className="space-y-4">
+            {/* run 全体の警告は店舗の不一致だけを出す (#359, #360)。本文取得の失敗などは
+                各項目の「未確認の情報源」と重なる。進捗は下部の固定バーに出ている。 */}
+            {identityMismatch && (
+              <p className="flex items-start gap-1.5 text-xs text-warning">
+                <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                <span>
+                  AIが調べた店舗の名前・住所が登録情報と一致しません。別の店舗の情報が混ざっている可能性があるため、採用する前に出典を確認してください。
+                </span>
+              </p>
+            )}
 
-          {reviewCompleted && (
-            <div className="flex justify-end pt-2 border-t border-border">
-              <Button type="button" variant="outline" onClick={onRestart} pending={restarting}>
-                再調査する
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant={filterUnresolved ? "secondary" : "outline"}
+                aria-pressed={filterUnresolved}
+                onClick={() => setFilterUnresolved((v) => !v)}
+              >
+                未判断の項目のみ表示
               </Button>
             </div>
-          )}
-          {/* 未完了時の完了操作は sticky footer(Card の外)へ置く。53項目・8カテゴリで
-              縦に長く、画面下までスクロールしないと完了できなかったため。 */}
-          {!reviewCompleted && <div className="h-2" aria-hidden />}
-        </Card.Body>
-      </Card>
+
+            {filterUnresolved && visibleGroups.length === 0 && (
+              <p role="status" className="rounded-md bg-muted p-4 text-sm leading-relaxed text-muted-foreground">
+                未判断の項目はありません。「未判断の項目のみ表示」を解除すると、判断済みの内容を確認できます。
+              </p>
+            )}
+
+            {visibleGroups.map(({ category, categoryItems, visibleItems, remaining }) => {
+              return (
+                <details key={category} id={`research-category-${category}`} tabIndex={-1} className="group/category scroll-mt-24 rounded-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground" open>
+                  <summary className="flex cursor-pointer list-none flex-wrap items-center gap-2 rounded-md bg-muted px-3 py-3 text-sm font-semibold leading-relaxed text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground [&::-webkit-details-marker]:hidden">
+                    <ChevronDown aria-hidden className="size-4 shrink-0 -rotate-90 text-muted-foreground group-open/category:rotate-0" />
+                    <span className="min-w-0 flex-1">{CATEGORY_LABELS[category]}</span>
+                    <span className="text-xs font-normal text-muted-foreground tabular-nums">{categoryItems.length}項目{!reviewCompleted && ` / 未判断 ${remaining}`}</span>
+                  </summary>
+                  <div className="space-y-3 py-3">
+                    {visibleItems.map((item) => {
+                      const lane = laneByKey.get(item.key);
+                      return (
+                        <ResearchItemCard
+                          key={item.key}
+                          item={item}
+                          label={BASIC_INFO_ITEM_BY_KEY.get(item.key)?.label ?? item.key}
+                          anchorId={researchItemAnchorId(item.key)}
+                          sourceRegistry={run.source_registry}
+                          decision={run.review_decisions[item.key]}
+                          current={store.basic_info[item.key]}
+                          defaultOpen={!reviewCompleted && (lane === "individual" || lane === "choose")}
+                          busy={busy || completing}
+                          pendingDecision={pendingDecisionForItem(item.key, busy, pendingDecision)}
+                          onDecide={(input) => onDecide(item, input)}
+                        />
+                      );
+                    })}
+                  </div>
+                </details>
+              );
+            })}
+
+            {nonReviewItems.length > 0 && (
+              <details className="border border-border rounded-lg">
+                <summary className="cursor-pointer select-none px-4 py-2.5 text-sm font-medium text-foreground bg-muted/30 rounded-lg">
+                  調査で値が出なかった項目({nonReviewItems.length}項目)
+                </summary>
+                <div className="p-4 space-y-3">
+                  {nonReviewItems.map((item) => (
+                    <NonReviewItemCard
+                      key={item.key}
+                      item={item}
+                      label={BASIC_INFO_ITEM_BY_KEY.get(item.key)?.label ?? item.key}
+                    />
+                  ))}
+                </div>
+              </details>
+            )}
+
+            {reviewCompleted && (
+              <div className="flex justify-end pt-2 border-t border-border">
+                <Button type="button" variant="outline" onClick={onRestart} pending={restarting}>
+                  再調査する
+                </Button>
+              </div>
+            )}
+            {/* 未完了時の完了操作は sticky footer(Card の外)へ置く。53項目・8カテゴリで
+                縦に長く、画面下までスクロールしないと完了できなかったため。 */}
+            {!reviewCompleted && <div className="h-2" aria-hidden />}
+          </Card.Body>
+        </Card>
+      </div>
       {!reviewCompleted && (
         <ReviewCompletionFooter
           model={footer}
@@ -532,7 +605,7 @@ export function ResearchReviewSection({ store, run, onUpdate, onRestart, restart
  * sticky が効かない。** 既存の先例(`stores-table-view.tsx` / `area-search-results.tsx`)
  * と同じく Card の外に置く。クラス列も先例をそのまま踏襲する
  * (`fixed` ではなく `sticky` にすることで、サイドバー折りたたみでも左端がズレない)。
- * 低い画面では 70dvh を上限として領域内をスクロールさせ、完了ボタンへの到達を保つ。
+ * 低い画面では 50dvh を上限として領域内をスクロールさせ、完了ボタンへの到達を保つ。
  */
 export function ReviewCompletionFooter({
   model,
@@ -560,7 +633,7 @@ export function ReviewCompletionFooter({
     <div
       role="region"
       aria-label="レビュー完了操作"
-      className="sticky bottom-0 z-30 flex max-h-[70dvh] flex-col gap-2 overflow-y-auto border-t border-border bg-background/80 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-md"
+      className="sticky bottom-0 z-30 flex max-h-[50dvh] flex-col gap-2 overflow-y-auto rounded-t-lg border border-border bg-card px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-card"
     >
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex flex-col gap-0.5 text-xs text-muted-foreground" aria-live="polite">

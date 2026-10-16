@@ -17,6 +17,7 @@
  */
 
 import { useState } from "react";
+import { ChevronDown } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -227,15 +228,16 @@ export function ResearchItemCard({
       id={anchorId}
       tabIndex={anchorId === undefined ? undefined : -1}
       open={defaultOpen}
-      className="group border border-border rounded-lg scroll-mt-24 [overflow-wrap:anywhere] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="group/item rounded-lg border border-border bg-card scroll-mt-24 [overflow-wrap:anywhere] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
     >
-      <summary className="flex cursor-pointer select-none flex-wrap items-center gap-2 px-4 py-3 [&>*+*]:ml-auto">
-        <span className="flex min-w-0 flex-col">
-          <span className="text-sm font-medium text-foreground">{label}</span>
-          {/* 閉じているときだけ値を 1 行で見せる。開いたら本文の「調査の値」と重なるので隠す。 */}
-          <span className="line-clamp-1 text-xs text-muted-foreground group-open:hidden">{preview}</span>
+      <summary className="flex cursor-pointer list-none flex-wrap items-start gap-3 rounded-lg px-4 py-4 hover:bg-muted/40 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground [&::-webkit-details-marker]:hidden">
+        <ChevronDown aria-hidden className="mt-0.5 size-4 shrink-0 -rotate-90 text-muted-foreground group-open/item:rotate-0" />
+        <span className="flex min-w-0 flex-1 basis-40 flex-col gap-1">
+          <span className="text-sm font-semibold text-foreground">{label}</span>
+          {/* 閉じているときも値を省略せずに見せる。開いたら本文の「調査の値」と重なるので隠す。 */}
+          <span className="text-sm leading-relaxed text-muted-foreground group-open/item:hidden">{preview}</span>
         </span>
-        <span className="flex flex-wrap items-center gap-2">
+        <span className="ms-auto flex flex-wrap items-center gap-2">
           {decided && (
             <Badge tone="secondary" className="whitespace-nowrap">
               {decided}
@@ -254,7 +256,7 @@ export function ResearchItemCard({
         </span>
       </summary>
 
-      <div className="space-y-2.5 px-4 pb-4">
+      <div className="space-y-4 px-4 pb-4 sm:ps-11">
         {isConflict ? (
           <div className="space-y-3">
             <p className="text-xs text-warning">⚠ 情報源間で内容が一致しません</p>
@@ -301,24 +303,34 @@ export function ResearchItemCard({
         ) : (
           <div className="space-y-1.5">
             {isOverwrite && current && <CurrentValueLine current={current} />}
-            <p className="text-sm text-foreground">調査の値: {item.value ?? "未取得"}</p>
+            <p className="max-w-prose whitespace-pre-wrap text-base leading-relaxed text-foreground">
+              <span className={isOverwrite ? "block text-xs text-muted-foreground" : "sr-only"}>調査の値: </span>{item.value ?? "未取得"}
+            </p>
             {effect?.kind === "same" && (
               <p className="text-xs text-muted-foreground">
                 いまの値と同じです。採用しても基本情報は変わりません。
               </p>
             )}
-            <p className="text-xs text-muted-foreground">{stripLegacyEvidenceSupplement(item.evidence)}</p>
-            {item.confidence !== null && item.confidence !== undefined && (
-              <p className="text-xs text-muted-foreground">確信度: {item.confidence}%</p>
-            )}
-            {item.evidence_basis && (
-              <p className="text-xs text-muted-foreground">{EVIDENCE_BASIS_LABELS[item.evidence_basis]}</p>
-            )}
-            <SourceBadgeList
-              sourceIds={item.source_ids}
-              sourceRegistry={sourceRegistry}
-              evidenceBasis={item.evidence_basis}
-            />
+            <details className="group/evidence pt-2 text-sm text-muted-foreground">
+              <summary className="flex min-h-9 w-fit cursor-pointer list-none items-center gap-1.5 rounded-md font-medium hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground [&::-webkit-details-marker]:hidden">
+                <ChevronDown aria-hidden className="size-3.5 -rotate-90 group-open/evidence:rotate-0" />
+                根拠・出典を確認
+              </summary>
+              <div className="space-y-3 border-s-2 border-border py-2 ps-3 leading-relaxed">
+                <p>{stripLegacyEvidenceSupplement(item.evidence)}</p>
+                {item.confidence !== null && item.confidence !== undefined && (
+                  <p className="text-xs text-muted-foreground">確信度: {item.confidence}%</p>
+                )}
+                {item.evidence_basis && (
+                  <p className="text-xs text-muted-foreground">{EVIDENCE_BASIS_LABELS[item.evidence_basis]}</p>
+                )}
+                <SourceBadgeList
+                  sourceIds={item.source_ids}
+                  sourceRegistry={sourceRegistry}
+                  evidenceBasis={item.evidence_basis}
+                />
+              </div>
+            </details>
           </div>
         )}
 
@@ -371,7 +383,7 @@ export function ResearchItemCard({
           // 枠なしのボタンが本文の文字列にしか見えなかった。収まる幅では 1 行のまま。
           // 組の中も折り返せるようにしておく。幅 320px では「いまの値を残す・スキップ」の
           // 組 (約 208px) がカードの中身 (約 170px) より広く、折り返さないとはみ出す。
-          <div className="flex flex-wrap items-center gap-2 pt-1">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-border pt-3">
             {!isConflict && (
               <div className="flex flex-wrap items-center gap-2">
                 <Button

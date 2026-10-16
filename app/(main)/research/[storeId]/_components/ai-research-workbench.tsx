@@ -139,13 +139,25 @@ export function AiResearchWorkbench({
   };
 
   return (
-    <div className="space-y-4 max-w-4xl mx-auto">
-      <div>
-        <Link href="/research" className="text-xs text-muted-foreground hover:text-foreground">
-          ← 調査
+    <div className="space-y-6 max-w-6xl mx-auto">
+      <header className="space-y-3">
+        <Link href="/research" className="inline-flex min-h-10 items-center gap-2 rounded-md text-sm text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-foreground">
+          ← 調査一覧
         </Link>
-        <h1 className="text-xl md:text-2xl font-bold text-foreground mt-1">{store.name}</h1>
-      </div>
+        <div className="flex flex-wrap items-start justify-between gap-4 [&>*+*]:ml-auto">
+          <div className="min-w-0 space-y-2">
+            <h1 className="text-2xl font-bold leading-snug tracking-tight text-foreground [overflow-wrap:anywhere] md:text-3xl">{store.name}</h1>
+            {(store.genre || store.address) && (
+              <p className="max-w-prose text-sm leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">
+                {[store.genre, store.address].filter(Boolean).join(" / ")}
+              </p>
+            )}
+          </div>
+          <Link href={`/stores/${store.id}`} className="inline-flex min-h-10 shrink-0 items-center rounded-md border border-input bg-card px-3 text-sm font-medium text-foreground hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground">
+            店舗情報を見る
+          </Link>
+        </div>
+      </header>
 
       <ResearchFlowSteps steps={flowSteps} />
 
