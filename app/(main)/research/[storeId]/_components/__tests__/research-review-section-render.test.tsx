@@ -91,13 +91,9 @@ function makeRun(items: ResearchItem[], decisions: ReviewDecisions = {}): StoreR
  * `html.includes("disabled")` では検知能力がゼロになる(常に true になる)。
  */
 function buttonAttributes(html: string, label: string): string {
-  // 処理中のボタンはラベルの前に `pending` のスピナー (svg) を持つ (#326)。
-  const match = html.match(
-    new RegExp(
-      `<button([^>]*)>(?:<svg[^>]*data-slot="button-spinner"[^>]*>.*?</svg>)?${label}</button>`,
-    ),
-  );
-  if (match === null) throw new Error(`button not found: ${label}`);
+  const buttons = [...html.matchAll(/<button([^>]*)>([\s\S]*?)<\/button>/g)];
+  const match = buttons.find((button) => button[2]!.replace(/<[^>]*>/g, "").trim() === label);
+  if (match === undefined) throw new Error(`button not found: ${label}`);
   return `${match[1]!} `;
 }
 
@@ -142,7 +138,7 @@ describe("主ボタン (#301: 推定を見ずに完了させない)", () => {
 
   it("推定しか残っていなければ、主ボタンは採用ではなく「次の未判断の項目へ」", () => {
     const html = render(makeRun([item("main_target", "inferred")]));
-    expect(html).toContain(">次の未判断の項目へ</button>");
+    expect(buttonAttributes(html, "次の未判断の項目へ")).not.toMatch(/ disabled=/);
     expect(html).not.toMatch(/件をまとめて採用|件を採用して調査完了/);
   });
 
@@ -163,7 +159,7 @@ describe("主ボタン (#301: 推定を見ずに完了させない)", () => {
       main_target: { decision: "skipped", decided_at: "2026-08-12T00:00:00.000Z" },
     };
     const html = render(makeRun(ITEMS, decisions));
-    expect(html).toContain(">レビュー完了</button>");
+    expect(buttonAttributes(html, "レビュー完了")).not.toMatch(/ disabled=/);
     expect(html).not.toContain("反映せずに完了");
   });
 
@@ -403,6 +399,25 @@ describe("researchItemAnchorId / scrollToResearchItem", () => {
       expect(scrollToReviewElement("research-category-category_1_basic")).toBe(true);
       expect(getElementById).toHaveBeenCalledWith("research-category-category_1_basic");
       expect(calls).toEqual(["scroll:true", "focus"]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("別店舗の非表示画面ではなく、表示中のレビューへ移動する", () => {
+    const visibleTarget = { id: "research-item-phone", scrollIntoView: vi.fn(), focus: vi.fn() };
+    const getElementById = vi.fn();
+    vi.stubGlobal("document", {
+      getElementById,
+      querySelectorAll: () => [
+        { getClientRects: () => [], querySelectorAll: vi.fn() },
+        { getClientRects: () => [{}], querySelectorAll: () => [visibleTarget] },
+      ],
+    });
+    try {
+      expect(scrollToResearchItem("phone")).toBe(true);
+      expect(visibleTarget.focus).toHaveBeenCalledWith({ preventScroll: true });
+      expect(getElementById).not.toHaveBeenCalled();
     } finally {
       vi.unstubAllGlobals();
     }

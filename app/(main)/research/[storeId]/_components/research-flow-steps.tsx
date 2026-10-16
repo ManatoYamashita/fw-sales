@@ -26,22 +26,22 @@ const STATUS_TEXT: Record<ResearchFlowStepStatus, string> = {
  */
 export function ResearchFlowSteps({ steps }: { steps: readonly ResearchFlowStep[] }) {
   return (
-    <nav aria-label="営業資産ができるまでの手順" className="flex flex-col gap-2">
-      <ol className="flex flex-wrap items-center gap-x-2 gap-y-2 text-sm">
+    <nav aria-label="営業資産ができるまでの手順" className="@container/flow flex min-w-0 flex-col gap-2">
+      <ol className="grid grid-cols-3 items-stretch gap-2 text-xs @min-[40rem]/flow:flex @min-[40rem]/flow:flex-wrap @min-[40rem]/flow:text-sm">
         {steps.map((step, index) => {
           const active = step.status === "current" || step.status === "running";
           const problem = step.status === "failed" || step.status === "overdue";
           return (
-            <li key={step.key} className="flex items-center gap-2">
+            <li key={step.key} className="min-w-0 @min-[40rem]/flow:flex @min-[40rem]/flow:items-center @min-[40rem]/flow:gap-2">
               {index > 0 && (
-                <span aria-hidden className="text-muted-foreground">
+                <span aria-hidden className="hidden text-muted-foreground @min-[40rem]/flow:inline">
                   →
                 </span>
               )}
               <span
                 aria-current={active || problem ? "step" : undefined}
                 className={cn(
-                  "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1",
+                  "flex h-full min-w-0 flex-col items-center justify-center gap-1 rounded-lg border px-2 py-2 text-center @min-[40rem]/flow:flex-row @min-[40rem]/flow:gap-1.5 @min-[40rem]/flow:rounded-full @min-[40rem]/flow:px-2.5 @min-[40rem]/flow:py-1",
                   active
                     ? "border-primary bg-primary/10 text-foreground font-medium"
                     : problem
@@ -52,7 +52,7 @@ export function ResearchFlowSteps({ steps }: { steps: readonly ResearchFlowStep[
                 <span
                   aria-hidden
                   className={cn(
-                    "inline-flex size-5 items-center justify-center rounded-full text-xs tabular-nums",
+                    "inline-flex size-5 shrink-0 items-center justify-center rounded-full text-xs tabular-nums",
                     active
                       ? "bg-primary text-primary-foreground"
                       : problem
@@ -73,7 +73,7 @@ export function ResearchFlowSteps({ steps }: { steps: readonly ResearchFlowStep[
                     index + 1
                   )}
                 </span>
-                {step.label}
+                <span className="min-w-0 leading-relaxed [overflow-wrap:anywhere]">{step.label}</span>
                 <span
                   className={cn(
                     "text-xs",

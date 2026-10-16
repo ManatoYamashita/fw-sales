@@ -137,7 +137,12 @@ export function scrollToResearchItem(key: string): boolean {
 /** 閉じたカテゴリも開いて移動し、キーボードの操作位置も合わせます。 */
 export function scrollToReviewElement(id: string): boolean {
   if (typeof document === "undefined") return false;
-  const el = document.getElementById(id);
+  // Next.jsが別店舗の画面を非表示で保持していても、現在のレビューだけを探します。
+  const activeRoot = Array.from(document.querySelectorAll?.("[data-research-review]") ?? [])
+    .find((root) => root.getClientRects().length > 0);
+  const el = activeRoot
+    ? Array.from(activeRoot.querySelectorAll<HTMLElement>("[id]")).find((element) => element.id === id) ?? null
+    : document.getElementById(id);
   if (el === null) return false;
 
   let ancestor: Element | null = el.closest?.("details") ?? null;
@@ -418,10 +423,10 @@ export function ResearchReviewSection({ store, run, onUpdate, onRestart, restart
   };
 
   return (
-    <>
-      <div className="grid items-start gap-5 xl:grid-cols-[13rem_minmax(0,1fr)] xl:gap-6">
-        <aside className="min-w-0 xl:sticky xl:top-24">
-          <div className="hidden space-y-4 xl:block">
+    <div data-research-review className="@container/review min-w-0">
+      <div className="grid items-start gap-5 @min-[60rem]/review:grid-cols-[13rem_minmax(0,1fr)] @min-[60rem]/review:gap-6 [&_:is(button,textarea,summary,a)]:scroll-mt-24 [&_:is(button,textarea,summary,a)]:scroll-mb-[50dvh]">
+        <aside className="min-w-0 @min-[60rem]/review:sticky @min-[60rem]/review:top-24 [@media(max-height:30rem)]:static">
+          <div className="hidden space-y-4 @min-[60rem]/review:block">
             <div className="space-y-2 px-3">
               <p className="text-sm font-semibold text-foreground">レビューの進捗</p>
               <p className="text-sm text-muted-foreground tabular-nums">
@@ -434,9 +439,9 @@ export function ResearchReviewSection({ store, run, onUpdate, onRestart, restart
                 {visibleGroups.map(({ category, categoryItems, remaining }) => (
                   <li key={category}>
                     <a
-                      href={`#research-category-${category}`}
+                      href={`#research-category-${store.id}-${category}`}
                       onClick={() => {
-                        const target = document.getElementById(`research-category-${category}`);
+                        const target = document.getElementById(`research-category-${store.id}-${category}`);
                         if (target && "open" in target) (target as HTMLDetailsElement).open = true;
                       }}
                       className="flex min-h-11 items-start justify-between gap-3 rounded-md px-3 py-2.5 text-sm leading-relaxed text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
@@ -453,7 +458,7 @@ export function ResearchReviewSection({ store, run, onUpdate, onRestart, restart
             </nav>
             {!reviewCompleted && <p className="px-3 text-xs leading-relaxed text-muted-foreground">数字は未判断の項目数です。</p>}
           </div>
-          <div className="space-y-2 xl:hidden">
+          <div className="space-y-2 @min-[60rem]/review:hidden">
             <label htmlFor={categorySelectId} className="block text-sm font-medium text-foreground">カテゴリへ移動</label>
             <Select
               id={categorySelectId}
@@ -463,7 +468,7 @@ export function ResearchReviewSection({ store, run, onUpdate, onRestart, restart
               onValueChange={scrollToReviewElement}
               placeholder={visibleGroups.length > 0 ? "確認したいカテゴリを選択" : "未判断の項目はありません"}
               options={visibleGroups.map(({ category, remaining }) => ({
-                value: `research-category-${category}`,
+                value: `research-category-${store.id}-${category}`,
                 label: `${CATEGORY_LABELS[category]}（未判断 ${remaining}件）`,
               }))}
             />
@@ -523,7 +528,7 @@ export function ResearchReviewSection({ store, run, onUpdate, onRestart, restart
 
             {visibleGroups.map(({ category, categoryItems, visibleItems, remaining }) => {
               return (
-                <details key={category} id={`research-category-${category}`} tabIndex={-1} className="group/category scroll-mt-24 rounded-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground" open>
+                <details key={category} id={`research-category-${store.id}-${category}`} tabIndex={-1} className="group/category scroll-mt-24 rounded-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground" open>
                   <summary className="flex cursor-pointer list-none flex-wrap items-center gap-2 rounded-md bg-muted px-3 py-3 text-sm font-semibold leading-relaxed text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground [&::-webkit-details-marker]:hidden">
                     <ChevronDown aria-hidden className="size-4 shrink-0 -rotate-90 text-muted-foreground group-open/category:rotate-0" />
                     <span className="min-w-0 flex-1">{CATEGORY_LABELS[category]}</span>
@@ -594,7 +599,7 @@ export function ResearchReviewSection({ store, run, onUpdate, onRestart, restart
           onCompleteDecidedOnly={onCompleteDecidedOnly}
         />
       )}
-    </>
+    </div>
   );
 }
 
@@ -629,46 +634,63 @@ export function ReviewCompletionFooter({
     .filter((line): line is string => line !== null)
     .join(" ／ ");
 
+  const primaryButton = (
+    <Button
+      type="button"
+      variant="primary"
+      size="touch"
+      className="w-full @min-[40rem]/review:w-auto"
+      onClick={onPrimary}
+      pending={completing}
+      disabled={disabled}
+    >
+      <span className="min-w-0 whitespace-normal text-center">{completing ? "処理中…" : model.primary.label}</span>
+    </Button>
+  );
+  const skipButton = model.skipLabel !== null ? (
+    <Button
+      type="button"
+      variant="ghost"
+      size="touch"
+      className="w-full @min-[40rem]/review:w-auto"
+      onClick={onCompleteDecidedOnly}
+      disabled={disabled}
+    >
+      <span className="min-w-0 whitespace-normal text-center">{model.skipLabel}</span>
+    </Button>
+  ) : null;
+  const progressLabel = `判断済み ${decidedCount} ・ 未対応 ${undecidedCount}`;
+
   return (
     <div
       role="region"
       aria-label="レビュー完了操作"
-      className="sticky bottom-0 z-30 flex max-h-[50dvh] flex-col gap-2 overflow-y-auto rounded-t-lg border border-border bg-card px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-card"
+      className="sticky bottom-0 z-30 max-h-[50dvh] overflow-y-auto rounded-t-lg border border-border bg-card px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-card [@media(max-height:30rem)]:static [@media(max-height:30rem)]:max-h-none"
     >
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="flex flex-col gap-0.5 text-xs text-muted-foreground" aria-live="polite">
-          {/* 「採用済み」ではなく「判断済み」。採用だけでなく却下・スキップも含む。 */}
-          <span>
-            判断済み {decidedCount} ・ 未対応 {undecidedCount}
-          </span>
-          {/* 主ボタンが採る項目と、残る項目の内訳を 1 行で並べる (#360)。 */}
+      <div className="hidden flex-wrap items-center gap-3 @min-[40rem]/review:flex">
+        <div className="min-w-0 flex-1 basis-64 space-y-0.5 text-xs leading-relaxed text-muted-foreground" aria-live="polite">
+          <span className="block tabular-nums">{progressLabel}</span>
           {breakdown !== "" && <span>{breakdown}</span>}
         </div>
-
-        <div className="ml-auto flex w-full flex-col-reverse items-stretch gap-2 sm:w-auto sm:flex-row sm:items-center">
-          {model.skipLabel !== null && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="w-full sm:w-auto"
-              onClick={onCompleteDecidedOnly}
-              disabled={disabled}
-            >
-              {model.skipLabel}
-            </Button>
-          )}
-          <Button
-            type="button"
-            variant="primary"
-            className="w-full sm:w-auto"
-            onClick={onPrimary}
-            pending={completing}
-            disabled={disabled}
-          >
-            {completing ? "処理中…" : model.primary.label}
-          </Button>
+        <div className="ms-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
+          {skipButton}
+          {primaryButton}
         </div>
+      </div>
+      <div className="space-y-2 @min-[40rem]/review:hidden">
+        {primaryButton}
+        <details className="group/completion">
+          <summary className="flex min-h-11 cursor-pointer list-none flex-wrap items-center justify-between gap-2 rounded-sm text-xs leading-relaxed text-muted-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground [&>*+*]:ml-auto [&::-webkit-details-marker]:hidden">
+            <span aria-live="polite" className="tabular-nums">{progressLabel}</span>
+            <span className="inline-flex items-center gap-1 font-medium text-foreground">
+              内訳・完了方法 <ChevronDown aria-hidden className="size-3.5 group-open/completion:rotate-180" />
+            </span>
+          </summary>
+          <div className="space-y-2 border-t border-border pt-3 text-xs leading-relaxed text-muted-foreground">
+            {breakdown !== "" && <p>{breakdown}</p>}
+            {skipButton}
+          </div>
+        </details>
       </div>
     </div>
   );
