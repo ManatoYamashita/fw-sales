@@ -16,6 +16,7 @@ import type { ReviewPlanSummary } from "@/lib/domain/research-review";
 import type { Store } from "@/types/store";
 import type { BasicInfo, BasicInfoField } from "@/types/basic-info";
 import { IDENTITY_MISMATCH_RUN_WARNING } from "@/lib/domain/research-item-notes";
+import { planReviewLanes, summarizeReviewPlan } from "@/lib/domain/research-review";
 
 vi.mock("server-only", () => ({}));
 
@@ -91,6 +92,9 @@ function makeRun(items: ResearchItem[], decisions: ReviewDecisions = {}): StoreR
  * `html.includes("disabled")` では検知能力がゼロになる(常に true になる)。
  */
 function buttonAttributes(html: string, label: string): string {
+  // 文言を幅ごとに出し分けるボタンは、読み上げ用の名前 (aria-label) で探す (#364)。
+  const named = html.match(new RegExp(`<button([^>]*aria-label="${label}"[^>]*)>`));
+  if (named !== null) return `${named[1]!} `;
   // 処理中のボタンはラベルの前に `pending` のスピナー (svg) を持つ (#326)。
   const match = html.match(
     new RegExp(
@@ -344,6 +348,7 @@ describe("existing_canonical の provenance 表示(Plan §7.3)", () => {
 
 const {
   ReviewCompletionFooter,
+  SKIP_SHORT_LABEL,
   buildReviewFooterModel,
   handleItemJump,
   researchItemAnchorId,
@@ -538,6 +543,8 @@ describe("ReviewCompletionFooter の busy / completing 挙動", () => {
     remainingLine: "1件ずつ確認: 推定 1",
     primary: { kind: "bulk" as const, label: "2件をまとめて採用", keys: ["a", "b"], complete: false },
     skipLabel: "残り3件は反映せずに完了",
+    compactLine: "未対応 3（まとめて採用 2・1件ずつ確認 1）",
+    primaryCompactLabel: null,
   };
 
   function renderFooter(overrides: Record<string, unknown> = {}): string {
@@ -625,8 +632,62 @@ describe("重複表示の整理 (#360)", () => {
 
   it("固定バーの内訳は 1 行で、ボタンの補足文は出さない", () => {
     const html = render(makeRun(ITEMS));
-    expect(html).toContain("<span>まとめて採用: 2件（新規 2） ／ 1件ずつ確認: 推定 1</span>");
+    expect(html).toContain(">まとめて採用: 2件（新規 2） ／ 1件ずつ確認: 推定 1</span>");
     expect(html).not.toContain("上書きになる項目と推定の項目は、1件ずつ確認します");
     expect(html).not.toContain("未対応の項目は基本情報に反映されません");
+  });
+});
+
+describe("スマートフォン幅の固定バー (#364)", () => {
+  it("1 行の要約は、未対応の件数と主ボタンの後に残る件数を並べる", () => {
+    expect(buildReviewFooterModel(summarizeReviewPlan(planReviewLanes(ITEMS, {}, {}))).compactLine).toBe(
+      "未対応 3（まとめて採用 2・1件ずつ確認 1）",
+    );
+  });
+
+  it("0 件の内訳は出さない", () => {
+    const onlyInferred = summarizeReviewPlan(planReviewLanes([item("main_target", "inferred")], {}, {}));
+    expect(buildReviewFooterModel(onlyInferred).compactLine).toBe("未対応 1（1件ずつ確認 1）");
+    expect(buildReviewFooterModel(summarizeReviewPlan([])).compactLine).toBe("未対応 0");
+  });
+
+  it("640px 未満は 1 行の要約、640px 以上は従来の 2 行を出す", () => {
+    const html = render(makeRun(ITEMS));
+    expect(html).toContain('<span class="sm:hidden">未対応 3（まとめて採用 2・1件ずつ確認 1）</span>');
+    expect(html).toContain('<span class="max-sm:hidden">判断済み 0 ・ 未対応 3</span>');
+    expect(html).toContain('<span class="max-sm:hidden">まとめて採用: 2件（新規 2） ／ 1件ずつ確認: 推定 1</span>');
+  });
+
+  it("副ボタンは 640px 未満で短い文言にし、読み上げ用の名前に件数を残す", () => {
+    const html = render(makeRun(ITEMS));
+    const attrs = buttonAttributes(html, "残り3件は反映せずに完了");
+    expect(attrs).toContain("shrink-0");
+    expect(html).toContain(
+      `<span class="sm:hidden">${SKIP_SHORT_LABEL}</span><span class="max-sm:hidden">残り3件は反映せずに完了</span>`,
+    );
+    // 名前は見えている短い文言を含む (音声入力で押せる)。
+    expect("残り3件は反映せずに完了").toContain(SKIP_SHORT_LABEL);
+  });
+
+  it("「N件を採用して調査完了」だけは 640px 未満で「N件を採用して完了」に縮め、名前は元の文言のまま", () => {
+    const allBulk = summarizeReviewPlan(planReviewLanes(ITEMS.slice(0, 2), {}, {}));
+    const model = buildReviewFooterModel(allBulk);
+    expect(model.primary.label).toBe("2件を採用して調査完了");
+    expect(model.primaryCompactLabel).toBe("2件を採用して完了");
+    expect(buildReviewFooterModel(summarizeReviewPlan(planReviewLanes(ITEMS, {}, {}))).primaryCompactLabel).toBeNull();
+
+    const html = render(makeRun(ITEMS.slice(0, 2)));
+    expect(buttonAttributes(html, "2件を採用して調査完了")).toContain("flex-auto");
+    expect(html).toContain(
+      '<span class="sm:hidden">2件を採用して完了</span><span class="max-sm:hidden">2件を採用して調査完了</span>',
+    );
+  });
+
+  it("ボタンは縦に積まず横に並べ、主ボタンが残りの幅を使う", () => {
+    const html = render(makeRun(ITEMS));
+    expect(html).not.toContain("flex-col-reverse");
+    expect(buttonAttributes(html, "2件をまとめて採用")).toContain("flex-auto sm:flex-none");
+    // 主ボタンを文言より狭くしない (min-w-0 を付けると、狭い幅で文言が欠ける)。
+    expect(buttonAttributes(html, "2件をまとめて採用")).not.toContain("min-w-0");
   });
 });

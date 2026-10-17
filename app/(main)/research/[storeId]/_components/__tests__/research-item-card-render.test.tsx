@@ -261,3 +261,33 @@ describe("ResearchItemCard: 繰り返しの表示を出さない (#360)", () => 
     expect(bordered).toEqual(["採用"]);
   });
 });
+
+describe("ResearchItemCard: 判断ボタンを 2 組に分けて折り返す (#362)", () => {
+  /** 判断ボタンの組 (`flex flex-wrap items-center gap-2` の div) ごとに、ボタンの文言を取り出す。 */
+  function buttonGroups(html: string): string[][] {
+    return Array.from(html.matchAll(/<div class="flex flex-wrap items-center gap-2">(.*?)<\/div>/g)).map(
+      ([, inner]) => Array.from(inner!.matchAll(/<button[^>]*>([^<]+)<\/button>/g)).map(([, label]) => label!),
+    );
+  }
+
+  it("「採用・編集して採用」と「却下・スキップ」の 2 組に分ける (幅 390px で 1 つだけ落ちない)", () => {
+    expect(buttonGroups(render(makeItem()))).toEqual([
+      ["採用", "編集して採用"],
+      ["却下", "スキップ"],
+    ]);
+  });
+
+  it("候補を選ぶ項目は「却下・スキップ」の 1 組だけ", () => {
+    const html = render(
+      makeItem({
+        status: "conflict",
+        value: null,
+        candidates: [
+          { candidate_id: "c1", label: "A", value: "045-000-0000", evidence: "根拠", source_ids: [] },
+          { candidate_id: "c2", label: "B", value: "045-111-1111", evidence: "根拠", source_ids: [] },
+        ],
+      }),
+    );
+    expect(buttonGroups(html)).toEqual([["却下", "スキップ"]]);
+  });
+});

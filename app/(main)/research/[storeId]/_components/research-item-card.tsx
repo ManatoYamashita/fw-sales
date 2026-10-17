@@ -365,44 +365,52 @@ export function ResearchItemCard({
           // どれを押せば進むのかが埋もれていた (#360)。判断済みの色はこれまでどおり。
           // 上書きになる項目では、採用は「上書きする」、却下は「いまの値を残す」と言い換え、
           // 押した結果が基本情報にどう効くかをボタン自体で示す (#319)。
+          //
+          // 「採用・編集して採用」と「却下・スキップ」の 2 組に分け、組ごとに折り返す (#362)。
+          // 4 つを並べて折り返すと、幅 390px で「スキップ」だけが次の行に 1 つで落ち、
+          // 枠なしのボタンが本文の文字列にしか見えなかった。収まる幅では 1 行のまま。
+          // 組の中も折り返せるようにしておく。幅 320px では「いまの値を残す・スキップ」の
+          // 組 (約 208px) がカードの中身 (約 170px) より広く、折り返さないとはみ出す。
           <div className="flex flex-wrap items-center gap-2 pt-1">
             {!isConflict && (
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={decision?.decision === "adopted" ? "primary" : "outline"}
+                  pending={isPending(pendingDecision, { decision: "adopted", edited: false })}
+                  disabled={busy}
+                  onClick={() => onDecide({ decision: "adopted" })}
+                >
+                  {isOverwrite ? "上書きする" : "採用"}
+                </Button>
+                <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => setEditing(true)}>
+                  編集して採用
+                </Button>
+              </div>
+            )}
+            <div className="flex flex-wrap items-center gap-2">
               <Button
                 type="button"
                 size="sm"
-                variant={decision?.decision === "adopted" ? "primary" : "outline"}
-                pending={isPending(pendingDecision, { decision: "adopted", edited: false })}
+                variant={decision?.decision === "rejected" ? "destructive" : "ghost"}
+                pending={isPending(pendingDecision, { decision: "rejected", edited: false })}
                 disabled={busy}
-                onClick={() => onDecide({ decision: "adopted" })}
+                onClick={() => onDecide({ decision: "rejected" })}
               >
-                {isOverwrite ? "上書きする" : "採用"}
+                {isOverwrite ? "いまの値を残す" : "却下"}
               </Button>
-            )}
-            {!isConflict && (
-              <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => setEditing(true)}>
-                編集して採用
+              <Button
+                type="button"
+                size="sm"
+                variant={decision?.decision === "skipped" ? "secondary" : "ghost"}
+                pending={isPending(pendingDecision, { decision: "skipped", edited: false })}
+                disabled={busy}
+                onClick={() => onDecide({ decision: "skipped" })}
+              >
+                スキップ
               </Button>
-            )}
-            <Button
-              type="button"
-              size="sm"
-              variant={decision?.decision === "rejected" ? "destructive" : "ghost"}
-              pending={isPending(pendingDecision, { decision: "rejected", edited: false })}
-              disabled={busy}
-              onClick={() => onDecide({ decision: "rejected" })}
-            >
-              {isOverwrite ? "いまの値を残す" : "却下"}
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant={decision?.decision === "skipped" ? "secondary" : "ghost"}
-              pending={isPending(pendingDecision, { decision: "skipped", edited: false })}
-              disabled={busy}
-              onClick={() => onDecide({ decision: "skipped" })}
-            >
-              スキップ
-            </Button>
+            </div>
           </div>
         )}
       </div>
