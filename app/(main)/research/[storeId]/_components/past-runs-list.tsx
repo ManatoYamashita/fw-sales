@@ -20,9 +20,9 @@ export function PastRunsList({ runs }: { runs: readonly StoreResearchRun[] }) {
       </summary>
       <ul className="divide-y divide-border">
         {runs.map((run) => (
-          <li key={run.id} className="px-4 py-2.5 flex items-center justify-between gap-2 text-sm">
+          <li key={run.id} className="px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 [&>*+*]:ml-auto text-sm">
             <span className="text-muted-foreground">{formatDateTime(run.started_at)}</span>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               {run.status === "succeeded" && run.review_completed_at === null && (
                 <Badge tone="warning">レビュー未完了</Badge>
               )}

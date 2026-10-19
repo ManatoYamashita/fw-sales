@@ -7,7 +7,7 @@ const REQUIRED_CLASSES = [
   "@min-[700px]:flex-row",
   "@min-[800px]:grid-cols-[minmax(0,1fr)_400px]",
   "@min-[800px]:h-[520px]",
-  "max-h-[70dvh]",
+  "max-h-[50dvh]",
   "[overflow-wrap:anywhere]",
 ];
 
@@ -28,7 +28,7 @@ describe("特殊ビューのレスポンシブ CSS", () => {
     expect(css).toContain("@container (width >= 800px)");
     expect(css).toContain("grid-template-columns: minmax(0,1fr) 400px");
     expect(css).toContain("height: 520px");
-    expect(css).toContain("max-height: 70dvh");
+    expect(css).toContain("max-height: 50dvh");
     expect(css).toContain("overflow-wrap: anywhere");
   });
 });

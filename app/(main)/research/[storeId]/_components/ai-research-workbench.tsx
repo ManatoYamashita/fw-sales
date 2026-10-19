@@ -18,7 +18,7 @@
  * (`researchUnavailableMessage`) を開始・再調査の位置に出し、ボタンで促さない。
  */
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Modal, ModalContent, ModalFooter } from "@/components/ui/modal";
@@ -62,6 +62,7 @@ export function AiResearchWorkbench({
   researchUnavailableMessage: string | null;
 }) {
   const router = useRouter();
+  const reviewSectionRef = useRef<HTMLElement>(null);
   const [runs, setRuns] = useState<StoreResearchRun[]>(initialRuns);
   const [starting, startStarting] = useTransition();
   const [confirmRestartOpen, setConfirmRestartOpen] = useState(false);
@@ -131,7 +132,7 @@ export function AiResearchWorkbench({
   }, []);
 
   const onJumpToReview = () => {
-    const el = document.getElementById(REVIEW_SECTION_ID);
+    const el = reviewSectionRef.current;
     if (!el) return;
     el.scrollIntoView({ block: "start" });
     // 視線だけでなくフォーカスも移し、キーボード・支援技術の利用者を同じ場所へ運ぶ。
@@ -139,13 +140,25 @@ export function AiResearchWorkbench({
   };
 
   return (
-    <div className="space-y-4 max-w-4xl mx-auto">
-      <div>
-        <Link href="/research" className="text-xs text-muted-foreground hover:text-foreground">
-          ← 調査
-        </Link>
-        <h1 className="text-xl md:text-2xl font-bold text-foreground mt-1">{store.name}</h1>
-      </div>
+    <div className="min-w-0 space-y-4 md:space-y-6 max-w-6xl mx-auto">
+      <header className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 [&>*+*]:ml-auto">
+          <Link href="/research" className="inline-flex min-h-10 items-center gap-2 rounded-md text-sm text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-foreground">
+            ← 調査一覧
+          </Link>
+          <Link href={`/stores/${store.id}`} className="inline-flex min-h-10 shrink-0 items-center rounded-md border border-input bg-card px-3 text-sm font-medium text-foreground hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground">
+            店舗情報を見る
+          </Link>
+        </div>
+        <div className="min-w-0 space-y-2">
+          <h1 className="text-2xl font-bold leading-snug tracking-tight text-foreground [overflow-wrap:anywhere] md:text-3xl">{store.name}</h1>
+          {(store.genre || store.address) && (
+            <p className="max-w-prose text-sm leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">
+              {[store.genre, store.address].filter(Boolean).join(" / ")}
+            </p>
+          )}
+        </div>
+      </header>
 
       <ResearchFlowSteps steps={flowSteps} />
 
@@ -181,6 +194,7 @@ export function AiResearchWorkbench({
 
       {primaryRun?.status === "succeeded" && (
         <section
+          ref={reviewSectionRef}
           id={REVIEW_SECTION_ID}
           tabIndex={-1}
           aria-label="② レビュー"

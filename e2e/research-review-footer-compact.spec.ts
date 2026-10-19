@@ -3,11 +3,11 @@ import postgres from "postgres";
 import { e2eDatabaseUrl } from "./support/e2e-db";
 
 /**
- * 調査レビューの固定バーを、スマートフォン幅で 1 段にまとめる (#364)。
+ * 調査レビューの固定バーを、スマートフォン幅でコンパクトに保つ (#364, #378)。
  *
  * 2 行の要約とボタン 2 つを縦に積んでいた頃は、固定バーが 163px あり、375×667 の画面の
- * 24% を占めていた。幅 640px 未満では要約を 1 行にし、副ボタンを「反映せずに完了」に縮めて
- * 主ボタンと横に並べる。640px 以上は従来の見た目のまま。
+ * 24% を占めていた。#378 では主操作を常に表示し、内訳・副操作を明示的な開閉へ移した。
+ * 切り替えはサイドバーを含む実効コンテナ幅で判定し、低い画面では固定を解除する。
  *
  * レイアウトは SSR のテストでは測れないため、実ブラウザで幅を変えて確かめる。
  * ほかの spec が判断を記録する store_005 の調査結果とは別に、seed の店舗を複製した専用の
@@ -95,123 +95,111 @@ test.afterAll(async () => {
 
 const footer = (page: Page): Locator => page.getByRole("region", { name: "レビュー完了操作" });
 
-/**
- * 画面に見えている文言。副ボタンは幅ごとの文言を両方 DOM に持ち、片方を CSS で隠すので、
- * 非表示の文字まで拾う `toHaveText` では確かめられない。
- */
-const visibleText = (locator: Locator) => locator.evaluate((el) => (el as HTMLElement).innerText.trim());
-
 async function openReview(page: Page, storeId: string, viewport: { width: number; height: number }) {
   await page.setViewportSize(viewport);
-  await page.goto(`/research/${storeId}`);
+  // 外部の埋め込み地図の load を待たず、対象の操作欄の描画を条件にする。
+  await page.goto(`/research/${storeId}`, { waitUntil: "domcontentloaded" });
   await expect(footer(page)).toBeVisible();
 }
 
-/** 固定バーの中の、表示されている要素の矩形と、主ボタンの文言が欠けていないか。 */
+/** 非表示の幅別レイアウトや、閉じた details の中身は計測しない。 */
 async function measureFooter(page: Page) {
   return footer(page).evaluate((bar) => {
     const box = (el: Element) => {
       const r = el.getBoundingClientRect();
       return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, height: r.height };
     };
-    const buttons = Array.from(bar.querySelectorAll("button")).filter((b) => b.offsetParent !== null);
-    const primary = buttons[buttons.length - 1]!;
-    const row = primary.parentElement!;
-    // 主ボタンを文言どおりの幅で描いたときの幅。複製を流れの外に置いて測る。
-    const probe = primary.cloneNode(true) as HTMLElement;
-    probe.style.cssText = "position:absolute;visibility:hidden;width:max-content;flex:none";
-    row.appendChild(probe);
-    const primaryNaturalWidth = probe.getBoundingClientRect().width;
-    probe.remove();
-    const gap = Number.parseFloat(getComputedStyle(row).columnGap) || 0;
-    const skipWidth = buttons.length > 1 ? buttons[0]!.getBoundingClientRect().width : 0;
+    const buttons = Array.from(bar.querySelectorAll("button")).filter((b) => b.checkVisibility());
     return {
       bar: box(bar),
       viewportWidth: window.innerWidth,
-      buttons: buttons.map((b) => ({ text: b.innerText, ...box(b) })),
-      primaryClipped: primary.scrollWidth > primary.clientWidth + 1,
-      /** 主ボタンが副ボタンの隣に文言どおりの幅で収まるか。収まらないときだけ折り返してよい。 */
-      // ブラウザは 1/64px 単位で厳密に比べて折り返す (352px で 288.03 > 288 を実測)。余裕を持たせない。
-      fitsInOneRow: skipWidth + gap + primaryNaturalWidth <= row.getBoundingClientRect().width,
-      fitDetail: `${skipWidth}+${gap}+${primaryNaturalWidth} vs ${row.getBoundingClientRect().width}`,
+      position: getComputedStyle(bar).position,
+      buttons: buttons.map((b) => ({
+        text: b.innerText,
+        clipped: b.scrollWidth > b.clientWidth + 1,
+        ...box(b),
+      })),
     };
   });
 }
 
-test.describe("640px 未満", () => {
-  test("375×667 で固定バーは 100px 以下、要約は 1 行、ボタンは横に並ぶ", async ({ page }) => {
-    await openReview(page, MIXED.storeId, { width: 375, height: 667 });
-    const bar = footer(page);
+test("375×667 は主操作と開閉見出しを表示し、内訳・副操作は開いて選べる", async ({ page }) => {
+  await openReview(page, MIXED.storeId, { width: 375, height: 667 });
+  const bar = footer(page);
+  const skip = bar.getByRole("button", { name: "残り4件は反映せずに完了", exact: true });
+  const summary = bar.locator("summary");
 
-    await expect(bar.getByText("未対応 4（まとめて採用 2・1件ずつ確認 2）")).toBeVisible();
-    await expect(bar.getByText("判断済み 0 ・ 未対応 4")).toBeHidden();
+  await expect(bar.getByRole("button", { name: "2件をまとめて採用" })).toBeVisible();
+  await expect(summary).toContainText("判断済み 0 ・ 未対応 4");
+  await expect(summary).toContainText("内訳・完了方法");
+  await expect(skip).toBeHidden();
+  const closed = await measureFooter(page);
+  expect(closed.bar.height).toBeLessThanOrEqual(124);
+  expect(closed.buttons).toHaveLength(1);
+  expect(closed.buttons[0]!.height).toBeGreaterThanOrEqual(44);
 
-    const skip = bar.getByRole("button", { name: "残り4件は反映せずに完了", exact: true });
-    await expect(skip).toBeVisible();
-    expect(await visibleText(skip)).toBe("反映せずに完了");
-    await expect(bar.getByRole("button", { name: "2件をまとめて採用" })).toBeVisible();
-
-    const m = await measureFooter(page);
-    expect(m.bar.height).toBeLessThanOrEqual(100);
-    expect(m.buttons.map((b) => b.text)).toEqual(["反映せずに完了", "2件をまとめて採用"]);
-    expect(Math.abs(m.buttons[0]!.top - m.buttons[1]!.top)).toBeLessThanOrEqual(1);
-    for (const b of m.buttons) expect(b.height).toBeGreaterThanOrEqual(44);
-    expect(m.primaryClipped).toBe(false);
-  });
-
-  // 主ボタンが副ボタンの隣に収まらない幅では、主ボタンを上の段へ折り返す。縮めると文言が欠ける
-  // (実測では「2件をまとめて採用」も 344px 以下で収まらない)。折り返しは収まらないときだけ許す。
-  for (const target of [MIXED, LONGEST]) {
-    test(`幅 320〜639px のどこでも、はみ出さず、主ボタンの文言が欠けない (${target.storeId})`, async ({
-      page,
-    }) => {
-      await openReview(page, target.storeId, { width: 639, height: 800 });
-      if (target === LONGEST) {
-        await expect(footer(page).getByRole("button", { name: "12件を採用して調査完了" })).toBeVisible();
-      }
-      const failures: string[] = [];
-      const stackedWidths: number[] = [];
-      for (let width = 320; width <= 639; width += 8) {
-        await page.setViewportSize({ width, height: 800 });
-        const m = await measureFooter(page);
-        const [skip, primary] = m.buttons;
-        if (m.buttons.length !== 2) failures.push(`${width}px: ボタンが ${m.buttons.length} 個`);
-        const stacked = skip !== undefined && primary !== undefined && Math.abs(skip.top - primary.top) > 1;
-        if (stacked) stackedWidths.push(width);
-        if (stacked && m.fitsInOneRow) failures.push(`${width}px: 収まるのに 1 段に並ばない (${m.fitDetail})`);
-        if (!stacked && !m.fitsInOneRow) failures.push(`${width}px: 収まらないのに折り返さない`);
-        if (stacked && primary!.bottom > skip!.top) failures.push(`${width}px: 折り返した主ボタンが上の段にない`);
-        if (m.buttons.some((b) => b.left < m.bar.left - 1 || b.right > m.bar.right + 1)) {
-          failures.push(`${width}px: ボタンが固定バーからはみ出す`);
-        }
-        if (m.bar.right > m.viewportWidth + 1) failures.push(`${width}px: 固定バーが画面からはみ出す`);
-        if (m.primaryClipped) failures.push(`${width}px: 主ボタンの文言が欠ける`);
-        // 1 段なら、要約が 2 行に折り返しても 108px に収まる (#364 の見込み)。
-        if (!stacked && m.bar.height > 108) failures.push(`${width}px: 固定バーが ${Math.round(m.bar.height)}px`);
-      }
-      expect(failures).toEqual([]);
-      // 折り返すのは狭い端だけ。375px (iPhone SE) では 1 段に収まる。
-      expect(stackedWidths.every((w) => w < 375)).toBe(true);
-      test.info().annotations.push({ type: "stacked widths", description: stackedWidths.join(", ") || "なし" });
-    });
+  await summary.focus();
+  await page.keyboard.press("Enter");
+  await expect(skip).toBeVisible();
+  await expect(bar.getByText("まとめて採用: 2件（新規 2） ／ 1件ずつ確認: 推定 2").last()).toBeVisible();
+  const opened = await measureFooter(page);
+  expect(opened.buttons).toHaveLength(2);
+  for (const button of opened.buttons) {
+    expect(button.height).toBeGreaterThanOrEqual(44);
+    expect(button.clipped).toBe(false);
   }
 });
 
-test("640px 以上は従来の見た目 (2 行の要約、件数入りの副ボタン)", async ({ page }) => {
+for (const target of [MIXED, LONGEST]) {
+  test(`幅 320〜639px で主操作と開いた副操作が欠けない (${target.storeId})`, async ({ page }) => {
+    await openReview(page, target.storeId, { width: 639, height: 800 });
+    const bar = footer(page);
+    const primaryLabel = target === LONGEST ? "12件を採用して調査完了" : "2件をまとめて採用";
+    await expect(bar.getByRole("button", { name: primaryLabel, exact: true })).toBeVisible();
+    const failures: string[] = [];
+    for (let width = 320; width <= 639; width += 8) {
+      await page.setViewportSize({ width, height: 800 });
+      for (const opened of [false, true]) {
+        await bar.locator("details").evaluate((el, open) => { (el as HTMLDetailsElement).open = open; }, opened);
+        const m = await measureFooter(page);
+        if (m.buttons.length !== (opened ? 2 : 1)) failures.push(`${width}px: 表示中の操作数が不正`);
+        if (m.buttons.some((b) => b.left < m.bar.left - 1 || b.right > m.bar.right + 1 || b.clipped)) {
+          failures.push(`${width}px: 操作が欠ける (open=${opened})`);
+        }
+        if (m.bar.right > m.viewportWidth + 1) failures.push(`${width}px: 固定バーが画面からはみ出す`);
+        if (!opened && m.bar.height > 124) failures.push(`${width}px: 固定バーが ${m.bar.height}px`);
+      }
+    }
+    expect(failures).toEqual([]);
+  });
+}
+
+test("広いコンテナでは内訳と両方の完了操作を常に表示する", async ({ page }) => {
   await openReview(page, MIXED.storeId, { width: 1117, height: 722 });
   const bar = footer(page);
-
-  await expect(bar.getByText("判断済み 0 ・ 未対応 4")).toBeVisible();
-  await expect(bar.getByText("まとめて採用: 2件（新規 2） ／ 1件ずつ確認: 推定 2")).toBeVisible();
-  await expect(bar.getByText("未対応 4（まとめて採用 2・1件ずつ確認 2）")).toBeHidden();
-  expect(await visibleText(bar.getByRole("button", { name: "残り4件は反映せずに完了", exact: true }))).toBe(
-    "残り4件は反映せずに完了",
-  );
+  await expect(bar.locator("summary")).toBeHidden();
+  await expect(bar.getByText("判断済み 0 ・ 未対応 4").first()).toBeVisible();
+  await expect(bar.getByText("まとめて採用: 2件（新規 2） ／ 1件ずつ確認: 推定 2").first()).toBeVisible();
+  await expect(bar.getByRole("button", { name: "残り4件は反映せずに完了", exact: true })).toBeVisible();
 
   const m = await measureFooter(page);
-  // #360 の時点で 61px。高さを増やさない。
-  expect(m.bar.height).toBeLessThanOrEqual(61);
-  // 640px 以上の副ボタンは高さ 32px、主ボタンは 36px (従来どおり)。縦の中心で揃っていれば 1 段。
-  const center = (b: { top: number; height: number }) => b.top + b.height / 2;
-  expect(Math.abs(center(m.buttons[0]!) - center(m.buttons[1]!))).toBeLessThanOrEqual(1);
+  expect(m.bar.height).toBeLessThanOrEqual(100);
+  expect(m.buttons).toHaveLength(2);
+  for (const button of m.buttons) {
+    expect(button.height).toBeGreaterThanOrEqual(44);
+    expect(button.clipped).toBe(false);
+  }
+  expect(Math.abs(m.buttons[0]!.top - m.buttons[1]!.top)).toBeLessThanOrEqual(1);
+});
+
+test("高さ330pxでは固定を解除し、ページ末尾から操作できる", async ({ page }) => {
+  await openReview(page, MIXED.storeId, { width: 375, height: 330 });
+  const bar = footer(page);
+  expect((await measureFooter(page)).position).toBe("static");
+  await bar.scrollIntoViewIfNeeded();
+  await expect(bar.getByRole("button", { name: "2件をまとめて採用" })).toBeInViewport();
+  await bar.locator("summary").click();
+  const skip = bar.getByRole("button", { name: "残り4件は反映せずに完了", exact: true });
+  await skip.scrollIntoViewIfNeeded();
+  await expect(skip).toBeInViewport();
 });

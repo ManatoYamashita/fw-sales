@@ -92,10 +92,10 @@ export function SourceBadge({ entry }: { entry: SourceRegistryEntry }) {
 
   const content = (
     <>
-      <Badge tone={display.tone}>
-        {display.icon} {display.label}
+      <Badge tone={display.tone} className="max-w-full">
+        <span className="whitespace-normal">{display.icon} {display.label}</span>
       </Badge>
-      <span className="text-xs text-muted-foreground truncate max-w-[12rem]">{displayName}</span>
+      <span className="text-xs leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">{displayName}</span>
     </>
   );
 
@@ -108,11 +108,11 @@ export function SourceBadge({ entry }: { entry: SourceRegistryEntry }) {
     if (shouldShowCandidateTitle(entry)) {
       return (
         <span
-          className="inline-flex flex-col gap-0.5 cursor-default"
+          className="inline-flex min-w-0 max-w-full flex-col gap-1 cursor-default"
           title={`${displayName}(URLの店舗同定が未確認のためリンクを無効にしています)`}
         >
-          <span className="inline-flex items-center gap-1.5">{content}</span>
-          <span className="text-xs text-muted-foreground truncate max-w-[20rem]">
+          <span className="inline-flex max-w-full flex-wrap items-center gap-1.5">{content}</span>
+          <span className="text-xs leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">
             {CANDIDATE_TITLE_LABEL}: {entry.title}
           </span>
         </span>
@@ -121,7 +121,7 @@ export function SourceBadge({ entry }: { entry: SourceRegistryEntry }) {
 
     return (
       <span
-        className="inline-flex items-center gap-1.5 cursor-default"
+        className="inline-flex max-w-full flex-wrap items-center gap-1.5 cursor-default"
         title={`${displayName}(URLの店舗同定が未確認のためリンクを無効にしています)`}
       >
         {content}
@@ -134,7 +134,7 @@ export function SourceBadge({ entry }: { entry: SourceRegistryEntry }) {
       href={url}
       target="_blank"
       rel="noopener noreferrer"
-      className="inline-flex items-center gap-1.5 hover:underline"
+      className="inline-flex max-w-full flex-wrap items-center gap-1.5 rounded-sm underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
       title={displayName}
     >
       {content}
@@ -204,7 +204,7 @@ export function SourceBadgeList({
       )}
       {unconfirmed.length > 0 && (
         <details className="text-xs text-muted-foreground">
-          <summary className="cursor-pointer select-none">
+          <summary className="min-h-8 cursor-pointer rounded-sm py-1 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground">
             {UNCONFIRMED_SUMMARY_LABEL} {unconfirmed.length}件
           </summary>
           <div className="flex flex-wrap items-center gap-2 pt-1.5">
