@@ -1,5 +1,6 @@
 import {
   pgTable,
+  primaryKey,
   text,
   integer,
   real,
@@ -21,6 +22,43 @@ import type {
 } from "@/types/research-run";
 
 /**
+ * Firstweb テナントの ID (migration 0032 が固定値で作る)。
+ *
+ * マルチテナント化 (#365) の移行期間は、業務テーブルの `tenant_id` の既定値でもあり、
+ * `tenant_id` を指定しない書き込みは Firstweb に入る。既定値は #371 で外す。
+ */
+export const FIRSTWEB_TENANT_ID = "cfe871a5-8fc7-42da-9677-3a050665cafb";
+
+/**
+ * tenants テーブル (マルチテナント化 #365 / #366)
+ *
+ * 本ツールを使う企業。業務データは `tenant_id` でいずれかのテナントに属する。
+ *
+ * - `id` は uuid PK。Firstweb だけは固定値 (`FIRSTWEB_TENANT_ID`)、以降は `gen_random_uuid()`
+ * - `slug` は UNIQUE。スクリプトの引数などでテナントを指す短い名前
+ * - `created_at` / `updated_at` は既存規約に従い `YYYY-MM-DD` 形式 text
+ * - RLS 有効・クライアントポリシー無し。サーバーの owner 接続だけが読み書きする (0028 / 0031 と同じ)
+ */
+export const tenants = pgTable("tenants", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  slug: text("slug").notNull().unique(),
+  name: text("name").notNull(),
+  created_at: text("created_at").notNull(),
+  updated_at: text("updated_at").notNull(),
+}).enableRLS();
+
+/**
+ * 業務テーブルの所属テナント。データが残っているテナントは削除できない (ON DELETE RESTRICT)。
+ * 既定値は移行期間だけのもので、#371 で外す。
+ */
+function tenantIdColumn() {
+  return uuid("tenant_id")
+    .notNull()
+    .default(FIRSTWEB_TENANT_ID)
+    .references(() => tenants.id, { onDelete: "restrict" });
+}
+
+/**
  * Phase 1 audit trail. No business/actor FKs: deletion must retain evidence.
  * RLS has NO client policies. Migration also revokes Data API role privileges.
  * The server DATABASE_URL must use the owner/BYPASSRLS role, as with the existing
@@ -29,6 +67,8 @@ import type {
  */
 export const eventLogs = pgTable("event_logs", {
   id: text("id").primaryKey(),
+  /** 証跡を残すため、tenants への FK も張らない (上記の方針)。 */
+  tenant_id: uuid("tenant_id").notNull().default(FIRSTWEB_TENANT_ID),
   occurred_at: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
   level: text("level").$type<"info" | "warn">().notNull(),
   kind: text("kind").$type<"mutation" | "authz_denied">().notNull(),
@@ -70,6 +110,35 @@ export const profiles = pgTable("profiles", {
 }).enableRLS();
 
 /**
+ * memberships テーブル (マルチテナント化 #365 / #366)
+ *
+ * ユーザーがどのテナントに、どのロールで所属するか。
+ *
+ * - PK は `(tenant_id, user_id)`。1 人が複数のテナントに所属できる
+ * - `role` は `'admin' | 'member' | 'placeholder'`。Postgres ENUM 化せずアプリ層型ガードで担保 (既存規約)
+ * - `user_id` は `profiles.id` への FK (ON DELETE CASCADE)。ユーザーが消えれば所属も消える
+ * - `tenant_id` は `tenants.id` への FK (ON DELETE RESTRICT)
+ * - 既存ユーザーは migration 0032 で Firstweb の所属へ移した。新規ユーザーには
+ *   `private.handle_new_user()` が Firstweb の所属を作る (招待制 #374 までの暫定措置)
+ * - `created_at` / `updated_at` は既存規約に従い `YYYY-MM-DD` 形式 text
+ */
+export const memberships = pgTable("memberships", {
+  tenant_id: uuid("tenant_id")
+    .notNull()
+    .references(() => tenants.id, { onDelete: "restrict" }),
+  user_id: uuid("user_id")
+    .notNull()
+    .references(() => profiles.id, { onDelete: "cascade" }),
+  role: text("role").notNull().default("member"),
+  created_at: text("created_at").notNull(),
+  updated_at: text("updated_at").notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.tenant_id, table.user_id] }),
+  // ユーザーから所属テナントを引くための索引。PK は tenant_id が先頭なので別に張る。
+  index("memberships_user_id_idx").on(table.user_id),
+]).enableRLS();
+
+/**
  * notifications テーブル (auth-and-notifications spec, Issue #16)
  *
  * テーブル本体および UI (通知ベル) は別仕様 (#14) が所有。本仕様では
@@ -86,6 +155,7 @@ export const profiles = pgTable("profiles", {
  */
 export const notifications = pgTable("notifications", {
   id: text("id").primaryKey(),
+  tenant_id: tenantIdColumn(),
   /**
    * 通知受信者の profile.id (uuid)。
    * Phase 10 (0006 マイグレーション) で `profiles.id` への FK 制約を追加。
@@ -113,6 +183,7 @@ export const notifications = pgTable("notifications", {
  */
 export const stores = pgTable("stores", {
   id: text("id").primaryKey(),
+  tenant_id: tenantIdColumn(),
   name: text("name").notNull(),
   prefecture: text("prefecture").notNull(),
   city: text("city").notNull(),
@@ -189,6 +260,7 @@ export const stores = pgTable("stores", {
  */
 export const deals = pgTable("deals", {
   id: text("id").primaryKey(),
+  tenant_id: tenantIdColumn(),
   store_id: text("store_id")
     .notNull()
     .references(() => stores.id, { onDelete: "cascade" }),
@@ -248,6 +320,7 @@ export const deals = pgTable("deals", {
 
 export const handoffs = pgTable("handoffs", {
   id: text("id").primaryKey(),
+  tenant_id: tenantIdColumn(),
   store_id: text("store_id")
     .notNull()
     .references(() => stores.id, { onDelete: "cascade" }),
@@ -313,6 +386,7 @@ export const aiPromptTemplates = pgTable(
   "ai_prompt_templates",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    tenant_id: tenantIdColumn(),
     user_id: uuid("user_id")
       .notNull()
       .references(() => profiles.id, { onDelete: "cascade" }),
@@ -360,6 +434,7 @@ export const aiPromptTemplates = pgTable(
  */
 export const appSettings = pgTable("app_settings", {
   key: text("key").primaryKey(),
+  tenant_id: tenantIdColumn(),
   value: text("value").notNull(),
   updated_at: text("updated_at").notNull(),
 }).enableRLS();
@@ -388,6 +463,7 @@ export const appSettings = pgTable("app_settings", {
  */
 export const placeCandidates = pgTable("place_candidates", {
   id: text("id").primaryKey(),
+  tenant_id: tenantIdColumn(),
   google_place_id: text("google_place_id").notNull(),
   status: text("status").notNull().default("candidate"),
   first_seen_at: text("first_seen_at").notNull(),
@@ -444,6 +520,7 @@ export const storeResearchRuns = pgTable(
   "store_research_runs",
   {
     id: text("id").primaryKey(),
+    tenant_id: tenantIdColumn(),
     store_id: text("store_id")
       .notNull()
       .references(() => stores.id, { onDelete: "cascade" }),
