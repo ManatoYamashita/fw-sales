@@ -115,7 +115,8 @@ const quoteIdent = (name) => `"${name.replaceAll('"', '""')}"`;
  * `profiles.email` の一意制約に当たる。そこで次の順に移す。
  *
  * 1. 旧プロフィールのメールを空ける
- * 2. 新 ID の `auth.users` を作り (トリガーがプロフィールを作る)、旧プロフィールの値を写す
+ * 2. 新 ID の `auth.users` を作り (トリガーがプロフィールを作る)、旧プロフィールの値を写す。
+ *    トリガーは新 ID の所属 (`memberships`) も作るが、旧 ID の所属を 3 で移すために消しておく
  * 3. `profiles.id` を参照する外部キーをカタログから列挙し、旧 ID を新 ID へ付け替える
  * 4. 旧 `auth.users` を消す (旧プロフィールは ON DELETE CASCADE で消える)
  *
@@ -141,6 +142,9 @@ export async function migrateLegacyLocalUser(tx) {
   await tx`INSERT INTO auth.users (id, email, raw_user_meta_data)
     SELECT ${LOCAL_USER_ID}, ${legacy.email}, raw_user_meta_data FROM auth.users
     WHERE id = ${LEGACY_LOCAL_USER_ID}`;
+  // トリガーが新 ID に作った所属は、旧 ID の所属を付け替えると主キー (tenant_id, user_id) で衝突する (#366)。
+  // 旧 ID の所属が旧ロールを持つ正しい側なので、トリガーが作った分を先に消す。
+  await tx`DELETE FROM memberships WHERE user_id = ${LOCAL_USER_ID}`;
   const columns = await tx`SELECT column_name FROM information_schema.columns
     WHERE table_schema = 'public' AND table_name = 'profiles' AND column_name NOT IN ('id', 'email')`;
   const assignments = columns
