@@ -12,21 +12,36 @@ import "server-only";
 import { cacheLife, cacheTag } from "next/cache";
 import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
-import type { Profile } from "@/types/profile";
+import type { Member, Profile } from "@/types/profile";
 
 /**
- * 全プロフィール取得 (担当者選択 UI 用)。
+ * 全プロフィール取得 (担当者選択 UI・担当者名の表示用)。ロールは含まない。
  *
- * @param options.excludePlaceholders true の場合は `role: 'placeholder'` を除外。
- *        担当者選択肢として実ユーザーのみを表示したい場合に使用。
+ * 引数を持たないので、呼び出し元がいくつあってもキャッシュの 1 エントリを共有する。
  */
-export async function getAllProfiles(options?: {
-  readonly excludePlaceholders?: boolean;
-}): Promise<readonly Profile[]> {
+export async function getAllProfiles(): Promise<readonly Profile[]> {
   "use cache";
   cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.profiles);
-  return repos.profile.findAll(options);
+  return repos.profile.findAll();
+}
+
+/**
+ * テナントの所属者を、そのテナントでのロール付きで取得する (ユーザー管理 UI 用)。
+ *
+ * `tenantId` は `resolveTenantId()` で解決した値を渡す。引数はキャッシュキーに含まれる。
+ * ロールの変更は `CACHE_TAGS.profiles` の失効で反映される。
+ *
+ * @param options.excludePlaceholders true なら placeholder の所属を除く
+ */
+export async function getTenantMembers(
+  tenantId: string,
+  options?: { readonly excludePlaceholders?: boolean },
+): Promise<readonly Member[]> {
+  "use cache";
+  cacheLife("longBackstop");
+  cacheTag(CACHE_TAGS.profiles);
+  return repos.membership.list(tenantId, options);
 }
 
 /**

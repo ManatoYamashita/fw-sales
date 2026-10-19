@@ -34,7 +34,7 @@ export default async function StoreDetailPage({
   // #152 で撤去された dealCount は一覧全店舗の事前計算であり、これとは別物。
   const [store, profiles, deals] = await Promise.all([
     getStoreCached(id),
-    getAllProfiles({ excludePlaceholders: false }),
+    getAllProfiles(),
     listDealsByStoreCached(id),
   ]);
   if (!store) notFound();

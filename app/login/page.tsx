@@ -33,6 +33,8 @@ function deriveErrorMessage(code: string | undefined): string | null {
       return "サインインがキャンセルされました。";
     case "callback_invalid":
       return "認証コールバックが無効でした。リンクを開き直してお試しください。";
+    case "no_membership":
+      return "このアカウントには利用の権限がありません。管理者に確認してください。";
     default:
       return "認証中にエラーが発生しました。時間を置いて再試行してください。";
   }

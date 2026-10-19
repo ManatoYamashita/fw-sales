@@ -35,7 +35,7 @@ async function StoreEditContent({
   const { id } = await params;
   const [store, profiles] = await Promise.all([
     getStoreCached(id),
-    getAllProfiles({ excludePlaceholders: false }),
+    getAllProfiles(),
   ]);
   if (!store) notFound();
   // task 4.2 (PR3a): AiAnalysisPanel 撤去に伴い isApiKeyConfigured / promptTemplates の

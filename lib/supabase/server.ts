@@ -18,7 +18,8 @@ import { unstable_rethrow } from "next/navigation";
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { repos } from "@/lib/repositories";
-import type { Profile } from "@/types/profile";
+import { resolveTenantId } from "@/lib/tenant/context";
+import type { Member } from "@/types/profile";
 
 export interface CurrentSession {
   readonly userId: string;
@@ -121,14 +122,22 @@ export async function getCurrentSession(): Promise<CurrentSession | null> {
 }
 
 /**
- * 現在のセッションに紐付く profile を取得する。
+ * 現在のセッションのユーザーを、いまのテナントでの所属 (ロール付き) として取得する。
  *
- * Postgres trigger (`handle_new_user`) により `auth.users` への INSERT 時に
- * `profiles` レコードは自動生成されるため、認証済セッションが存在すれば
- * profile も存在することが保証される (Req 2.1)。万一存在しない場合は null。
+ * ロールは `memberships` から読み、`profiles.role` は読まない (マルチテナント化 #367)。
+ * 未認証、またはいまのテナントに所属していなければ null を返す。認可ガード
+ * (`lib/actions/_authz.ts`) はこの null を拒否として扱うので、所属の無いユーザーは
+ * Server Action・Route Handler で拒否される。
+ *
+ * 新規ユーザーには `handle_new_user` trigger が Firstweb の所属を作る (招待制 #374 までの暫定)。
  */
-export async function getCurrentProfile(): Promise<Profile | null> {
+export async function getCurrentProfile(): Promise<Member | null> {
   const session = await getCurrentSession();
   if (!session) return null;
-  return repos.profile.findById(session.userId);
+  const tenantId = await resolveTenantId();
+  const member = await repos.membership.find(tenantId, session.userId);
+  if (!member) {
+    console.warn("[authz] no membership", { userId: session.userId, tenantId });
+  }
+  return member;
 }

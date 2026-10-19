@@ -20,7 +20,7 @@ interface PageProps {
 export default async function PipelinePage({ searchParams }: PageProps) {
   const [sp, profiles] = await Promise.all([
     searchParams,
-    getAllProfiles({ excludePlaceholders: false }),
+    getAllProfiles(),
   ]);
   const filter: StoreFilter = {};
   if (sp.q) filter.q = sp.q;

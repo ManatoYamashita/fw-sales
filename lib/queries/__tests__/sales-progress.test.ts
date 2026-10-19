@@ -15,8 +15,6 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import type { Store } from "@/types/store";
 
 /** 型を満たす最小の Store (stores-sort.test.ts と同じ方針)。 */
@@ -75,9 +73,9 @@ describe("listSalesProgressRows の getAllProfiles 呼び出し", () => {
     expect(mockFindAll).toHaveBeenCalledTimes(1);
   });
 
-  it("引数形状を {excludePlaceholders: false} に固定する (キャッシュキー分裂の防止)", async () => {
+  it("引数なしで取得する (getAllProfiles は引数を持たず、キャッシュキーが 1 つにそろう)", async () => {
     await listSalesProgressRows();
-    expect(mockFindAll).toHaveBeenCalledWith({ excludePlaceholders: false });
+    expect(mockFindAll).toHaveBeenCalledWith();
   });
 
   it("取得した profile を salesName へ解決する (呼び出し側から渡さなくても解決される)", async () => {
@@ -118,15 +116,5 @@ describe("listSalesProgressRows の getAllProfiles 呼び出し", () => {
 
   it("店舗 0 件でも例外を投げず空配列を返す", async () => {
     await expect(listSalesProgressRows()).resolves.toEqual([]);
-  });
-});
-
-describe("getAllProfiles の引数形状が呼び出し元間で一致する", () => {
-  it("stores/page.tsx も {excludePlaceholders: false} で呼ぶ", async () => {
-    const source = await readFile(
-      path.join(process.cwd(), "app/(main)/stores/page.tsx"),
-      "utf8",
-    );
-    expect(source).toContain("getAllProfiles({ excludePlaceholders: false })");
   });
 });

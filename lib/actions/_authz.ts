@@ -2,7 +2,7 @@ import "server-only";
 
 import { getCurrentProfile } from "@/lib/supabase/server";
 import { failure, type ActionResult } from "./_helpers";
-import type { Profile } from "@/types/profile";
+import type { Member } from "@/types/profile";
 
 /**
  * 破壊的 Server Action の認可ガード (#155 destructive-action-authz)。
@@ -17,6 +17,8 @@ import type { Profile } from "@/types/profile";
  *   (`console.warn("[authz] denied", …)`) にのみ残し、UI へ返す文言には
  *   内部情報を一切含めない (#152 で確立した二系統設計を踏襲)。
  * - 認可の唯一の真の防御はこのサーバ層。UI 側のボタン無効化は UX 上の補助に過ぎない。
+ * - ロールはいまのテナントでの所属 (`memberships.role`) から読む (`getCurrentProfile()`、
+ *   マルチテナント化 #367)。所属が無いユーザーは profile が null になり、未認証と同じく拒否される。
  *
  * `requireAdmin` の適用範囲は破壊的 8 action (store/deal/handoff の delete、
  * data の reset/clear/import、prompt-template の delete)。
@@ -28,10 +30,10 @@ import type { Profile } from "@/types/profile";
  * (`app/api/export/route.ts` が該当し `requireSignedIn` を使用)。
  */
 export type AdminGuard =
-  | { ok: true; profile: Profile }
+  | { ok: true; profile: Member }
   | { ok: false; denied: ActionResult<never> };
 
-type Denial = { profile: Profile | null; reason: "unauthenticated" | "not_admin" };
+type Denial = { profile: Member | null; reason: "unauthenticated" | "not_admin" };
 type DenialObserver = (denial: Denial) => Promise<void>;
 
 async function notifyDenial(observer: DenialObserver, denial: Denial): Promise<void> {

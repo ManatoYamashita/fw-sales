@@ -5,7 +5,7 @@ import { LogOut } from "lucide-react";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { signOutAction } from "@/lib/actions/auth-actions";
 import { cn } from "@/lib/utils/cn";
-import type { Profile } from "@/types/profile";
+import type { Member } from "@/types/profile";
 
 function getInitial(displayName: string): string {
   const trimmed = displayName.trim();
@@ -13,7 +13,7 @@ function getInitial(displayName: string): string {
   return trimmed.charAt(0).toUpperCase();
 }
 
-function getRoleLabel(profile: Profile | null | undefined): string {
+function getRoleLabel(profile: Member | null | undefined): string {
   if (profile?.role === "placeholder") return "未登録";
   if (profile?.role === "admin") return "管理者";
   return "メンバー";
@@ -21,7 +21,7 @@ function getRoleLabel(profile: Profile | null | undefined): string {
 
 export interface UserMenuProps {
   /** 現在ログイン中のプロフィール。proxy が保護するため通常は null にならない。 */
-  profile?: Profile | null;
+  profile?: Member | null;
   /** サイドバー下部か Topbar 右端か。 */
   variant?: "sidebar" | "topbar";
   /** サイドバーがアイコンレールへ折りたたまれているか。 */
