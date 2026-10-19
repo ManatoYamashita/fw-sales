@@ -18,7 +18,7 @@ async function loadColumns(filter: StoreFilter) {
 export async function KanbanBoard({ filter }: { filter: StoreFilter }) {
   const [columns, profiles] = await Promise.all([
     loadColumns(filter),
-    getAllProfiles({ excludePlaceholders: false }),
+    getAllProfiles(),
   ]);
   // Phase 7: 営業担当の表示は profile.display_name を id 経由で解決する。
   const profileNameById = new Map(profiles.map((p) => [p.id, p.display_name]));

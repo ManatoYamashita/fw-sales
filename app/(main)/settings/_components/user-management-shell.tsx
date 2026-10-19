@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Modal, ModalContent, ModalFooter } from "@/components/ui/modal";
 import { runAction } from "@/lib/client/run-action";
 import { updateProfileRoleAction } from "@/lib/actions/profile-actions";
-import type { Profile, ProfileRole } from "@/types/profile";
+import type { Member, ProfileRole } from "@/types/profile";
 
 /**
  * ユーザー管理カードの client Shell (#155)。admin 判定は server 側
@@ -28,7 +28,7 @@ export function UserManagementShell({
   users,
   currentUserId,
 }: {
-  users: readonly Profile[];
+  users: readonly Member[];
   currentUserId: string;
 }) {
   const router = useRouter();
@@ -39,7 +39,7 @@ export function UserManagementShell({
   // 自己降格の確認待ち対象。
   const [confirmSelfId, setConfirmSelfId] = useState<string | null>(null);
 
-  const roleOf = (u: Profile): ProfileRole => optimistic[u.id] ?? u.role;
+  const roleOf = (u: Member): ProfileRole => optimistic[u.id] ?? u.role;
 
   const applyRole = (userId: string, role: ProfileRole) => {
     setOptimistic((prev) => ({ ...prev, [userId]: role }));
@@ -61,7 +61,7 @@ export function UserManagementShell({
     });
   };
 
-  const onSelect = (user: Profile, next: ProfileRole) => {
+  const onSelect = (user: Member, next: ProfileRole) => {
     if (!ASSIGNABLE.includes(next) || next === roleOf(user)) return;
     // 自分自身を管理者から外す時だけ確認を挟む。
     if (user.id === currentUserId && next === "member") {

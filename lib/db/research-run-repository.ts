@@ -32,7 +32,12 @@ import { generateId } from "@/lib/utils/id";
 import { nowIso } from "@/lib/utils/date";
 import { getResearchRunExpiresMarginMinutes } from "@/lib/env";
 
-type StoreResearchRunSelectRow = typeof storeResearchRuns.$inferSelect;
+/**
+ * ドメイン型 (`StoreResearchRun`) への変換に使う行の型。`tenant_id` はまだドメイン型に
+ * 持たせていない (テナントで絞るのは #368) ので、変換の入力からも外す。INSERT した値を
+ * そのまま変換する `create` では、既定値で埋まる `tenant_id` を持っていないため。
+ */
+type StoreResearchRunSelectRow = Omit<typeof storeResearchRuns.$inferSelect, "tenant_id">;
 
 /**
  * `updateIfRunning` が SET 句へ載せてよい列の allowlist

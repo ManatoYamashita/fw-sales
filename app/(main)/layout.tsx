@@ -8,7 +8,7 @@ import { Topbar } from "@/components/layout/topbar";
 import { NavigationProgress } from "@/components/layout/navigation-progress";
 import { CurrentUserProvider } from "@/components/layout/current-user-provider";
 import { loadNavBadgeCounts } from "@/components/layout/nav-badges";
-import { getCurrentProfile } from "@/lib/supabase/server";
+import { getCurrentProfile, getCurrentSession } from "@/lib/supabase/server";
 import { getRecentNotifications } from "@/lib/queries/notification";
 
 async function SidebarShell({
@@ -39,12 +39,18 @@ async function SidebarShell({
  * proxy が `(main)` 配下を保護するため通常はここに到達しているなら
  * 認証済のはずだが、防御的に profile が null の場合は `/login` に redirect する
  * (auth-and-notifications spec §1.1, §1.5)。
+ *
+ * ログイン済みでも、いまのテナントに所属していなければ profile は null になる (#367)。
+ * その場合は理由をログイン画面に出す。ただしこれは案内であり、データの保護ではない。
+ * Suspense の中の redirect はストリーミング中のクライアント側の転送で、そのときには
+ * 静的シェル (事前生成したページ) はもう送られている。所属の無いユーザーからページの
+ * データを守るのは、テナントをリクエストから決めて静的シェルを組み直す #373 の役目。
  */
 async function TopbarShell() {
   // getCurrentProfile() の cookies() 読取で動的化されるため connection() は不要。
   const profile = await getCurrentProfile();
   if (!profile) {
-    redirect("/login");
+    redirect((await getCurrentSession()) ? "/login?error=no_membership" : "/login");
   }
   const notifications = await getRecentNotifications(profile.id, 10);
   return <Topbar currentProfile={profile} notifications={notifications} />;

@@ -105,13 +105,11 @@ function StoresTableFallback() {
 /**
  * ProgressFilterBar に担当者選択肢を注入する data-fetching shell。
  *
- * `getAllProfiles` は `listSalesProgressRows` からも呼ばれるが、
- * **引数形状 (`{ excludePlaceholders: false }`) を必ず一致させる**こと。
- * 食い違うと `'use cache'` のキャッシュキーが割れ、コールド時に同じ SELECT が
- * 2 回走る。この一致は lib/queries/__tests__/sales-progress.test.ts で固定している。
+ * `getAllProfiles` は `listSalesProgressRows` からも呼ばれる。引数を持たないので、
+ * `'use cache'` のキャッシュエントリは両者で共有される。
  */
 async function ProgressFilterBarSlot() {
-  const profiles = await getAllProfiles({ excludePlaceholders: false });
+  const profiles = await getAllProfiles();
   return <ProgressFilterBar profileEntries={profiles.map((p) => [p.id, p.display_name] as const)} />;
 }
 

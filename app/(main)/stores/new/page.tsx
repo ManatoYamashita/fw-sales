@@ -29,7 +29,7 @@ export default async function NewStorePage({
   const placesApiConfigured = isPlacesApiKeyConfigured();
   // 担当者選択肢 + 現在ログイン中ユーザを SSR で取得し props 経由で渡す (Phase 7.3)。
   const [profiles, currentProfile, sp] = await Promise.all([
-    getAllProfiles({ excludePlaceholders: false }),
+    getAllProfiles(),
     getCurrentProfile(),
     searchParams,
   ]);

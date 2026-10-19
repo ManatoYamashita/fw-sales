@@ -20,7 +20,7 @@ import {
 import { cn } from "@/lib/utils/cn";
 import { UserMenu } from "@/components/layout/user-menu";
 import type { NavBadgeCounts } from "@/lib/queries/stats";
-import type { Profile } from "@/types/profile";
+import type { Member } from "@/types/profile";
 
 export interface SidebarProps {
   counts?: Partial<NavBadgeCounts>;
@@ -28,7 +28,7 @@ export interface SidebarProps {
    * 現在ログイン中の profile (Phase 7 で `CURRENT_USER` 定数を撤廃)。
    * null は未認証想定だが proxy が拾うため通常は到達しない。
    */
-  currentProfile?: Profile | null;
+  currentProfile?: Member | null;
   /**
    * デスクトップ (md 以上) でアイコンレールに折りたたんだ初期状態。
    * SSR 時に Cookie `sidebar_collapsed` を読んで layout から注入し、

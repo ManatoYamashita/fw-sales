@@ -214,10 +214,13 @@ async function setupLocalDatabase(config) {
     await sql`INSERT INTO auth.users (id, email, raw_user_meta_data)
       VALUES (${LOCAL_USER_ID}, ${config.email}, ${JSON.stringify({ name: "Local Test User" })}::jsonb)
       ON CONFLICT (id) DO NOTHING`;
-    await sql`INSERT INTO profiles (id, email, display_name, role, created_at, updated_at)
-      VALUES (${LOCAL_USER_ID}, ${config.email}, 'Local Test User', 'admin', ${today}, ${today})
-      ON CONFLICT (id) DO UPDATE SET
-        display_name = EXCLUDED.display_name, role = 'admin'`;
+    await sql`INSERT INTO profiles (id, email, display_name, created_at, updated_at)
+      VALUES (${LOCAL_USER_ID}, ${config.email}, 'Local Test User', ${today}, ${today})
+      ON CONFLICT (id) DO UPDATE SET display_name = EXCLUDED.display_name`;
+    // ロールは所属 (memberships) の属性 (#367)。ローカル検証のユーザーは Firstweb の admin にする。
+    await sql`INSERT INTO memberships (tenant_id, user_id, role, created_at, updated_at)
+      SELECT id, ${LOCAL_USER_ID}, 'admin', ${today}, ${today} FROM tenants WHERE slug = 'firstweb'
+      ON CONFLICT (tenant_id, user_id) DO UPDATE SET role = 'admin', updated_at = EXCLUDED.updated_at`;
     console.log(`[local] DB準備完了: ${LOCAL_CONTAINER_NAME} / ${count === 0 ? "初回seed投入" : "既存データを保持"}`);
   } finally {
     await sql.end({ timeout: 5 });

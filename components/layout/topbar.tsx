@@ -12,7 +12,7 @@ import { UserMenu } from "@/components/layout/user-menu";
 import { useMounted } from "@/lib/hooks/use-mounted";
 import { cn } from "@/lib/utils/cn";
 import type { Notification } from "@/types/notification";
-import type { Profile } from "@/types/profile";
+import type { Member } from "@/types/profile";
 
 function deriveBreadcrumb(pathname: string): BreadcrumbItem[] {
   if (pathname === "/" || pathname === "/dashboard") {
@@ -45,7 +45,7 @@ export interface TopbarProps {
    * で解決した最新通知配列。deep-research-pipeline spec #43 で追加。
    */
   notifications?: readonly Notification[];
-  currentProfile?: Profile | null;
+  currentProfile?: Member | null;
 }
 
 export function Topbar({ notifications = [], currentProfile }: TopbarProps) {

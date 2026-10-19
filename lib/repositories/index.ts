@@ -27,6 +27,7 @@ import type { EventLogRepository } from "./event-log-repository";
 import type { StoreRepository } from "./store-repository";
 import type { HandoffRepository } from "./handoff-repository";
 import type { ProfileRepository } from "./profile-repository";
+import type { MembershipRepository } from "./membership-repository";
 import type { NotificationRepository } from "./notification-repository";
 import type { PromptTemplateRepository } from "./prompt-template-repository";
 import type { AppSettingsRepository } from "./app-settings-repository";
@@ -38,6 +39,7 @@ export type {
   StoreRepository,
   HandoffRepository,
   ProfileRepository,
+  MembershipRepository,
   NotificationRepository,
   PromptTemplateRepository,
   AppSettingsRepository,
@@ -59,6 +61,8 @@ export interface TxRepos {
   store: StoreRepository;
   handoff: HandoffRepository;
   profile: ProfileRepository;
+  /** テナントへの所属とロール (マルチテナント化 #367) で追加。 */
+  membership: MembershipRepository;
   notification: NotificationRepository;
   /** AI プロンプトテンプレート (Issue #42) で追加。 */
   promptTemplate: PromptTemplateRepository;
@@ -81,6 +85,8 @@ export interface Repos {
   deal: DealRepository;
   handoff: HandoffRepository;
   profile: ProfileRepository;
+  /** テナントへの所属とロール (マルチテナント化 #367) で追加。 */
+  membership: MembershipRepository;
   notification: NotificationRepository;
   /** AI プロンプトテンプレート (Issue #42) で追加。 */
   promptTemplate: PromptTemplateRepository;
@@ -107,6 +113,7 @@ async function buildRepos(): Promise<Repos> {
     dbStoreRepo,
     dbHandoffRepo,
     dbProfileRepo,
+    dbMembershipRepo,
     dbNotificationRepo,
     dbPromptTemplateRepo,
     dbAppSettingsRepo,
@@ -116,6 +123,7 @@ async function buildRepos(): Promise<Repos> {
     makeStoreRepo,
     makeHandoffRepo,
     makeProfileRepo,
+    makeMembershipRepo,
     makeNotificationRepo,
     makePromptTemplateRepo,
     makeAppSettingsRepo,
@@ -129,6 +137,7 @@ async function buildRepos(): Promise<Repos> {
     deal: dbDealRepo,
     handoff: dbHandoffRepo,
     profile: dbProfileRepo,
+    membership: dbMembershipRepo,
     notification: dbNotificationRepo,
     promptTemplate: dbPromptTemplateRepo,
     appSettings: dbAppSettingsRepo,
@@ -141,6 +150,7 @@ async function buildRepos(): Promise<Repos> {
           store: makeStoreRepo(tx),
           handoff: makeHandoffRepo(tx),
           profile: makeProfileRepo(tx),
+          membership: makeMembershipRepo(tx),
           notification: makeNotificationRepo(tx),
           promptTemplate: makePromptTemplateRepo(tx),
           appSettings: makeAppSettingsRepo(tx),

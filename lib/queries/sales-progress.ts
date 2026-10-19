@@ -25,12 +25,10 @@ import {
 } from "@/lib/domain/sales-progress";
 
 /**
- * `getAllProfiles` の引数形状は **`{ excludePlaceholders: false }` で固定**する。
- *
- * `'use cache'` のキャッシュキーは引数を含むため、同一リクエスト内の別の呼び出し元
- * (`app/(main)/stores/page.tsx` の `ProgressFilterBarSlot`) と形状が食い違うと
- * キーが割れ、コールド時に同じ SELECT が 2 回走る。
- * この一致は `lib/queries/__tests__/sales-progress.test.ts` で機械的に検証している。
+ * `getAllProfiles` は引数を持たない。`'use cache'` のキャッシュキーは引数を含むため、
+ * 同一リクエスト内の別の呼び出し元 (`app/(main)/stores/page.tsx` の `ProgressFilterBarSlot`)
+ * と引数が食い違うとキーが割れ、コールド時に同じ SELECT が 2 回走る。引数が無ければ
+ * 割れようがなく、渡そうとすれば型エラーになる (#367 で `excludePlaceholders` を廃止)。
  *
  * profiles を引数で受け取らないのは、既定値 (`= []`) を許すと呼び出し側の渡し忘れで
  * 全行の `salesName` が null になり、`applyProgressSort` の `case "sales"` が例外も
@@ -43,7 +41,7 @@ export async function listSalesProgressRows(
   const [stores, deals, profiles, needsReviewStoreIds] = await Promise.all([
     listStores({}),
     listDealsCached(),
-    getAllProfiles({ excludePlaceholders: false }),
+    getAllProfiles(),
     getStoreIdsNeedingReview(),
   ]);
   const profilesById = new Map(profiles.map((p) => [p.id, p.display_name]));
