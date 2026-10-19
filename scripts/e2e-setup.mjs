@@ -21,11 +21,19 @@ async function ensureE2eProfile(localEnv, e2eConfig) {
       raw_user_meta_data = EXCLUDED.raw_user_meta_data
   `;
   await sql`
-    INSERT INTO profiles (id, email, display_name, role, created_at, updated_at)
-    VALUES (${E2E_TEST_USER_ID}, ${e2eConfig.email}, ${"E2E Test User"}, ${"member"}, ${todayJst}, ${todayJst})
+    INSERT INTO profiles (id, email, display_name, created_at, updated_at)
+    VALUES (${E2E_TEST_USER_ID}, ${e2eConfig.email}, ${"E2E Test User"}, ${todayJst}, ${todayJst})
     ON CONFLICT (id) DO UPDATE SET
       email = EXCLUDED.email,
       display_name = EXCLUDED.display_name,
+      updated_at = EXCLUDED.updated_at
+  `;
+  // ロールは所属 (memberships) の属性 (#367)。E2E のユーザーは Firstweb の member にする。
+  await sql`
+    INSERT INTO memberships (tenant_id, user_id, role, created_at, updated_at)
+    SELECT id, ${E2E_TEST_USER_ID}, ${"member"}, ${todayJst}, ${todayJst} FROM tenants WHERE slug = 'firstweb'
+    ON CONFLICT (tenant_id, user_id) DO UPDATE SET
+      role = EXCLUDED.role,
       updated_at = EXCLUDED.updated_at
   `;
   await sql.end();
