@@ -56,6 +56,12 @@ async function delayServerActions(page: Page, ms: number): Promise<void> {
 /** 項目のカード。項目名は画面の別の欄 (店舗の基本情報) にも出るので、項目の key で探す。 */
 const itemCard = (page: Page, key: string): Locator => page.locator(`#research-item-${key}`);
 
+/**
+ * 項目のカードの見出し。カードの中には「根拠・出典を確認」(#378) や未確認の情報源の
+ * 開閉が `<details>` で入れ子になるので、カード直下の summary に絞る。
+ */
+const itemSummary = (card: Locator): Locator => card.locator(":scope > summary");
+
 const busyButtons = (page: Page): Locator => page.locator('button[aria-busy="true"]');
 
 // 処理中の表示は、判断の応答 (`ACTION_DELAY_MS` 遅らせる) の後の `router.refresh()` が
@@ -95,7 +101,7 @@ test("「却下」を押すと、そのボタンだけが処理中になり、�
   ]);
 
   await expect(busyButtons(page)).toHaveCount(0, { timeout: REFRESH_TIMEOUT_MS });
-  await expect(phone.locator("summary")).toContainText("却下済み");
+  await expect(itemSummary(phone)).toContainText("却下済み");
   await expect(seats.getByRole("button", { name: "却下", exact: true })).toBeEnabled();
   await expect(page.getByRole("button", { name: "候補Bを採用" })).toBeEnabled();
 
@@ -119,7 +125,7 @@ test("候補を選ぶ項目では、押した候補のボタンだけが処理�
   ]);
 
   await expect(busyButtons(page)).toHaveCount(0, { timeout: REFRESH_TIMEOUT_MS });
-  await expect(hours.locator("summary")).toContainText("採用済み");
+  await expect(itemSummary(hours)).toContainText("採用済み");
 });
 
 test("「編集内容で採用」は、処理中も編集欄を残して読み取り専用にし、完了後に閉じる", async ({ page }) => {
@@ -140,6 +146,6 @@ test("「編集内容で採用」は、処理中も編集欄を残して読み�
   await expect(seats.getByRole("button", { name: "採用", exact: true })).toHaveCount(0);
 
   await expect(busyButtons(page)).toHaveCount(0, { timeout: REFRESH_TIMEOUT_MS });
-  await expect(seats.locator("summary")).toContainText("採用済み");
+  await expect(itemSummary(seats)).toContainText("採用済み");
   await expect(editor).toHaveCount(0);
 });
