@@ -1,0 +1,85 @@
+# E2E (Playwright) を PR と main への push で実行する (#386)。
+#
+# 画面を変えた PR が別の spec を壊しても、手元で E2E を流さない限り気づけなかった
+# (#378 で入れ子になった summary に research-review-decision-pending.spec.ts が当たり、
+# main で約 27 時間見過ごされた → #382)。手元の `pnpm e2e` と同じコマンドを、
+# Apple Container の代わりに service container の PostgreSQL で動かす。
+#
+# - `E2E_DATABASE_URL` を渡すと、scripts/e2e-local.mjs はコンテナを作らずにこの DB を使う。
+#   準備処理 (`pnpm e2e:setup`) が migration・seed・E2E 用のデータを毎回入れ直す。
+# - E2E 認証 (`/api/e2e/login`) は `next dev` かつ `E2E_TEST_MODE=1` のときだけ有効で、
+#   secret も本番 DB も使わない。fork からの PR も `pull_request` のまま流せる。
+# - playwright.config.ts は CI では retries 2・line reporter・付属の Chromium に固定する。
+# - まずは required check にしない。flaky が出ないのを見てから決める。
+
+name: E2E
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# 同じ PR へ続けて push したときは、古い実行を止める。main への push はコミットごとに走らせる。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: Playwright E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      E2E_DATABASE_URL: "postgres://postgres:postgres@localhost:5432/postgres"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # ヘッドレス実行は Chromium の Headless Shell を使う。OS の依存ライブラリも入れる。
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps --only-shell chromium
+
+      - name: Run E2E
+        run: pnpm e2e
+
+      # 失敗した試行の trace (trace: retain-on-failure) を残す。retry で通った flaky も含む。
+      - name: Upload test results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-test-results
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7
