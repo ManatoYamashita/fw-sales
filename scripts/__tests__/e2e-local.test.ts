@@ -4,6 +4,9 @@
  * `pnpm e2e` は起動のたびに同名のコンテナを `delete --force` で作り直す。名前が固定だと
  * 別の作業ツリーで実行中のE2EのDBを消してしまうため、`E2E_DB_CONTAINER` で分けられる
  * ようにした。ここでは名前の解決と、起動・削除・IP取得のすべてが同じ名前を使うことを確かめる。
+ *
+ * CI の Linux ランナーには Apple Container の `container` コマンドが無い (#386)。
+ * `E2E_DATABASE_URL` を指定したときは、コンテナに一切触れずにその DB を使うことも確かめる。
  */
 import fs from "node:fs";
 import os from "node:os";
@@ -118,5 +121,71 @@ describe("コンテナ操作が指定した名前を使う", () => {
   it("対象コンテナが無ければ名前を添えて失敗する", () => {
     process.env.E2E_DB_CONTAINER = "fw-sales-e2e-postgres-missing";
     expect(() => getE2eDatabaseEnv()).toThrow("fw-sales-e2e-postgres-missing");
+  });
+
+  it("E2E_DATABASE_URL が空なら、従来どおりコンテナへ接続する", () => {
+    process.env.E2E_DATABASE_URL = "";
+    expect(getE2eDatabaseEnv().DATABASE_URL).toBe(
+      "postgres://postgres:postgres@192.168.64.2:5432/postgres",
+    );
+  });
+});
+
+describe("E2E_DATABASE_URL で外部の PostgreSQL を使う (#386)", () => {
+  const savedEnv = { ...process.env };
+  let emptyBinDir: string;
+
+  beforeEach(() => {
+    execFileSync.mockReset();
+    // container コマンドの無い PATH (CI の Linux ランナーと同じ)
+    emptyBinDir = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-local-test-"));
+    process.env.PATH = emptyBinDir;
+    delete process.env.E2E_DB_CONTAINER;
+  });
+
+  afterEach(() => {
+    process.env = { ...savedEnv };
+    fs.rmSync(emptyBinDir, { recursive: true, force: true });
+  });
+
+  it.each([
+    "postgres://postgres:postgres@localhost:5432/postgres",
+    "postgresql://postgres:postgres@127.0.0.1:5432/postgres",
+    "postgres://postgres:postgres@192.168.64.9:5432/postgres",
+  ])("%s へ、コンテナに触れずに接続する", (url) => {
+    process.env.E2E_DATABASE_URL = url;
+
+    expect(startE2eDatabase().DATABASE_URL).toBe(url);
+    expect(getE2eDatabaseEnv().DATABASE_URL).toBe(url);
+    expect(execFileSync).not.toHaveBeenCalled();
+  });
+
+  // E2E の準備は接続先へ migration と seed を入れ直す。本番などを指定したら、
+  // `e2e-setup.mjs` が DB へ接続する前 (`startE2eDatabase` の時点) で止める。
+  it.each([
+    ["Supabase への直結", "postgresql://postgres:secret-pw@db.abcdefghijklmnopqrst.supabase.co:5432/postgres"],
+    [
+      "Supabase の pooler",
+      "postgresql://postgres.abcdefghijklmnopqrst:secret-pw@aws-0-ap-northeast-1.pooler.supabase.com:6543/postgres",
+    ],
+    ["公開 IP", "postgres://postgres:secret-pw@203.0.113.10:5432/postgres"],
+    ["PostgreSQL 以外", "mysql://root:secret-pw@localhost:3306/app"],
+    ["URL でない値", "secret-pw"],
+    ["空白だけの値", "   "],
+  ])("%s は、コンテナに触れずに拒否する", (_label, url) => {
+    process.env.E2E_DATABASE_URL = url;
+
+    for (const resolve of [startE2eDatabase, getE2eDatabaseEnv]) {
+      let message = "";
+      try {
+        resolve();
+      } catch (error) {
+        message = (error as Error).message;
+      }
+      expect(message).toMatch(/^E2E_DATABASE_URL には/);
+      // 接続文字列はパスワードを含むので、エラーに出さない
+      expect(message).not.toContain("secret-pw");
+    }
+    expect(execFileSync).not.toHaveBeenCalled();
   });
 });

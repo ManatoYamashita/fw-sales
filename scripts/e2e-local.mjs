@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import postgres from "postgres";
+import { assertDatabaseTarget } from "../lib/environment-isolation.mjs";
 
 export const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const DEFAULT_E2E_EMAIL = "e2e@example.test";
@@ -65,13 +66,39 @@ export function getE2eConfig() {
   };
 }
 
+/**
+ * `E2E_DATABASE_URL`で指定された外部のPostgreSQLの接続文字列を返します。未指定なら`undefined`です。
+ *
+ * CIのservice containerなど、Apple Containerを使えない環境ではこれでE2E用DBを渡します。
+ * E2Eの準備はこのDBへmigrationとseedを入れ直すため、ローカルのPostgreSQL
+ * (localhostまたはプライベートIP) 以外は、接続する前に拒否します。
+ *
+ * @returns {string | undefined}
+ */
+function getExternalE2eDatabaseUrl() {
+  const url = process.env.E2E_DATABASE_URL;
+  if (!url) return undefined;
+  try {
+    assertDatabaseTarget({ APP_ENV: "local", DATABASE_URL: url });
+  } catch {
+    // 接続文字列はパスワードを含むため、エラーには値を出しません。
+    throw new Error(
+      "E2E_DATABASE_URL には、ローカルのPostgreSQL (localhost またはプライベートIP) を指定してください。",
+    );
+  }
+  return url;
+}
+
+/**
+ * E2E用DBの接続先を返します。
+ *
+ * `E2E_DATABASE_URL`があればそのDBを使い、コンテナには触れません。
+ * 未指定なら、Apple Container上のE2E用コンテナ (`E2E_DB_CONTAINER`) の内部IPへ接続します。
+ */
 export function getE2eDatabaseEnv() {
-  const databaseHost = getE2eDatabaseHost();
-  return {
-    DATABASE_URL:
-      process.env.E2E_DATABASE_URL ||
-      `postgres://postgres:postgres@${databaseHost}:5432/postgres`,
-  };
+  const externalUrl = getExternalE2eDatabaseUrl();
+  if (externalUrl) return { DATABASE_URL: externalUrl };
+  return { DATABASE_URL: `postgres://postgres:postgres@${getE2eDatabaseHost()}:5432/postgres` };
 }
 
 function getE2eDatabaseHost() {
@@ -93,8 +120,15 @@ function getE2eDatabaseHost() {
 /**
  * Apple Container上でE2E専用PostgreSQLを起動します。
  * Supabase CLIはDocker Engine APIを要求するため、E2Eでは直接PostgreSQLを利用します。
+ *
+ * `E2E_DATABASE_URL`を指定したときは、コンテナを起動せずにそのDBを使います (CIなど)。
  */
 export function startE2eDatabase() {
+  if (getExternalE2eDatabaseUrl()) {
+    console.log("[e2e] E2E_DATABASE_URL のPostgreSQLを使います (コンテナは起動しません)");
+    return getE2eDatabaseEnv();
+  }
+
   const containerName = getE2eDbContainerName();
   if (!commandExists("container")) {
     throw new Error(
