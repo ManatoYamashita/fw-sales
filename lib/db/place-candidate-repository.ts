@@ -17,9 +17,9 @@
 
 import "server-only";
 
-import { eq, inArray } from "drizzle-orm";
-import { db, type DbClient, type Tx } from "./client";
-import { placeCandidates } from "./schema";
+import { and, eq, inArray } from "drizzle-orm";
+import { type DbClient, type Tx } from "./client";
+import { placeCandidates, stores } from "./schema";
 import type {
   PlaceCandidateRepository,
   UpsertPlaceCandidatesFromAreaSearchResult,
@@ -30,7 +30,9 @@ import { generateId } from "@/lib/utils/id";
 
 export function makePlaceCandidateRepo(
   executor: DbClient | Tx,
+  tenantId: string,
 ): PlaceCandidateRepository {
+  const inTenant = eq(placeCandidates.tenant_id, tenantId);
   return {
     async upsertFromAreaSearch({
       places,
@@ -54,16 +56,23 @@ export function makePlaceCandidateRepo(
         const existingRows = await executor
           .select()
           .from(placeCandidates)
-          .where(eq(placeCandidates.google_place_id, googlePlaceId))
+          .where(and(inTenant, eq(placeCandidates.google_place_id, googlePlaceId)))
           .limit(1);
         const existing = existingRows[0];
 
         const newSources = item.discovery.sources;
         const matchedStoreId = item.matchedStore?.id ?? null;
 
+        if (matchedStoreId) {
+          const matched = await executor.select({ id: stores.id }).from(stores)
+            .where(and(eq(stores.tenant_id, tenantId), eq(stores.id, matchedStoreId))).limit(1);
+          if (matched.length === 0) throw new Error("店舗が見つかりません");
+        }
+
         if (!existing) {
           await executor.insert(placeCandidates).values({
             id: generateId("place_candidate"),
+            tenant_id: tenantId,
             google_place_id: googlePlaceId,
             status: "candidate",
             first_seen_at: now,
@@ -112,7 +121,7 @@ export function makePlaceCandidateRepo(
             status: nextStatus,
             updated_at: now,
           })
-          .where(eq(placeCandidates.google_place_id, googlePlaceId));
+          .where(and(inTenant, eq(placeCandidates.google_place_id, googlePlaceId)));
         updatedCount++;
       }
 
@@ -126,11 +135,8 @@ export function makePlaceCandidateRepo(
       const rows = await executor
         .select()
         .from(placeCandidates)
-        .where(inArray(placeCandidates.google_place_id, dedupedIds));
+        .where(and(inTenant, inArray(placeCandidates.google_place_id, dedupedIds)));
       return rows as PlaceCandidate[];
     },
   };
 }
-
-export const dbPlaceCandidateRepo: PlaceCandidateRepository =
-  makePlaceCandidateRepo(db);

@@ -42,6 +42,7 @@ import {
   MAX_SUPPLEMENT_LENGTH,
 } from "@/lib/domain/sales-assets-input";
 import { failure, success, type ActionResult } from "./_helpers";
+import { resolveTenantId } from "@/lib/tenant/context";
 
 /**
  * Gemini 呼出の中断しきい値。
@@ -108,6 +109,7 @@ export async function generateSalesAssetsAction(
   pastedResearchText: string,
   additionalInstructions: string = "",
 ): Promise<ActionResult<AiAnalysisResult>> {
+  const tenantId = await resolveTenantId();
   // ① 認証
   const session = await getCurrentSession();
   if (!session) {
@@ -124,7 +126,7 @@ export async function generateSalesAssetsAction(
   }
 
   // ③ 店舗取得 + 店舗名検証 (R1.1 店舗名のみ必須)
-  const store = await repos.store.get(storeId);
+  const store = await repos.forTenant(tenantId).store.get(storeId);
   if (!store) {
     return failure("店舗が見つかりません");
   }
@@ -182,11 +184,11 @@ export async function generateSalesAssetsAction(
     }
 
     // ⑧ 保存 + キャッシュ無効化 (R7.5 再表示可能)
-    await repos.store.update(storeId, {
+    await repos.forTenant(tenantId).store.update(storeId, {
       ai_analysis_result: validated.value,
     });
-    revalidateTag(CACHE_TAGS.store(storeId), "max");
-    revalidateTag(CACHE_TAGS.stores, "max");
+    revalidateTag(CACHE_TAGS.store(tenantId, storeId), "max");
+    revalidateTag(CACHE_TAGS.stores(tenantId), "max");
 
     return success(validated.value, "営業資産を生成しました");
   } catch (err) {

@@ -61,6 +61,7 @@ import type {
   StoreResearchRun,
 } from "@/types/research-run";
 import { failure, success, type ActionResult } from "./_helpers";
+import { resolveTenantId } from "@/lib/tenant/context";
 
 export interface StartResearchRunResult {
   runId: string;
@@ -91,6 +92,7 @@ function buildReviewCompletePayload(
 export async function startResearchRunAction(
   storeId: string,
 ): Promise<ActionResult<StartResearchRunResult>> {
+  const tenantId = await resolveTenantId();
   const session = await getCurrentSession();
   if (!session) return failure("ログインが必要です");
 
@@ -106,7 +108,7 @@ export async function startResearchRunAction(
   const rateLimit = checkRateLimit(storeId);
   if (!rateLimit.ok) return failure(rateLimit.message);
 
-  const store = await repos.store.get(storeId);
+  const store = await repos.forTenant(tenantId).store.get(storeId);
   if (!store) return failure("店舗が見つかりません");
 
   const latest = await repos.researchRun.getLatestForStore(storeId);
@@ -209,7 +211,7 @@ export async function startResearchRunAction(
     runId,
     payload: { stuckRunFailedId },
   });
-  revalidateTag(CACHE_TAGS.store(storeId), "max");
+  revalidateTag(CACHE_TAGS.store(tenantId, storeId), "max");
   return success({ runId }, "AI店舗調査を開始しました");
 }
 
@@ -224,6 +226,7 @@ export async function startResearchRunAction(
 export async function getResearchRunStatusAction(
   runId: string,
 ): Promise<ActionResult<StoreResearchRun>> {
+  const tenantId = await resolveTenantId();
   const session = await getCurrentSession();
   if (!session) return failure("ログインが必要です");
   if (typeof runId !== "string" || runId.trim() === "") {
@@ -233,7 +236,7 @@ export async function getResearchRunStatusAction(
   if (!run) return failure("調査結果が見つかりません");
   dropBlankVercelUrl();
   const synced = await syncRunWithWorkflow(run);
-  if (synced.markedFailed) revalidateTag(CACHE_TAGS.store(run.store_id), "max");
+  if (synced.markedFailed) revalidateTag(CACHE_TAGS.store(tenantId, run.store_id), "max");
   return success(synced.run);
 }
 
@@ -266,6 +269,7 @@ export interface RecordReviewDecisionInput {
 export async function recordReviewDecisionAction(
   input: RecordReviewDecisionInput,
 ): Promise<ActionResult<{ reviewDecisions: ReviewDecisions }>> {
+  const tenantId = await resolveTenantId();
   const session = await getCurrentSession();
   if (!session) return failure("ログインが必要です");
 
@@ -316,7 +320,7 @@ export async function recordReviewDecisionAction(
   // (`as` で宣言型を保つ。callback 内の代入は制御フロー解析に見えず、`null` に絞り込まれるため)
   let auditPayload = null as ResearchReviewDecidePayload | null;
 
-  const result = await repos.transaction(async (tx) => {
+  const result = await repos.forTenant(tenantId).transaction(async (tx) => {
     const run = await tx.researchRun.getForUpdate(runId);
     if (!run || run.store_id !== storeId) return failure("調査結果が見つかりません");
     if (run.status !== "succeeded") return failure("この調査はまだレビューできません");
@@ -399,7 +403,7 @@ export async function recordReviewDecisionAction(
       payload: auditPayload,
     });
   }
-  if (result.ok) revalidateTag(CACHE_TAGS.store(storeId), "max");
+  if (result.ok) revalidateTag(CACHE_TAGS.store(tenantId, storeId), "max");
   return result;
 }
 
@@ -422,6 +426,7 @@ export interface CompleteReviewInput {
 export async function completeReviewAction(
   input: CompleteReviewInput,
 ): Promise<ActionResult<void>> {
+  const tenantId = await resolveTenantId();
   const session = await getCurrentSession();
   if (!session) return failure("ログインが必要です");
 
@@ -434,7 +439,7 @@ export async function completeReviewAction(
   // 原子化する(旧実装は別々のawaitで、片側のみ成功する不整合の余地があった)。
   let auditPayload = null as ResearchReviewCompletePayload | null;
 
-  const result = await repos.transaction(async (tx) => {
+  const result = await repos.forTenant(tenantId).transaction(async (tx) => {
     const run = await tx.researchRun.getForUpdate(runId);
     if (!run || run.store_id !== storeId) return failure("調査結果が見つかりません");
     if (run.status !== "succeeded") return failure("この調査はまだレビューできません");
@@ -486,8 +491,8 @@ export async function completeReviewAction(
     });
   }
   if (result.ok) {
-    revalidateTag(CACHE_TAGS.store(storeId), "max");
-    revalidateTag(CACHE_TAGS.stores, "max");
+    revalidateTag(CACHE_TAGS.store(tenantId, storeId), "max");
+    revalidateTag(CACHE_TAGS.stores(tenantId), "max");
   }
   return result;
 }
@@ -546,6 +551,7 @@ export interface AdoptBulkLaneResult {
 export async function adoptBulkLaneAction(
   input: AdoptBulkLaneInput,
 ): Promise<ActionResult<AdoptBulkLaneResult>> {
+  const tenantId = await resolveTenantId();
   const session = await getCurrentSession();
   if (!session) return failure("ログインが必要です");
 
@@ -565,7 +571,7 @@ export async function adoptBulkLaneAction(
   let auditEffectCounts = null as Record<AdoptionEffectKind, number> | null;
   let auditCompletePayload = null as ResearchReviewCompletePayload | null;
 
-  const result = await repos.transaction(async (tx) => {
+  const result = await repos.forTenant(tenantId).transaction(async (tx) => {
     const run = await tx.researchRun.getForUpdate(runId);
     if (!run || run.store_id !== storeId) return failure("調査結果が見つかりません");
     if (run.status !== "succeeded") return failure("この調査はまだレビューできません");
@@ -660,8 +666,8 @@ export async function adoptBulkLaneAction(
     }
   }
   if (result.ok) {
-    revalidateTag(CACHE_TAGS.store(storeId), "max");
-    if (complete) revalidateTag(CACHE_TAGS.stores, "max");
+    revalidateTag(CACHE_TAGS.store(tenantId, storeId), "max");
+    if (complete) revalidateTag(CACHE_TAGS.stores(tenantId), "max");
   }
   return result;
 }

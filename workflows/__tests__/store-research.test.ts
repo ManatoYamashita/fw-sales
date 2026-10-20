@@ -53,7 +53,7 @@ const mockResearchRun = vi.hoisted(() => ({
   update: vi.fn(),
 }));
 vi.mock("@/lib/repositories", () => ({
-  repos: { researchRun: mockResearchRun, store: { get: vi.fn() } },
+  repos: ((tenantRepos) => ({ ...tenantRepos, forTenant: () => tenantRepos }))({ researchRun: mockResearchRun, store: { get: vi.fn() } }),
 }));
 vi.mock("@/lib/ai/research/pipeline", () => ({
   runStage1: vi.fn(),

@@ -6,6 +6,7 @@ import {
   type SalesProgressFilter,
 } from "@/lib/domain/sales-progress";
 import { StoresTableView } from "./stores-table-view";
+import { resolveTenantId } from "@/lib/tenant/context";
 
 /**
  * `sales=me` が未解決のままドメインへ届いたときに使う非一致プレースホルダ。
@@ -62,6 +63,7 @@ export async function StoresTable({
   filter: SalesProgressFilter;
   sort: ProgressSort;
 }) {
+  const tenantId = await resolveTenantId();
   const profile = await getCurrentProfile();
   const isAdmin = profile?.role === "admin";
 
@@ -70,7 +72,7 @@ export async function StoresTable({
       ? { ...filter, sales: profile?.id ?? NO_SESSION_SALES_SENTINEL }
       : filter;
 
-  const rows = await listSalesProgressRows(resolvedFilter, sort);
+  const rows = await listSalesProgressRows(tenantId, resolvedFilter, sort);
   return (
     <StoresTableView
       rows={rows}

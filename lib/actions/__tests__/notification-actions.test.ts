@@ -30,12 +30,12 @@ vi.mock("@/lib/supabase/server", () => ({
 }));
 
 vi.mock("@/lib/repositories", () => ({
-  repos: {
+  repos: ((tenantRepos) => ({ ...tenantRepos, forTenant: () => tenantRepos }))({
     notification: {
       markAsRead: mockMarkAsRead,
       markAllAsRead: mockMarkAllAsRead,
     },
-  },
+  }),
 }));
 
 vi.mock("next/cache", () => ({
@@ -80,8 +80,8 @@ describe("notification actions", () => {
       const result = await markNotificationReadAction("notif_1");
       expect(result).toEqual({ ok: true, data: { updated: true } });
       expect(mockMarkAsRead).toHaveBeenCalledWith("notif_1", "user-1");
-      expect(mockUpdateTag).toHaveBeenCalledWith("notifications");
-      expect(mockUpdateTag).toHaveBeenCalledWith("notification:notif_1");
+      expect(mockUpdateTag).toHaveBeenCalledWith("tenant:cfe871a5-8fc7-42da-9677-3a050665cafb:notifications");
+      expect(mockUpdateTag).toHaveBeenCalledWith("tenant:cfe871a5-8fc7-42da-9677-3a050665cafb:notification:notif_1");
     });
 
     it("既読済み・他人の通知 (更新 0 件) は成功扱いでキャッシュを触らない", async () => {
@@ -115,7 +115,7 @@ describe("notification actions", () => {
       const result = await markAllNotificationsReadAction();
       expect(result).toEqual({ ok: true, data: { count: 9 } });
       expect(mockMarkAllAsRead).toHaveBeenCalledWith("user-1");
-      expect(mockUpdateTag).toHaveBeenCalledWith("notifications");
+      expect(mockUpdateTag).toHaveBeenCalledWith("tenant:cfe871a5-8fc7-42da-9677-3a050665cafb:notifications");
     });
 
     it("0 件ならキャッシュを触らない", async () => {

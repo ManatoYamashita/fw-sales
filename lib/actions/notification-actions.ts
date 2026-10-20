@@ -17,6 +17,7 @@ import { CACHE_TAGS } from "@/lib/cache";
 import { getCurrentProfile } from "@/lib/supabase/server";
 import { failure, success, type ActionResult } from "./_helpers";
 import { UNAUTHENTICATED_MESSAGE } from "./_messages";
+import { resolveTenantId } from "@/lib/tenant/context";
 
 /**
  * 指定通知を既読にする。既に既読・他人の通知・存在しない ID は何もしない
@@ -25,6 +26,7 @@ import { UNAUTHENTICATED_MESSAGE } from "./_messages";
 export async function markNotificationReadAction(
   notificationId: string,
 ): Promise<ActionResult<{ updated: boolean }>> {
+  const tenantId = await resolveTenantId();
   const profile = await getCurrentProfile();
   if (!profile) return failure(UNAUTHENTICATED_MESSAGE);
   if (typeof notificationId !== "string" || notificationId.trim() === "") {
@@ -37,8 +39,8 @@ export async function markNotificationReadAction(
       profile.id,
     );
     if (updated) {
-      updateTag(CACHE_TAGS.notifications);
-      updateTag(CACHE_TAGS.notification(notificationId));
+      updateTag(CACHE_TAGS.notifications(tenantId));
+      updateTag(CACHE_TAGS.notification(tenantId, notificationId));
     }
     return success({ updated });
   } catch (error) {
@@ -55,12 +57,13 @@ export async function markNotificationReadAction(
 export async function markAllNotificationsReadAction(): Promise<
   ActionResult<{ count: number }>
 > {
+  const tenantId = await resolveTenantId();
   const profile = await getCurrentProfile();
   if (!profile) return failure(UNAUTHENTICATED_MESSAGE);
 
   try {
     const count = await repos.notification.markAllAsRead(profile.id);
-    if (count > 0) updateTag(CACHE_TAGS.notifications);
+    if (count > 0) updateTag(CACHE_TAGS.notifications(tenantId));
     return success({ count });
   } catch (error) {
     console.error("[notifications.markAllAsRead] failed", {

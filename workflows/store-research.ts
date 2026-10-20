@@ -98,6 +98,7 @@ import type { BasicInfo } from "@/types/basic-info";
 import type { StoreResearchRun, StoreResearchRunPatch } from "@/types/research-run";
 import { nowIso } from "@/lib/utils/date";
 import { IDENTITY_MISMATCH_RUN_WARNING } from "@/lib/domain/research-item-notes";
+import { resolveTenantId } from "@/lib/tenant/context";
 
 /**
  * timeout / retry 構成は `lib/ai/research/run-timing.ts` を唯一のSource of Truthとする
@@ -630,7 +631,8 @@ interface LoadedStore {
 
 async function loadStoreStep(storeId: string): Promise<LoadedStore> {
   "use step";
-  const store = await repos.store.get(storeId);
+  const tenantId = await resolveTenantId();
+  const store = await repos.forTenant(tenantId).store.get(storeId);
   if (!store) {
     throw new FatalError(`店舗が見つかりません: ${storeId}`);
   }

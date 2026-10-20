@@ -8,12 +8,13 @@ import { CACHE_TAGS } from "@/lib/cache";
 import type { ReactNode } from "react";
 import type { Store } from "@/types/store";
 import type { Handoff } from "@/types/handoff";
+import { resolveTenantId } from "@/lib/tenant/context";
 
-async function loadQueue() {
+async function loadQueue(tenantId: string) {
   "use cache";
   cacheLife("longBackstop");
-  cacheTag(CACHE_TAGS.stores, CACHE_TAGS.handoffs, CACHE_TAGS.actionQueue);
-  return getActionQueue();
+  cacheTag(CACHE_TAGS.stores(tenantId), CACHE_TAGS.handoffs(tenantId), CACHE_TAGS.actionQueue(tenantId));
+  return getActionQueue(tenantId);
 }
 
 interface SectionProps {
@@ -80,7 +81,8 @@ function HandoffItem({ handoff }: { handoff: Handoff }) {
 }
 
 export async function ActionQueue() {
-  const queue = await loadQueue();
+  const tenantId = await resolveTenantId();
+  const queue = await loadQueue(tenantId);
   const isEmpty =
     queue.needsResearch.length === 0 &&
     queue.needsAction.length === 0 &&

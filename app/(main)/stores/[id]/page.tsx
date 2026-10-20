@@ -9,6 +9,7 @@ import { getStoreCached } from "@/lib/queries/stores";
 import { listDealsByStoreCached } from "@/lib/queries/deals";
 import { getAllProfiles } from "@/lib/queries/profiles";
 import { getStoreResearchPhase } from "@/lib/domain/store-research-phase";
+import { resolveTenantId } from "@/lib/tenant/context";
 
 type Params = Promise<{ id: string }>;
 
@@ -17,8 +18,9 @@ export async function generateMetadata({
 }: {
   params: Params;
 }): Promise<Metadata> {
+  const tenantId = await resolveTenantId();
   const { id } = await params;
-  const store = await getStoreCached(id);
+  const store = await getStoreCached(tenantId, id);
   return {
     title: store ? store.name : "店舗詳細",
   };
@@ -29,13 +31,14 @@ export default async function StoreDetailPage({
 }: {
   params: Params;
 }) {
+  const tenantId = await resolveTenantId();
   const { id } = await params;
   // deals は営業進捗タブ用の店舗単位キャッシュ (dealsByStore タグ)。
   // #152 で撤去された dealCount は一覧全店舗の事前計算であり、これとは別物。
   const [store, profiles, deals] = await Promise.all([
-    getStoreCached(id),
-    getAllProfiles(),
-    listDealsByStoreCached(id),
+    getStoreCached(tenantId, id),
+    getAllProfiles(tenantId),
+    listDealsByStoreCached(tenantId, id),
   ]);
   if (!store) notFound();
   // task 4.2 (PR3a): DeepResearchSection / getDeepResearchReport / assignedSalesName 解決 /

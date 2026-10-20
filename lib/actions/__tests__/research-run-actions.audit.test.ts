@@ -17,7 +17,7 @@ vi.mock("@/lib/supabase/server", () => ({ getCurrentSession: mocks.session }));
 vi.mock("workflow/api", () => ({ start: mocks.start }));
 vi.mock("@/workflows/store-research", () => ({ storeResearchWorkflow: vi.fn() }));
 vi.mock("next/cache", () => ({ revalidateTag: mocks.revalidateTag }));
-vi.mock("@/lib/repositories", () => ({ repos: {
+vi.mock("@/lib/repositories", () => ({ repos: ((tenantRepos) => ({ ...tenantRepos, forTenant: () => tenantRepos }))({
   store: { get: mocks.storeGet },
   researchRun: {
     getLatestForStore: mocks.getLatestForStore, create: mocks.create, update: mocks.runUpdateOutsideTx,
@@ -26,7 +26,7 @@ vi.mock("@/lib/repositories", () => ({ repos: {
   },
   eventLog: { insert: mocks.insert },
   transaction: mocks.transaction,
-} }));
+}) }));
 
 import {
   adoptBulkLaneAction,

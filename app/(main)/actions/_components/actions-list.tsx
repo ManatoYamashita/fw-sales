@@ -8,19 +8,21 @@ import { StageBadge } from "@/components/feature/stage-badge";
 import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
 import { ACTION_READY_STAGES } from "@/lib/domain/stages";
+import { resolveTenantId } from "@/lib/tenant/context";
 
-async function loadActionableStores() {
+async function loadActionableStores(tenantId: string) {
   "use cache";
   cacheLife("longBackstop");
-  cacheTag(CACHE_TAGS.stores, CACHE_TAGS.actionQueue);
-  const all = await repos.store.list();
+  cacheTag(CACHE_TAGS.stores(tenantId), CACHE_TAGS.actionQueue(tenantId));
+  const all = await repos.forTenant(tenantId).store.list();
   return all.filter((s) =>
     (ACTION_READY_STAGES as readonly string[]).includes(s.stage),
   );
 }
 
 export async function ActionsList() {
-  const stores = await loadActionableStores();
+  const tenantId = await resolveTenantId();
+  const stores = await loadActionableStores(tenantId);
   return (
     <Card>
       <Card.Header>

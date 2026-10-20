@@ -15,7 +15,7 @@ const mocks = vi.hoisted(() => ({
   updateTag: vi.fn(),
   revalidateTag: vi.fn(),
 }));
-vi.mock("@/lib/repositories", () => ({ repos: { store: { update: mocks.update } } }));
+vi.mock("@/lib/repositories", () => ({ repos: ((tenantRepos) => ({ ...tenantRepos, forTenant: () => tenantRepos }))({ store: { update: mocks.update } }) }));
 vi.mock("next/cache", () => ({ updateTag: mocks.updateTag, revalidateTag: mocks.revalidateTag }));
 vi.mock("next/navigation", () => ({ redirect: vi.fn() }));
 
@@ -31,10 +31,10 @@ describe("updateStoreStageAction", () => {
     const result = await updateStoreStageAction("store_1", "調査済み");
     expect(result.ok).toBe(true);
     expect(mocks.update).toHaveBeenCalledExactlyOnceWith("store_1", { stage: "調査済み" });
-    expect(mocks.updateTag).toHaveBeenCalledWith(CACHE_TAGS.store("store_1"));
-    expect(mocks.updateTag).toHaveBeenCalledWith(CACHE_TAGS.stores);
+    expect(mocks.updateTag).toHaveBeenCalledWith(CACHE_TAGS.store("cfe871a5-8fc7-42da-9677-3a050665cafb", "store_1"));
+    expect(mocks.updateTag).toHaveBeenCalledWith(CACHE_TAGS.stores("cfe871a5-8fc7-42da-9677-3a050665cafb"));
     // 詳細を stale-while-revalidate で失効すると、選んだ値が元に戻って見える。
-    expect(mocks.revalidateTag).not.toHaveBeenCalledWith(CACHE_TAGS.store("store_1"), "max");
+    expect(mocks.revalidateTag).not.toHaveBeenCalledWith(CACHE_TAGS.store("cfe871a5-8fc7-42da-9677-3a050665cafb", "store_1"), "max");
   });
 
   it("店舗が無ければ失効せずに失敗を返す", async () => {

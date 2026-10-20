@@ -147,7 +147,7 @@ describe("makePlaceCandidateRepo.upsertFromAreaSearch", () => {
 
   it("新しいplaceIdはinsertされる", async () => {
     executor = makeMockExecutor([]); // 既存レコードなし
-    const repo = makePlaceCandidateRepo(executor as unknown as DbClient);
+    const repo = makePlaceCandidateRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     const result = await repo.upsertFromAreaSearch({
       ...baseParams,
@@ -164,7 +164,7 @@ describe("makePlaceCandidateRepo.upsertFromAreaSearch", () => {
 
   it("既存placeIdはupdateされる", async () => {
     executor = makeMockExecutor([makeExistingRow()]);
-    const repo = makePlaceCandidateRepo(executor as unknown as DbClient);
+    const repo = makePlaceCandidateRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     const result = await repo.upsertFromAreaSearch({
       ...baseParams,
@@ -180,7 +180,7 @@ describe("makePlaceCandidateRepo.upsertFromAreaSearch", () => {
   it("firstSeenAtは維持される (insertのみで設定され、update時はsetに含まれない)", async () => {
     const existing = makeExistingRow({ first_seen_at: "2026-05-01" });
     executor = makeMockExecutor([existing]);
-    const repo = makePlaceCandidateRepo(executor as unknown as DbClient);
+    const repo = makePlaceCandidateRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     await repo.upsertFromAreaSearch({
       ...baseParams,
@@ -193,7 +193,7 @@ describe("makePlaceCandidateRepo.upsertFromAreaSearch", () => {
   it("lastSeenAtは更新される", async () => {
     const existing = makeExistingRow({ last_seen_at: "2026-05-01" });
     executor = makeMockExecutor([existing]);
-    const repo = makePlaceCandidateRepo(executor as unknown as DbClient);
+    const repo = makePlaceCandidateRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     await repo.upsertFromAreaSearch({
       ...baseParams,
@@ -206,7 +206,7 @@ describe("makePlaceCandidateRepo.upsertFromAreaSearch", () => {
   it("seenCountが増える", async () => {
     const existing = makeExistingRow({ seen_count: 3 });
     executor = makeMockExecutor([existing]);
-    const repo = makePlaceCandidateRepo(executor as unknown as DbClient);
+    const repo = makePlaceCandidateRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     await repo.upsertFromAreaSearch({
       ...baseParams,
@@ -219,7 +219,7 @@ describe("makePlaceCandidateRepo.upsertFromAreaSearch", () => {
   it("discoverySourcesが統合される", async () => {
     const existing = makeExistingRow({ discovery_sources: ["mainTextSearch"] });
     executor = makeMockExecutor([existing]);
-    const repo = makePlaceCandidateRepo(executor as unknown as DbClient);
+    const repo = makePlaceCandidateRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     await repo.upsertFromAreaSearch({
       ...baseParams,
@@ -232,7 +232,7 @@ describe("makePlaceCandidateRepo.upsertFromAreaSearch", () => {
   it("duplicate sourceは増えない", async () => {
     const existing = makeExistingRow({ discovery_sources: ["mainTextSearch"] });
     executor = makeMockExecutor([existing]);
-    const repo = makePlaceCandidateRepo(executor as unknown as DbClient);
+    const repo = makePlaceCandidateRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     await repo.upsertFromAreaSearch({
       ...baseParams,
@@ -245,7 +245,7 @@ describe("makePlaceCandidateRepo.upsertFromAreaSearch", () => {
   it("added/ignored statusをcandidateに戻さない", async () => {
     const existingAdded = makeExistingRow({ status: "added" });
     executor = makeMockExecutor([existingAdded]);
-    const repo = makePlaceCandidateRepo(executor as unknown as DbClient);
+    const repo = makePlaceCandidateRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     await repo.upsertFromAreaSearch({
       ...baseParams,
@@ -257,7 +257,7 @@ describe("makePlaceCandidateRepo.upsertFromAreaSearch", () => {
 
   it("placeIdが空の候補はskip", async () => {
     executor = makeMockExecutor([]);
-    const repo = makePlaceCandidateRepo(executor as unknown as DbClient);
+    const repo = makePlaceCandidateRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     const result = await repo.upsertFromAreaSearch({
       ...baseParams,
@@ -297,7 +297,7 @@ describe("makePlaceCandidateRepo.findByGooglePlaceIds", () => {
   it("該当する候補を返す", async () => {
     const row = makeExistingRow({ google_place_id: "ChIJtarget" });
     executor = makeMockExecutor([row]);
-    const repo = makePlaceCandidateRepo(executor as unknown as DbClient);
+    const repo = makePlaceCandidateRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     const result = await repo.findByGooglePlaceIds(["ChIJtarget"]);
 
@@ -305,7 +305,7 @@ describe("makePlaceCandidateRepo.findByGooglePlaceIds", () => {
   });
 
   it("空配列ならDB queryせず [] を返す", async () => {
-    const repo = makePlaceCandidateRepo(executor as unknown as DbClient);
+    const repo = makePlaceCandidateRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     const result = await repo.findByGooglePlaceIds([]);
 
@@ -316,7 +316,7 @@ describe("makePlaceCandidateRepo.findByGooglePlaceIds", () => {
   it("重複placeIdを渡しても問題なく返る", async () => {
     const row = makeExistingRow({ google_place_id: "ChIJtarget" });
     executor = makeMockExecutor([row]);
-    const repo = makePlaceCandidateRepo(executor as unknown as DbClient);
+    const repo = makePlaceCandidateRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     const result = await repo.findByGooglePlaceIds(["ChIJtarget", "ChIJtarget"]);
 
@@ -325,7 +325,7 @@ describe("makePlaceCandidateRepo.findByGooglePlaceIds", () => {
 
   it("存在しないplaceIdは返らない", async () => {
     executor = makeMockExecutor([]);
-    const repo = makePlaceCandidateRepo(executor as unknown as DbClient);
+    const repo = makePlaceCandidateRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     const result = await repo.findByGooglePlaceIds(["ChIJnotfound"]);
 

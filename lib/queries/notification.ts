@@ -38,22 +38,24 @@ const MAX_LIMIT = 50;
  * - 存在しない店舗を指す `link_url` は null にする (404 画面へ誘導しない)
  */
 export async function getRecentNotifications(
+  tenantId: string,
   userId: string | null,
   limit: number = DEFAULT_LIMIT,
 ): Promise<readonly Notification[]> {
   "use cache";
   cacheLife("longBackstop");
-  cacheTag(CACHE_TAGS.notifications, CACHE_TAGS.stores);
+  cacheTag(CACHE_TAGS.notifications(tenantId), CACHE_TAGS.stores(tenantId));
 
   if (!userId || userId.trim() === "") return [];
   const safeLimit = Math.min(Math.max(1, limit), MAX_LIMIT);
 
   const all = await repos.notification.findByUserId(userId);
   // findByUserId は created_at DESC で返すパターンを Mock/DB ともに踏襲済
-  return dropDeadStoreLinks(all.slice(0, safeLimit));
+  return dropDeadStoreLinks(tenantId, all.slice(0, safeLimit));
 }
 
 async function dropDeadStoreLinks(
+  tenantId: string,
   notifications: readonly Notification[],
 ): Promise<readonly Notification[]> {
   const storeIds = new Set<string>();
@@ -66,7 +68,7 @@ async function dropDeadStoreLinks(
   const existing = new Set<string>();
   await Promise.all(
     [...storeIds].map(async (id) => {
-      if (await repos.store.get(id)) existing.add(id);
+      if (await repos.forTenant(tenantId).store.get(id)) existing.add(id);
     }),
   );
 

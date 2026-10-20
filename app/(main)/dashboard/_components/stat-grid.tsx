@@ -11,16 +11,18 @@ import { Stat } from "@/components/ui/stat";
 import { formatYen } from "@/lib/utils/format";
 import { getDashboardStats } from "@/lib/queries/stats";
 import { CACHE_TAGS } from "@/lib/cache";
+import { resolveTenantId } from "@/lib/tenant/context";
 
-async function loadStats() {
+async function loadStats(tenantId: string) {
   "use cache";
   cacheLife("longBackstop");
-  cacheTag(CACHE_TAGS.stats, CACHE_TAGS.stores, CACHE_TAGS.handoffs);
-  return getDashboardStats();
+  cacheTag(CACHE_TAGS.stats(tenantId), CACHE_TAGS.stores(tenantId), CACHE_TAGS.handoffs(tenantId));
+  return getDashboardStats(tenantId);
 }
 
 export async function StatGrid() {
-  const stats = await loadStats();
+  const tenantId = await resolveTenantId();
+  const stats = await loadStats(tenantId);
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
       <Stat

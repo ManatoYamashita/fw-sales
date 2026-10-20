@@ -42,12 +42,12 @@ beforeEach(() => {
 // repos に deal を生やさない。本 Action が deals へ触れたら TypeError で落ちるため、
 // 「Deal.assigned_sales_user_id を変更しない」ことの機械的な担保にもなる。
 vi.mock("@/lib/repositories", () => ({
-  repos: {
+  repos: ((tenantRepos) => ({ ...tenantRepos, forTenant: () => tenantRepos }))({
     store: { update: mockUpdate },
     eventLog: { insert: mockInsert },
     transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn({ store: { getForUpdate: mockGetForUpdate, update: mockUpdate } }),
     profile: { findById: mockFindProfileById },
-  },
+  }),
 }));
 
 vi.mock("next/cache", () => ({
@@ -117,8 +117,8 @@ describe("updateSalesProgressAction", () => {
     });
     // 保存直後に必ず読むタグは updateTag で即時失効する (下の describe で詳述)
     const updated = mockUpdateTag.mock.calls.map((c) => c[0]);
-    expect(updated).toContain("stores");
-    expect(updated).toContain("store:store_1");
+    expect(updated).toContain("tenant:cfe871a5-8fc7-42da-9677-3a050665cafb:stores");
+    expect(updated).toContain("tenant:cfe871a5-8fc7-42da-9677-3a050665cafb:store:store_1");
   });
 
   it("空文字は null に正規化される (= フィールドのクリア)", async () => {
@@ -459,7 +459,7 @@ describe("updateSalesProgressAction: キャッシュ失効", () => {
     );
 
     expect(result.ok).toBe(true);
-    expect(tagsOf(mockUpdateTag).sort()).toEqual(["store:store_1", "stores"]);
+    expect(tagsOf(mockUpdateTag).sort()).toEqual(["tenant:cfe871a5-8fc7-42da-9677-3a050665cafb:store:store_1", "tenant:cfe871a5-8fc7-42da-9677-3a050665cafb:stores"]);
   });
 
   it("保存直後に見るタグを revalidateTag (stale-while-revalidate) に残さない", async () => {
@@ -468,8 +468,8 @@ describe("updateSalesProgressAction: キャッシュ失効", () => {
     await updateSalesProgressAction("store_1", makeFormData({ memo: "メモ" }));
 
     const revalidated = tagsOf(mockRevalidateTag);
-    expect(revalidated).not.toContain("stores");
-    expect(revalidated).not.toContain("store:store_1");
+    expect(revalidated).not.toContain("tenant:cfe871a5-8fc7-42da-9677-3a050665cafb:stores");
+    expect(revalidated).not.toContain("tenant:cfe871a5-8fc7-42da-9677-3a050665cafb:store:store_1");
   });
 
   it("集計系タグは従来どおり revalidateTag(_, 'max') で背景更新する", async () => {
@@ -478,10 +478,10 @@ describe("updateSalesProgressAction: キャッシュ失効", () => {
     await updateSalesProgressAction("store_1", makeFormData({ memo: "メモ" }));
 
     expect(tagsOf(mockRevalidateTag).sort()).toEqual([
-      "action-queue",
-      "kpi",
-      "pipeline",
-      "stats",
+      "tenant:cfe871a5-8fc7-42da-9677-3a050665cafb:action-queue",
+      "tenant:cfe871a5-8fc7-42da-9677-3a050665cafb:kpi",
+      "tenant:cfe871a5-8fc7-42da-9677-3a050665cafb:pipeline",
+      "tenant:cfe871a5-8fc7-42da-9677-3a050665cafb:stats",
     ]);
     for (const call of mockRevalidateTag.mock.calls) {
       expect(call[1]).toBe("max");
