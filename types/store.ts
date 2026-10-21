@@ -34,6 +34,8 @@ export interface Store {
   site_url: string;
   instagram_url: string;
   phone: string;
+  /** 契約連絡先メール。空文字は未登録。旧JSONスナップショット互換のため入力では省略可。 */
+  contact_email?: string;
   target_service: string; // CSV: "MEO,HP,インスタ"
   review_count: number;
   review_avg: number;
