@@ -191,8 +191,9 @@ function invalidateAllStoreScopes(id?: string) {
  * 保存直後に必ず読まれる 2 つ (`store:{id}` = 店舗詳細 / `stores` = 店舗一覧) だけを
  * 即時失効し、集計系は従来どおり背景更新に任せる。
  *
- * `invalidateAllStoreScopes` は create/update/delete が使う既存の失効なので、
- * そちらの意味は変えずに本関数を別途用意している。
+ * `invalidateAllStoreScopes` は create/delete が使う既存の失効なので、
+ * そちらの意味は変えずに本関数を別途用意している。店舗全体の編集 (`updateStoreAction`) も
+ * 保存後に店舗詳細へ移るため、本関数を使う (#384)。
  */
 function invalidateStoreScopesImmediate(id: string) {
   updateTag(CACHE_TAGS.store(id));
@@ -300,7 +301,9 @@ export async function updateStoreAction(
   if (assigneeError) return failure(assigneeError);
   const updated = await repos.store.update(id, input);
   if (!updated) return failure("店舗が見つかりませんでした");
-  invalidateAllStoreScopes(id);
+  // 保存後はすぐ店舗詳細へ移り、保存した値を確かめる。stale-while-revalidate の失効だと
+  // 移動先が旧値を表示する (アドレスを変えたのに詳細に旧アドレスが出る。#384 の E2E で検出)。
+  invalidateStoreScopesImmediate(id);
   return success({ id }, "更新しました");
 }
 
@@ -337,6 +340,12 @@ export async function updateStorePatchAction(
     const email = normalizeContactEmail(patch.contact_email);
     if (!email.ok) return failure(email.error);
     patch = { ...patch, contact_email: email.value };
+  }
+  // 基本情報カードは担当者の「未割当」を空文字で送る。uuid 列に空文字は入らず
+  // (22P02 で保存全体が失敗する)、担当者の無い店舗ではアドレスも保存できなかったため、
+  // 未割当 (null) に直す (#384 の E2E で検出)。
+  for (const key of ["assigned_planner_user_id", "assigned_sales_user_id"] as const) {
+    if (patch[key] === "") patch = { ...patch, [key]: null };
   }
   const updated = await repos.store.update(id, patch);
   if (!updated) return failure("店舗が見つかりませんでした");

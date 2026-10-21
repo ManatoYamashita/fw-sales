@@ -7,6 +7,7 @@
  * - 不正な値やログインしていない呼び出しでは、DB に何も書かない
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { CACHE_TAGS } from "@/lib/cache";
 
 vi.mock("server-only", () => ({}));
 const mocks = vi.hoisted(() => ({
@@ -15,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   findProfile: vi.fn(),
   getCurrentProfile: vi.fn(),
   redirect: vi.fn(),
+  updateTag: vi.fn(),
 }));
 vi.mock("@/lib/repositories", () => ({
   repos: {
@@ -22,7 +24,7 @@ vi.mock("@/lib/repositories", () => ({
     profile: { findById: mocks.findProfile },
   },
 }));
-vi.mock("next/cache", () => ({ revalidateTag: vi.fn(), updateTag: vi.fn() }));
+vi.mock("next/cache", () => ({ revalidateTag: vi.fn(), updateTag: mocks.updateTag }));
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
 vi.mock("@/lib/supabase/server", () => ({ getCurrentProfile: mocks.getCurrentProfile }));
 
@@ -106,6 +108,12 @@ describe("updateStoreAction (店舗全体の編集)", () => {
     expect(lastUpdatePatch()).toMatchObject({ memo: "メモ" });
   });
 
+  it("保存後に移る店舗詳細が新しい値を表示するよう、店舗のキャッシュを即時に失効する", async () => {
+    await updateStoreAction("store_1", null, storeForm({ contact_email: "new@example.com" }));
+    expect(mocks.updateTag).toHaveBeenCalledWith(CACHE_TAGS.store("store_1"));
+    expect(mocks.updateTag).toHaveBeenCalledWith(CACHE_TAGS.stores);
+  });
+
   it("空文字を送ったときだけ、アドレスを消す", async () => {
     await updateStoreAction("store_1", null, storeForm({ contact_email: "  " }));
     expect(lastUpdatePatch()).toMatchObject({ contact_email: "" });
@@ -155,6 +163,19 @@ describe("updateStorePatchAction (店舗詳細の部分更新)", () => {
       expect(result.ok).toBe(false);
     }
     expect(mocks.update).not.toHaveBeenCalled();
+  });
+
+  it("基本情報カードが送る担当者の空文字 (未割当) は null にして保存する", async () => {
+    await updateStorePatchAction("store_1", {
+      contact_email: "a@example.com",
+      assigned_planner_user_id: "",
+      assigned_sales_user_id: "",
+    } as never);
+    expect(lastUpdatePatch()).toMatchObject({
+      contact_email: "a@example.com",
+      assigned_planner_user_id: null,
+      assigned_sales_user_id: null,
+    });
   });
 
   it("ログインしていなければ保存しない", async () => {
