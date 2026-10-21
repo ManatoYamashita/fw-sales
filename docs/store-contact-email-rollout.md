@@ -1,13 +1,13 @@
 # 契約連絡先メールアドレス（stores.contact_email）の段階リリース
 
-Issue: [#384](https://github.com/ManatoYamashita/fw-sales/issues/384) ／ Phase 1: PR [#387](https://github.com/ManatoYamashita/fw-sales/pull/387)
+Issue: [#384](https://github.com/ManatoYamashita/fw-sales/issues/384) ／ Phase 1: PR [#387](https://github.com/ManatoYamashita/fw-sales/pull/387) ／ Phase 2: PR [#388](https://github.com/ManatoYamashita/fw-sales/pull/388)
 
 `main`へのpushでは、VercelのデプロイとGitHub ActionsのApply Migrations（dev→prd）が互いを待たずに進みます。新しい列を読むアプリが列より先に本番へ出ると、店舗の一覧・詳細が`column does not exist`で落ちます。そのため、DBの変更とアプリの変更を2つのPRに分けます。
 
 | 段階 | 変えるもの | 変えないもの |
 | --- | --- | --- |
 | Phase 1（#387） | `drizzle/0033_add_store_contact_email.sql`。`--custom`で生成したため、snapshotは0032と同じ | `lib/db/schema.ts`、型、アプリ |
-| Phase 2 | `schema.ts`・型・画面・Actions、列の定義を確かめるmigration | 列そのもの（Phase 1で追加済み） |
+| Phase 2（#388） | `schema.ts`・型・画面・Actions、列の定義を確かめるmigration（0034） | 列そのもの（Phase 1で追加済み） |
 
 ## Phase 1：merge前と適用後
 
@@ -58,7 +58,9 @@ ALTER TABLE "stores" ADD COLUMN "contact_email" text DEFAULT '' NOT NULL;
 
 ```sql
 -- 0033 で追加済みの stores.contact_email が、schema.ts と同じ定義 (text / NOT NULL / DEFAULT '') かを確かめる (#384)。
--- 列を足す DDL ではないため、stores のロックは取らない。定義が違えば migration 全体を失敗させる。
+-- information_schema.columns を読む間だけ stores の AccessShare ロックを一瞬取るため、待ちを 3 秒で打ち切る。
+SET LOCAL lock_timeout = '3s';
+--> statement-breakpoint
 DO $$
 DECLARE
   col record;
@@ -83,7 +85,9 @@ END $$;
 | --- | --- |
 | 生成された`ADD COLUMN`のまま | 列のあるdev・prdで`column already exists`になり、Apply Migrationsが失敗する。Vercelはアプリを先に配信するので、migrationの来歴が止まったまま本番が動くことになる |
 | `ADD COLUMN IF NOT EXISTS` | 既存の列の型・NOT NULL・DEFAULTが違っていても、NOTICEを出すだけで通る（NULL許容の列で再現済み）。さらに、何もしない場合でも`stores`のACCESS EXCLUSIVEロックを取る |
-| 確認ブロック（採用） | カタログを読むだけで、`stores`のロックを取らない。列が無い場合と定義が違う場合は、migration全体を失敗させる |
+| 確認ブロック（採用） | 列の定義を読むだけ。列が無い場合と定義が違う場合は、migration全体を失敗させる |
+
+確認ブロックは`information_schema.columns`を読む間だけ、`stores`のAccessShareロックを一瞬取り、読み終えるとすぐ放します。通常の読み書きとはぶつかりません。ただ、ほかのDDLが`stores`の排他ロックを持っていると、その間は待たされます（PostgreSQL 17.11で再現済み）。そのため、0033と同じく`lock_timeout`を3秒にしています。
 
 ### 2. レビューで確かめること（PRのチェックリストに写す）
 
@@ -113,9 +117,22 @@ Issue #384の「本番安全性レビュー」とPR #387の補足から、DBに�
   - 対象：`pipeline/_components/kanban-board.tsx`、`dashboard/_components/action-queue.tsx`、`research/[storeId]`など
 - [ ] 監査payloadは`changedFields`（項目名）だけのまま。アドレスの値をログ・エラー本文・AIのプロンプトに入れない
 
+## Phase 1からPhase 2までのマージ順序
+
+PR #388はPR #387のブランチを土台にしたPRです（stacked PR）。次の順に進め、どの段階でも条件を満たさなければ止めます。
+
+1. **PR #387のマージ前：** [手動バックアップと復元確認](manual-db-backup-runbook.md)を、PostgreSQL 17系で、エラー0件で終えます。結果は#387に記録します。PR #388はDraftのままにします。
+2. **PR #387をmainにマージする：** Apply Migrationsのmigrate-devとmigrate-prdが成功し、両方で`db:verify-hashes`と`db:verify-fks`がOKになることを確かめます。
+3. **「Phase 2の着手条件」のSQLを、本番とdevで実行する：** 期待どおりであることを確かめ、結果を#384に記録します。
+4. **PR #388のベースをmainに変える：** GitHubで「Edit」からbaseを`main`に変えます。#387がsquashではなく通常のmergeであれば、差分はPhase 2の分だけになります。squash mergeだった場合は、`git rebase --onto origin/main feat/issue-384-db-contact-email`でPhase 2のcommitだけを載せ直します。
+5. **ほかのmigrationが先にmainへ入っていないかを確かめる：** mainの最後のmigrationが0033でなければ、0034の番号・journal・snapshot（prevId）を作り直します。生成し直したSQLの中身は、もう一度確認ブロックに置き換えます。そのうえで`pnpm db:generate`が`No schema changes`になることを確かめます。
+6. **Vercel Previewを再実行する：** devに0033が入った後は、Previewのビルドが通るはずです。通らない場合は、ログで`contact_email`以外の原因を調べます。PreviewはdevのDBを使います。Previewを通すためだけに、devへ手でmigrationを流すことはしません。
+7. **CIの全ジョブとPreviewが成功し、レビューが済んだら、PR #388をReady for reviewにする：** マージは利用の少ない時間帯に行います。0034は列の定義を確かめるだけなので、データは変わりません。
+8. **PR #388をマージした後：** Apply Migrationsが成功し、来歴が35件（`max(created_at)`が0034の`when`）になることを確かめます。そのうえで、本番の店舗詳細でアドレスの登録・コピー・削除ができること、一覧画面のHTMLにアドレスが含まれないことを確かめます。
+
 ## 切り戻し
 
 - **migrationのcommitをrevertしない。** 適用済みの来歴がorphanになり、`db:verify-hashes`で以後のApply Migrationsが止まります。
-- **Phase 2のアプリに問題が出た場合：** Vercelで直前のデプロイに戻します。列は残したままで、旧版のアプリは列があっても動きます。
+- **Phase 2のアプリに問題が出た場合：** Vercelで直前のデプロイに戻します。列は残したままで、旧版のアプリは列があっても動きます。Phase 2の間に登録されたアドレスは列に残ります。旧版のアプリは、列を知らないまま更新しても値を消しません（Phase 1の結合テストで確認済み）。
 - **Phase 2のmigrationが失敗した場合：** トランザクション全体がROLLBACKされます。確認ブロックの失敗メッセージ（Supabaseの Postgresログに出ます）で原因を調べ、`schema.ts`と本番の定義のどちらが想定と違うのかを切り分けます。
 - **列を消す必要がある場合：** Phase 2を出す前で、かつ`filled = 0`の場合に限ります。新しい`--custom`のmigrationで`ALTER TABLE "stores" DROP COLUMN IF EXISTS "contact_email";`を流します。
