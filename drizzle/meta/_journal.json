@@ -232,6 +232,13 @@
       "when": 1792191226126,
       "tag": "0032_add_tenants_and_memberships",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1792555307007,
+      "tag": "0033_add_store_contact_email",
+      "breakpoints": true
     }
   ]
 }
