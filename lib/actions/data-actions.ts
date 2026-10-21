@@ -167,6 +167,31 @@ export async function clearAllAction(): Promise<ActionResult> {
   return success(undefined, "全データを削除しました");
 }
 
+/**
+ * インポートする店舗の契約連絡先メールを正規化する。キーがある店舗だけを検証し、
+ * エラー文言には何件目かだけを含める (アドレスそのものは画面にもログにも出さない)。
+ */
+function normalizeImportedContactEmails(
+  importedStores: DbSnapshot["stores"],
+): { ok: true; stores: DbSnapshot["stores"] } | { ok: false; error: string } {
+  const out: DbSnapshot["stores"] = [];
+  for (const [index, s] of importedStores.entries()) {
+    if (s == null || typeof s !== "object" || !Object.hasOwn(s, "contact_email")) {
+      out.push(s);
+      continue;
+    }
+    const normalized = normalizeContactEmail(s.contact_email);
+    if (!normalized.ok) {
+      return {
+        ok: false,
+        error: `${index + 1}件目の店舗の契約連絡先メールアドレスが不正なため、インポートしませんでした。`,
+      };
+    }
+    out.push({ ...s, contact_email: normalized.value });
+  }
+  return { ok: true, stores: out };
+}
+
 export async function importJsonAction(
   _prev: ActionResult | null,
   formData: FormData,
@@ -181,9 +206,15 @@ export async function importJsonAction(
     const text = await file.text();
     const parsed = JSON.parse(text);
 
-    const importedStores = Array.isArray(parsed?.stores)
+    const rawStores = Array.isArray(parsed?.stores)
       ? (parsed.stores as DbSnapshot["stores"])
       : undefined;
+    // 契約連絡先メール (#384) は DB に書く前に全件を検証し、1 件でも不正なら何も書かない。
+    // 旧 JSON にキーが無い店舗はキーを省いたまま渡し、既存のアドレスを保持する
+    // (`toDbRow` が列ごと省くため、upsert の SET にも入らない)。
+    const checkedStores = rawStores ? normalizeImportedContactEmails(rawStores) : undefined;
+    if (checkedStores && !checkedStores.ok) return failure(checkedStores.error);
+    const importedStores = checkedStores?.stores;
     const importedDeals = Array.isArray(parsed?.deals)
       ? (parsed.deals as DbSnapshot["deals"])
       : undefined;
@@ -208,15 +239,7 @@ export async function importJsonAction(
         // ai_analysis_result はオブジェクト ↔ text 列の変換のため toDbRow 経由
         if (importedStores) {
           for (const s of importedStores) {
-            // 旧JSONに無いキーはそのまま省略し、既存のアドレスを保持する。
-            // ある場合のみ型・長さ・形式を検証してからDBに渡す。
-            let candidate = s;
-            if (s != null && Object.prototype.hasOwnProperty.call(s, "contact_email")) {
-              const normalized = normalizeContactEmail(s.contact_email);
-              if (!normalized.ok) throw new Error(normalized.error);
-              candidate = { ...s, contact_email: normalized.value };
-            }
-            const row = storeToDbRow(candidate);
+            const row = storeToDbRow(s);
             await tx
               .insert(stores)
               .values(row)

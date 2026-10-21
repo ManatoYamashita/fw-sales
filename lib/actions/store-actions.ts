@@ -34,7 +34,7 @@ import {
   success,
   type ActionResult,
 } from "./_helpers";
-import { requireAdmin, requireSignedInWithProfile } from "./_authz";
+import { requireAdmin, requireSignedIn, requireSignedInWithProfile } from "./_authz";
 import { AUDIT_EVENTS, SALES_PROGRESS_FIELDS, type SalesProgressField } from "@/lib/observability/events";
 import { snapshotActor } from "@/lib/observability/actor";
 import { writeAudit } from "@/lib/observability/audit";
@@ -227,6 +227,8 @@ export async function createStoreAction(
   _prev: ActionResult<{ id: string }> | null,
   formData: FormData,
 ): Promise<ActionResult<{ id: string }>> {
+  const denied = await requireSignedIn();
+  if (denied) return denied;
   const input: StoreInput = {
     ...buildStoreInput(formData),
     google_place_id: null,
@@ -251,6 +253,9 @@ export async function createStoreAction(
 }
 
 export async function createStoreAndRedirect(formData: FormData) {
+  if (await requireSignedIn()) {
+    throw new Error("ログインが必要です");
+  }
   const input: StoreInput = {
     ...buildStoreInput(formData),
     google_place_id: null,
@@ -279,6 +284,8 @@ export async function updateStoreAction(
   _prev: ActionResult<{ id: string }> | null,
   formData: FormData,
 ): Promise<ActionResult<{ id: string }>> {
+  const denied = await requireSignedIn();
+  if (denied) return denied;
   const input = buildStoreInput(formData);
   // 旧画面が開いたままの場合、送られてこない列は変更しない。
   if (!formData.has("contact_email")) {
@@ -322,7 +329,11 @@ export async function updateStorePatchAction(
   id: string,
   patch: StorePatch,
 ): Promise<ActionResult> {
-  if ("contact_email" in patch) {
+  const denied = await requireSignedIn();
+  if (denied) return denied;
+  // キーが無い (または undefined の) patch は列を変更しない。地図・Web 資産・店舗名の
+  // 編集や、アドレス欄を持たない旧画面の基本情報カードがこれにあたる。
+  if (patch.contact_email !== undefined) {
     const email = normalizeContactEmail(patch.contact_email);
     if (!email.ok) return failure(email.error);
     patch = { ...patch, contact_email: email.value };
