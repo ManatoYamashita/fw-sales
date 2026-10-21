@@ -48,6 +48,7 @@ export function StoreEditForm({
     site_url: store.site_url,
     instagram_url: store.instagram_url,
     phone: store.phone,
+    contact_email: store.contact_email ?? "",
     target_service: store.target_service,
     review_count: String(store.review_count ?? ""),
     review_avg: String(store.review_avg ?? ""),
@@ -234,6 +235,17 @@ export function StoreEditForm({
               name="phone"
               value={form.phone}
               onChange={onText("phone")}
+            />
+          </FormField>
+          <FormField label="契約連絡先メールアドレス" htmlFor="contact_email" className="md:col-span-2">
+            <Input
+              id="contact_email"
+              name="contact_email"
+              type="email"
+              maxLength={254}
+              value={form.contact_email}
+              onChange={onText("contact_email")}
+              placeholder="contract@example.com"
             />
           </FormField>
           <FormField
