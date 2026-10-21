@@ -37,7 +37,7 @@ import { normalizeContactEmail } from "@/lib/domain/store-contact-email";
 import { clipForLog } from "@/lib/utils/log-sanitize";
 import { CACHE_TAGS } from "@/lib/cache";
 import { failure, success, type ActionResult } from "./_helpers";
-import { requireAdmin } from "./_authz";
+import { requireAdmin, requireSignedIn } from "./_authz";
 import {
   DATA_RESET_DENIED_MESSAGE,
   isDataResetAllowed,
@@ -281,6 +281,9 @@ export async function importJsonAction(
 }
 
 export async function getSnapshotForExportAction(): Promise<DbSnapshot> {
+  // 全件 (契約連絡先メール・電話番号を含む) を返すため、`/api/export` と同じく
+  // ログインを要求する (#384 のレビュー)。権限の範囲 (admin に絞るか) は変えていない。
+  if (await requireSignedIn()) throw new Error("ログインが必要です");
   // 3 entity を DB から並列取得 (Req 8.1, 8.4)。
   const [dbDeals, dbStores, dbHandoffs] = await Promise.all([
     repos.deal.list(),
