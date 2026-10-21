@@ -48,6 +48,7 @@ export interface BasicInfoCardProps {
 export function BasicInfoCard({ store, profiles }: BasicInfoCardProps) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
+  const [emailCopied, setEmailCopied] = useState(false);
   const [pending, startTransition] = useTransition();
   const [form, setForm] = useState({
     prefecture: store.prefecture,
@@ -56,6 +57,7 @@ export function BasicInfoCard({ store, profiles }: BasicInfoCardProps) {
     genre: store.genre,
     channel: store.channel,
     has_contact_form: store.has_contact_form,
+    contact_email: store.contact_email ?? "",
     target_service: store.target_service,
     operator_type: store.operator_type,
     operator_name: store.operator_name,
@@ -102,6 +104,7 @@ export function BasicInfoCard({ store, profiles }: BasicInfoCardProps) {
       genre: store.genre,
       channel: store.channel,
       has_contact_form: store.has_contact_form,
+      contact_email: store.contact_email ?? "",
       target_service: store.target_service,
       operator_type: store.operator_type,
       operator_name: store.operator_name,
@@ -192,6 +195,16 @@ export function BasicInfoCard({ store, profiles }: BasicInfoCardProps) {
             <FormField label="業態" htmlFor="genre">
               <Input id="genre" value={form.genre} onChange={onText("genre")} />
             </FormField>
+            <FormField label="契約連絡先メールアドレス" htmlFor="contact_email" className="md:col-span-2">
+              <Input
+                id="contact_email"
+                type="email"
+                maxLength={254}
+                value={form.contact_email}
+                onChange={onText("contact_email")}
+                placeholder="contract@example.com"
+              />
+            </FormField>
             <FormField label="問い合わせフォーム" htmlFor="has_contact_form">
               <Select
                 width="full"
@@ -265,6 +278,29 @@ export function BasicInfoCard({ store, profiles }: BasicInfoCardProps) {
               <ChannelBadge channel={store.channel} />
             </Row>
             <Row label="問い合わせフォーム">{store.has_contact_form}</Row>
+            <Row label="契約連絡先メールアドレス">
+              {store.contact_email ? (
+                <span className="flex flex-wrap items-center gap-2">
+                  <a className="break-all underline underline-offset-2" href={`mailto:${store.contact_email}`}>
+                    {store.contact_email}
+                  </a>
+                  <button
+                    type="button"
+                    className="text-xs text-primary hover:underline"
+                    aria-label="契約連絡先メールアドレスをコピー"
+                    onClick={() => {
+                      if (!navigator.clipboard) return;
+                      void navigator.clipboard.writeText(store.contact_email ?? "").then(
+                        () => setEmailCopied(true),
+                        () => setEmailCopied(false),
+                      );
+                    }}
+                  >
+                    {emailCopied ? "コピーしました" : "コピー"}
+                  </button>
+                </span>
+              ) : "—"}
+            </Row>
             <Row label="口コミ">
               {store.review_count > 0 ? (
                 <span className="inline-flex items-center gap-2">
