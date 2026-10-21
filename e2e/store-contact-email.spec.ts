@@ -9,7 +9,9 @@ import { e2eDatabaseUrl } from "./support/e2e-db";
  * 削除ができること、不正な値を保存しないこと、ほかの項目の保存でアドレスを消さないことを確かめる。
  *
  * 店舗を作って消すため直列で流す。seed の店舗は他の spec も使うので、seed の店舗を複製した
- * 専用の店舗を作り、最後に消す (`store-basic-info-inline-edit.spec.ts` と同じ方式)。
+ * 専用の店舗をテストごとに作り、最後に消す (`store-basic-info-inline-edit.spec.ts` と同じ方式)。
+ * 店舗詳細はキャッシュされるため、SQL で直接変えた値は画面に出ない。テストごとに別の店舗を、
+ * 最初に開く前に作る。
  */
 test.describe.configure({ mode: "serial" });
 
@@ -17,29 +19,35 @@ test.beforeEach(() => {
   test.slow();
 });
 
-const STORE_ID = "store_e2e_384";
-const STORE_URL = `/stores/${STORE_ID}`;
-const STORE_NAME = "E2E契約連絡先";
+const STORE_ID_PREFIX = "store_e2e_384_";
 const NEW_STORE_NAME = "E2E契約連絡先の新規店舗";
 
 const sql = postgres(e2eDatabaseUrl(), { prepare: false, max: 1 });
 
-async function savedEmail(id = STORE_ID): Promise<string | undefined> {
+async function savedEmail(id: string): Promise<string | undefined> {
   const rows = await sql<{ contact_email: string }[]>`SELECT contact_email FROM stores WHERE id = ${id}`;
   return rows[0]?.contact_email;
 }
 
-test.beforeAll(async () => {
-  await sql`DELETE FROM stores WHERE id = ${STORE_ID} OR name = ${NEW_STORE_NAME}`;
+/** seed の店舗を複製して、このテスト専用の店舗を作る。 */
+async function createStore(suffix: string, contactEmail: string): Promise<string> {
+  const id = `${STORE_ID_PREFIX}${suffix}`;
   await sql.begin(async (tx) => {
     await tx`CREATE TEMP TABLE e2e_store ON COMMIT DROP AS SELECT * FROM stores WHERE id = 'store_005'`;
-    await tx`UPDATE e2e_store SET id = ${STORE_ID}, name = ${STORE_NAME}, contact_email = '', genre = '居酒屋'`;
+    await tx`UPDATE e2e_store SET id = ${id}, name = ${`E2E契約連絡先 ${suffix}`}, contact_email = ${contactEmail}, genre = '居酒屋'`;
     await tx`INSERT INTO stores SELECT * FROM e2e_store`;
   });
-});
+  return id;
+}
+
+async function deleteE2eStores() {
+  await sql`DELETE FROM stores WHERE id LIKE ${`${STORE_ID_PREFIX}%`} OR name = ${NEW_STORE_NAME}`;
+}
+
+test.beforeAll(deleteE2eStores);
 
 test.afterAll(async () => {
-  await sql`DELETE FROM stores WHERE id = ${STORE_ID} OR name = ${NEW_STORE_NAME}`;
+  await deleteE2eStores();
   await sql.end();
 });
 
@@ -49,8 +57,16 @@ const basicCard = (page: Page) =>
 const emailRow = (page: Page) =>
   basicCard(page).locator("dl > div").filter({ has: page.getByText("契約連絡先メールアドレス", { exact: true }) });
 
-async function openDetail(page: Page) {
-  await page.goto(STORE_URL);
+/** 新規登録の「手動」タブで店舗名を入れ、入力フォームを開く。 */
+async function openNewStoreForm(page: Page) {
+  await page.goto("/stores/new?mode=manual");
+  await page.getByRole("textbox", { name: "店舗名" }).fill(NEW_STORE_NAME);
+  await page.getByRole("button", { name: "フォームを開く" }).click();
+  await expect(page.getByLabel("契約連絡先メールアドレス")).toBeVisible({ timeout: 60_000 });
+}
+
+async function openDetail(page: Page, id: string) {
+  await page.goto(`/stores/${id}`);
   await expect(basicCard(page)).toBeVisible({ timeout: 60_000 });
 }
 
@@ -64,8 +80,7 @@ async function saveBasicInfo(page: Page) {
 }
 
 test("新規登録で入力したアドレスを、店舗詳細で表示する", async ({ page }) => {
-  await page.goto("/stores/new");
-  await page.getByLabel("店舗名").fill(NEW_STORE_NAME);
+  await openNewStoreForm(page);
   await page.getByLabel("契約連絡先メールアドレス").fill("  new-contract@example.com ");
   await page.getByRole("button", { name: "登録する" }).click();
   await expect(page).toHaveURL(/\/stores\/store_/, { timeout: 60_000 });
@@ -78,8 +93,7 @@ test("新規登録で入力したアドレスを、店舗詳細で表示する",
 
 test("新規登録で不正なアドレスは保存しない", async ({ page }) => {
   await sql`DELETE FROM stores WHERE name = ${NEW_STORE_NAME}`;
-  await page.goto("/stores/new");
-  await page.getByLabel("店舗名").fill(NEW_STORE_NAME);
+  await openNewStoreForm(page);
   // ブラウザの type="email" は通すが、サーバーの規則 (ドメインにドットが要る) で断る値
   await page.getByLabel("契約連絡先メールアドレス").fill("contract@localhost");
   await page.getByRole("button", { name: "登録する" }).click();
@@ -90,7 +104,8 @@ test("新規登録で不正なアドレスは保存しない", async ({ page }) 
 
 test("基本情報で登録・表示・コピー・削除ができる", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-  await openDetail(page);
+  const id = await createStore("crud", "");
+  await openDetail(page, id);
   await expect(emailRow(page)).toContainText("—");
 
   const input = await editBasicInfo(page);
@@ -99,10 +114,10 @@ test("基本情報で登録・表示・コピー・削除ができる", async ({
   const link = emailRow(page).getByRole("link", { name: "contract.team@example.co.jp" });
   await expect(link).toBeVisible({ timeout: 60_000 });
   await expect(link).toHaveAttribute("href", "mailto:contract.team@example.co.jp");
-  expect(await savedEmail()).toBe("contract.team@example.co.jp");
+  expect(await savedEmail(id)).toBe("contract.team@example.co.jp");
 
-  // コピー: ボタンの名前は「契約連絡先メールアドレスをコピー」、成功すると「コピー済み」に変わる
-  await emailRow(page).getByRole("button", { name: "契約連絡先メールアドレスをコピー" }).click();
+  // コピー: ボタンの名前は「契約連絡先メールアドレスを コピー」 (前半は読み上げ専用)、成功すると「コピー済み」に変わる
+  await emailRow(page).getByRole("button", { name: /契約連絡先メールアドレスを\s*コピー/ }).click();
   await expect(emailRow(page).getByRole("button", { name: /コピー済み/ })).toBeVisible();
   await expect(page.getByText("コピーしました")).toBeVisible();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("contract.team@example.co.jp");
@@ -114,75 +129,81 @@ test("基本情報で登録・表示・コピー・削除ができる", async ({
   await saveBasicInfo(page);
   await expect(emailRow(page)).toContainText("—", { timeout: 60_000 });
   await expect(emailRow(page).getByRole("button", { name: /コピー/ })).toHaveCount(0);
-  expect(await savedEmail()).toBe("");
+  expect(await savedEmail(id)).toBe("");
 });
 
 test("コピーに失敗したら、失敗を知らせる", async ({ page }) => {
-  await sql`UPDATE stores SET contact_email = 'copy-fail@example.com' WHERE id = ${STORE_ID}`;
-  await openDetail(page);
+  await openDetail(page, await createStore("copy_fail", "copy-fail@example.com"));
   await page.evaluate(() => {
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
       value: { writeText: () => Promise.reject(new Error("denied")) },
     });
   });
-  await emailRow(page).getByRole("button", { name: "契約連絡先メールアドレスをコピー" }).click();
+  await emailRow(page).getByRole("button", { name: /契約連絡先メールアドレスを\s*コピー/ }).click();
   await expect(page.getByText("コピーに失敗しました")).toBeVisible();
   await expect(emailRow(page).getByRole("button", { name: /コピー済み/ })).toHaveCount(0);
 });
 
 test("基本情報で不正なアドレスは保存せず、編集を続けられる", async ({ page }) => {
-  await sql`UPDATE stores SET contact_email = 'keep@example.com' WHERE id = ${STORE_ID}`;
-  await openDetail(page);
+  const id = await createStore("invalid", "keep@example.com");
+  await openDetail(page, id);
   const input = await editBasicInfo(page);
   await input.fill("wrong@@example.com");
   await saveBasicInfo(page);
   await expect(page.getByText(/契約連絡先メールアドレスは、半角/)).toBeVisible({ timeout: 60_000 });
   await expect(input).toBeVisible();
-  expect(await savedEmail()).toBe("keep@example.com");
+  expect(await savedEmail(id)).toBe("keep@example.com");
 });
 
 test("基本情報でほかの項目を保存しても、編集中に別の人が登録したアドレスを上書きしない", async ({ page }) => {
-  await sql`UPDATE stores SET contact_email = '' WHERE id = ${STORE_ID}`;
-  await openDetail(page);
+  const id = await createStore("concurrent", "");
+  await openDetail(page, id);
   await editBasicInfo(page);
   // 編集を始めた後に、別の人が登録した
-  await sql`UPDATE stores SET contact_email = 'other-user@example.com' WHERE id = ${STORE_ID}`;
+  await sql`UPDATE stores SET contact_email = 'other-user@example.com' WHERE id = ${id}`;
   await basicCard(page).getByLabel("業態").fill("焼き鳥");
   await saveBasicInfo(page);
   await expect(basicCard(page).getByText("焼き鳥")).toBeVisible({ timeout: 60_000 });
-  expect(await savedEmail()).toBe("other-user@example.com");
+  expect(await savedEmail(id)).toBe("other-user@example.com");
 });
 
 test("店舗全体の編集で、アドレスを変えずに保存すると残り、変えると保存される", async ({ page }) => {
-  await sql`UPDATE stores SET contact_email = 'edit-page@example.com', memo = '' WHERE id = ${STORE_ID}`;
-  await page.goto(`${STORE_URL}/edit`);
+  const id = await createStore("edit_page", "edit-page@example.com");
+  const storeUrl = `/stores/${id}`;
+  await page.goto(`${storeUrl}/edit`);
   const input = page.getByLabel("契約連絡先メールアドレス");
   await expect(input).toHaveValue("edit-page@example.com", { timeout: 60_000 });
   await page.getByLabel("メモ").fill("E2E メモ");
   await page.getByRole("button", { name: "保存する" }).click();
-  await expect(page).toHaveURL(new RegExp(`${STORE_URL}$`), { timeout: 60_000 });
-  expect(await savedEmail()).toBe("edit-page@example.com");
+  await expect(page).toHaveURL(new RegExp(`${storeUrl}$`), { timeout: 60_000 });
+  expect(await savedEmail(id)).toBe("edit-page@example.com");
 
-  await page.goto(`${STORE_URL}/edit`);
+  await page.goto(`${storeUrl}/edit`);
   await page.getByLabel("契約連絡先メールアドレス").fill("changed@example.com");
   await page.getByRole("button", { name: "保存する" }).click();
-  await expect(page).toHaveURL(new RegExp(`${STORE_URL}$`), { timeout: 60_000 });
+  await expect(page).toHaveURL(new RegExp(`${storeUrl}$`), { timeout: 60_000 });
   await expect(emailRow(page).getByRole("link", { name: "changed@example.com" })).toBeVisible();
-  expect(await savedEmail()).toBe("changed@example.com");
+  expect(await savedEmail(id)).toBe("changed@example.com");
 });
 
-test("一覧・パイプラインの画面には、アドレスを渡さない", async ({ page }) => {
-  await sql`UPDATE stores SET contact_email = 'not-in-list@example.com' WHERE id = ${STORE_ID}`;
-  for (const url of ["/stores", "/pipeline", "/dashboard", "/research", `/research/${STORE_ID}`]) {
+test("一覧・パイプライン・ダッシュボード・AI調査の画面には、アドレスを渡さない", async ({ page }) => {
+  const id = await createStore("lists", "");
+  // 画面から保存して、一覧のキャッシュも失効させる (店舗が一覧に載った状態で確かめる)
+  await openDetail(page, id);
+  await (await editBasicInfo(page)).fill("not-in-list@example.com");
+  await saveBasicInfo(page);
+  await expect(emailRow(page).getByRole("link", { name: "not-in-list@example.com" })).toBeVisible({ timeout: 60_000 });
+
+  await page.goto("/stores");
+  await expect(page.getByText("E2E契約連絡先 lists").first()).toBeVisible({ timeout: 60_000 });
+  for (const url of ["/stores", "/pipeline", "/dashboard", "/research", `/research/${id}`]) {
     const response = await page.goto(url);
     expect(response?.ok(), url).toBe(true);
     await page.waitForLoadState("networkidle");
+    // HTML と、その中に埋め込まれた RSC payload (Client Component の props) の両方
     expect(await page.content(), url).not.toContain("not-in-list@example.com");
   }
-  // 店舗詳細には出る (比較のため)
-  await openDetail(page);
-  await expect(page.getByText("not-in-list@example.com")).toBeVisible();
 });
 
 test.describe("スマートフォンの幅", () => {
@@ -190,12 +211,17 @@ test.describe("スマートフォンの幅", () => {
 
   test("長いアドレスでも横にはみ出さず、コピーボタンを押せる", async ({ page }) => {
     const long = `${"very-long-contract-address".repeat(2)}@${"sub".repeat(10)}.example.co.jp`;
-    await sql`UPDATE stores SET contact_email = ${long} WHERE id = ${STORE_ID}`;
-    await openDetail(page);
+    await openDetail(page, await createStore("mobile", long));
     await expect(emailRow(page).getByRole("link", { name: long })).toBeVisible();
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     expect(overflow).toBeLessThanOrEqual(0);
-    const button = emailRow(page).getByRole("button", { name: "契約連絡先メールアドレスをコピー" });
+    const button = emailRow(page).getByRole("button", { name: /契約連絡先メールアドレスを\s*コピー/ });
+    await button.scrollIntoViewIfNeeded();
     await expect(button).toBeInViewport();
+    // 横方向にも画面の中に収まっている (長いアドレスに押し出されない)
+    const box = await button.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(375);
   });
 });
