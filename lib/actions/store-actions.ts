@@ -6,6 +6,7 @@ import { z } from "zod";
 import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
 import { decideChannel } from "@/lib/domain/channel";
+import { normalizeContactEmail } from "@/lib/domain/store-contact-email";
 import { parsePostgresError, formatUserMessage } from "@/lib/db/postgres-error";
 import {
   CHANNELS,
@@ -122,6 +123,7 @@ function buildStoreInput(
     site_url: readString(formData, "site_url"),
     instagram_url: readString(formData, "instagram_url"),
     phone: readString(formData, "phone"),
+    contact_email: readString(formData, "contact_email"),
     target_service: readString(formData, "target_service"),
     review_count: readNumber(formData, "review_count", 0),
     review_avg: readNumber(formData, "review_avg", 0),
@@ -234,6 +236,9 @@ export async function createStoreAction(
     next_action_note: null,
   };
   if (!input.name) return failure("店舗名を入力してください");
+  const email = normalizeContactEmail(formData.get("contact_email") ?? "");
+  if (!email.ok) return failure(email.error);
+  input.contact_email = email.value;
   const assigneeError = await validateAssignedUserIds(input);
   if (assigneeError) return failure(assigneeError);
 
@@ -257,6 +262,9 @@ export async function createStoreAndRedirect(formData: FormData) {
   if (!input.name) {
     throw new Error("店舗名を入力してください");
   }
+  const email = normalizeContactEmail(formData.get("contact_email") ?? "");
+  if (!email.ok) throw new Error(email.error);
+  input.contact_email = email.value;
   const assigneeError = await validateAssignedUserIds(input);
   if (assigneeError) {
     throw new Error(assigneeError);
@@ -272,6 +280,14 @@ export async function updateStoreAction(
   formData: FormData,
 ): Promise<ActionResult<{ id: string }>> {
   const input = buildStoreInput(formData);
+  // 旧画面が開いたままの場合、送られてこない列は変更しない。
+  if (!formData.has("contact_email")) {
+    delete input.contact_email;
+  } else {
+    const email = normalizeContactEmail(formData.get("contact_email"));
+    if (!email.ok) return failure(email.error);
+    input.contact_email = email.value;
+  }
   if (!input.name) return failure("店舗名を入力してください");
   const assigneeError = await validateAssignedUserIds(input);
   if (assigneeError) return failure(assigneeError);
@@ -306,6 +322,11 @@ export async function updateStorePatchAction(
   id: string,
   patch: StorePatch,
 ): Promise<ActionResult> {
+  if ("contact_email" in patch) {
+    const email = normalizeContactEmail(patch.contact_email);
+    if (!email.ok) return failure(email.error);
+    patch = { ...patch, contact_email: email.value };
+  }
   const updated = await repos.store.update(id, patch);
   if (!updated) return failure("店舗が見つかりませんでした");
   // 呼び出し元はすべて店舗詳細の「保存してその場で確認する」編集 (店舗名・業態 /
