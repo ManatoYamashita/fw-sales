@@ -11,7 +11,7 @@ export function normalizeContactEmail(value: unknown): NormalizedContactEmail {
   }
   const normalized = value.trim();
   if (normalized === "") return { ok: true, value: "" };
-  if (normalized.length > CONTACT_EMAIL_MAX_LENGTH || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/u.test(normalized)) {
+  if (normalized.length > CONTACT_EMAIL_MAX_LENGTH || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(normalized)) {
     return { ok: false, error: "契約連絡先メールアドレスの形式を確認してください" };
   }
   return { ok: true, value: normalized };
