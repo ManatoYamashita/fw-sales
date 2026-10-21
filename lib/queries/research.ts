@@ -1,5 +1,6 @@
 import "server-only";
 import { repos } from "@/lib/repositories";
+import { omitContactEmail } from "@/lib/domain/store-contact-email";
 import { classifyResearchQueue, type ResearchQueueBuckets } from "@/lib/domain/research-review";
 
 export type ResearchQueue = ResearchQueueBuckets;
@@ -24,7 +25,8 @@ export async function getResearchQueue(): Promise<ResearchQueue> {
     repos.researchRun.listStoreIdsNeedingReview(),
   ]);
 
-  return classifyResearchQueue(stores, new Set(needsReviewStoreIds));
+  // 調査一覧はアドレスを表示しないため、クライアントへ渡す前に外す (#384)。
+  return classifyResearchQueue(stores.map(omitContactEmail), new Set(needsReviewStoreIds));
 }
 
 /**

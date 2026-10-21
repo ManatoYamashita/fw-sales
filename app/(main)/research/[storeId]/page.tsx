@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { AiResearchWorkbench } from "./_components/ai-research-workbench";
 import { getStoreCached } from "@/lib/queries/stores";
+import { omitContactEmail } from "@/lib/domain/store-contact-email";
 import { repos } from "@/lib/repositories";
 import { isApiKeyConfigured } from "@/lib/env";
 import { getResearchAvailability } from "@/lib/ai/research/availability";
@@ -39,9 +40,10 @@ export default async function ResearchDetailPage({
   // 営業資産生成の唯一の入口 (#300) なので、API キー未設定の判定もここで渡す。
   // AI 調査を実行できない理由も、押す前に示すためここで渡す (#324)。値ではなく固定文のみ。
   const researchAvailability = getResearchAvailability();
+  // AI 調査の画面は契約連絡先メールを使わないため、クライアントへ渡さない (#384)。
   return (
     <AiResearchWorkbench
-      store={store}
+      store={omitContactEmail(store)}
       initialRuns={runs}
       isApiKeyConfigured={isApiKeyConfigured()}
       researchUnavailableMessage={

@@ -1,5 +1,6 @@
 import "server-only";
 import { repos } from "@/lib/repositories";
+import { omitContactEmail } from "@/lib/domain/store-contact-email";
 import type { Store } from "@/types/store";
 import type { Handoff } from "@/types/handoff";
 import { ACTION_READY_STAGES } from "@/lib/domain/stages";
@@ -11,10 +12,12 @@ export interface ActionQueue {
 }
 
 export async function getActionQueue(): Promise<ActionQueue> {
-  const [stores, handoffs] = await Promise.all([
+  const [allStores, handoffs] = await Promise.all([
     repos.store.list(),
     repos.handoff.list(),
   ]);
+  // ダッシュボードのカードはアドレスを表示しないため、クライアントへ渡す前に外す (#384)。
+  const stores = allStores.map(omitContactEmail);
 
   return {
     needsResearch: stores
