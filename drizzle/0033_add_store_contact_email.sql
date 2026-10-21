@@ -5,7 +5,8 @@
 -- `pnpm db:generate --custom` で作ったため、0033 の snapshot は 0032 と同じで、この列を含みません。
 -- schema.ts と snapshot が一致したままなので、アプリに反映するまでの間に別件で db:generate を回しても
 -- この列の DROP は生成されません。アプリへの反映 (#384 の後続 PR) で schema.ts に列を足すと
--- db:generate が同じ ADD COLUMN を再び作るため、その migration は `ADD COLUMN IF NOT EXISTS` に直します。
+-- db:generate が同じ ADD COLUMN を再び作るため、その migration は列の定義を確かめるブロックに置き換えます
+-- (docs/store-contact-email-rollout.md)。
 --
 -- ADD COLUMN は stores の排他ロックを一瞬だけ取ります。長い処理がロックを持っていると、待つ間に後続の
 -- 店舗の読み書きが列に並んでしまうため、待ちを 3 秒で打ち切ります。打ち切った場合は migration 全体が
