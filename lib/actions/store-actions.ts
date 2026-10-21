@@ -7,6 +7,8 @@ import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
 import { decideChannel } from "@/lib/domain/channel";
 import { normalizeContactEmail } from "@/lib/domain/store-contact-email";
+import { parseStorePatch } from "@/lib/domain/store-patch";
+import { clipForLog } from "@/lib/utils/log-sanitize";
 import { parsePostgresError, formatUserMessage } from "@/lib/db/postgres-error";
 import {
   CHANNELS,
@@ -224,6 +226,40 @@ function dumpUnrecognizedErrorShape(scope: string, err: unknown) {
   });
 }
 
+const STORE_WRITE_FAILED = "店舗を保存できませんでした。時間をおいて、もう一度お試しください。";
+
+/**
+ * 店舗の作成・更新の DB エラーを、値を含めずにログへ残す (#384 のレビュー)。
+ *
+ * Drizzle の `DrizzleQueryError` は message に `params:` として保存しようとした値をすべて含み、
+ * cause の PostgresError の `detail` にも `Failing row contains (...)` として行の値が入る。
+ * 捕まえずに投げ直すと Next.js がそれをそのままログへ出すため、契約連絡先メールや電話番号が
+ * Vercel のログに残る。原因の切り分けに要る SQLSTATE・制約名・表・列だけを残す。
+ */
+function logStoreWriteFailure(scope: string, err: unknown) {
+  const parsed = parsePostgresError(err);
+  console.error(`${scope} failed`, {
+    code: parsed?.code,
+    constraint: parsed?.constraint,
+    table: parsed?.table,
+    column: parsed?.column,
+    name: err instanceof Error ? err.name : typeof err,
+  });
+}
+
+/** `work` の DB エラーを値を含まないログに変える。失敗したら `{ ok: false }` を返す。 */
+async function withStoreWriteLog<T>(
+  scope: string,
+  work: () => Promise<T>,
+): Promise<{ ok: true; value: T } | { ok: false }> {
+  try {
+    return { ok: true, value: await work() };
+  } catch (err) {
+    logStoreWriteFailure(scope, err);
+    return { ok: false };
+  }
+}
+
 export async function createStoreAction(
   _prev: ActionResult<{ id: string }> | null,
   formData: FormData,
@@ -245,7 +281,9 @@ export async function createStoreAction(
   const assigneeError = await validateAssignedUserIds(input);
   if (assigneeError) return failure(assigneeError);
 
-  const created = await repos.store.create(input);
+  const written = await withStoreWriteLog("[stores.create]", () => repos.store.create(input));
+  if (!written.ok) return failure(STORE_WRITE_FAILED);
+  const created = written.value;
   invalidateAllStoreScopes(created.id);
   return success(
     { id: created.id },
@@ -275,9 +313,10 @@ export async function createStoreAndRedirect(formData: FormData) {
   if (assigneeError) {
     throw new Error(assigneeError);
   }
-  const created = await repos.store.create(input);
-  invalidateAllStoreScopes(created.id);
-  redirect(`/stores/${created.id}`);
+  const written = await withStoreWriteLog("[stores.create]", () => repos.store.create(input));
+  if (!written.ok) throw new Error(STORE_WRITE_FAILED);
+  invalidateAllStoreScopes(written.value.id);
+  redirect(`/stores/${written.value.id}`);
 }
 
 export async function updateStoreAction(
@@ -299,8 +338,9 @@ export async function updateStoreAction(
   if (!input.name) return failure("店舗名を入力してください");
   const assigneeError = await validateAssignedUserIds(input);
   if (assigneeError) return failure(assigneeError);
-  const updated = await repos.store.update(id, input);
-  if (!updated) return failure("店舗が見つかりませんでした");
+  const written = await withStoreWriteLog("[stores.update]", () => repos.store.update(id, input));
+  if (!written.ok) return failure(STORE_WRITE_FAILED);
+  if (!written.value) return failure("店舗が見つかりませんでした");
   // 保存後はすぐ店舗詳細へ移り、保存した値を確かめる。stale-while-revalidate の失効だと
   // 移動先が旧値を表示する (アドレスを変えたのに詳細に旧アドレスが出る。#384 の E2E で検出)。
   invalidateStoreScopesImmediate(id);
@@ -311,8 +351,16 @@ export async function updateStoreStageAction(
   id: string,
   stage: StageId,
 ): Promise<ActionResult> {
-  const updated = await repos.store.update(id, { stage });
-  if (!updated) return failure("店舗が見つかりませんでした");
+  const denied = await requireSignedIn();
+  if (denied) return denied;
+  // 引数はブラウザから届く任意の値。型の StageId は実行時に何も守らないため、
+  // 定義済みの段階だけを受け付ける (asStage のように既定値へ丸めると、不正な値で
+  // 「未調査」に戻ってしまう)。
+  if (typeof id !== "string" || id.trim() === "") return failure("店舗が指定されていません");
+  if (!(STAGE_IDS as readonly string[]).includes(stage)) return failure("調査段階が不正です");
+  const written = await withStoreWriteLog("[stores.stage]", () => repos.store.update(id, { stage }));
+  if (!written.ok) return failure(STORE_WRITE_FAILED);
+  if (!written.value) return failure("店舗が見つかりませんでした");
   // 店舗詳細の調査段階 Select は選んだ値をその場で表示し続ける (#334)。
   // stale-while-revalidate の失効だと、応答に載る再描画が旧値を返し、
   // 選んだ直後に元の段階へ戻って見える。
@@ -330,25 +378,30 @@ export async function updateStoreStageAction(
  */
 export async function updateStorePatchAction(
   id: string,
-  patch: StorePatch,
+  rawPatch: StorePatch,
 ): Promise<ActionResult> {
   const denied = await requireSignedIn();
   if (denied) return denied;
-  // キーが無い (または undefined の) patch は列を変更しない。地図・Web 資産・店舗名の
-  // 編集や、アドレス欄を持たない旧画面の基本情報カードがこれにあたる。
-  if (patch.contact_email !== undefined) {
-    const email = normalizeContactEmail(patch.contact_email);
-    if (!email.ok) return failure(email.error);
-    patch = { ...patch, contact_email: email.value };
+  if (typeof id !== "string" || id.trim() === "") return failure("店舗が指定されていません");
+  // 引数はブラウザから届く任意の値。編集を許可した項目だけを、値も検証してから DB へ渡す
+  // (`lib/domain/store-patch.ts`)。tenant_id・id・作成日時などを含む patch や、不正な値を
+  // 1 つでも含む patch は、ほかの項目も含めて保存しない。値が undefined のキーは変更しない。
+  const parsed = parseStorePatch(rawPatch);
+  if (!parsed.ok) {
+    console.warn("[store.patch] rejected", {
+      keys: parsed.rejectedKeys.slice(0, 10).map((key) => clipForLog(key, 64)),
+    });
+    return failure(parsed.error);
   }
-  // 基本情報カードは担当者の「未割当」を空文字で送る。uuid 列に空文字は入らず
-  // (22P02 で保存全体が失敗する)、担当者の無い店舗ではアドレスも保存できなかったため、
-  // 未割当 (null) に直す (#384 の E2E で検出)。
-  for (const key of ["assigned_planner_user_id", "assigned_sales_user_id"] as const) {
-    if (patch[key] === "") patch = { ...patch, [key]: null };
-  }
-  const updated = await repos.store.update(id, patch);
-  if (!updated) return failure("店舗が見つかりませんでした");
+  const patch = parsed.patch;
+  const assigneeError = await validateAssignedUserIds({
+    assigned_planner_user_id: patch.assigned_planner_user_id ?? null,
+    assigned_sales_user_id: patch.assigned_sales_user_id ?? null,
+  });
+  if (assigneeError) return failure("担当者が見つかりませんでした");
+  const written = await withStoreWriteLog("[stores.patch]", () => repos.store.update(id, patch));
+  if (!written.ok) return failure(STORE_WRITE_FAILED);
+  if (!written.value) return failure("店舗が見つかりませんでした");
   // 呼び出し元はすべて店舗詳細の「保存してその場で確認する」編集 (店舗名・業態 /
   // 基本情報 / 地図 / Web 資産 / 営業資料)。stale-while-revalidate だと保存直後の
   // router.refresh() が旧値を返し、店舗名を直したのに見出しが戻らない (#297 の E2E で検出)。
@@ -491,6 +544,9 @@ export async function updateSalesProgressAction(
 export async function getStoreDeleteImpactAction(
   ids: readonly string[],
 ): Promise<ActionResult<StoreDeleteImpact>> {
+  // 店舗ごとの商談・調査などの件数を返すため、ログインしていない呼び出しには答えない。
+  const denied = await requireSignedIn();
+  if (denied) return denied;
   if (!Array.isArray(ids) || ids.length === 0) {
     return failure("削除対象の店舗が指定されていません");
   }
