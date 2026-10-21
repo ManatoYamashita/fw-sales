@@ -33,6 +33,7 @@ import { revalidateTag } from "next/cache";
 import { SEED_STORES, SEED_DEALS, SEED_HANDOFFS } from "@/lib/db/seed-data";
 import type { DbSnapshot } from "@/lib/db/snapshot";
 import { repos } from "@/lib/repositories";
+import { normalizeContactEmail } from "@/lib/domain/store-contact-email";
 import { clipForLog } from "@/lib/utils/log-sanitize";
 import { CACHE_TAGS } from "@/lib/cache";
 import { failure, success, type ActionResult } from "./_helpers";
@@ -207,7 +208,15 @@ export async function importJsonAction(
         // ai_analysis_result はオブジェクト ↔ text 列の変換のため toDbRow 経由
         if (importedStores) {
           for (const s of importedStores) {
-            const row = storeToDbRow(s);
+            // 旧JSONに無いキーはそのまま省略し、既存のアドレスを保持する。
+            // ある場合のみ型・長さ・形式を検証してからDBに渡す。
+            let candidate = s;
+            if (s != null && Object.prototype.hasOwnProperty.call(s, "contact_email")) {
+              const normalized = normalizeContactEmail(s.contact_email);
+              if (!normalized.ok) throw new Error(normalized.error);
+              candidate = { ...s, contact_email: normalized.value };
+            }
+            const row = storeToDbRow(candidate);
             await tx
               .insert(stores)
               .values(row)
