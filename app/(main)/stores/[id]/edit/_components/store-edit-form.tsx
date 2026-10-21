@@ -93,6 +93,11 @@ export function StoreEditForm({
   ];
 
   const submit = (formData: FormData) => {
+    // 契約連絡先メールを変えていなければ送らない。updateStoreAction はキーが無ければ
+    // 列を変更しないため、編集を始めた後で別の人が登録したアドレスを上書きしない (#384)。
+    if (String(formData.get("contact_email") ?? "").trim() === (store.contact_email ?? "")) {
+      formData.delete("contact_email");
+    }
     // task 4.2 (PR3a): AiAnalysisPanel 撤去に伴い ai_analysis_result の編集経路はここから除去。
     // 既存値の上書き保護のため formData に明示空文字を入れず、updateStoreAction の
     // readNullableAiAnalysis が FormData から欠落キーを既存値維持として扱う既存挙動に委ねる。
@@ -242,6 +247,7 @@ export function StoreEditForm({
               id="contact_email"
               name="contact_email"
               type="email"
+              autoComplete="off"
               maxLength={254}
               value={form.contact_email}
               onChange={onText("contact_email")}

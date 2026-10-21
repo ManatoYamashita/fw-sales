@@ -11,11 +11,13 @@ import { optionsFromValues } from "@/components/ui/select-logic";
 import { FormField } from "@/components/ui/form-field";
 import { StarRating } from "@/components/ui/star-rating";
 import { ChannelBadge } from "@/components/feature/channel-badge";
+import { CopyButton } from "@/components/feature/copy-button";
 import { ServiceTagList } from "@/components/feature/service-tag-list";
 import { ServiceCheckboxGroup } from "@/app/(main)/stores/new/_components/service-checkbox-group";
 import { runAction } from "@/lib/client/run-action";
 import { updateStorePatchAction } from "@/lib/actions/store-actions";
 import { decideChannel } from "@/lib/domain/channel";
+import { contactEmailMailto } from "@/lib/domain/store-contact-email";
 import { formatDate } from "@/lib/utils/date";
 import {
   CONTACT_FORMS,
@@ -48,7 +50,6 @@ export interface BasicInfoCardProps {
 export function BasicInfoCard({ store, profiles }: BasicInfoCardProps) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
-  const [emailCopied, setEmailCopied] = useState(false);
   const [pending, startTransition] = useTransition();
   const [form, setForm] = useState({
     prefecture: store.prefecture,
@@ -118,8 +119,19 @@ export function BasicInfoCard({ store, profiles }: BasicInfoCardProps) {
     setEditing(false);
   };
 
+  const onEdit = () => {
+    // 前回の保存後に画面が読み直されていれば、その値から編集を始める。
+    reset();
+    setEditing(true);
+  };
+
   const onSave = () => {
     const patch: StorePatch = { ...form };
+    // アドレスを変えていなければ送らない。ほかの項目だけを直したときに、編集を
+    // 始めた後で別の人が登録したアドレスを、この画面の古い値で上書きしないため。
+    if (form.contact_email.trim() === (store.contact_email ?? "")) {
+      delete patch.contact_email;
+    }
     startTransition(async () => {
       const result = await runAction(() => updateStorePatchAction(store.id, patch), {
         success: "更新しました",
@@ -162,7 +174,7 @@ export function BasicInfoCard({ store, profiles }: BasicInfoCardProps) {
             type="button"
             variant="ghost"
             size="sm"
-            onClick={() => setEditing(true)}
+            onClick={onEdit}
           >
             <Pencil className="h-3.5 w-3.5" /> 編集
           </Button>
@@ -199,6 +211,7 @@ export function BasicInfoCard({ store, profiles }: BasicInfoCardProps) {
               <Input
                 id="contact_email"
                 type="email"
+                autoComplete="off"
                 maxLength={254}
                 value={form.contact_email}
                 onChange={onText("contact_email")}
@@ -281,23 +294,13 @@ export function BasicInfoCard({ store, profiles }: BasicInfoCardProps) {
             <Row label="契約連絡先メールアドレス">
               {store.contact_email ? (
                 <span className="flex flex-wrap items-center gap-2">
-                  <a className="break-all underline underline-offset-2" href={`mailto:${store.contact_email}`}>
+                  <a
+                    className="min-w-0 break-all underline underline-offset-2"
+                    href={contactEmailMailto(store.contact_email)}
+                  >
                     {store.contact_email}
                   </a>
-                  <button
-                    type="button"
-                    className="text-xs text-primary hover:underline"
-                    aria-label="契約連絡先メールアドレスをコピー"
-                    onClick={() => {
-                      if (!navigator.clipboard) return;
-                      void navigator.clipboard.writeText(store.contact_email ?? "").then(
-                        () => setEmailCopied(true),
-                        () => setEmailCopied(false),
-                      );
-                    }}
-                  >
-                    {emailCopied ? "コピーしました" : "コピー"}
-                  </button>
+                  <CopyButton text={store.contact_email} target="契約連絡先メールアドレス" />
                 </span>
               ) : "—"}
             </Row>

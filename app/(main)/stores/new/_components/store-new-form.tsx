@@ -370,6 +370,7 @@ export function StoreNewForm({
               id="contact_email"
               name="contact_email"
               type="email"
+              autoComplete="off"
               value={form.contact_email}
               onChange={handlers.contact_email}
               placeholder="contract@example.com"
