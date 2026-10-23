@@ -1,19 +1,51 @@
 import { expect, test, type Page, type Request } from "@playwright/test";
 import postgres from "postgres";
 import { e2eDatabaseUrl } from "./support/e2e-db";
+import { refreshServerCache } from "./support/fresh-cache";
 
 /**
  * 通知ベルの既読化 (#296)。
  *
- * 固定データは scripts/e2e-setup.mjs の ensureE2eNotifications が投入する
- * (未読 3 件 = 実在店舗 / 削除済み店舗 / リンク無し、既読 1 件)。
- * 既読状態を順に変えていくため、1 本のシナリオとして直列に確かめる。
+ * 固定データ (未読 3 件 = 実在店舗 / 削除済み店舗 / リンク無し、既読 1 件) を
+ * `beforeAll` で作り直す。既読状態を順に変えていくため、1 本のシナリオとして直列に
+ * 確かめる。CI の retry でも未読 3 件から始められるよう、毎回作り直す (#390)。
  */
 
 // 追加の通知が既存シナリオの未読件数へ混ざらないよう、同じファイル内で直列に流す。
 test.describe.configure({ mode: "serial" });
 
+const E2E_EMAIL = process.env.E2E_TEST_EMAIL?.trim() || "e2e@example.test";
+
+/** 固定の通知。並び順 (created_at DESC) を固定するため、配列順に新しい日付を振る。 */
+const FIXED_NOTIFICATIONS = [
+  { id: "notif_e2e_alive", title: "E2E: 導楽の調査が完了しました", linkUrl: "/stores/store_001", readAt: null },
+  {
+    id: "notif_e2e_dead",
+    title: "E2E: 削除済み店舗の通知",
+    linkUrl: "/stores/store_e2e_deleted#deep-research",
+    readAt: null,
+  },
+  { id: "notif_e2e_nolink", title: "E2E: リンクの無い通知", linkUrl: null, readAt: null },
+  { id: "notif_e2e_read", title: "E2E: 既読の通知", linkUrl: null, readAt: "2026-10-01" },
+];
+
 const sql = postgres(e2eDatabaseUrl(), { prepare: false, max: 1 });
+
+test.beforeAll(async ({}, testInfo) => {
+  await sql`DELETE FROM notifications WHERE user_id IN (SELECT id FROM profiles WHERE email = ${E2E_EMAIL})`;
+  for (const [index, n] of FIXED_NOTIFICATIONS.entries()) {
+    const createdAt = `2026-10-0${7 - index}`;
+    const rows = await sql`INSERT INTO notifications
+      (id, user_id, kind, title, body, link_url, read_at, created_at, updated_at)
+      SELECT ${n.id}, id, 'research_job_completed', ${n.title}, 'E2E 用の通知です',
+        ${n.linkUrl}, ${n.readAt}, ${createdAt}, ${createdAt}
+      FROM profiles WHERE email = ${E2E_EMAIL}
+      RETURNING id`;
+    expect(rows).toHaveLength(1);
+  }
+  // 通知は 'use cache' で読むので、作り直した未読件数をベルにも出させる。
+  await refreshServerCache(testInfo, ["/stores"]);
+});
 
 test.afterEach(async () => {
   await sql`DELETE FROM notifications WHERE id LIKE 'notif_e2e_351_%'`;
@@ -30,7 +62,7 @@ async function createLinkedNotification(id: string, readAt: string | null = null
     (id, user_id, kind, title, body, link_url, read_at, created_at, updated_at)
     SELECT ${id}, id, 'research_job_completed', ${title}, '既読保存と遷移を確認します',
       '/stores/store_001', ${readAt}, ${now}, ${now}
-    FROM profiles WHERE email = ${process.env.E2E_TEST_EMAIL?.trim() || "e2e@example.test"}
+    FROM profiles WHERE email = ${E2E_EMAIL}
     RETURNING id`;
   expect(rows).toHaveLength(1);
   return title;
