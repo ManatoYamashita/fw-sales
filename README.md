@@ -145,9 +145,11 @@ cp .env.example .env.local
 
 ```bash
 pnpm drizzle-kit migrate          # drizzle/*.sql を順次適用 (推奨)
-# あるいは開発初期のスキーマ調整中は push を併用
-pnpm drizzle-kit push             # スキーマ差分を直接反映 (本番運用では migrate を使用)
 ```
+
+> **dev / prd に `drizzle-kit push` を使わないこと。** push は `lib/db/schema.ts` と実 DB の差分を直接反映するため、migration が先行して schema.ts にまだ無い列 (例: #384 の `stores.contact_email`) を DROP します。dev / prd への適用は `main` への push を契機とする GitHub Actions の Apply Migrations だけで行います。
+>
+> 本番のスキーマを変える migration を merge する前は、[手動バックアップと復元確認](docs/manual-db-backup-runbook.md) を行います (Supabase は Free プランで自動バックアップが無い)。列の追加をアプリより先に出す手順は [`docs/store-contact-email-rollout.md`](docs/store-contact-email-rollout.md) を参照してください。
 
 複数の `drizzle/000N_*.sql` がある場合は番号順に適用されます (`0000` → `0001` → `0002` ...)。スキーマ定義 (`lib/db/schema.ts`) を変更した場合は `pnpm drizzle-kit generate` で SQL を再生成してから `migrate` を実行してください。
 
