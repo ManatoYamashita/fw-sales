@@ -63,7 +63,7 @@ describe("syncRunWithWorkflow", () => {
       vi.spyOn(console, "error").mockImplementation(() => {});
       const d = deps(async () => workflowStatus);
 
-      const result = await syncRunWithWorkflow(makeRun(), d);
+      const result = await syncRunWithWorkflow("cfe871a5-8fc7-42da-9677-3a050665cafb", makeRun(), d);
 
       expect(d.getWorkflowRunStatus).toHaveBeenCalledWith("wrun_1");
       expect(d.runs.updateIfRunning).toHaveBeenCalledWith("research_run_1", {
@@ -83,7 +83,7 @@ describe("syncRunWithWorkflow", () => {
       const d = deps(async () => workflowStatus);
       const run = makeRun({ started_at: "2026-10-10T00:00:00.000Z" });
 
-      const result = await syncRunWithWorkflow(run, d);
+      const result = await syncRunWithWorkflow("cfe871a5-8fc7-42da-9677-3a050665cafb", run, d);
 
       expect(d.runs.updateIfRunning).not.toHaveBeenCalled();
       expect(result).toEqual({ run, markedFailed: false });
@@ -97,7 +97,7 @@ describe("syncRunWithWorkflow", () => {
     });
     const run = makeRun();
 
-    const result = await syncRunWithWorkflow(run, d);
+    const result = await syncRunWithWorkflow("cfe871a5-8fc7-42da-9677-3a050665cafb", run, d);
 
     expect(result).toEqual({ run, markedFailed: false });
     expect(d.runs.updateIfRunning).not.toHaveBeenCalled();
@@ -109,7 +109,7 @@ describe("syncRunWithWorkflow", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     const d = deps(() => new Promise<string>(() => {}));
 
-    const result = await syncRunWithWorkflow(makeRun(), d);
+    const result = await syncRunWithWorkflow("cfe871a5-8fc7-42da-9677-3a050665cafb", makeRun(), d);
 
     expect(result.markedFailed).toBe(false);
     expect(d.runs.updateIfRunning).not.toHaveBeenCalled();
@@ -119,7 +119,7 @@ describe("syncRunWithWorkflow", () => {
     const recorded = makeRun({ status: "failed", error_kind: "fatal:auth_error" });
     const d = deps(async () => "failed", recorded);
 
-    const result = await syncRunWithWorkflow(makeRun(), d);
+    const result = await syncRunWithWorkflow("cfe871a5-8fc7-42da-9677-3a050665cafb", makeRun(), d);
 
     expect(result).toEqual({ run: recorded, markedFailed: false });
   });
@@ -127,9 +127,9 @@ describe("syncRunWithWorkflow", () => {
   it("running 以外の run と、Workflow run ID の記録が無い run は問い合わせない", async () => {
     const d = deps(async () => "failed");
 
-    await syncRunWithWorkflow(makeRun({ status: "succeeded" }), d);
-    await syncRunWithWorkflow(makeRun({ status: "failed" }), d);
-    await syncRunWithWorkflow(makeRun({ token_usage: null }), d);
+    await syncRunWithWorkflow("cfe871a5-8fc7-42da-9677-3a050665cafb", makeRun({ status: "succeeded" }), d);
+    await syncRunWithWorkflow("cfe871a5-8fc7-42da-9677-3a050665cafb", makeRun({ status: "failed" }), d);
+    await syncRunWithWorkflow("cfe871a5-8fc7-42da-9677-3a050665cafb", makeRun({ token_usage: null }), d);
 
     expect(d.getWorkflowRunStatus).not.toHaveBeenCalled();
   });
@@ -148,7 +148,7 @@ describe("readWorkflowRunId", () => {
 describe("linkWorkflowRun", () => {
   it("running の run にだけ記録する (compare-and-swap)", async () => {
     const updateIfRunning = vi.fn(async () => null);
-    await linkWorkflowRun("research_run_1", "wrun_1", { updateIfRunning });
+    await linkWorkflowRun("cfe871a5-8fc7-42da-9677-3a050665cafb", "research_run_1", "wrun_1", { updateIfRunning });
     expect(updateIfRunning).toHaveBeenCalledWith("research_run_1", {
       token_usage: { workflow_run_id: "wrun_1" },
     });
@@ -159,7 +159,7 @@ describe("linkWorkflowRun", () => {
     const updateIfRunning = vi.fn(async () => {
       throw new Error("connection refused 10.0.0.7");
     });
-    await expect(linkWorkflowRun("r", "w", { updateIfRunning })).resolves.toBeUndefined();
+    await expect(linkWorkflowRun("cfe871a5-8fc7-42da-9677-3a050665cafb", "r", "w", { updateIfRunning })).resolves.toBeUndefined();
     expect(JSON.stringify(error.mock.calls)).not.toContain("10.0.0.7");
     error.mockRestore();
   });

@@ -46,5 +46,4 @@ export {
 } from "./place-candidate-repository";
 export {
   makeResearchRunRepo,
-  dbResearchRunRepo,
 } from "./research-run-repository";

@@ -32,8 +32,8 @@ export default async function ResearchDetailPage({
   const [store, runs] = await Promise.all([
     getStoreCached(tenantId, storeId),
     // 調査run一覧は running中の状態を含むため 'use cache' を経由しない
-    // (`repos.researchRun.listForStore` 参照、PR4)。
-    repos.researchRun.listForStore(storeId, 10),
+    // (`repos.forTenant(tenantId).researchRun.listForStore` 参照、PR4)。
+    repos.forTenant(tenantId).researchRun.listForStore(storeId, 10),
   ]);
   if (!store) notFound();
   // AI 店舗調査再設計(Plan v3.2)により、旧 STEP0(外部 Gem へのプロンプト生成・貼付欄)は

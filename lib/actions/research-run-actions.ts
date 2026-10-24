@@ -111,7 +111,7 @@ export async function startResearchRunAction(
   const store = await repos.forTenant(tenantId).store.get(storeId);
   if (!store) return failure("店舗が見つかりません");
 
-  const latest = await repos.researchRun.getLatestForStore(storeId);
+  const latest = await repos.forTenant(tenantId).researchRun.getLatestForStore(storeId);
   let stuckRunFailedId: string | null = null;
   if (latest?.status === "running") {
     // stuck run対策(Plan v3.2 §17): Workflowが想定外にクラッシュし
@@ -120,7 +120,7 @@ export async function startResearchRunAction(
     // (store_research_runs_running_store_idx)が新規runの作成を阻害する前に
     // ここでfailedへ倒してから再調査を許可する。
     if (isRunStuck(latest, nowIso())) {
-      await repos.researchRun.update(latest.id, {
+      await repos.forTenant(tenantId).researchRun.update(latest.id, {
         status: "failed",
         error_kind: "stuck_run_timeout",
         error_message: "処理時間が想定を超えたため中断しました。",
@@ -134,7 +134,7 @@ export async function startResearchRunAction(
 
   let runId: string;
   try {
-    const run = await repos.researchRun.create({
+    const run = await repos.forTenant(tenantId).researchRun.create({
       store_id: storeId,
       requested_by_user_id: session.userId,
     });
@@ -175,7 +175,7 @@ export async function startResearchRunAction(
   let workflowRunId: string;
   try {
     dropBlankVercelUrl();
-    const workflowRun = await start(storeResearchWorkflow, [runId, storeId]);
+    const workflowRun = await start(storeResearchWorkflow, [runId, storeId, tenantId]);
     workflowRunId = workflowRun.runId;
   } catch (err) {
     // DB へ raw message を残さなくなった分、運用診断は structured log 側で担保する
@@ -187,7 +187,7 @@ export async function startResearchRunAction(
       error_name: err instanceof Error ? err.name : typeof err,
       error_constructor: (err as { constructor?: { name?: string } } | null)?.constructor?.name,
     });
-    await repos.researchRun.update(runId, {
+    await repos.forTenant(tenantId).researchRun.update(runId, {
       status: "failed",
       error_kind: "workflow_start_failed",
       // raw な起動エラーを DB へ保存しない(`workflows/store-research.ts:buildFailureRecord`
@@ -200,7 +200,7 @@ export async function startResearchRunAction(
     return failure("調査の開始に失敗しました。しばらくしてから再度お試しください。");
   }
   // enqueue 後に実行基盤で失敗しても気づけるよう、Workflow run と関連付ける (#324)。
-  await linkWorkflowRun(runId, workflowRunId);
+  await linkWorkflowRun(tenantId, runId, workflowRunId);
 
   // 監査は run の作成と Workflow の起動が成立した後に書く。失敗しても起動は取り消さない
   // (`writeAudit` は例外を投げない)。
@@ -232,10 +232,10 @@ export async function getResearchRunStatusAction(
   if (typeof runId !== "string" || runId.trim() === "") {
     return failure("runIdが不正です");
   }
-  const run = await repos.researchRun.get(runId);
+  const run = await repos.forTenant(tenantId).researchRun.get(runId);
   if (!run) return failure("調査結果が見つかりません");
   dropBlankVercelUrl();
-  const synced = await syncRunWithWorkflow(run);
+  const synced = await syncRunWithWorkflow(tenantId, run);
   if (synced.markedFailed) revalidateTag(CACHE_TAGS.store(tenantId, run.store_id), "max");
   return success(synced.run);
 }

@@ -21,7 +21,7 @@ export type ResearchQueue = ResearchQueueBuckets;
 export async function getResearchQueue(tenantId: string): Promise<ResearchQueue> {
   const [stores, needsReviewStoreIds] = await Promise.all([
     repos.forTenant(tenantId).store.list(),
-    repos.researchRun.listStoreIdsNeedingReview(),
+    repos.forTenant(tenantId).researchRun.listStoreIdsNeedingReview(),
   ]);
 
   return classifyResearchQueue(stores, new Set(needsReviewStoreIds));
@@ -38,8 +38,8 @@ export async function getResearchReviewCount(tenantId: string): Promise<number> 
 }
 
 /** 未レビューの AI 調査結果を持つ店舗の id 集合 (#299, `/stores` の調査段階列用)。 */
-export async function getStoreIdsNeedingReview(): Promise<ReadonlySet<string>> {
-  return new Set(await repos.researchRun.listStoreIdsNeedingReview());
+export async function getStoreIdsNeedingReview(tenantId: string): Promise<ReadonlySet<string>> {
+  return new Set(await repos.forTenant(tenantId).researchRun.listStoreIdsNeedingReview());
 }
 
 /**
@@ -48,6 +48,6 @@ export async function getStoreIdsNeedingReview(): Promise<ReadonlySet<string>> {
  * 判定の SQL を 1 本に保つため、店舗単位の専用クエリを作らず
  * {@link getStoreIdsNeedingReview} と同じ一覧から引く。
  */
-export async function storeNeedsResearchReview(storeId: string): Promise<boolean> {
-  return (await getStoreIdsNeedingReview()).has(storeId);
+export async function storeNeedsResearchReview(tenantId: string, storeId: string): Promise<boolean> {
+  return (await getStoreIdsNeedingReview(tenantId)).has(storeId);
 }

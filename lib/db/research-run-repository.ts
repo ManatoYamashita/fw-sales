@@ -15,8 +15,8 @@
 import "server-only";
 
 import { and, count as countAll, desc, eq, isNull } from "drizzle-orm";
-import { db, type DbClient, type Tx } from "./client";
-import { storeResearchRuns } from "./schema";
+import { type DbClient, type Tx } from "./client";
+import { memberships, stores, storeResearchRuns } from "./schema";
 import type {
   ResearchRunRepository,
 } from "@/lib/repositories/research-run-repository";
@@ -33,9 +33,7 @@ import { nowIso } from "@/lib/utils/date";
 import { getResearchRunExpiresMarginMinutes } from "@/lib/env";
 
 /**
- * ドメイン型 (`StoreResearchRun`) への変換に使う行の型。`tenant_id` はまだドメイン型に
- * 持たせていない (テナントで絞るのは #368) ので、変換の入力からも外す。INSERT した値を
- * そのまま変換する `create` では、既定値で埋まる `tenant_id` を持っていないため。
+ * ドメイン型は所属を含めず、repository の closure で tenantId を束縛する (#368)。
  */
 type StoreResearchRunSelectRow = Omit<typeof storeResearchRuns.$inferSelect, "tenant_id">;
 
@@ -137,9 +135,19 @@ function fromDbRow(row: StoreResearchRunSelectRow): StoreResearchRun {
 
 export function makeResearchRunRepo(
   executor: DbClient | Tx,
+  tenantId: string,
 ): ResearchRunRepository {
+  const inTenant = eq(storeResearchRuns.tenant_id, tenantId);
   return {
     async create({ store_id, requested_by_user_id }) {
+      const parent = await executor.select({ id: stores.id }).from(stores)
+        .where(and(eq(stores.tenant_id, tenantId), eq(stores.id, store_id))).limit(1);
+      if (parent.length === 0) throw new Error("店舗が見つかりません");
+      if (requested_by_user_id != null) {
+        const member = await executor.select({ id: memberships.user_id }).from(memberships)
+          .where(and(eq(memberships.tenant_id, tenantId), eq(memberships.user_id, requested_by_user_id))).limit(1);
+        if (member.length === 0) throw new Error("依頼者が見つかりません");
+      }
       const startedAt = nowIso();
       const marginMinutes = getResearchRunExpiresMarginMinutes();
       const expiresAt = new Date(
@@ -148,6 +156,7 @@ export function makeResearchRunRepo(
 
       const row = {
         id: generateId("research_run"),
+        tenant_id: tenantId,
         store_id,
         requested_by_user_id,
         status: "running" as const,
@@ -173,7 +182,7 @@ export function makeResearchRunRepo(
       const rows = await executor
         .select()
         .from(storeResearchRuns)
-        .where(eq(storeResearchRuns.id, id))
+        .where(and(inTenant, eq(storeResearchRuns.id, id)))
         .limit(1);
       const row = rows[0];
       return row ? fromDbRow(row) : null;
@@ -183,7 +192,7 @@ export function makeResearchRunRepo(
       const rows = await executor
         .select()
         .from(storeResearchRuns)
-        .where(eq(storeResearchRuns.store_id, storeId))
+        .where(and(inTenant, eq(storeResearchRuns.store_id, storeId)))
         .orderBy(desc(storeResearchRuns.started_at))
         .limit(1);
       const row = rows[0];
@@ -194,7 +203,7 @@ export function makeResearchRunRepo(
       const rows = await executor
         .select()
         .from(storeResearchRuns)
-        .where(eq(storeResearchRuns.store_id, storeId))
+        .where(and(inTenant, eq(storeResearchRuns.store_id, storeId)))
         .orderBy(desc(storeResearchRuns.started_at))
         .limit(limit);
       return rows.map(fromDbRow);
@@ -206,6 +215,7 @@ export function makeResearchRunRepo(
         .from(storeResearchRuns)
         .where(
           and(
+            inTenant,
             eq(storeResearchRuns.status, "succeeded"),
             isNull(storeResearchRuns.review_completed_at),
           ),
@@ -216,7 +226,8 @@ export function makeResearchRunRepo(
     async count() {
       const rows = await executor
         .select({ value: countAll() })
-        .from(storeResearchRuns);
+        .from(storeResearchRuns)
+        .where(inTenant);
       return rows[0]?.value ?? 0;
     },
 
@@ -224,7 +235,7 @@ export function makeResearchRunRepo(
       const rows = await executor
         .select()
         .from(storeResearchRuns)
-        .where(eq(storeResearchRuns.id, id))
+        .where(and(inTenant, eq(storeResearchRuns.id, id)))
         .for("update")
         .limit(1);
       const row = rows[0];
@@ -235,13 +246,17 @@ export function makeResearchRunRepo(
       const current = await executor
         .select()
         .from(storeResearchRuns)
-        .where(eq(storeResearchRuns.id, id))
+        .where(and(inTenant, eq(storeResearchRuns.id, id)))
         .limit(1);
       const headRow = current[0];
       if (!headRow) return null;
 
       const head = fromDbRow(headRow);
-      const next: StoreResearchRun = { ...head, ...patch };
+      const next: StoreResearchRun = { ...head };
+      for (const column of PATCHABLE_COLUMNS) {
+        const value = patch[column];
+        if (value !== undefined) (next as unknown as Record<string, unknown>)[column] = value;
+      }
 
       await executor
         .update(storeResearchRuns)
@@ -258,7 +273,7 @@ export function makeResearchRunRepo(
           error_message: next.error_message,
           finished_at: next.finished_at,
         })
-        .where(eq(storeResearchRuns.id, id));
+        .where(and(inTenant, eq(storeResearchRuns.id, id)));
 
       return next;
     },
@@ -283,7 +298,7 @@ export function makeResearchRunRepo(
       const rows = await executor
         .update(storeResearchRuns)
         .set(set)
-        .where(and(eq(storeResearchRuns.id, id), eq(storeResearchRuns.status, "running")))
+        .where(and(inTenant, eq(storeResearchRuns.id, id), eq(storeResearchRuns.status, "running")))
         .returning();
 
       const row = rows[0];
@@ -291,5 +306,3 @@ export function makeResearchRunRepo(
     },
   };
 }
-
-export const dbResearchRunRepo: ResearchRunRepository = makeResearchRunRepo(db);

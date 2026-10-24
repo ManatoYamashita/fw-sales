@@ -65,8 +65,6 @@ export interface TxRepos {
   promptTemplate: PromptTemplateRepository;
   /** アプリ全体設定 key-value (Issue #122) で追加。 */
   appSettings: AppSettingsRepository;
-  /** AI 店舗調査 run (AI 店舗調査再設計 Plan v3.2, PR1) で追加。 */
-  researchRun: ResearchRunRepository;
   // task 4.2 (PR3a): deepResearch を撤去 (#121 / #110 連動)。
   // Issue #110: 旧手入力調査テーブルの research も撤去。
 }
@@ -74,16 +72,19 @@ export interface TxRepos {
 /**
  * アプリ全体で参照される repository 集約 + transaction API。
  */
-/** 調査・ユーザー領域の tx repository は後続 PR で移行する (#368)。 */
+/** ユーザー領域の tx repository は後続 PR で移行する (#368)。 */
 export interface TenantTxRepos extends TxRepos {
+  /** AI 店舗調査の通常操作と行ロックを同じテナントに束縛する。 */
+  researchRun: ResearchRunRepository;
   deal: DealRepository;
   handoff: HandoffRepository;
   store: StoreRepository;
   placeCandidate: PlaceCandidateRepository;
 }
 
-/** 移行済みの店舗・商談領域はテナントを指定した入口からだけ利用できる。 */
+/** 移行済みの店舗・商談・調査領域はテナントを指定した入口からだけ利用できる。 */
 export interface TenantRepos {
+  researchRun: ResearchRunRepository;
   deal: DealRepository;
   handoff: HandoffRepository;
   store: StoreRepository;
@@ -102,8 +103,6 @@ export interface Repos {
   promptTemplate: PromptTemplateRepository;
   /** アプリ全体設定 key-value (Issue #122) で追加。 */
   appSettings: AppSettingsRepository;
-  /** AI 店舗調査 run (AI 店舗調査再設計 Plan v3.2, PR1) で追加。 */
-  researchRun: ResearchRunRepository;
   /**
    * 複数リポジトリ書込みを 1 トランザクションで実行する。
    * `db.transaction` で BEGIN/COMMIT/ROLLBACK を自動制御。
@@ -122,7 +121,6 @@ async function buildRepos(): Promise<Repos> {
     dbNotificationRepo,
     dbPromptTemplateRepo,
     dbAppSettingsRepo,
-    dbResearchRunRepo,
     makeDealRepo,
     makeStoreRepo,
     makeHandoffRepo,
@@ -138,10 +136,11 @@ async function buildRepos(): Promise<Repos> {
   const legacyTxRepos = (executor: import("@/lib/db").DbClient | import("@/lib/db").Tx): TxRepos => ({
     profile: makeProfileRepo(executor), membership: makeMembershipRepo(executor),
     notification: makeNotificationRepo(executor), promptTemplate: makePromptTemplateRepo(executor),
-    appSettings: makeAppSettingsRepo(executor), researchRun: makeResearchRunRepo(executor),
+    appSettings: makeAppSettingsRepo(executor),
   });
   const tenantTxRepos = (executor: import("@/lib/db").DbClient | import("@/lib/db").Tx, tenantId: string): TenantTxRepos => ({
     ...legacyTxRepos(executor),
+    researchRun: makeResearchRunRepo(executor, tenantId),
     deal: makeDealRepo(executor, tenantId),
     handoff: makeHandoffRepo(executor, tenantId),
     store: makeStoreRepo(executor, tenantId),
@@ -152,6 +151,7 @@ async function buildRepos(): Promise<Repos> {
     forTenant(tenantId: string): TenantRepos {
       if (!tenantId.trim()) throw new Error("テナントが指定されていません");
       return Object.freeze({
+        researchRun: makeResearchRunRepo(db, tenantId),
         deal: makeDealRepo(db, tenantId),
         handoff: makeHandoffRepo(db, tenantId),
         store: makeStoreRepo(db, tenantId),
@@ -166,7 +166,6 @@ async function buildRepos(): Promise<Repos> {
     notification: dbNotificationRepo,
     promptTemplate: dbPromptTemplateRepo,
     appSettings: dbAppSettingsRepo,
-    researchRun: dbResearchRunRepo,
     transaction: <T>(fn: (tx: TxRepos) => Promise<T>): Promise<T> =>
       db.transaction((tx) => fn(legacyTxRepos(tx))),
   }) satisfies Repos;

@@ -41,7 +41,7 @@ async function loadCounts(tenantId: string) {
   cacheTag(CACHE_TAGS.stores(tenantId), CACHE_TAGS.deals(tenantId), CACHE_TAGS.handoffs(tenantId));
   const [stores, researchRuns, deals, handoffs] = await Promise.all([
     repos.forTenant(tenantId).store.list(),
-    repos.researchRun.count(),
+    repos.forTenant(tenantId).researchRun.count(),
     repos.forTenant(tenantId).deal.list(),
     repos.forTenant(tenantId).handoff.list(),
   ]);
