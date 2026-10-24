@@ -41,6 +41,10 @@ vi.mock("next/cache", () => ({
 vi.mock("next/navigation", () => ({
   redirect: mockRedirect,
 }));
+// ログイン済みの呼び出しとして扱う (未ログインの拒否は store-actions.authz.test.ts)。
+vi.mock("@/lib/supabase/server", () => ({
+  getCurrentProfile: async () => ({ id: "00000000-0000-4000-8000-000000000001" }),
+}));
 
 const { getStoreDeleteImpactAction } = await import("../store-actions");
 

@@ -43,6 +43,7 @@ type FormState = {
   site_url: string;
   instagram_url: string;
   phone: string;
+  contact_email: string;
   target_service: string;
   review_count: string;
   review_avg: string;
@@ -68,6 +69,7 @@ const INITIAL: FormState = {
   site_url: "",
   instagram_url: "",
   phone: "",
+  contact_email: "",
   target_service: "",
   review_count: "",
   review_avg: "",
@@ -361,6 +363,18 @@ export function StoreNewForm({
               onChange={handlers.phone}
               placeholder="例: 03-1234-5678"
               bg={bgFor("phone")}
+            />
+          </FormField>
+          <FormField label="契約連絡先メールアドレス" htmlFor="contact_email" className="md:col-span-2">
+            <MemoInput
+              id="contact_email"
+              name="contact_email"
+              type="email"
+              autoComplete="off"
+              value={form.contact_email}
+              onChange={handlers.contact_email}
+              placeholder="contract@example.com"
+              maxLength={254}
             />
           </FormField>
           <FormField

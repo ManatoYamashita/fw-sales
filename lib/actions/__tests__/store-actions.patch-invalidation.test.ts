@@ -13,7 +13,10 @@ const mocks = vi.hoisted(() => ({ update: vi.fn(), revalidateTag: vi.fn(), updat
 vi.mock("@/lib/repositories", () => ({ repos: ((tenantRepos) => ({ ...tenantRepos, forTenant: () => tenantRepos }))({ store: { update: mocks.update } }) }));
 vi.mock("next/cache", () => ({ revalidateTag: mocks.revalidateTag, updateTag: mocks.updateTag }));
 vi.mock("next/navigation", () => ({ redirect: vi.fn() }));
-vi.mock("@/lib/supabase/server", () => ({ getCurrentProfile: vi.fn() }));
+// updateStorePatchAction はログイン済みであることを先に確かめる (#384)。
+vi.mock("@/lib/supabase/server", () => ({
+  getCurrentProfile: vi.fn().mockResolvedValue({ id: "00000000-0000-4000-8000-000000000001" }),
+}));
 
 const { updateStorePatchAction } = await import("../store-actions");
 

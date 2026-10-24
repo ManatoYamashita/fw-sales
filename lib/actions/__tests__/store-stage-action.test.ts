@@ -18,6 +18,10 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/lib/repositories", () => ({ repos: ((tenantRepos) => ({ ...tenantRepos, forTenant: () => tenantRepos }))({ store: { update: mocks.update } }) }));
 vi.mock("next/cache", () => ({ updateTag: mocks.updateTag, revalidateTag: mocks.revalidateTag }));
 vi.mock("next/navigation", () => ({ redirect: vi.fn() }));
+// ログイン済みの呼び出しとして扱う (未ログインの拒否は store-actions.authz.test.ts)。
+vi.mock("@/lib/supabase/server", () => ({
+  getCurrentProfile: async () => ({ id: "00000000-0000-4000-8000-000000000001" }),
+}));
 
 import { updateStoreStageAction } from "../store-actions";
 
