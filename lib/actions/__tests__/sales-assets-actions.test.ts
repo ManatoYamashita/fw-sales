@@ -48,7 +48,7 @@ vi.mock("@/lib/ai/client", async (importOriginal) => {
 vi.mock("@/lib/repositories", () => ({
   repos: ((tenantRepos) => ({ ...tenantRepos, forTenant: () => tenantRepos }))({
     store: { get: mockStoreGet, update: mockStoreUpdate },
-    profile: { findById: mockProfileFindById },
+    membership: { find: mockProfileFindById },
   }),
 }));
 
@@ -222,7 +222,7 @@ describe("generateSalesAssetsAction — 正常系 (手動貼付フローの回�
 
     await generateSalesAssetsAction(nextStoreId(), "");
 
-    expect(mockProfileFindById).toHaveBeenCalledWith("user-1");
+    expect(mockProfileFindById).toHaveBeenCalledWith("cfe871a5-8fc7-42da-9677-3a050665cafb", "user-1");
     expect(lastAnalysisCall().input.systemPrompt).toContain(
       "私ファーストWEBの山田と申しまして",
     );

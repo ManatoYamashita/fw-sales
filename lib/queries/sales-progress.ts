@@ -42,7 +42,7 @@ export async function listSalesProgressRows(
     listStores(tenantId, {}),
     listDealsCached(tenantId),
     getAllProfiles(tenantId),
-    getStoreIdsNeedingReview(),
+    getStoreIdsNeedingReview(tenantId),
   ]);
   const profilesById = new Map(profiles.map((p) => [p.id, p.display_name]));
   const rows = buildSalesProgressRows(

@@ -288,7 +288,7 @@ describe("startResearchRunAction", () => {
     });
     expect(mockStart).toHaveBeenCalledTimes(1);
     const startArgs = mockStart.mock.calls[0];
-    expect(startArgs?.[1]).toEqual(["research_run_1", storeId]);
+    expect(startArgs?.[1]).toEqual(["research_run_1", storeId, "cfe871a5-8fc7-42da-9677-3a050665cafb"]);
     expect(mockRevalidateTag).toHaveBeenCalled();
   });
 

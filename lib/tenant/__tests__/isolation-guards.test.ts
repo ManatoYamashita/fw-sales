@@ -11,6 +11,8 @@ import type { makeStoreRepo } from "@/lib/db/store-repository";
 import type { makeDealRepo } from "@/lib/db/deal-repository";
 import type { makeHandoffRepo } from "@/lib/db/handoff-repository";
 
+import type { makeResearchRunRepo } from "@/lib/db/research-run-repository";
+
 type Assert<T extends true> = T;
 // 未束縛入口が復活したら typecheck が落ちる。
 type NoUnboundStore = Assert<"store" extends keyof Repos ? false : true>;
@@ -23,7 +25,10 @@ type NoUnboundTxDeals = Assert<"deal" extends keyof TxRepos ? false : true>;
 type NoUnboundTxHandoffs = Assert<"handoff" extends keyof TxRepos ? false : true>;
 type DealFactoryRequiresTenant = Assert<Parameters<typeof makeDealRepo> extends [unknown, string] ? true : false>;
 type HandoffFactoryRequiresTenant = Assert<Parameters<typeof makeHandoffRepo> extends [unknown, string] ? true : false>;
-export type TenantTypeGuards = [NoUnboundStore, NoUnboundCandidates, NoUnboundTxStore, FactoryRequiresTenant,
+type NoUnboundResearch = Assert<"researchRun" extends keyof Repos ? false : true>;
+type NoUnboundTxResearch = Assert<"researchRun" extends keyof TxRepos ? false : true>;
+type ResearchFactoryRequiresTenant = Assert<Parameters<typeof makeResearchRunRepo> extends [unknown, string] ? true : false>;
+export type TenantTypeGuards = [NoUnboundResearch, NoUnboundTxResearch, ResearchFactoryRequiresTenant, NoUnboundStore, NoUnboundCandidates, NoUnboundTxStore, FactoryRequiresTenant,
   NoUnboundDeals, NoUnboundHandoffs, NoUnboundTxDeals, NoUnboundTxHandoffs, DealFactoryRequiresTenant, HandoffFactoryRequiresTenant];
 
 function source(file: string, text = readFileSync(file, "utf8")) {
