@@ -61,6 +61,7 @@ import type {
   StoreResearchRun,
 } from "@/types/research-run";
 import { failure, success, type ActionResult } from "./_helpers";
+import { resolveTenantId } from "@/lib/tenant/context";
 
 export interface StartResearchRunResult {
   runId: string;
@@ -91,6 +92,7 @@ function buildReviewCompletePayload(
 export async function startResearchRunAction(
   storeId: string,
 ): Promise<ActionResult<StartResearchRunResult>> {
+  const tenantId = await resolveTenantId();
   const session = await getCurrentSession();
   if (!session) return failure("ログインが必要です");
 
@@ -106,10 +108,10 @@ export async function startResearchRunAction(
   const rateLimit = checkRateLimit(storeId);
   if (!rateLimit.ok) return failure(rateLimit.message);
 
-  const store = await repos.store.get(storeId);
+  const store = await repos.forTenant(tenantId).store.get(storeId);
   if (!store) return failure("店舗が見つかりません");
 
-  const latest = await repos.researchRun.getLatestForStore(storeId);
+  const latest = await repos.forTenant(tenantId).researchRun.getLatestForStore(storeId);
   let stuckRunFailedId: string | null = null;
   if (latest?.status === "running") {
     // stuck run対策(Plan v3.2 §17): Workflowが想定外にクラッシュし
@@ -118,7 +120,7 @@ export async function startResearchRunAction(
     // (store_research_runs_running_store_idx)が新規runの作成を阻害する前に
     // ここでfailedへ倒してから再調査を許可する。
     if (isRunStuck(latest, nowIso())) {
-      await repos.researchRun.update(latest.id, {
+      await repos.forTenant(tenantId).researchRun.update(latest.id, {
         status: "failed",
         error_kind: "stuck_run_timeout",
         error_message: "処理時間が想定を超えたため中断しました。",
@@ -132,7 +134,7 @@ export async function startResearchRunAction(
 
   let runId: string;
   try {
-    const run = await repos.researchRun.create({
+    const run = await repos.forTenant(tenantId).researchRun.create({
       store_id: storeId,
       requested_by_user_id: session.userId,
     });
@@ -173,7 +175,7 @@ export async function startResearchRunAction(
   let workflowRunId: string;
   try {
     dropBlankVercelUrl();
-    const workflowRun = await start(storeResearchWorkflow, [runId, storeId]);
+    const workflowRun = await start(storeResearchWorkflow, [runId, storeId, tenantId]);
     workflowRunId = workflowRun.runId;
   } catch (err) {
     // DB へ raw message を残さなくなった分、運用診断は structured log 側で担保する
@@ -185,7 +187,7 @@ export async function startResearchRunAction(
       error_name: err instanceof Error ? err.name : typeof err,
       error_constructor: (err as { constructor?: { name?: string } } | null)?.constructor?.name,
     });
-    await repos.researchRun.update(runId, {
+    await repos.forTenant(tenantId).researchRun.update(runId, {
       status: "failed",
       error_kind: "workflow_start_failed",
       // raw な起動エラーを DB へ保存しない(`workflows/store-research.ts:buildFailureRecord`
@@ -198,23 +200,23 @@ export async function startResearchRunAction(
     return failure("調査の開始に失敗しました。しばらくしてから再度お試しください。");
   }
   // enqueue 後に実行基盤で失敗しても気づけるよう、Workflow run と関連付ける (#324)。
-  await linkWorkflowRun(runId, workflowRunId);
+  await linkWorkflowRun(tenantId, runId, workflowRunId);
 
   // 監査は run の作成と Workflow の起動が成立した後に書く。失敗しても起動は取り消さない
   // (`writeAudit` は例外を投げない)。
-  await writeAudit({
+  await writeAudit(tenantId, {
     event: AUDIT_EVENTS.researchRunStart,
     actor: snapshotSessionActor(session),
     storeId,
     runId,
     payload: { stuckRunFailedId },
   });
-  revalidateTag(CACHE_TAGS.store(storeId), "max");
+  revalidateTag(CACHE_TAGS.store(tenantId, storeId), "max");
   return success({ runId }, "AI店舗調査を開始しました");
 }
 
 /**
- * run 進捗のポーリング用(PR4)。`repos.researchRun` は server-only のため、
+ * run 進捗のポーリング用(PR4)。`repos.forTenant(tenantId).researchRun` は server-only のため、
  * client component からは本 Action 経由で読む。`'use cache'` は使わない
  * (running中のrunを数秒間隔で読むため、Cache Componentsのキャッシュ対象外)。
  *
@@ -224,16 +226,17 @@ export async function startResearchRunAction(
 export async function getResearchRunStatusAction(
   runId: string,
 ): Promise<ActionResult<StoreResearchRun>> {
+  const tenantId = await resolveTenantId();
   const session = await getCurrentSession();
   if (!session) return failure("ログインが必要です");
   if (typeof runId !== "string" || runId.trim() === "") {
     return failure("runIdが不正です");
   }
-  const run = await repos.researchRun.get(runId);
+  const run = await repos.forTenant(tenantId).researchRun.get(runId);
   if (!run) return failure("調査結果が見つかりません");
   dropBlankVercelUrl();
-  const synced = await syncRunWithWorkflow(run);
-  if (synced.markedFailed) revalidateTag(CACHE_TAGS.store(run.store_id), "max");
+  const synced = await syncRunWithWorkflow(tenantId, run);
+  if (synced.markedFailed) revalidateTag(CACHE_TAGS.store(tenantId, run.store_id), "max");
   return success(synced.run);
 }
 
@@ -254,7 +257,7 @@ export interface RecordReviewDecisionInput {
  * 変更しない。採用でも、いまの値と同じ(正規化して一致)なら `basic_info` は変更しない (#319)。
  *
  * feat/research-review-write-integrity(MAJOR10・MAJOR11)での変更:
- * - `repos.transaction` + `getForUpdate`(`SELECT ... FOR UPDATE`)でrun行をロックし、
+ * - `repos.forTenant(tenantId).transaction` + `getForUpdate`(`SELECT ... FOR UPDATE`)でrun行をロックし、
  *   basic_info書込みとreview_decisions書込みを1トランザクションで原子化する。
  *   同一runへの並行操作(採用/却下/スキップ、一括採用、レビュー完了)を直列化する。
  * - 一度`review_decisions`に記録済みのitemKeyへの再判断は拒否する(immutable設計。
@@ -266,6 +269,7 @@ export interface RecordReviewDecisionInput {
 export async function recordReviewDecisionAction(
   input: RecordReviewDecisionInput,
 ): Promise<ActionResult<{ reviewDecisions: ReviewDecisions }>> {
+  const tenantId = await resolveTenantId();
   const session = await getCurrentSession();
   if (!session) return failure("ログインが必要です");
 
@@ -316,7 +320,7 @@ export async function recordReviewDecisionAction(
   // (`as` で宣言型を保つ。callback 内の代入は制御フロー解析に見えず、`null` に絞り込まれるため)
   let auditPayload = null as ResearchReviewDecidePayload | null;
 
-  const result = await repos.transaction(async (tx) => {
+  const result = await repos.forTenant(tenantId).transaction(async (tx) => {
     const run = await tx.researchRun.getForUpdate(runId);
     if (!run || run.store_id !== storeId) return failure("調査結果が見つかりません");
     if (run.status !== "succeeded") return failure("この調査はまだレビューできません");
@@ -391,7 +395,7 @@ export async function recordReviewDecisionAction(
   // 監査と revalidate は transaction のコミット後にだけ行う(rollback 時に走らせない)。
   // 監査の書き込みに失敗しても判断の記録は取り消さない(`writeAudit` は例外を投げない)。
   if (result.ok && auditPayload) {
-    await writeAudit({
+    await writeAudit(tenantId, {
       event: AUDIT_EVENTS.researchReviewDecide,
       actor: snapshotSessionActor(session),
       storeId,
@@ -399,7 +403,7 @@ export async function recordReviewDecisionAction(
       payload: auditPayload,
     });
   }
-  if (result.ok) revalidateTag(CACHE_TAGS.store(storeId), "max");
+  if (result.ok) revalidateTag(CACHE_TAGS.store(tenantId, storeId), "max");
   return result;
 }
 
@@ -422,6 +426,7 @@ export interface CompleteReviewInput {
 export async function completeReviewAction(
   input: CompleteReviewInput,
 ): Promise<ActionResult<void>> {
+  const tenantId = await resolveTenantId();
   const session = await getCurrentSession();
   if (!session) return failure("ログインが必要です");
 
@@ -434,7 +439,7 @@ export async function completeReviewAction(
   // 原子化する(旧実装は別々のawaitで、片側のみ成功する不整合の余地があった)。
   let auditPayload = null as ResearchReviewCompletePayload | null;
 
-  const result = await repos.transaction(async (tx) => {
+  const result = await repos.forTenant(tenantId).transaction(async (tx) => {
     const run = await tx.researchRun.getForUpdate(runId);
     if (!run || run.store_id !== storeId) return failure("調査結果が見つかりません");
     if (run.status !== "succeeded") return failure("この調査はまだレビューできません");
@@ -477,7 +482,7 @@ export async function completeReviewAction(
 
   // 監査と revalidate は transaction のコミット後にだけ行う(rollback 時に走らせない)。
   if (result.ok && auditPayload) {
-    await writeAudit({
+    await writeAudit(tenantId, {
       event: AUDIT_EVENTS.researchReviewComplete,
       actor: snapshotSessionActor(session),
       storeId,
@@ -486,8 +491,8 @@ export async function completeReviewAction(
     });
   }
   if (result.ok) {
-    revalidateTag(CACHE_TAGS.store(storeId), "max");
-    revalidateTag(CACHE_TAGS.stores, "max");
+    revalidateTag(CACHE_TAGS.store(tenantId, storeId), "max");
+    revalidateTag(CACHE_TAGS.stores(tenantId), "max");
   }
   return result;
 }
@@ -546,6 +551,7 @@ export interface AdoptBulkLaneResult {
 export async function adoptBulkLaneAction(
   input: AdoptBulkLaneInput,
 ): Promise<ActionResult<AdoptBulkLaneResult>> {
+  const tenantId = await resolveTenantId();
   const session = await getCurrentSession();
   if (!session) return failure("ログインが必要です");
 
@@ -565,7 +571,7 @@ export async function adoptBulkLaneAction(
   let auditEffectCounts = null as Record<AdoptionEffectKind, number> | null;
   let auditCompletePayload = null as ResearchReviewCompletePayload | null;
 
-  const result = await repos.transaction(async (tx) => {
+  const result = await repos.forTenant(tenantId).transaction(async (tx) => {
     const run = await tx.researchRun.getForUpdate(runId);
     if (!run || run.store_id !== storeId) return failure("調査結果が見つかりません");
     if (run.status !== "succeeded") return failure("この調査はまだレビューできません");
@@ -642,7 +648,7 @@ export async function adoptBulkLaneAction(
   // 監査 DB が詰まったときの待ち時間は最大で 2 件分(`AUDIT_WRITE_WAIT_MS` × 2)になる。
   if (result.ok && auditEffectCounts) {
     const actor = snapshotSessionActor(session);
-    await writeAudit({
+    await writeAudit(tenantId, {
       event: AUDIT_EVENTS.researchReviewBulkAdopt,
       actor,
       storeId,
@@ -650,7 +656,7 @@ export async function adoptBulkLaneAction(
       payload: { itemKeys: expectedKeys, effectCounts: auditEffectCounts },
     });
     if (auditCompletePayload) {
-      await writeAudit({
+      await writeAudit(tenantId, {
         event: AUDIT_EVENTS.researchReviewComplete,
         actor,
         storeId,
@@ -660,8 +666,8 @@ export async function adoptBulkLaneAction(
     }
   }
   if (result.ok) {
-    revalidateTag(CACHE_TAGS.store(storeId), "max");
-    if (complete) revalidateTag(CACHE_TAGS.stores, "max");
+    revalidateTag(CACHE_TAGS.store(tenantId, storeId), "max");
+    if (complete) revalidateTag(CACHE_TAGS.stores(tenantId), "max");
   }
   return result;
 }

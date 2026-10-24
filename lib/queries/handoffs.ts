@@ -4,16 +4,16 @@ import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
 import type { Handoff } from "@/types/handoff";
 
-export async function listHandoffsCached(): Promise<Handoff[]> {
+export async function listHandoffsCached(tenantId: string): Promise<Handoff[]> {
   "use cache";
   cacheLife("longBackstop");
-  cacheTag(CACHE_TAGS.handoffs);
-  return repos.handoff.list();
+  cacheTag(CACHE_TAGS.handoffs(tenantId));
+  return repos.forTenant(tenantId).handoff.list();
 }
 
-export async function getHandoffCached(id: string): Promise<Handoff | null> {
+export async function getHandoffCached(tenantId: string, id: string): Promise<Handoff | null> {
   "use cache";
   cacheLife("longBackstop");
-  cacheTag(CACHE_TAGS.handoff(id), CACHE_TAGS.handoffs);
-  return repos.handoff.get(id);
+  cacheTag(CACHE_TAGS.handoff(tenantId, id), CACHE_TAGS.handoffs(tenantId));
+  return repos.forTenant(tenantId).handoff.get(id);
 }

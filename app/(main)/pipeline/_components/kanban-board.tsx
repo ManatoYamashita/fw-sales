@@ -7,18 +7,20 @@ import { CACHE_TAGS } from "@/lib/cache";
 import { cn } from "@/lib/utils/cn";
 import type { Store, StoreFilter } from "@/types/store";
 import type { StageId } from "@/types/stage";
+import { resolveTenantId } from "@/lib/tenant/context";
 
-async function loadColumns(filter: StoreFilter) {
+async function loadColumns(tenantId: string, filter: StoreFilter) {
   "use cache";
   cacheLife("longBackstop");
-  cacheTag(CACHE_TAGS.stores, CACHE_TAGS.pipeline);
-  return getPipelineColumns(filter);
+  cacheTag(CACHE_TAGS.stores(tenantId), CACHE_TAGS.pipeline(tenantId));
+  return getPipelineColumns(tenantId, filter);
 }
 
 export async function KanbanBoard({ filter }: { filter: StoreFilter }) {
+  const tenantId = await resolveTenantId();
   const [columns, profiles] = await Promise.all([
-    loadColumns(filter),
-    getAllProfiles(),
+    loadColumns(tenantId, filter),
+    getAllProfiles(tenantId),
   ]);
   // Phase 7: 営業担当の表示は profile.display_name を id 経由で解決する。
   const profileNameById = new Map(profiles.map((p) => [p.id, p.display_name]));

@@ -3,6 +3,7 @@ import type { DbSnapshot } from "@/lib/db/snapshot";
 import { repos } from "@/lib/repositories";
 import { today } from "@/lib/utils/date";
 import { requireSignedIn } from "@/lib/actions/_authz";
+import { resolveTenantId } from "@/lib/tenant/context";
 
 // Runtime: Node.js 固定。
 // postgres.js は Edge ランタイム非対応のため、本ルートは Node.js でしか
@@ -16,6 +17,7 @@ import { requireSignedIn } from "@/lib/actions/_authz";
 // は、ビルドシステム側でより強く保証されているためコメント化のみとする。
 
 export async function GET() {
+  const tenantId = await resolveTenantId();
   // 認証ゲート。`proxy.ts` の `config.matcher` は `/api/*` を除外しており、
   // Route Handler は proxy に守られない。本 route は DB スナップショット全件
   // (店舗の連絡先・商談の見積/受注額・失注理由を含む) を返すため、認可は
@@ -42,9 +44,9 @@ export async function GET() {
   // research-handoff-db-migration §8.1 / §8.4 で Mock 経由を排除済。
   // Issue #110 で旧 `research` テーブルを撤去したため 4 → 3 entity になった。
   const [deals, stores, handoffs] = await Promise.all([
-    repos.deal.list(),
-    repos.store.list(),
-    repos.handoff.list(),
+    repos.forTenant(tenantId).deal.list(),
+    repos.forTenant(tenantId).store.list(),
+    repos.forTenant(tenantId).handoff.list(),
   ]);
   const snapshot: DbSnapshot = { stores, deals, handoffs };
 

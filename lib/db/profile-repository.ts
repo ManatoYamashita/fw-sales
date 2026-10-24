@@ -3,9 +3,8 @@
  *
  * 役割:
  * - `lib/repositories/profile-repository.ts` の `ProfileRepository` interface を Drizzle で 1:1 実装する
- * - `makeProfileRepo(executor)` ファクトリで `DbClient` または `Tx` を受け取り、
+ * - `makeProfileRepo(executor, tenantId)` ファクトリで `DbClient` または `Tx` を受け取り、
  *   トランザクション境界を呼び出し側 (Action) で制御できるようにする
- * - 既定 export `dbProfileRepo` は `db` (singleton) を束縛したインスタンス
  *
  * 制約:
  * - `import "server-only"` を必ず付け、Client バンドルへの混入を防ぐ
@@ -16,9 +15,9 @@
  */
 
 import "server-only";
-import { eq, inArray } from "drizzle-orm";
-import { db, type DbClient, type Tx } from "./client";
-import { profiles } from "./schema";
+import { and, eq, inArray } from "drizzle-orm";
+import { type DbClient, type Tx } from "./client";
+import { memberships, profiles } from "./schema";
 import type { ProfileRepository } from "@/lib/repositories/profile-repository";
 import type { Profile } from "@/types/profile";
 
@@ -45,12 +44,13 @@ function fromDbRow(row: Profile): Profile {
 /**
  * `ProfileRepository` を Drizzle で実装するファクトリ。
  */
-export function makeProfileRepo(executor: DbClient | Tx): ProfileRepository {
+export function makeProfileRepo(executor: DbClient | Tx, tenantId: string): ProfileRepository {
   return {
     async findById(id) {
       const rows = await executor
         .select(profileColumns)
         .from(profiles)
+        .innerJoin(memberships, and(eq(memberships.user_id, profiles.id), eq(memberships.tenant_id, tenantId)))
         .where(eq(profiles.id, id))
         .limit(1);
       const head = rows[0];
@@ -61,6 +61,7 @@ export function makeProfileRepo(executor: DbClient | Tx): ProfileRepository {
       const rows = await executor
         .select(profileColumns)
         .from(profiles)
+        .innerJoin(memberships, and(eq(memberships.user_id, profiles.id), eq(memberships.tenant_id, tenantId)))
         .where(eq(profiles.email, email))
         .limit(1);
       const head = rows[0];
@@ -71,6 +72,7 @@ export function makeProfileRepo(executor: DbClient | Tx): ProfileRepository {
       const rows = await executor
         .select(profileColumns)
         .from(profiles)
+        .innerJoin(memberships, and(eq(memberships.user_id, profiles.id), eq(memberships.tenant_id, tenantId)))
         .where(eq(profiles.display_name, name))
         .limit(1);
       const head = rows[0];
@@ -82,18 +84,15 @@ export function makeProfileRepo(executor: DbClient | Tx): ProfileRepository {
       const rows = await executor
         .select(profileColumns)
         .from(profiles)
+        .innerJoin(memberships, and(eq(memberships.user_id, profiles.id), eq(memberships.tenant_id, tenantId)))
         .where(inArray(profiles.id, [...ids]));
       return rows.map(fromDbRow);
     },
 
     async findAll() {
-      const rows = await executor.select(profileColumns).from(profiles);
+      const rows = await executor.select(profileColumns).from(profiles)
+        .innerJoin(memberships, and(eq(memberships.user_id, profiles.id), eq(memberships.tenant_id, tenantId)));
       return rows.map(fromDbRow);
     },
   };
 }
-
-/**
- * `db` singleton を束縛した既定 `ProfileRepository` インスタンス。
- */
-export const dbProfileRepo: ProfileRepository = makeProfileRepo(db);

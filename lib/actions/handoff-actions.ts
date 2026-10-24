@@ -15,18 +15,19 @@ import {
   type ActionResult,
 } from "./_helpers";
 import { requireAdmin } from "./_authz";
+import { resolveTenantId } from "@/lib/tenant/context";
 
-function invalidate(handoffId?: string, storeId?: string) {
-  revalidateTag(CACHE_TAGS.handoffs, "max");
-  if (handoffId) revalidateTag(CACHE_TAGS.handoff(handoffId), "max");
+function invalidate(tenantId: string, handoffId?: string, storeId?: string) {
+  revalidateTag(CACHE_TAGS.handoffs(tenantId), "max");
+  if (handoffId) revalidateTag(CACHE_TAGS.handoff(tenantId, handoffId), "max");
   if (storeId) {
-    revalidateTag(CACHE_TAGS.handoffsByStore(storeId), "max");
-    revalidateTag(CACHE_TAGS.store(storeId), "max");
-    revalidateTag(CACHE_TAGS.stores, "max");
+    revalidateTag(CACHE_TAGS.handoffsByStore(tenantId, storeId), "max");
+    revalidateTag(CACHE_TAGS.store(tenantId, storeId), "max");
+    revalidateTag(CACHE_TAGS.stores(tenantId), "max");
   }
-  revalidateTag(CACHE_TAGS.stats, "max");
-  revalidateTag(CACHE_TAGS.kpi, "max");
-  revalidateTag(CACHE_TAGS.actionQueue, "max");
+  revalidateTag(CACHE_TAGS.stats(tenantId), "max");
+  revalidateTag(CACHE_TAGS.kpi(tenantId), "max");
+  revalidateTag(CACHE_TAGS.actionQueue(tenantId), "max");
 }
 
 function buildInput(
@@ -58,7 +59,8 @@ export async function createHandoffAction(
   _prev: ActionResult<{ id: string }> | null,
   formData: FormData,
 ): Promise<ActionResult<{ id: string }>> {
-  const deal = await repos.deal.get(dealId);
+  const tenantId = await resolveTenantId();
+  const deal = await repos.forTenant(tenantId).deal.get(dealId);
   if (!deal) return failure("商談が見つかりませんでした");
 
   const input = buildInput(formData, {
@@ -70,14 +72,14 @@ export async function createHandoffAction(
   try {
     // handoff create と店舗 stage 同期を 1 トランザクションで原子化
     // (research-handoff-db-migration §4.3, §4.4, §4.5)。
-    const created = await repos.transaction(async ({ handoff, store }) => {
+    const created = await repos.forTenant(tenantId).transaction(async ({ handoff, store }) => {
       const c = await handoff.create(input);
       await store.update(deal.store_id, { stage: "架電済み" });
       return c;
     });
 
     // tx 成功後にのみキャッシュ失効を実行。
-    invalidate(created.id, deal.store_id);
+    invalidate(tenantId, created.id, deal.store_id);
     return success({ id: created.id }, "引き継ぎシートを作成しました");
   } catch (err) {
     console.error("[handoff.create] failed", {
@@ -93,10 +95,11 @@ export async function updateHandoffAction(
   _prev: ActionResult<{ id: string }> | null,
   formData: FormData,
 ): Promise<ActionResult<{ id: string }>> {
-  const current = await repos.handoff.get(handoffId);
+  const tenantId = await resolveTenantId();
+  const current = await repos.forTenant(tenantId).handoff.get(handoffId);
   if (!current) return failure("引き継ぎが見つかりませんでした");
 
-  const updated = await repos.handoff.update(handoffId, {
+  const updated = await repos.forTenant(tenantId).handoff.update(handoffId, {
     contract_services: readString(formData, "contract_services"),
     initial_fee: readNumber(formData, "initial_fee", 0),
     monthly_fee: readNumber(formData, "monthly_fee", 0),
@@ -113,26 +116,27 @@ export async function updateHandoffAction(
   });
   if (!updated) return failure("更新に失敗しました");
 
-  invalidate(handoffId, current.store_id);
+  invalidate(tenantId, handoffId, current.store_id);
   return success({ id: handoffId }, "引き継ぎを更新しました");
 }
 
 export async function completeHandoffAction(
   handoffId: string,
 ): Promise<ActionResult> {
-  const current = await repos.handoff.get(handoffId);
+  const tenantId = await resolveTenantId();
+  const current = await repos.forTenant(tenantId).handoff.get(handoffId);
   if (!current) return failure("引き継ぎが見つかりませんでした");
 
   try {
     // handoff status 更新と店舗 stage 同期を 1 トランザクションで原子化
     // (research-handoff-db-migration §4.4, §4.5)。
-    await repos.transaction(async ({ handoff, store }) => {
+    await repos.forTenant(tenantId).transaction(async ({ handoff, store }) => {
       await handoff.update(handoffId, { status: "完了" });
       await store.update(current.store_id, { stage: "架電済み" });
     });
 
     // tx 成功後にのみキャッシュ失効を実行。
-    invalidate(handoffId, current.store_id);
+    invalidate(tenantId, handoffId, current.store_id);
     return success(undefined, "運用への引き継ぎを完了しました");
   } catch (err) {
     console.error("[handoff.complete] failed", {
@@ -146,12 +150,13 @@ export async function completeHandoffAction(
 export async function deleteHandoffAction(
   handoffId: string,
 ): Promise<ActionResult> {
+  const tenantId = await resolveTenantId();
   const guard = await requireAdmin("handoffs.delete");
   if (!guard.ok) return guard.denied;
-  const current = await repos.handoff.get(handoffId);
+  const current = await repos.forTenant(tenantId).handoff.get(handoffId);
   if (!current) return failure("引き継ぎが見つかりませんでした");
-  await repos.handoff.delete(handoffId);
-  invalidate(handoffId, current.store_id);
+  await repos.forTenant(tenantId).handoff.delete(handoffId);
+  invalidate(tenantId, handoffId, current.store_id);
   console.log("[audit] handoffs.delete", { by: guard.profile.email, handoffId });
   redirect("/handoffs");
 }

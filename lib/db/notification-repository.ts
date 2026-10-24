@@ -5,8 +5,8 @@
  *
  * 制約:
  * - `import "server-only"` を必ず付ける
- * - `markAsRead` は `WHERE id = ? AND user_id = ?` で他人の既読化を防ぐ (Req 7.3 invariants)
- * - `markAllAsRead` も `user_id` で絞り、未読行だけを更新する (#296)
+ * - `markAsRead` は `WHERE tenant_id = ? AND id = ? AND user_id = ?` で他人の既読化を防ぐ (Req 7.3 invariants)
+ * - `markAllAsRead` も `tenant_id` と `user_id` で絞り、未読行だけを更新する (#296)
  * - id は `notif_<id>` 形式を採用 (既存 `<entity>_<id>` 規約)
  *
  * 関連: design.md §「NotificationRepository」, requirements.md §7.1, §7.2, §7.3
@@ -14,8 +14,8 @@
 
 import "server-only";
 import { and, desc, eq, isNull } from "drizzle-orm";
-import { db, type DbClient, type Tx } from "./client";
-import { notifications } from "./schema";
+import { type DbClient, type Tx } from "./client";
+import { notifications, memberships } from "./schema";
 import type { NotificationRepository } from "@/lib/repositories/notification-repository";
 import type {
   Notification,
@@ -54,10 +54,12 @@ function fromDbRow(row: NotificationSelectRow): Notification {
 
 export function makeNotificationRepo(
   executor: DbClient | Tx,
+  tenantId: string,
 ): NotificationRepository {
+  const inTenant = eq(notifications.tenant_id, tenantId);
   return {
     async findByUserId(userId, options = {}) {
-      const conditions = [eq(notifications.user_id, userId)];
+      const conditions = [inTenant, eq(notifications.user_id, userId)];
       if (options.unreadOnly) {
         conditions.push(isNull(notifications.read_at));
       }
@@ -75,6 +77,7 @@ export function makeNotificationRepo(
         .set({ read_at: today(), updated_at: today() })
         .where(
           and(
+            inTenant,
             eq(notifications.id, notificationId),
             eq(notifications.user_id, userId),
           ),
@@ -89,26 +92,32 @@ export function makeNotificationRepo(
         .update(notifications)
         .set({ read_at: now, updated_at: now })
         .where(
-          and(eq(notifications.user_id, userId), isNull(notifications.read_at)),
+          and(inTenant, eq(notifications.user_id, userId), isNull(notifications.read_at)),
         )
         .returning({ id: notifications.id });
       return result.length;
     },
 
     async insert(input: NotificationInput) {
+      if (input.user_id != null) {
+        const member = await executor.select({ id: memberships.user_id }).from(memberships)
+          .where(and(eq(memberships.tenant_id, tenantId), eq(memberships.user_id, input.user_id))).limit(1);
+        if (member.length === 0) throw new Error("ユーザーが見つかりません");
+      }
       const now = today();
       const row: Notification = {
-        ...input,
+        user_id: input.user_id,
+        kind: input.kind,
+        title: input.title,
+        body: input.body,
+        link_url: input.link_url,
         id: generateId("notif"),
         read_at: null,
         created_at: now,
         updated_at: now,
       };
-      await executor.insert(notifications).values(row);
+      await executor.insert(notifications).values({ ...row, tenant_id: tenantId });
       return row;
     },
   };
 }
-
-export const dbNotificationRepo: NotificationRepository =
-  makeNotificationRepo(db);

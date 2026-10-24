@@ -12,6 +12,7 @@ vi.mock("@/lib/db/client", () => ({
   db: {},
 }));
 
+import { storeResearchRuns } from "../schema";
 import { makeResearchRunRepo } from "../research-run-repository";
 import type { DbClient } from "@/lib/db/client";
 import type { StoreResearchRun } from "@/types/research-run";
@@ -74,7 +75,7 @@ function makeMockExecutor(
 ) {
   const { insert, update, inserted, updated } = makeWriteCapture(returningRows);
   return {
-    select: vi.fn().mockReturnValue(makeSelectProxy(selectRows)),
+    select: vi.fn(() => ({ from: (table: unknown) => makeSelectProxy(table === storeResearchRuns ? selectRows : [{ id: "valid-reference" }]) })),
     selectDistinct: vi.fn().mockReturnValue(makeSelectProxy(selectDistinctRows)),
     insert,
     update,
@@ -111,7 +112,7 @@ function makeExistingRow(
 describe("makeResearchRunRepo.create", () => {
   it("status='running' で新規行を作成する", async () => {
     const executor = makeMockExecutor();
-    const repo = makeResearchRunRepo(executor as unknown as DbClient);
+    const repo = makeResearchRunRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     const result = await repo.create({
       store_id: "store_1",
@@ -129,7 +130,7 @@ describe("makeResearchRunRepo.create", () => {
 
   it("expires_at は started_at より後の時刻になる", async () => {
     const executor = makeMockExecutor();
-    const repo = makeResearchRunRepo(executor as unknown as DbClient);
+    const repo = makeResearchRunRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     const result = await repo.create({
       store_id: "store_1",
@@ -143,7 +144,7 @@ describe("makeResearchRunRepo.create", () => {
 
   it("id は research_run_ プレフィックスを持つ", async () => {
     const executor = makeMockExecutor();
-    const repo = makeResearchRunRepo(executor as unknown as DbClient);
+    const repo = makeResearchRunRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     const result = await repo.create({
       store_id: "store_1",
@@ -158,7 +159,7 @@ describe("makeResearchRunRepo.get", () => {
   it("存在するidなら行を返す", async () => {
     const row = makeExistingRow();
     const executor = makeMockExecutor([row]);
-    const repo = makeResearchRunRepo(executor as unknown as DbClient);
+    const repo = makeResearchRunRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     const result = await repo.get("research_run_existing");
 
@@ -167,7 +168,7 @@ describe("makeResearchRunRepo.get", () => {
 
   it("存在しないidならnullを返す", async () => {
     const executor = makeMockExecutor([]);
-    const repo = makeResearchRunRepo(executor as unknown as DbClient);
+    const repo = makeResearchRunRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     const result = await repo.get("research_run_missing");
 
@@ -177,7 +178,7 @@ describe("makeResearchRunRepo.get", () => {
   it("破損したsource_registry(配列でない)は空配列にフェイルセーフする", async () => {
     const row = { ...makeExistingRow(), source_registry: "not-an-array" };
     const executor = makeMockExecutor([row]);
-    const repo = makeResearchRunRepo(executor as unknown as DbClient);
+    const repo = makeResearchRunRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     const result = await repo.get("research_run_existing");
 
@@ -187,7 +188,7 @@ describe("makeResearchRunRepo.get", () => {
   it("破損したreview_decisions(配列)は空オブジェクトにフェイルセーフする", async () => {
     const row = { ...makeExistingRow(), review_decisions: ["not", "an", "object"] };
     const executor = makeMockExecutor([row]);
-    const repo = makeResearchRunRepo(executor as unknown as DbClient);
+    const repo = makeResearchRunRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     const result = await repo.get("research_run_existing");
 
@@ -197,7 +198,7 @@ describe("makeResearchRunRepo.get", () => {
   it("不正なstatus文字列はrunningにフェイルセーフする", async () => {
     const row = { ...makeExistingRow(), status: "unknown_status" };
     const executor = makeMockExecutor([row]);
-    const repo = makeResearchRunRepo(executor as unknown as DbClient);
+    const repo = makeResearchRunRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     const result = await repo.get("research_run_existing");
 
@@ -209,7 +210,7 @@ describe("makeResearchRunRepo.getLatestForStore", () => {
   it("started_at降順の先頭1件を返す (orderByはDB側だが、mockは渡された1件をそのまま返す)", async () => {
     const row = makeExistingRow({ started_at: "2026-08-02T01:00:00.000Z" });
     const executor = makeMockExecutor([row]);
-    const repo = makeResearchRunRepo(executor as unknown as DbClient);
+    const repo = makeResearchRunRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     const result = await repo.getLatestForStore("store_1");
 
@@ -218,7 +219,7 @@ describe("makeResearchRunRepo.getLatestForStore", () => {
 
   it("該当runが無ければnullを返す", async () => {
     const executor = makeMockExecutor([]);
-    const repo = makeResearchRunRepo(executor as unknown as DbClient);
+    const repo = makeResearchRunRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     const result = await repo.getLatestForStore("store_missing");
 
@@ -233,7 +234,7 @@ describe("makeResearchRunRepo.listForStore", () => {
       makeExistingRow({ id: "research_run_1", started_at: "2026-08-01T00:00:00.000Z" }),
     ];
     const executor = makeMockExecutor(rows);
-    const repo = makeResearchRunRepo(executor as unknown as DbClient);
+    const repo = makeResearchRunRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     const result = await repo.listForStore("store_1");
 
@@ -242,7 +243,7 @@ describe("makeResearchRunRepo.listForStore", () => {
 
   it("該当runが無ければ空配列を返す", async () => {
     const executor = makeMockExecutor([]);
-    const repo = makeResearchRunRepo(executor as unknown as DbClient);
+    const repo = makeResearchRunRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     const result = await repo.listForStore("store_missing");
 
@@ -256,7 +257,7 @@ describe("makeResearchRunRepo.listStoreIdsNeedingReview", () => {
       [],
       [{ store_id: "store_1" }, { store_id: "store_2" }],
     );
-    const repo = makeResearchRunRepo(executor as unknown as DbClient);
+    const repo = makeResearchRunRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     const result = await repo.listStoreIdsNeedingReview();
 
@@ -265,7 +266,7 @@ describe("makeResearchRunRepo.listStoreIdsNeedingReview", () => {
 
   it("該当が無ければ空配列を返す", async () => {
     const executor = makeMockExecutor([], []);
-    const repo = makeResearchRunRepo(executor as unknown as DbClient);
+    const repo = makeResearchRunRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     const result = await repo.listStoreIdsNeedingReview();
 
@@ -282,7 +283,7 @@ describe("makeResearchRunRepo.update", () => {
 
   it("存在しないidはnullを返しupdateを呼ばない", async () => {
     executor = makeMockExecutor([]);
-    const repo = makeResearchRunRepo(executor as unknown as DbClient);
+    const repo = makeResearchRunRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     const result = await repo.update("research_run_missing", { status: "succeeded" });
 
@@ -293,7 +294,7 @@ describe("makeResearchRunRepo.update", () => {
   it("statusを更新できる", async () => {
     const existing = makeExistingRow({ status: "running" });
     executor = makeMockExecutor([existing]);
-    const repo = makeResearchRunRepo(executor as unknown as DbClient);
+    const repo = makeResearchRunRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     const result = await repo.update("research_run_existing", { status: "succeeded" });
 
@@ -304,7 +305,7 @@ describe("makeResearchRunRepo.update", () => {
   it("id / store_id / started_at / expires_at は変更されない (パッチに含めても無視される型)", async () => {
     const existing = makeExistingRow();
     executor = makeMockExecutor([existing]);
-    const repo = makeResearchRunRepo(executor as unknown as DbClient);
+    const repo = makeResearchRunRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     const result = await repo.update("research_run_existing", { status: "failed" });
 
@@ -317,7 +318,7 @@ describe("makeResearchRunRepo.update", () => {
   it("review_completed_atを設定できる (レビュー完了操作)", async () => {
     const existing = makeExistingRow({ review_completed_at: null });
     executor = makeMockExecutor([existing]);
-    const repo = makeResearchRunRepo(executor as unknown as DbClient);
+    const repo = makeResearchRunRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     const result = await repo.update("research_run_existing", {
       review_completed_at: "2026-08-02T02:00:00.000Z",
@@ -333,7 +334,7 @@ describe("makeResearchRunRepo.update", () => {
       },
     });
     executor = makeMockExecutor([existing]);
-    const repo = makeResearchRunRepo(executor as unknown as DbClient);
+    const repo = makeResearchRunRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     const result = await repo.update("research_run_existing", {
       review_decisions: {
@@ -349,7 +350,7 @@ describe("makeResearchRunRepo.update", () => {
   it("warningsを更新できる (Places再同期失敗の記録等)", async () => {
     const existing = makeExistingRow({ warnings: [] });
     executor = makeMockExecutor([existing]);
-    const repo = makeResearchRunRepo(executor as unknown as DbClient);
+    const repo = makeResearchRunRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     const result = await repo.update("research_run_existing", {
       warnings: ["Places情報の再取得に失敗しました"],
@@ -375,7 +376,7 @@ describe("makeResearchRunRepo.updateIfRunning", () => {
   it("1. running run を更新し、更新後の行を返す", async () => {
     const updatedRow = makeExistingRow({ status: "succeeded", stage: "done" });
     const executor = makeMockExecutor([], [], [updatedRow]);
-    const repo = makeResearchRunRepo(executor as unknown as DbClient);
+    const repo = makeResearchRunRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     const result = await repo.updateIfRunning("research_run_existing", {
       status: "succeeded",
@@ -389,7 +390,7 @@ describe("makeResearchRunRepo.updateIfRunning", () => {
 
   it("2. failed run(0行更新)は null を返す", async () => {
     const executor = makeMockExecutor([], [], []);
-    const repo = makeResearchRunRepo(executor as unknown as DbClient);
+    const repo = makeResearchRunRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     const result = await repo.updateIfRunning("research_run_failed", { status: "succeeded" });
 
@@ -398,7 +399,7 @@ describe("makeResearchRunRepo.updateIfRunning", () => {
 
   it("3. succeeded run(0行更新)は null を返す", async () => {
     const executor = makeMockExecutor([], [], []);
-    const repo = makeResearchRunRepo(executor as unknown as DbClient);
+    const repo = makeResearchRunRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     const result = await repo.updateIfRunning("research_run_succeeded", { stage: "done" });
 
@@ -407,7 +408,7 @@ describe("makeResearchRunRepo.updateIfRunning", () => {
 
   it("4. 存在しない id(0行更新)は null を返す", async () => {
     const executor = makeMockExecutor([], [], []);
-    const repo = makeResearchRunRepo(executor as unknown as DbClient);
+    const repo = makeResearchRunRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     const result = await repo.updateIfRunning("research_run_missing", { status: "failed" });
 
@@ -416,7 +417,7 @@ describe("makeResearchRunRepo.updateIfRunning", () => {
 
   it("5. patch に含まれない列を SET 句へ含めない(全列 SET にしない)", async () => {
     const executor = makeMockExecutor([], [], [makeExistingRow({ stage: "researching" })]);
-    const repo = makeResearchRunRepo(executor as unknown as DbClient);
+    const repo = makeResearchRunRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     await repo.updateIfRunning("research_run_existing", { stage: "researching" });
 
@@ -428,7 +429,7 @@ describe("makeResearchRunRepo.updateIfRunning", () => {
 
   it("6. 明示的な null は SET 句へ含める(undefined とは区別する)", async () => {
     const executor = makeMockExecutor([], [], [makeExistingRow()]);
-    const repo = makeResearchRunRepo(executor as unknown as DbClient);
+    const repo = makeResearchRunRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     await repo.updateIfRunning("research_run_existing", {
       error_kind: null,
@@ -441,7 +442,7 @@ describe("makeResearchRunRepo.updateIfRunning", () => {
 
   it("SELECT を先行させない(read-modify-write を使わない)", async () => {
     const executor = makeMockExecutor([], [], [makeExistingRow()]);
-    const repo = makeResearchRunRepo(executor as unknown as DbClient);
+    const repo = makeResearchRunRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     await repo.updateIfRunning("research_run_existing", { status: "failed" });
 
@@ -450,7 +451,7 @@ describe("makeResearchRunRepo.updateIfRunning", () => {
 
   it("更新対象フィールドが1つも無い patch は書き込まず null を返す", async () => {
     const executor = makeMockExecutor([], [], [makeExistingRow()]);
-    const repo = makeResearchRunRepo(executor as unknown as DbClient);
+    const repo = makeResearchRunRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     const result = await repo.updateIfRunning("research_run_existing", { status: undefined });
 
@@ -461,7 +462,7 @@ describe("makeResearchRunRepo.updateIfRunning", () => {
 
   it("jsonb 列(result / source_registry / token_usage / warnings)も更新できる", async () => {
     const executor = makeMockExecutor([], [], [makeExistingRow()]);
-    const repo = makeResearchRunRepo(executor as unknown as DbClient);
+    const repo = makeResearchRunRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     await repo.updateIfRunning("research_run_existing", {
       result: [],

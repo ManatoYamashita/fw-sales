@@ -2,7 +2,7 @@
  * リポジトリ層 composition root。
  *
  * 役割:
- * - `repos.transaction(fn)` API を提供し、複数リポジトリにまたがる書込みを
+ * - `repos.forTenant(tenantId).transaction(fn)` API を提供し、複数リポジトリにまたがる書込みを
  *   1 トランザクションで原子的に実行する手段を上位層 (actions/*) に与える。
  *
  * 設計上のポイント:
@@ -47,122 +47,60 @@ export type {
   ResearchRunRepository,
 };
 
-/**
- * トランザクション境界内で利用可能なリポジトリ集合。
- * `transaction` のコールバックに渡される `tx` 引数の型。
- *
- * research-handoff-db-migration spec で `research` / `handoff` を追加した。
- * 構造的型付けのため、既存の `repos.transaction(async ({ deal, store }) => ...)`
- * 利用箇所(`createDealAction` / `updateDealAction`)は分割代入で 2 entity しか
- * 参照しないため非破壊で動作する。
- */
-export interface TxRepos {
-  deal: DealRepository;
-  store: StoreRepository;
-  handoff: HandoffRepository;
+/** 同じテナントとtransaction接続に束縛する業務repository。 */
+export interface TenantTxRepos {
   profile: ProfileRepository;
-  /** テナントへの所属とロール (マルチテナント化 #367) で追加。 */
   membership: MembershipRepository;
   notification: NotificationRepository;
-  /** AI プロンプトテンプレート (Issue #42) で追加。 */
   promptTemplate: PromptTemplateRepository;
-  /** アプリ全体設定 key-value (Issue #122) で追加。 */
   appSettings: AppSettingsRepository;
-  /** エリア検索 候補DB保存の土台 (Issue #129 follow-up) で追加。 */
-  placeCandidate: PlaceCandidateRepository;
-  /** AI 店舗調査 run (AI 店舗調査再設計 Plan v3.2, PR1) で追加。 */
   researchRun: ResearchRunRepository;
-  // task 4.2 (PR3a): deepResearch を撤去 (#121 / #110 連動)。
-  // Issue #110: 旧手入力調査テーブルの research も撤去。
+  deal: DealRepository;
+  handoff: HandoffRepository;
+  store: StoreRepository;
+  placeCandidate: PlaceCandidateRepository;
 }
 
-/**
- * アプリ全体で参照される repository 集約 + transaction API。
- */
-export interface Repos {
+/** 監査は業務commit後、専用プールへ書くためtransactionには含めない。 */
+export interface TenantRepos extends TenantTxRepos {
   eventLog: EventLogRepository;
-  store: StoreRepository;
-  deal: DealRepository;
-  handoff: HandoffRepository;
-  profile: ProfileRepository;
-  /** テナントへの所属とロール (マルチテナント化 #367) で追加。 */
-  membership: MembershipRepository;
-  notification: NotificationRepository;
-  /** AI プロンプトテンプレート (Issue #42) で追加。 */
-  promptTemplate: PromptTemplateRepository;
-  /** アプリ全体設定 key-value (Issue #122) で追加。 */
-  appSettings: AppSettingsRepository;
-  /** エリア検索 候補DB保存の土台 (Issue #129 follow-up) で追加。 */
-  placeCandidate: PlaceCandidateRepository;
-  /** AI 店舗調査 run (AI 店舗調査再設計 Plan v3.2, PR1) で追加。 */
-  researchRun: ResearchRunRepository;
-  /**
-   * 複数リポジトリ書込みを 1 トランザクションで実行する。
-   * `db.transaction` で BEGIN/COMMIT/ROLLBACK を自動制御。
-   */
-  transaction: <T>(fn: (tx: TxRepos) => Promise<T>) => Promise<T>;
+  transaction: <T>(fn: (tx: TenantTxRepos) => Promise<T>) => Promise<T>;
+}
+
+/** テナントを指定しないrepository・transactionの入口は提供しない。 */
+export interface Repos {
+  forTenant: (tenantId: string) => TenantRepos;
 }
 
 async function buildRepos(): Promise<Repos> {
-  // 静的に解析可能なパスで動的 import (bundle-analyzable-paths 準拠)。
-  const dbModule = await import("@/lib/db");
   const {
-    db,
-    dbEventLogRepo,
-    dbDealRepo,
-    dbStoreRepo,
-    dbHandoffRepo,
-    dbProfileRepo,
-    dbMembershipRepo,
-    dbNotificationRepo,
-    dbPromptTemplateRepo,
-    dbAppSettingsRepo,
-    dbPlaceCandidateRepo,
-    dbResearchRunRepo,
-    makeDealRepo,
-    makeStoreRepo,
-    makeHandoffRepo,
-    makeProfileRepo,
-    makeMembershipRepo,
-    makeNotificationRepo,
-    makePromptTemplateRepo,
-    makeAppSettingsRepo,
-    makePlaceCandidateRepo,
-    makeResearchRunRepo,
-  } = dbModule;
-
+    db, auditDb, makeEventLogRepo, makeProfileRepo, makeMembershipRepo,
+    makeNotificationRepo, makePromptTemplateRepo, makeAppSettingsRepo,
+    makeResearchRunRepo, makeDealRepo, makeHandoffRepo, makeStoreRepo, makePlaceCandidateRepo,
+  } = await import("@/lib/db");
+  const tenantTxRepos = (executor: import("@/lib/db").DbClient | import("@/lib/db").Tx, tenantId: string): TenantTxRepos => ({
+    profile: makeProfileRepo(executor, tenantId),
+    membership: makeMembershipRepo(executor, tenantId),
+    notification: makeNotificationRepo(executor, tenantId),
+    promptTemplate: makePromptTemplateRepo(executor, tenantId),
+    appSettings: makeAppSettingsRepo(executor, tenantId),
+    researchRun: makeResearchRunRepo(executor, tenantId),
+    deal: makeDealRepo(executor, tenantId),
+    handoff: makeHandoffRepo(executor, tenantId),
+    store: makeStoreRepo(executor, tenantId),
+    placeCandidate: makePlaceCandidateRepo(executor, tenantId),
+  });
   return Object.freeze({
-    eventLog: dbEventLogRepo,
-    store: dbStoreRepo,
-    deal: dbDealRepo,
-    handoff: dbHandoffRepo,
-    profile: dbProfileRepo,
-    membership: dbMembershipRepo,
-    notification: dbNotificationRepo,
-    promptTemplate: dbPromptTemplateRepo,
-    appSettings: dbAppSettingsRepo,
-    placeCandidate: dbPlaceCandidateRepo,
-    researchRun: dbResearchRunRepo,
-    transaction: <T>(fn: (tx: TxRepos) => Promise<T>): Promise<T> =>
-      db.transaction(async (tx) =>
-        fn({
-          deal: makeDealRepo(tx),
-          store: makeStoreRepo(tx),
-          handoff: makeHandoffRepo(tx),
-          profile: makeProfileRepo(tx),
-          membership: makeMembershipRepo(tx),
-          notification: makeNotificationRepo(tx),
-          promptTemplate: makePromptTemplateRepo(tx),
-          appSettings: makeAppSettingsRepo(tx),
-          placeCandidate: makePlaceCandidateRepo(tx),
-          researchRun: makeResearchRunRepo(tx),
-        }),
-      ),
+    forTenant(tenantId: string): TenantRepos {
+      if (!tenantId.trim()) throw new Error("テナントが指定されていません");
+      return Object.freeze({
+        ...tenantTxRepos(db, tenantId),
+        eventLog: makeEventLogRepo(auditDb, tenantId),
+        transaction: <T>(fn: (tx: TenantTxRepos) => Promise<T>) =>
+          db.transaction((tx) => fn(tenantTxRepos(tx, tenantId))),
+      });
+    },
   }) satisfies Repos;
 }
 
-/**
- * top-level await により、モジュール初回 import 時に 1 度だけ buildRepos を
- * 評価する。以降の import では構築済み singleton が返る。
- */
 export const repos: Repos = await buildRepos();

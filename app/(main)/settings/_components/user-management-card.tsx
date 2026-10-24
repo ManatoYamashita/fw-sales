@@ -12,9 +12,10 @@ import { UserManagementShell } from "./user-management-shell";
  *   必ず <Suspense> 隔離し、静的 PPR シェルを保つこと (AiPromptTemplatesCard と同型)。
  */
 export async function UserManagementCard() {
+  const tenantId = await resolveTenantId();
   const current = await getCurrentProfile();
   if (current?.role !== "admin") return null;
 
-  const users = await getTenantMembers(await resolveTenantId(), { excludePlaceholders: true });
+  const users = await getTenantMembers(tenantId, { excludePlaceholders: true });
   return <UserManagementShell users={users} currentUserId={current.id} />;
 }

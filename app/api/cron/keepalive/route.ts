@@ -1,3 +1,4 @@
+import { FIRSTWEB_TENANT_ID } from "@/lib/tenant/id";
 /**
  * `GET /api/cron/keepalive` — Supabase 自動 pause の予防 (Issue #242)
  *
@@ -108,7 +109,7 @@ export async function GET(request: Request): Promise<NextResponse> {
     // 同時に、この行が「cron が実際に DB へ届いた」ことの唯一の事後証跡になる。
     // Vercel の Runtime Logs は Hobby プランでは 1 時間しか残らないため、
     // 翌日以降に確認できる記録は DB 側にしか作れない。
-    await repos.appSettings.set(KEEPALIVE_LAST_RUN_KEY, at);
+    await repos.forTenant(FIRSTWEB_TENANT_ID).appSettings.set(KEEPALIVE_LAST_RUN_KEY, at);
   } catch (error) {
     // 握り潰して 200 を返すと「成功したように見えて DB に触れていない」という
     // 最悪の無言故障になる。必ず 500 にする。

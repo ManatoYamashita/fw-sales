@@ -13,7 +13,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // vi.hoisted: vi.mock factory より前に評価されるため、factory 内で参照できる
 // ---------------------------------------------------------------------------
 
-const { mockRepo, mockTransaction, mockGetCurrentSession, mockGetCurrentProfile } =
+const { mockRepo, mockTransaction, mockGetCurrentProfile } =
   vi.hoisted(() => ({
     mockRepo: {
       list: vi.fn(),
@@ -26,21 +26,19 @@ const { mockRepo, mockTransaction, mockGetCurrentSession, mockGetCurrentProfile 
       setDefault: vi.fn(),
     },
     mockTransaction: vi.fn(),
-    mockGetCurrentSession: vi.fn(),
     mockGetCurrentProfile: vi.fn(),
   }));
 
 vi.mock("@/lib/repositories", () => ({
-  repos: {
+  repos: ((tenantRepos) => ({ ...tenantRepos, forTenant: () => tenantRepos }))({
     promptTemplate: mockRepo,
     transaction: mockTransaction,
-  },
+  }),
 }));
 
 // delete は #155 で requireAdmin (getCurrentProfile) 経由の admin ガードに昇格した。
-// 他アクションは従来どおり getCurrentSession の login チェックのため両方を mock する。
+// すべての操作が現在の所属を検証し、削除は追加でadminを要求する。
 vi.mock("@/lib/supabase/server", () => ({
-  getCurrentSession: mockGetCurrentSession,
   getCurrentProfile: mockGetCurrentProfile,
 }));
 
@@ -70,7 +68,7 @@ const USER_A = "user-uuid-a";
 const USER_B = "user-uuid-b";
 const TEMPLATE_ID = "f47ac10b-58cc-4372-a567-0e02b2c3d479";
 
-const SESSION_A = { userId: USER_A, email: "a@test.com" };
+const SESSION_A = { id: USER_A, email: "a@test.com" };
 /** #155: delete は admin ロールを要求する。id は USER_A に一致させ所有スコープを維持。 */
 const ADMIN_A = {
   id: USER_A,
@@ -141,7 +139,7 @@ beforeEach(() => {
 
 describe("listPromptTemplatesAction", () => {
   it("未ログインならfailure", async () => {
-    mockGetCurrentSession.mockResolvedValue(null);
+    mockGetCurrentProfile.mockResolvedValue(null);
     const result = await listPromptTemplatesAction();
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toMatch(/ログイン/);
@@ -150,7 +148,7 @@ describe("listPromptTemplatesAction", () => {
 
   it("ログイン中なら自分のテンプレート一覧を返す", async () => {
     const rows = [makeTemplateRow(), makeTemplateRow({ id: "t2", name: "B" })];
-    mockGetCurrentSession.mockResolvedValue(SESSION_A);
+    mockGetCurrentProfile.mockResolvedValue(SESSION_A);
     mockRepo.list.mockResolvedValue(rows);
 
     const result = await listPromptTemplatesAction();
@@ -171,7 +169,7 @@ describe("listPromptTemplatesAction", () => {
 describe("createPromptTemplateAction", () => {
   it("正常に作成できる", async () => {
     const created = makeTemplateRow({ name: "新規テンプレート" });
-    mockGetCurrentSession.mockResolvedValue(SESSION_A);
+    mockGetCurrentProfile.mockResolvedValue(SESSION_A);
     mockTransaction.mockImplementationOnce(
       (fn: (tx: { promptTemplate: typeof mockRepo }) => Promise<AiPromptTemplate>) =>
         fn({ promptTemplate: { ...mockRepo, countByUser: vi.fn().mockResolvedValue(2), insert: vi.fn().mockResolvedValue(created) } }),
@@ -185,7 +183,7 @@ describe("createPromptTemplateAction", () => {
   });
 
   it("未ログインならfailure", async () => {
-    mockGetCurrentSession.mockResolvedValue(null);
+    mockGetCurrentProfile.mockResolvedValue(null);
     const result = await createPromptTemplateAction(makeCreateFormData());
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toMatch(/ログイン/);
@@ -193,7 +191,7 @@ describe("createPromptTemplateAction", () => {
   });
 
   it("6件目作成は failure(上限 5 件を超えました)", async () => {
-    mockGetCurrentSession.mockResolvedValue(SESSION_A);
+    mockGetCurrentProfile.mockResolvedValue(SESSION_A);
     mockTransaction.mockImplementationOnce(
       (fn: (tx: { promptTemplate: typeof mockRepo }) => Promise<AiPromptTemplate>) =>
         fn({ promptTemplate: { ...mockRepo, countByUser: vi.fn().mockResolvedValue(5) } }),
@@ -206,7 +204,7 @@ describe("createPromptTemplateAction", () => {
   });
 
   it("name が空文字なら failure", async () => {
-    mockGetCurrentSession.mockResolvedValue(SESSION_A);
+    mockGetCurrentProfile.mockResolvedValue(SESSION_A);
     const result = await createPromptTemplateAction(
       makeCreateFormData({ name: "" }),
     );
@@ -216,7 +214,7 @@ describe("createPromptTemplateAction", () => {
   });
 
   it("name が空白のみなら failure", async () => {
-    mockGetCurrentSession.mockResolvedValue(SESSION_A);
+    mockGetCurrentProfile.mockResolvedValue(SESSION_A);
     const result = await createPromptTemplateAction(
       makeCreateFormData({ name: "   " }),
     );
@@ -227,7 +225,7 @@ describe("createPromptTemplateAction", () => {
 
   it("前後空白つき name は trim されて insert される", async () => {
     const created = makeTemplateRow({ name: "テスト" });
-    mockGetCurrentSession.mockResolvedValue(SESSION_A);
+    mockGetCurrentProfile.mockResolvedValue(SESSION_A);
     const txInsert = vi.fn().mockResolvedValue(created);
     mockTransaction.mockImplementationOnce(
       (fn: (tx: { promptTemplate: typeof mockRepo }) => Promise<AiPromptTemplate>) =>
@@ -244,7 +242,7 @@ describe("createPromptTemplateAction", () => {
   });
 
   it("body が不正 JSON なら failure", async () => {
-    mockGetCurrentSession.mockResolvedValue(SESSION_A);
+    mockGetCurrentProfile.mockResolvedValue(SESSION_A);
     const result = await createPromptTemplateAction(
       makeCreateFormData({ body: "not-json" }),
     );
@@ -254,7 +252,7 @@ describe("createPromptTemplateAction", () => {
   });
 
   it("fewshots が 0 件なら failure", async () => {
-    mockGetCurrentSession.mockResolvedValue(SESSION_A);
+    mockGetCurrentProfile.mockResolvedValue(SESSION_A);
     const result = await createPromptTemplateAction(
       makeCreateFormData({ body: makeValidBody(0) }),
     );
@@ -264,7 +262,7 @@ describe("createPromptTemplateAction", () => {
   });
 
   it("fewshots が 11 件なら failure", async () => {
-    mockGetCurrentSession.mockResolvedValue(SESSION_A);
+    mockGetCurrentProfile.mockResolvedValue(SESSION_A);
     const result = await createPromptTemplateAction(
       makeCreateFormData({ body: makeValidBody(11) }),
     );
@@ -274,7 +272,7 @@ describe("createPromptTemplateAction", () => {
   });
 
   it("call_script_ideal が 2000 字超過なら failure", async () => {
-    mockGetCurrentSession.mockResolvedValue(SESSION_A);
+    mockGetCurrentProfile.mockResolvedValue(SESSION_A);
     const body = serializeFewshots([
       {
         title: "タイトル",
@@ -291,7 +289,7 @@ describe("createPromptTemplateAction", () => {
   });
 
   it("{ASSIGNED_SALES} がない場合は failure", async () => {
-    mockGetCurrentSession.mockResolvedValue(SESSION_A);
+    mockGetCurrentProfile.mockResolvedValue(SESSION_A);
     const body = serializeFewshots([
       { title: "タイトル", store_meta: "店舗情報", call_script_ideal: "プレースホルダーなし" },
     ]);
@@ -305,7 +303,7 @@ describe("createPromptTemplateAction", () => {
 
   it("1 件目作成時は is_default: true で insert される", async () => {
     const created = makeTemplateRow({ is_default: true });
-    mockGetCurrentSession.mockResolvedValue(SESSION_A);
+    mockGetCurrentProfile.mockResolvedValue(SESSION_A);
     const txInsert = vi.fn().mockResolvedValue(created);
     mockTransaction.mockImplementationOnce(
       (fn: (tx: { promptTemplate: typeof mockRepo }) => Promise<AiPromptTemplate>) =>
@@ -323,7 +321,7 @@ describe("createPromptTemplateAction", () => {
 
   it("2 件目以降は is_default: false で insert される", async () => {
     const created = makeTemplateRow({ is_default: false });
-    mockGetCurrentSession.mockResolvedValue(SESSION_A);
+    mockGetCurrentProfile.mockResolvedValue(SESSION_A);
     const txInsert = vi.fn().mockResolvedValue(created);
     mockTransaction.mockImplementationOnce(
       (fn: (tx: { promptTemplate: typeof mockRepo }) => Promise<AiPromptTemplate>) =>
@@ -347,7 +345,7 @@ describe("createPromptTemplateAction", () => {
 describe("freeform テンプレートのバリデーション", () => {
   it("freeform body で正常に作成できる({ASSIGNED_SALES} なしでも可)", async () => {
     const created = makeTemplateRow({ name: "自由記述テンプレ" });
-    mockGetCurrentSession.mockResolvedValue(SESSION_A);
+    mockGetCurrentProfile.mockResolvedValue(SESSION_A);
     const txInsert = vi.fn().mockResolvedValue(created);
     mockTransaction.mockImplementationOnce(
       (fn: (tx: { promptTemplate: typeof mockRepo }) => Promise<AiPromptTemplate>) =>
@@ -368,7 +366,7 @@ describe("freeform テンプレートのバリデーション", () => {
   });
 
   it("freeform body が空文字なら failure", async () => {
-    mockGetCurrentSession.mockResolvedValue(SESSION_A);
+    mockGetCurrentProfile.mockResolvedValue(SESSION_A);
     const result = await createPromptTemplateAction(
       makeCreateFormData({ body: serializeFreeform("   ") }),
     );
@@ -378,7 +376,7 @@ describe("freeform テンプレートのバリデーション", () => {
   });
 
   it("freeform body が上限超過なら failure", async () => {
-    mockGetCurrentSession.mockResolvedValue(SESSION_A);
+    mockGetCurrentProfile.mockResolvedValue(SESSION_A);
     const tooLong = "あ".repeat(MAX_FREEFORM_LENGTH + 1);
     const result = await createPromptTemplateAction(
       makeCreateFormData({ body: serializeFreeform(tooLong) }),
@@ -390,7 +388,7 @@ describe("freeform テンプレートのバリデーション", () => {
 
   it("freeform body で更新できる", async () => {
     const updated = makeTemplateRow({ name: "更新" });
-    mockGetCurrentSession.mockResolvedValue(SESSION_A);
+    mockGetCurrentProfile.mockResolvedValue(SESSION_A);
     mockRepo.update.mockResolvedValue(updated);
 
     const result = await updatePromptTemplateAction(
@@ -417,7 +415,7 @@ describe("freeform テンプレートのバリデーション", () => {
 describe("updatePromptTemplateAction", () => {
   it("正常に更新できる", async () => {
     const updated = makeTemplateRow({ name: "更新テンプレート" });
-    mockGetCurrentSession.mockResolvedValue(SESSION_A);
+    mockGetCurrentProfile.mockResolvedValue(SESSION_A);
     mockRepo.update.mockResolvedValue(updated);
 
     const result = await updatePromptTemplateAction(makeUpdateFormData());
@@ -432,7 +430,7 @@ describe("updatePromptTemplateAction", () => {
   });
 
   it("他ユーザー / 存在しない id なら failure", async () => {
-    mockGetCurrentSession.mockResolvedValue(SESSION_A);
+    mockGetCurrentProfile.mockResolvedValue(SESSION_A);
     mockRepo.update.mockResolvedValue(null);
 
     const result = await updatePromptTemplateAction(
@@ -445,7 +443,7 @@ describe("updatePromptTemplateAction", () => {
 
   it("patch に is_default を含まない", async () => {
     const updated = makeTemplateRow();
-    mockGetCurrentSession.mockResolvedValue(SESSION_A);
+    mockGetCurrentProfile.mockResolvedValue(SESSION_A);
     mockRepo.update.mockResolvedValue(updated);
 
     await updatePromptTemplateAction(makeUpdateFormData());
@@ -459,7 +457,7 @@ describe("updatePromptTemplateAction", () => {
   });
 
   it("不正 body なら failure", async () => {
-    mockGetCurrentSession.mockResolvedValue(SESSION_A);
+    mockGetCurrentProfile.mockResolvedValue(SESSION_A);
     const result = await updatePromptTemplateAction(
       makeUpdateFormData({ body: "{bad json}" }),
     );
@@ -469,7 +467,7 @@ describe("updatePromptTemplateAction", () => {
   });
 
   it("id が不正UUID なら failure を返し、repo.update を呼ばない", async () => {
-    mockGetCurrentSession.mockResolvedValue(SESSION_A);
+    mockGetCurrentProfile.mockResolvedValue(SESSION_A);
 
     const result = await updatePromptTemplateAction(
       makeUpdateFormData({ id: "not-a-uuid" }),
@@ -482,7 +480,7 @@ describe("updatePromptTemplateAction", () => {
 
   it("前後空白つき name は trim されて update される", async () => {
     const updated = makeTemplateRow({ name: "更新後" });
-    mockGetCurrentSession.mockResolvedValue(SESSION_A);
+    mockGetCurrentProfile.mockResolvedValue(SESSION_A);
     mockRepo.update.mockResolvedValue(updated);
 
     await updatePromptTemplateAction(makeUpdateFormData({ name: "  更新後  " }));
@@ -566,7 +564,7 @@ describe("setDefaultPromptTemplateAction", () => {
   it("正常にデフォルトを切り替えられ、repos.transaction() が呼ばれる", async () => {
     const existing = makeTemplateRow({ is_default: false });
     const updated = makeTemplateRow({ is_default: true });
-    mockGetCurrentSession.mockResolvedValue(SESSION_A);
+    mockGetCurrentProfile.mockResolvedValue(SESSION_A);
     mockRepo.findById.mockResolvedValue(existing);
 
     const mockTxSetDefault = vi.fn().mockResolvedValue(updated);
@@ -587,7 +585,7 @@ describe("setDefaultPromptTemplateAction", () => {
   });
 
   it("存在しない id なら failure (transaction 未呼び出し)", async () => {
-    mockGetCurrentSession.mockResolvedValue(SESSION_A);
+    mockGetCurrentProfile.mockResolvedValue(SESSION_A);
     mockRepo.findById.mockResolvedValue(null);
 
     const result = await setDefaultPromptTemplateAction("nonexistent");
@@ -599,7 +597,7 @@ describe("setDefaultPromptTemplateAction", () => {
 
   it("他ユーザーの id なら failure (findById が null → transaction 未呼び出し)", async () => {
     // USER_B で検索すると findById は null を返す (userId 条件でフィルタ済)
-    mockGetCurrentSession.mockResolvedValue({ userId: USER_B, email: "b@test.com" });
+    mockGetCurrentProfile.mockResolvedValue({ id: USER_B, email: "b@test.com" });
     mockRepo.findById.mockResolvedValue(null);
 
     const result = await setDefaultPromptTemplateAction(TEMPLATE_ID);
@@ -610,7 +608,7 @@ describe("setDefaultPromptTemplateAction", () => {
   });
 
   it("id が不正UUID なら failure を返し、repo.findById / repos.transaction を呼ばない", async () => {
-    mockGetCurrentSession.mockResolvedValue(SESSION_A);
+    mockGetCurrentProfile.mockResolvedValue(SESSION_A);
 
     const result = await setDefaultPromptTemplateAction("not-a-uuid");
 
@@ -622,7 +620,7 @@ describe("setDefaultPromptTemplateAction", () => {
 
   it("transaction 内部でエラーが発生した場合は failure", async () => {
     const existing = makeTemplateRow();
-    mockGetCurrentSession.mockResolvedValue(SESSION_A);
+    mockGetCurrentProfile.mockResolvedValue(SESSION_A);
     mockRepo.findById.mockResolvedValue(existing);
     mockTransaction.mockRejectedValueOnce(new Error("DB error"));
 

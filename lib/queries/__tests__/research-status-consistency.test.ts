@@ -21,13 +21,13 @@ const { mockStoreList, mockNeedsReview } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/repositories", () => ({
-  repos: {
+  repos: ((tenantRepos) => ({ ...tenantRepos, forTenant: () => tenantRepos }))({
     store: { list: mockStoreList },
     deal: { list: vi.fn().mockResolvedValue([]) },
     handoff: { list: vi.fn().mockResolvedValue([]) },
-    profile: { findAll: vi.fn().mockResolvedValue([]) },
+    membership: { list: vi.fn().mockResolvedValue([]) },
     researchRun: { listStoreIdsNeedingReview: mockNeedsReview },
-  },
+  }),
 }));
 
 vi.mock("next/cache", () => ({
@@ -77,9 +77,9 @@ beforeEach(() => {
 describe("調査状態の画面間一致 (#299)", () => {
   it("サイドバーのバッジ = /research のレビュー待ちタブ = /stores でレビュー待ちと出る行", async () => {
     const [queue, badge, rows] = await Promise.all([
-      getResearchQueue(),
-      getResearchNavBadgeCount(),
-      listSalesProgressRows(),
+      getResearchQueue("cfe871a5-8fc7-42da-9677-3a050665cafb"),
+      getResearchNavBadgeCount("cfe871a5-8fc7-42da-9677-3a050665cafb"),
+      listSalesProgressRows("cfe871a5-8fc7-42da-9677-3a050665cafb"),
     ]);
 
     const pendingRows = rows.filter((r) => r.researchStatus === "レビュー待ち");
@@ -89,7 +89,7 @@ describe("調査状態の画面間一致 (#299)", () => {
   });
 
   it("店舗ごとの状態が /research のタブと /stores の調査段階列で矛盾しない", async () => {
-    const [queue, rows] = await Promise.all([getResearchQueue(), listSalesProgressRows()]);
+    const [queue, rows] = await Promise.all([getResearchQueue("cfe871a5-8fc7-42da-9677-3a050665cafb"), listSalesProgressRows("cfe871a5-8fc7-42da-9677-3a050665cafb")]);
 
     const tabOf = new Map<string, string>();
     for (const s of queue.needsReview) tabOf.set(s.id, "レビュー待ち");
@@ -107,7 +107,7 @@ describe("調査状態の画面間一致 (#299)", () => {
 
   it("バッジは stage=未調査 の件数を数えない (#121 以来の旧定義へ退行しない)", async () => {
     const stageUnresearched = STORES.filter((s) => s.stage === "未調査").length;
-    const badge = await getResearchNavBadgeCount();
+    const badge = await getResearchNavBadgeCount("cfe871a5-8fc7-42da-9677-3a050665cafb");
     // fixture は 2 つの定義で件数が分かれるように組んである。等しいと検知力が無い。
     expect(stageUnresearched).not.toBe(NEEDS_REVIEW.length);
     expect(badge).toBe(NEEDS_REVIEW.length);

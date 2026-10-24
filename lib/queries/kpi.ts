@@ -20,14 +20,14 @@ export interface KpiSnapshot {
   monthlyRecurring: number;
 }
 
-export async function getKpiSnapshot(): Promise<KpiSnapshot> {
+export async function getKpiSnapshot(tenantId: string): Promise<KpiSnapshot> {
   "use cache";
   cacheLife("longBackstop");
-  cacheTag(CACHE_TAGS.kpi, CACHE_TAGS.stores, CACHE_TAGS.handoffs);
+  cacheTag(CACHE_TAGS.kpi(tenantId), CACHE_TAGS.stores(tenantId), CACHE_TAGS.handoffs(tenantId));
 
   const [stores, handoffs] = await Promise.all([
-    repos.store.list(),
-    repos.handoff.list(),
+    repos.forTenant(tenantId).store.list(),
+    repos.forTenant(tenantId).handoff.list(),
   ]);
   const total = stores.length || 1;
   const surveyed = stores.filter((s) => s.stage !== "未調査").length;

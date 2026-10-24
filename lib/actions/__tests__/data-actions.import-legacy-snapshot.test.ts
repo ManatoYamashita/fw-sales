@@ -60,11 +60,11 @@ vi.mock("@/lib/db/store-repository", () => ({
   toDbRow: (store: Record<string, unknown>) => store,
 }));
 vi.mock("@/lib/repositories", () => ({
-  repos: {
+  repos: ((tenantRepos) => ({ ...tenantRepos, forTenant: () => tenantRepos }))({
     store: { list: vi.fn() },
     deal: { list: vi.fn() },
     handoff: { list: vi.fn() },
-  },
+  }),
 }));
 
 const { importJsonAction } = await import("../data-actions");

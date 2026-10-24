@@ -518,7 +518,7 @@ const RUN_SUPERSEDED_MESSAGE =
  * (監査 F2、CONFIRMED)。特に `persistSucceededStep` は `status: "succeeded"` を
  * 無条件に書くため、failed が succeeded へ**復活**していた。
  *
- * `repos.researchRun.updateIfRunning` が 0 行更新(= CAS miss)を返したとき、
+ * `repos.forTenant(tenantId).researchRun.updateIfRunning` が 0 行更新(= CAS miss)を返したとき、
  * 「この run はもう自分のものではない」と判断して本エラーを投げ、Gemini 呼出を含む
  * 以降の処理へ進ませない。
  *
@@ -551,7 +551,7 @@ export function isRunSupersededError(err: unknown): boolean {
 }
 
 /**
- * ResearchRun への書込み口(`repos.researchRun` の必要最小限の構造的部分型)。
+ * ResearchRun への書込み口(`repos.forTenant(tenantId).researchRun` の必要最小限の構造的部分型)。
  *
  * ## なぜ `repos` を直接参照せず引数で受け取るのか
  *
@@ -576,7 +576,7 @@ interface ResearchRunWriter {
 /**
  * Workflow 由来の ResearchRun write の唯一の入口(PR #180 F2)。
  *
- * `repos.researchRun.update()` を Workflow から直接呼んではいけない。
+ * `repos.forTenant(tenantId).researchRun.update()` を Workflow から直接呼んではいけない。
  * `update()` は status 条件を持たないため、terminal な run を書き換えられる。
  *
  * CAS miss(0行更新)は `RunSupersededError` を投げる。**失敗記録の write だけは
@@ -628,9 +628,9 @@ interface LoadedStore {
   knownStoreDataUrls: ReturnType<typeof buildKnownStoreDataUrls>;
 }
 
-async function loadStoreStep(storeId: string): Promise<LoadedStore> {
+async function loadStoreStep(tenantId: string, storeId: string): Promise<LoadedStore> {
   "use step";
-  const store = await repos.store.get(storeId);
+  const store = await repos.forTenant(tenantId).store.get(storeId);
   if (!store) {
     throw new FatalError(`店舗が見つかりません: ${storeId}`);
   }
@@ -659,11 +659,12 @@ async function loadStoreStep(storeId: string): Promise<LoadedStore> {
 loadStoreStep.maxRetries = DB_STEP_MAX_RETRIES;
 
 async function markStageStep(
+  tenantId: string,
   runId: string,
   stage: "discovering" | "researching" | "done",
 ): Promise<void> {
   "use step";
-  await writeRunningRun(repos.researchRun, runId, { stage });
+  await writeRunningRun(repos.forTenant(tenantId).researchRun, runId, { stage });
 }
 markStageStep.maxRetries = DB_STEP_MAX_RETRIES;
 
@@ -716,6 +717,7 @@ stage1Step.maxRetries = GEMINI_STAGE_MAX_RETRIES;
  * best-effort。resolver が全滅しても registry はそのまま Stage2 へ進む。
  */
 async function resolveAndPersistSourceRegistryStep(
+  tenantId: string,
   runId: string,
   sourceRegistry: SourceRegistryEntry[],
   knownOfficialUrls: string[],
@@ -736,7 +738,7 @@ async function resolveAndPersistSourceRegistryStep(
     skipped_unsupported_host: aliased.skippedUnsupportedHost,
     failures: aliased.failures,
   });
-  await writeRunningRun(repos.researchRun, runId, { source_registry: aliased.registry });
+  await writeRunningRun(repos.forTenant(tenantId).researchRun, runId, { source_registry: aliased.registry });
   return aliased.registry;
 }
 resolveAndPersistSourceRegistryStep.maxRetries = DB_STEP_MAX_RETRIES;
@@ -833,9 +835,9 @@ export async function persistSucceededRun(
   throw new RunSupersededError();
 }
 
-async function persistSucceededStep(runId: string, params: FinalizeStepParams): Promise<void> {
+async function persistSucceededStep(tenantId: string, runId: string, params: FinalizeStepParams): Promise<void> {
   "use step";
-  await persistSucceededRun(repos.researchRun, runId, params);
+  await persistSucceededRun(repos.forTenant(tenantId).researchRun, runId, params);
 }
 persistSucceededStep.maxRetries = DB_STEP_MAX_RETRIES;
 
@@ -903,13 +905,14 @@ export async function persistFailedRun(
 }
 
 async function markFailedStep(
+  tenantId: string,
   runId: string,
   err: unknown,
   stage1Usage: UsageMetadataLike | null = null,
   stage1Diagnostics: Stage1Diagnostics | null = null,
 ): Promise<void> {
   "use step";
-  await persistFailedRun(repos.researchRun, runId, err, stage1Usage, stage1Diagnostics);
+  await persistFailedRun(repos.forTenant(tenantId).researchRun, runId, err, stage1Usage, stage1Diagnostics);
 }
 markFailedStep.maxRetries = DB_STEP_MAX_RETRIES;
 
@@ -923,7 +926,7 @@ export interface StoreResearchWorkflowResult {
 }
 
 /**
- * AI 店舗調査の Workflow 本体。`start(storeResearchWorkflow, [runId, storeId])` で起動する
+ * AI 店舗調査の Workflow 本体。`start(storeResearchWorkflow, [runId, storeId, tenantId])` で起動する
  * (トリガーは `lib/actions/research-run-actions.ts`)。
  *
  * 1 runあたりのGemini API呼出は原則2回(Stage1 1回・Stage2 1回)。
@@ -933,8 +936,10 @@ export interface StoreResearchWorkflowResult {
 export async function storeResearchWorkflow(
   runId: string,
   storeId: string,
+  tenantId: string,
 ): Promise<StoreResearchWorkflowResult> {
   "use workflow";
+  if (!tenantId?.trim()) throw new FatalError("テナントが指定されていません");
 
   // Stage2 が失敗しても Stage1 の usage を失わないよう、try の外側で保持する
   // (feat/ai-research-quality-ux-hardening、Theme 5B)。
@@ -951,9 +956,9 @@ export async function storeResearchWorkflow(
       basicInfo,
       googlePlaceId,
       knownStoreDataUrls,
-    } = await loadStoreStep(storeId);
+    } = await loadStoreStep(tenantId, storeId);
 
-    await markStageStep(runId, "discovering");
+    await markStageStep(tenantId, runId, "discovering");
 
     // Stage0: Places軽量再同期(best-effort)。in-memoryでのみ利用し、DBへは書き込まない。
     // google_place_idが無い場合はText Search fallback(strong matchのみ採用)を試みる
@@ -1010,12 +1015,13 @@ export async function storeResearchWorkflow(
     // 決定的に確認できた場合のみ統合する(Q5、Plan §8.2)。trust boundary は無改変で、
     // 統合できなければ従来どおりの判定になる(退化ではない)。
     const resolvedRegistry = await resolveAndPersistSourceRegistryStep(
+      tenantId,
       runId,
       mergedRegistry,
       knownStoreDataUrls.map((u) => u.url),
     );
 
-    await markStageStep(runId, "researching");
+    await markStageStep(tenantId, runId, "researching");
 
     // Stage2: URL Context + Structured Output(単一call)。Stage1のSearch Notesも渡す。
     const stage2Result = await stage2Step(
@@ -1131,7 +1137,7 @@ export async function storeResearchWorkflow(
       );
     }
 
-    await persistSucceededStep(runId, {
+    await persistSucceededStep(tenantId, runId, {
       items: orderedItems,
       sourceRegistry: finalRegistry,
       tokenUsage: {
@@ -1156,7 +1162,7 @@ export async function storeResearchWorkflow(
   } catch (err) {
     // running状態から抜け出せない状態を作らない(Plan §17の必須要件)。
     // Workflow自体もfailedとして記録されるようre-throwする(観測性の二重化)。
-    await markFailedStep(runId, err, stage1Usage, stage1Diagnostics);
+    await markFailedStep(tenantId, runId, err, stage1Usage, stage1Diagnostics);
     throw err;
   }
 }

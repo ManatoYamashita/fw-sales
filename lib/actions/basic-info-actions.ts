@@ -27,6 +27,7 @@ import { mergeBasicInfo } from "@/lib/domain/basic-info-merge";
 import { clipForLog } from "@/lib/utils/log-sanitize";
 import type { BasicInfo, BasicInfoField } from "@/types/basic-info";
 import { failure, success, type ActionResult } from "./_helpers";
+import { resolveTenantId } from "@/lib/tenant/context";
 
 /**
  * 基本情報の 1 項目を手動編集し、`filled_by="manual"` で永続化する。
@@ -41,6 +42,7 @@ export async function updateBasicInfoFieldAction(
   key: string,
   value: string,
 ): Promise<ActionResult<void>> {
+  const tenantId = await resolveTenantId();
   // storeId 検証
   if (typeof storeId !== "string" || storeId.trim() === "") {
     return failure("店舗 ID が指定されていません");
@@ -82,7 +84,7 @@ export async function updateBasicInfoFieldAction(
     // ロック順は `stores` のみ(review 系は run -> store)。
     // `stores` -> `store_research_runs` の順で明示ロックを取る経路は存在しないため、
     // 新しい deadlock クラスは発生しない。
-    await repos.transaction(async (tx) => {
+    await repos.forTenant(tenantId).transaction(async (tx) => {
       const store = await tx.store.getForUpdate(storeId);
       if (!store) throw new Error(`Store not found: ${storeId}`);
       const merged = mergeBasicInfo(store.basic_info, incoming, "manual", new Date().toISOString());
@@ -92,8 +94,8 @@ export async function updateBasicInfoFieldAction(
     // 店舗詳細は保存直後に `router.refresh()` で読み直し、入力済み件数・信頼度・根拠を
     // 更新する。`revalidateTag(_, "max")` (stale-while-revalidate) だと旧値が返り、
     // 未入力へ戻したのに件数が減らない (E2E で検出)。`updateStorePatchAction` と同じ規約。
-    updateTag(CACHE_TAGS.store(storeId));
-    updateTag(CACHE_TAGS.stores);
+    updateTag(CACHE_TAGS.store(tenantId, storeId));
+    updateTag(CACHE_TAGS.stores(tenantId));
     return success(undefined, `「${def.label}」を更新しました`);
   } catch (err) {
     // 例外の文 (英語・内部の名前を含みうる) は画面に出さず、ログにだけ残す (#327)。

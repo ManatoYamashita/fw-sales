@@ -15,6 +15,7 @@ import { normalizeDealStatusAmounts } from "@/lib/domain/deal-status";
 import { MAX_YEN_AMOUNT, parseCanonicalYenAmount } from "@/lib/domain/yen-amount";
 import { failure, readNullableNumber, readNullableString, readNumber, readString, success, type ActionResult } from "./_helpers";
 import { requireAdmin, requireSignedIn } from "./_authz";
+import { resolveTenantId } from "@/lib/tenant/context";
 
 const ACTIVITY_MEMO_MAX = 5000;
 const NEXT_ACTION_NOTE_MAX = 500;
@@ -75,36 +76,37 @@ function validateFields(formData: FormData): ActionResult<never> | null {
   return null;
 }
 
-function invalidateDealScopes(dealId?: string, storeId?: string) {
+function invalidateDealScopes(tenantId: string, dealId?: string, storeId?: string) {
   // 店舗詳細 / 店舗一覧が参照するタグは updateTag で即時失効させる (#172)。
   // revalidateTag(_, "max") は stale-while-revalidate 挙動のため、Server Action 直後の
   // router.refresh() が失効前のキャッシュを返し「保存したのに古い内容が表示される」
   // read-your-own-writes 違反が起きていた。updateTag は Server Action 専用 API で、
   // 同一リクエスト内から失効が保証される (profile-actions.ts / prompt-template-actions.ts
   // と同規約。この規約を最初に明記していた app-settings-actions.ts は #213 で撤去済み)。
-  updateTag(CACHE_TAGS.deals);
-  if (dealId) updateTag(CACHE_TAGS.deal(dealId));
+  updateTag(CACHE_TAGS.deals(tenantId));
+  if (dealId) updateTag(CACHE_TAGS.deal(tenantId, dealId));
   if (storeId) {
-    updateTag(CACHE_TAGS.dealsByStore(storeId));
-    updateTag(CACHE_TAGS.store(storeId));
-    updateTag(CACHE_TAGS.stores);
+    updateTag(CACHE_TAGS.dealsByStore(tenantId, storeId));
+    updateTag(CACHE_TAGS.store(tenantId, storeId));
+    updateTag(CACHE_TAGS.stores(tenantId));
   }
   // 集計系ダッシュボード (stats / kpi / pipeline) は保存直後の閲覧画面ではないため、
   // 従来どおり stale-while-revalidate で背景更新する (過剰な同期失効を避ける)
-  revalidateTag(CACHE_TAGS.stats, "max");
-  revalidateTag(CACHE_TAGS.kpi, "max");
-  revalidateTag(CACHE_TAGS.pipeline, "max");
+  revalidateTag(CACHE_TAGS.stats(tenantId), "max");
+  revalidateTag(CACHE_TAGS.kpi(tenantId), "max");
+  revalidateTag(CACHE_TAGS.pipeline(tenantId), "max");
 }
 
 export async function createDealAction(storeId: string, _prev: ActionResult<{ id: string }> | null, formData: FormData): Promise<ActionResult<{ id: string }>> {
+  const tenantId = await resolveTenantId();
   const denied = await requireSignedIn();
   if (denied) return denied;
   const invalid = validateFields(formData);
   if (invalid) return invalid;
-  const store = await repos.store.get(storeId);
+  const store = await repos.forTenant(tenantId).store.get(storeId);
   if (!store) return failure("店舗が見つかりませんでした");
   const assigned = readNullableString(formData, "assigned_sales_user_id") ?? store.assigned_sales_user_id;
-  if (assigned && !(await repos.profile.findById(assigned))) return failure("営業担当が見つかりませんでした");
+  if (assigned && !(await repos.forTenant(tenantId).membership.find(assigned))) return failure("営業担当が見つかりませんでした");
   const status = (readString(formData, "status") || "初回接触") as DealStatus;
   const statusAmounts = normalizeDealStatusAmounts(status, {
     order_amount: readNullableNumber(formData, "order_amount"),
@@ -125,14 +127,14 @@ export async function createDealAction(storeId: string, _prev: ActionResult<{ id
     // Deal 作成 + (未到達の場合のみ) Store stage の "架電済み" への昇格を 1 トランザクションで
     // 実行する。失敗時は ROLLBACK されるため、tx 外側で invalidateDealScopes を呼ぶことで
     // 部分失敗時のキャッシュ汚染を防ぐ。
-    const created = await repos.transaction(async ({ deal, store: storeTx }) => {
+    const created = await repos.forTenant(tenantId).transaction(async ({ deal, store: storeTx }) => {
       const c = await deal.create(input);
       if (store.stage !== CONTACTED_STAGE) {
         await storeTx.update(storeId, { stage: CONTACTED_STAGE });
       }
       return c;
     });
-    invalidateDealScopes(created.id, storeId);
+    invalidateDealScopes(tenantId, created.id, storeId);
     return success({ id: created.id }, "営業記録を追加しました");
   } catch (error) {
     console.error("[salesActivity.create] failed", { storeId, message: error instanceof Error ? error.message : String(error) });
@@ -141,11 +143,12 @@ export async function createDealAction(storeId: string, _prev: ActionResult<{ id
 }
 
 export async function updateDealAction(dealId: string, _prev: ActionResult<{ id: string }> | null, formData: FormData): Promise<ActionResult<{ id: string }>> {
+  const tenantId = await resolveTenantId();
   const denied = await requireSignedIn();
   if (denied) return denied;
   const invalid = validateFields(formData);
   if (invalid) return invalid;
-  const current = await repos.deal.get(dealId);
+  const current = await repos.forTenant(tenantId).deal.get(dealId);
   if (!current) return failure("営業記録が見つかりませんでした");
   const patch: DealPatch = {};
   const textFields = ["discussion", "proposal"] as const;
@@ -171,7 +174,7 @@ export async function updateDealAction(dealId: string, _prev: ActionResult<{ id:
   }
   if (formData.has("assigned_sales_user_id")) {
     const assigned = readNullableString(formData, "assigned_sales_user_id");
-    if (assigned && !(await repos.profile.findById(assigned))) return failure("営業担当が見つかりませんでした");
+    if (assigned && !(await repos.forTenant(tenantId).membership.find(assigned))) return failure("営業担当が見つかりませんでした");
     patch.assigned_sales_user_id = assigned;
   }
   if (formData.has("activity_memo")) patch.activity_memo = readNullableString(formData, "activity_memo");
@@ -179,19 +182,19 @@ export async function updateDealAction(dealId: string, _prev: ActionResult<{ id:
   if (formData.has("next_action_type")) patch.next_action_type = readNullableString(formData, "next_action_type") as NextActionType | null;
   if (formData.has("next_action_note")) patch.next_action_note = readNullableString(formData, "next_action_note");
   try {
-    const store = await repos.store.get(current.store_id);
+    const store = await repos.forTenant(tenantId).store.get(current.store_id);
     // Store が既に "架電済み" ならプレーンな Deal 更新のみで済ませる。未到達の場合だけ
     // トランザクションで Deal 更新 + Store stage 昇格を原子的に行う。
     const updated = store && store.stage !== CONTACTED_STAGE
-      ? await repos.transaction(async ({ deal, store: storeTx }) => {
+      ? await repos.forTenant(tenantId).transaction(async ({ deal, store: storeTx }) => {
           const u = await deal.update(dealId, patch);
           if (!u) throw new Error("営業記録が見つかりませんでした");
           await storeTx.update(current.store_id, { stage: CONTACTED_STAGE });
           return u;
         })
-      : await repos.deal.update(dealId, patch);
+      : await repos.forTenant(tenantId).deal.update(dealId, patch);
     if (!updated) return failure("営業記録が見つかりませんでした");
-    invalidateDealScopes(updated.id, current.store_id);
+    invalidateDealScopes(tenantId, updated.id, current.store_id);
     return success({ id: updated.id }, "営業記録を更新しました");
   } catch (error) {
     console.error("[salesActivity.update] failed", { dealId, message: error instanceof Error ? error.message : String(error) });
@@ -200,12 +203,13 @@ export async function updateDealAction(dealId: string, _prev: ActionResult<{ id:
 }
 
 export async function deleteDealAction(dealId: string): Promise<ActionResult> {
+  const tenantId = await resolveTenantId();
   const guard = await requireAdmin("deals.delete");
   if (!guard.ok) return guard.denied;
-  const current = await repos.deal.get(dealId);
+  const current = await repos.forTenant(tenantId).deal.get(dealId);
   if (!current) return failure("営業記録が見つかりませんでした");
-  await repos.deal.delete(dealId);
-  invalidateDealScopes(dealId, current.store_id);
+  await repos.forTenant(tenantId).deal.delete(dealId);
+  invalidateDealScopes(tenantId, dealId, current.store_id);
   console.log("[audit] deals.delete", { by: guard.profile.email, dealId });
   redirect(`/stores/${current.store_id}?tab=progress`);
 }
@@ -225,14 +229,15 @@ export async function deleteDealAction(dealId: string): Promise<ActionResult> {
  * - 成功時は redirect せず ActionResult を返す (toast + 画面内更新のため)
  */
 export async function deleteSalesActivityAction(dealId: string): Promise<ActionResult> {
+  const tenantId = await resolveTenantId();
   const profile = await getCurrentProfile();
   if (!profile) return failure("ログインが必要です");
   if (!dealId) return failure("営業記録が指定されていません");
   try {
-    const current = await repos.deal.get(dealId);
+    const current = await repos.forTenant(tenantId).deal.get(dealId);
     if (!current) return failure("営業記録が見つかりませんでした");
-    await repos.deal.delete(dealId);
-    invalidateDealScopes(dealId, current.store_id);
+    await repos.forTenant(tenantId).deal.delete(dealId);
+    invalidateDealScopes(tenantId, dealId, current.store_id);
     console.log("[audit] sales-activity.delete", { by: profile.email, dealId, storeId: current.store_id });
     return success(undefined, "営業記録を削除しました");
   } catch (error) {

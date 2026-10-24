@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { StoreResearchStatusBadge } from "@/components/feature/stage-badge";
 import { RESEARCH_REVIEW_PENDING } from "@/lib/domain/store-research-status";
+import { resolveTenantId } from "@/lib/tenant/context";
 import { storeNeedsResearchReview } from "@/lib/queries/research";
 
 /**
@@ -14,7 +15,8 @@ import { storeNeedsResearchReview } from "@/lib/queries/research";
  * 使わない。ページの静的シェルを崩さないよう、呼び出し側で Suspense 境界の内側に置くこと。
  */
 export async function StoreResearchReviewNotice({ storeId }: { storeId: string }) {
-  if (!(await storeNeedsResearchReview(storeId))) return null;
+  const tenantId = await resolveTenantId();
+  if (!(await storeNeedsResearchReview(tenantId, storeId))) return null;
   return (
     <div
       role="note"

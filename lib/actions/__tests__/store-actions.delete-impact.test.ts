@@ -29,9 +29,9 @@ const { mockGetDeleteImpact, mockRevalidateTag, mockRedirect } = vi.hoisted(() =
 }));
 
 vi.mock("@/lib/repositories", () => ({
-  repos: {
+  repos: ((tenantRepos) => ({ ...tenantRepos, forTenant: () => tenantRepos }))({
     store: { getDeleteImpact: mockGetDeleteImpact },
-  },
+  }),
 }));
 
 vi.mock("next/cache", () => ({

@@ -3,9 +3,9 @@
  *
  * 役割:
  * - `lib/repositories/store-repository.ts` の `StoreRepository` interface を Drizzle で 1:1 実装する
- * - `makeStoreRepo(executor)` ファクトリで `DbClient` または `Tx` を受け取り、
+ * - `makeStoreRepo(executor, tenantId)` ファクトリで `DbClient` または `Tx` を受け取り、
  *   トランザクション境界を呼び出し側 (Action 層) で制御できるようにする
- * - 既定 export `dbStoreRepo` は `db` (singleton) を束縛したインスタンス
+ * - テナント ID はファクトリで必須とし、すべての操作に束縛する
  *
  * 制約:
  * - `import "server-only"` を必ず付け、Client バンドルへの混入を防ぐ (Req 6.4)
@@ -22,9 +22,10 @@
 
 import "server-only";
 import { eq, desc, and, or, ilike, inArray, gte, lte, sql, type SQL } from "drizzle-orm";
-import { db, type DbClient, type Tx } from "./client";
+import { type DbClient, type Tx } from "./client";
 import {
   deals,
+  memberships,
   handoffs,
   placeCandidates,
   storeResearchRuns,
@@ -105,7 +106,7 @@ function toDbPatch(patch: StorePatch): Partial<StoreInsertRow> {
   const row: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(patch)) {
     // `undefined` = 未指定。`null` は有効な値なので除外しない。
-    if (value === undefined) continue;
+    if (value === undefined || key === "tenant_id" || key === "id" || key === "created_at") continue;
     row[key] =
       key === "ai_analysis_result" && value !== null ? JSON.stringify(value) : value;
   }
@@ -215,19 +216,28 @@ function toImpactCount(value: unknown): number {
  * `StoreRepository` を Drizzle で実装するファクトリ。
  *
  * - `executor` には `db` (singleton) または transaction `tx` を渡せる
- * - 内部状態は持たず、closure には `executor` のみを保持する
+ * - 内部状態は持たず、closure に executor と tenantId を保持する
  */
-export function makeStoreRepo(executor: DbClient | Tx): StoreRepository {
+export function makeStoreRepo(executor: DbClient | Tx, tenantId: string): StoreRepository {
+  const inTenant = eq(stores.tenant_id, tenantId);
+
+  async function validateAssignees(input: StorePatch): Promise<void> {
+    const ids = [...new Set([input.assigned_planner_user_id, input.assigned_sales_user_id]
+      .filter((id): id is string => typeof id === "string"))];
+    if (ids.length === 0) return;
+    const members = await executor.select({ id: memberships.user_id }).from(memberships)
+      .where(and(eq(memberships.tenant_id, tenantId), inArray(memberships.user_id, ids)));
+    if (members.length !== ids.length) throw new Error("担当者が見つかりません");
+  }
   return {
     async list(filter = {}) {
-      // ソート (created_at 降順) は常に適用し、フィルタ条件がある場合のみ
-      // `where(...)` を追加する。条件が空なら全件取得となる
-      const where = buildFilterConditions(filter);
+      // テナント条件は検索条件の有無によらず必ず適用する。
+      const where = and(inTenant, buildFilterConditions(filter));
       const query = executor
         .select()
         .from(stores)
         .orderBy(desc(stores.created_at));
-      const rows = where ? await query.where(where) : await query;
+      const rows = await query.where(where);
       return rows.map(fromDbRow);
     },
 
@@ -235,7 +245,7 @@ export function makeStoreRepo(executor: DbClient | Tx): StoreRepository {
       const rows = await executor
         .select()
         .from(stores)
-        .where(eq(stores.id, id))
+        .where(and(inTenant, eq(stores.id, id)))
         .limit(1);
       const head = rows[0];
       return head ? fromDbRow(head) : null;
@@ -247,7 +257,7 @@ export function makeStoreRepo(executor: DbClient | Tx): StoreRepository {
       const rows = await executor
         .select()
         .from(stores)
-        .where(eq(stores.id, id))
+        .where(and(inTenant, eq(stores.id, id)))
         .for("update")
         .limit(1);
       const head = rows[0];
@@ -255,6 +265,7 @@ export function makeStoreRepo(executor: DbClient | Tx): StoreRepository {
     },
 
     async create(input: StoreInput) {
+      await validateAssignees(input);
       const now = today();
       const row: Store = {
         ...input,
@@ -262,11 +273,15 @@ export function makeStoreRepo(executor: DbClient | Tx): StoreRepository {
         created_at: now,
         updated_at: now,
       };
-      await executor.insert(stores).values(toDbRow(row));
+      await executor.insert(stores).values({ ...toDbRow(row), tenant_id: tenantId });
       return row;
     },
 
     async update(id, patch: StorePatch) {
+      if (patch.assigned_planner_user_id != null || patch.assigned_sales_user_id != null) {
+        if (!(await this.get(id))) return null;
+        await validateAssignees(patch);
+      }
       // patch で指定された列 + `updated_at` **のみ** を SET する(`toDbPatch` の JSDoc 参照)。
       // 事前 SELECT を廃し 1 文で完結させることで、read-modify-write 由来の
       // lost update が原理的に発生しなくなる。戻り値は `RETURNING` で
@@ -275,7 +290,7 @@ export function makeStoreRepo(executor: DbClient | Tx): StoreRepository {
       const rows = await executor
         .update(stores)
         .set({ ...toDbPatch(patch), updated_at: today() })
-        .where(eq(stores.id, id))
+        .where(and(inTenant, eq(stores.id, id)))
         .returning();
       const head = rows[0];
       return head ? fromDbRow(head) : null;
@@ -287,7 +302,7 @@ export function makeStoreRepo(executor: DbClient | Tx): StoreRepository {
       // `RETURNING id` を使って削除行の存在を確実に判定する
       const deleted = await executor
         .delete(stores)
-        .where(eq(stores.id, id))
+        .where(and(inTenant, eq(stores.id, id)))
         .returning({ id: stores.id });
       return deleted.length > 0;
     },
@@ -307,7 +322,7 @@ export function makeStoreRepo(executor: DbClient | Tx): StoreRepository {
       // pgbouncer 設定 or chunk 分割) で別 PR で扱う。
       const deleted = await executor
         .delete(stores)
-        .where(inArray(stores.id, ids))
+        .where(and(inTenant, inArray(stores.id, ids)))
         .returning({ id: stores.id });
       return deleted.length;
     },
@@ -335,10 +350,10 @@ export function makeStoreRepo(executor: DbClient | Tx): StoreRepository {
       const idArray = [...ids];
       const rows = await executor.execute(sql`
         select
-          (select count(*)::int from ${deals} where ${inArray(deals.store_id, idArray)}) as deals,
-          (select count(*)::int from ${storeResearchRuns} where ${inArray(storeResearchRuns.store_id, idArray)}) as store_research_runs,
-          (select count(*)::int from ${handoffs} where ${inArray(handoffs.store_id, idArray)}) as handoffs,
-          (select count(*)::int from ${placeCandidates} where ${inArray(placeCandidates.matched_store_id, idArray)}) as place_candidates
+          (select count(*)::int from ${deals} where ${and(eq(deals.tenant_id, tenantId), inArray(deals.store_id, idArray), sql`${deals.store_id} in (select ${stores.id} from ${stores} where ${inTenant})`)}) as deals,
+          (select count(*)::int from ${storeResearchRuns} where ${and(eq(storeResearchRuns.tenant_id, tenantId), inArray(storeResearchRuns.store_id, idArray), sql`${storeResearchRuns.store_id} in (select ${stores.id} from ${stores} where ${inTenant})`)}) as store_research_runs,
+          (select count(*)::int from ${handoffs} where ${and(eq(handoffs.tenant_id, tenantId), inArray(handoffs.store_id, idArray), sql`${handoffs.store_id} in (select ${stores.id} from ${stores} where ${inTenant})`)}) as handoffs,
+          (select count(*)::int from ${placeCandidates} where ${and(eq(placeCandidates.tenant_id, tenantId), inArray(placeCandidates.matched_store_id, idArray), sql`${placeCandidates.matched_store_id} in (select ${stores.id} from ${stores} where ${inTenant})`)}) as place_candidates
       `);
       const row = (rows as Array<Record<string, unknown>>)[0];
       return {
@@ -354,14 +369,14 @@ export function makeStoreRepo(executor: DbClient | Tx): StoreRepository {
       //
       // feat/ai-research-quality-ux-hardening(最終レビュー指摘1):
       // - 現在値の読み出しに **行ロック**(`SELECT ... FOR UPDATE`)を付ける。
-      //   トランザクション内(`repos.transaction` 経由)で呼ばれた場合、
+      //   トランザクション内(`repos.forTenant(tenantId).transaction` 経由)で呼ばれた場合、
       //   他の `basic_info` writer と直列化される。
       // - 書き込みは **`basic_info` 列だけ**に絞る(旧実装は `toDbRow(next)` で全列 SET
       //   していたため、並行する `stage`/`memo` 更新等を巻き戻す余地があった)。
       const current = await executor
         .select()
         .from(stores)
-        .where(eq(stores.id, id))
+        .where(and(inTenant, eq(stores.id, id)))
         .for("update")
         .limit(1);
       const headRow = current[0];
@@ -385,7 +400,7 @@ export function makeStoreRepo(executor: DbClient | Tx): StoreRepository {
       const rows = await executor
         .update(stores)
         .set({ basic_info: mergedBasicInfo, updated_at: today() })
-        .where(eq(stores.id, id))
+        .where(and(inTenant, eq(stores.id, id)))
         .returning();
       const updatedRow = rows[0];
       // `RETURNING` が空になるのは、ロック取得後に別 tx が削除した場合のみ。
@@ -424,16 +439,9 @@ export function makeStoreRepo(executor: DbClient | Tx): StoreRepository {
       const rows = await executor
         .select()
         .from(stores)
-        .where(where)
+        .where(and(inTenant, where))
         .orderBy(desc(stores.created_at));
       return rows.map(fromDbRow);
     },
   };
 }
-
-/**
- * `db` singleton を束縛した既定 `StoreRepository` インスタンス。
- *
- * トランザクション内では呼び出し側で `makeStoreRepo(tx)` を都度生成して使用する。
- */
-export const dbStoreRepo: StoreRepository = makeStoreRepo(db);

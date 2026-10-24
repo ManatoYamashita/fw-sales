@@ -22,10 +22,11 @@ import {
   Handshake,
   ArrowLeftRight,
 } from "lucide-react";
+import { resolveTenantId } from "@/lib/tenant/context";
 
 export const metadata: Metadata = { title: "設定" };
 
-async function loadCounts() {
+async function loadCounts(tenantId: string) {
   "use cache";
   // 3テーブルを full list する最重クエリ。longBackstop だと build 時 prerender 充填が走り、
   // データ増大時に将来 USE_CACHE_TIMEOUT を招き得る。
@@ -37,12 +38,12 @@ async function loadCounts() {
   // `count(*)` で取る。run の作成・完了は `startResearchRunAction` 等が
   // `CACHE_TAGS.stores` を revalidate するため、下のタグで失効が届く。
   cacheLife("dynamicHole");
-  cacheTag(CACHE_TAGS.stores, CACHE_TAGS.deals, CACHE_TAGS.handoffs);
+  cacheTag(CACHE_TAGS.stores(tenantId), CACHE_TAGS.deals(tenantId), CACHE_TAGS.handoffs(tenantId));
   const [stores, researchRuns, deals, handoffs] = await Promise.all([
-    repos.store.list(),
-    repos.researchRun.count(),
-    repos.deal.list(),
-    repos.handoff.list(),
+    repos.forTenant(tenantId).store.list(),
+    repos.forTenant(tenantId).researchRun.count(),
+    repos.forTenant(tenantId).deal.list(),
+    repos.forTenant(tenantId).handoff.list(),
   ]);
   return {
     stores: stores.length,
@@ -53,7 +54,8 @@ async function loadCounts() {
 }
 
 async function CountsGrid() {
-  const counts = await loadCounts();
+  const tenantId = await resolveTenantId();
+  const counts = await loadCounts(tenantId);
   return (
     <div className={COUNTS_GRID_CLASS}>
       <Stat label="店舗" value={counts.stores} icon={<StoreIcon />} />

@@ -10,10 +10,10 @@ export interface ActionQueue {
   pendingHandoffs: Handoff[];
 }
 
-export async function getActionQueue(): Promise<ActionQueue> {
+export async function getActionQueue(tenantId: string): Promise<ActionQueue> {
   const [stores, handoffs] = await Promise.all([
-    repos.store.list(),
-    repos.handoff.list(),
+    repos.forTenant(tenantId).store.list(),
+    repos.forTenant(tenantId).handoff.list(),
   ]);
 
   return {

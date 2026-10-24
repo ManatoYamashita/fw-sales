@@ -19,27 +19,28 @@ import {
 export { applyStoreFilter, applyStoreSort };
 export type { StoreSortContext };
 
-async function listAllStoresCached() {
+async function listAllStoresCached(tenantId: string) {
   "use cache";
   cacheLife("longBackstop");
-  cacheTag(CACHE_TAGS.stores);
-  return repos.store.list();
+  cacheTag(CACHE_TAGS.stores(tenantId));
+  return repos.forTenant(tenantId).store.list();
 }
 
 export async function listStores(
+  tenantId: string,
   filter: StoreFilter = {},
   sort: StoreSort = DEFAULT_STORE_SORT,
   ctx: StoreSortContext = {},
 ): Promise<Store[]> {
-  const all = await listAllStoresCached();
+  const all = await listAllStoresCached(tenantId);
   return applyStoreSort(applyStoreFilter(all, filter), sort, ctx);
 }
 
-export async function getStoreCached(id: string): Promise<Store | null> {
+export async function getStoreCached(tenantId: string, id: string): Promise<Store | null> {
   "use cache";
   cacheLife("longBackstop");
-  cacheTag(CACHE_TAGS.store(id), CACHE_TAGS.stores);
-  return repos.store.get(id);
+  cacheTag(CACHE_TAGS.store(tenantId, id), CACHE_TAGS.stores(tenantId));
+  return repos.forTenant(tenantId).store.get(id);
 }
 
 export interface StoreCounts {

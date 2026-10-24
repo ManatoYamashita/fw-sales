@@ -43,12 +43,12 @@ const { mockFindAll, mockStoreList, mockDealList, mockNeedsReview } = vi.hoisted
 }));
 
 vi.mock("@/lib/repositories", () => ({
-  repos: {
-    profile: { findAll: mockFindAll },
+  repos: ((tenantRepos) => ({ ...tenantRepos, forTenant: () => tenantRepos }))({
+    membership: { list: mockFindAll },
     store: { list: mockStoreList },
     deal: { list: mockDealList },
     researchRun: { listStoreIdsNeedingReview: mockNeedsReview },
-  },
+  }),
 }));
 
 vi.mock("next/cache", () => ({
@@ -69,12 +69,12 @@ beforeEach(() => {
 
 describe("listSalesProgressRows の getAllProfiles 呼び出し", () => {
   it("profile 一覧を 1 リクエストにつき 1 回だけ取得する", async () => {
-    await listSalesProgressRows();
+    await listSalesProgressRows("cfe871a5-8fc7-42da-9677-3a050665cafb");
     expect(mockFindAll).toHaveBeenCalledTimes(1);
   });
 
-  it("引数なしで取得する (getAllProfiles は引数を持たず、キャッシュキーが 1 つにそろう)", async () => {
-    await listSalesProgressRows();
+  it("テナント ID を渡して同じ所属一覧のキャッシュを使う", async () => {
+    await listSalesProgressRows("cfe871a5-8fc7-42da-9677-3a050665cafb");
     expect(mockFindAll).toHaveBeenCalledWith();
   });
 
@@ -87,14 +87,14 @@ describe("listSalesProgressRows の getAllProfiles 呼び出し", () => {
       makeStore({ id: "store_1", assigned_sales_user_id: "user_1" }),
     ]);
 
-    const rows = await listSalesProgressRows();
+    const rows = await listSalesProgressRows("cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     expect(rows).toHaveLength(1);
     expect(rows[0]?.salesName).toBe("山田太郎");
   });
 
   it("store / deal 一覧も同時に取得する", async () => {
-    await listSalesProgressRows();
+    await listSalesProgressRows("cfe871a5-8fc7-42da-9677-3a050665cafb");
     expect(mockStoreList).toHaveBeenCalledTimes(1);
     expect(mockDealList).toHaveBeenCalledTimes(1);
   });
@@ -107,7 +107,7 @@ describe("listSalesProgressRows の getAllProfiles 呼び出し", () => {
     ]);
     mockNeedsReview.mockResolvedValue(["store_1"]);
 
-    const rows = await listSalesProgressRows();
+    const rows = await listSalesProgressRows("cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     const byId = new Map(rows.map((r) => [r.store.id, r.researchStatus]));
     expect(byId.get("store_1")).toBe("レビュー待ち");
@@ -115,6 +115,6 @@ describe("listSalesProgressRows の getAllProfiles 呼び出し", () => {
   });
 
   it("店舗 0 件でも例外を投げず空配列を返す", async () => {
-    await expect(listSalesProgressRows()).resolves.toEqual([]);
+    await expect(listSalesProgressRows("cfe871a5-8fc7-42da-9677-3a050665cafb")).resolves.toEqual([]);
   });
 });

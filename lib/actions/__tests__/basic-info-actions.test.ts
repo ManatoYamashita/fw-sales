@@ -33,7 +33,7 @@ const {
 }));
 
 vi.mock("@/lib/repositories", () => ({
-  repos: {
+  repos: ((tenantRepos) => ({ ...tenantRepos, forTenant: () => tenantRepos }))({
     store: {
       get: mockStoreGet,
       getForUpdate: mockStoreGetForUpdate,
@@ -41,7 +41,7 @@ vi.mock("@/lib/repositories", () => ({
       mergeBasicInfo: mockMergeBasicInfoRepo,
     },
     transaction: mockTransaction,
-  },
+  }),
 }));
 
 // `getForUpdate` と `get` は別 mock。実装が誤って行ロック無しの `get` を使うように
@@ -149,12 +149,12 @@ describe("updateBasicInfoFieldAction — 店舗詳細のインライン編集 (#
   it("保存直後の再取得で新しい値を読めるよう、店舗詳細・一覧のタグを即時失効する", async () => {
     const result = await updateBasicInfoFieldAction("store-1", "concept", "東北の郷土料理");
     expect(result.ok).toBe(true);
-    expect(mockUpdateTag).toHaveBeenCalledWith(CACHE_TAGS.store("store-1"));
-    expect(mockUpdateTag).toHaveBeenCalledWith(CACHE_TAGS.stores);
+    expect(mockUpdateTag).toHaveBeenCalledWith(CACHE_TAGS.store("cfe871a5-8fc7-42da-9677-3a050665cafb", "store-1"));
+    expect(mockUpdateTag).toHaveBeenCalledWith(CACHE_TAGS.stores("cfe871a5-8fc7-42da-9677-3a050665cafb"));
     // stale-while-revalidate だと旧値が返り、入力済み件数や信頼度が古いまま残る。
     const swrTags = mockRevalidateTag.mock.calls.map(([tag]) => tag);
-    expect(swrTags).not.toContain(CACHE_TAGS.store("store-1"));
-    expect(swrTags).not.toContain(CACHE_TAGS.stores);
+    expect(swrTags).not.toContain(CACHE_TAGS.store("cfe871a5-8fc7-42da-9677-3a050665cafb", "store-1"));
+    expect(swrTags).not.toContain(CACHE_TAGS.stores("cfe871a5-8fc7-42da-9677-3a050665cafb"));
   });
 
   it("AI 調査から採用した値を手で直すと、元の確信度・出典を引き継がない", async () => {

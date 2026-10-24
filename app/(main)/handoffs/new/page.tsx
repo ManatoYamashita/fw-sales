@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { HandoffNewForm } from "./_components/handoff-new-form";
 import { getDealCached } from "@/lib/queries/deals";
+import { resolveTenantId } from "@/lib/tenant/context";
 
 export const metadata: Metadata = { title: "引き継ぎを作成" };
 
@@ -11,9 +12,10 @@ interface PageProps {
 }
 
 export default async function NewHandoffPage({ searchParams }: PageProps) {
+  const tenantId = await resolveTenantId();
   const sp = await searchParams;
   if (!sp.deal) notFound();
-  const deal = await getDealCached(sp.deal);
+  const deal = await getDealCached(tenantId, sp.deal);
   if (!deal) notFound();
 
   return (

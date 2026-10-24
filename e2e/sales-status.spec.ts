@@ -1,4 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
+import postgres from "postgres";
+import { e2eDatabaseUrl } from "./support/e2e-db";
+import { refreshServerCache } from "./support/fresh-cache";
 import { chooseOption } from "./support/select";
 
 /**
@@ -13,6 +16,23 @@ test.describe.configure({ mode: "serial" });
 // 1 回のコンパイルが 30 秒の既定を超えることがあるため、各テストの持ち時間を 3 倍にする。
 test.beforeEach(() => {
   test.slow();
+});
+
+const sql = postgres(e2eDatabaseUrl(), { prepare: false, max: 1 });
+
+// CI の retry でも seed の状態から始められるよう、書き換える 2 店舗を毎回戻す (#390)。
+test.beforeAll(async ({}, testInfo) => {
+  // 営業記録を足すと、調査段階も「架電済み」へ上がる (createDealAction)。あわせて戻す。
+  await sql`DELETE FROM deals WHERE store_id = 'store_004'`;
+  await sql`UPDATE stores SET stage = '未調査' WHERE id = 'store_004'`;
+  // 店舗名を書き換えてから直すまでの間で落ちても、元の名前から始める。
+  await sql`UPDATE stores SET name = 'CAFE VERDE' WHERE id = 'store_002'`;
+  // 店舗と営業記録は 'use cache' で読むので、戻した値を画面にも出させる。
+  await refreshServerCache(testInfo, ["/stores", "/stores/store_004?tab=progress", "/stores/store_002"]);
+});
+
+test.afterAll(async () => {
+  await sql.end();
 });
 
 /**

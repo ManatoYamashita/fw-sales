@@ -9,6 +9,7 @@ import { StageBadge } from "@/components/feature/stage-badge";
 import { getStoreCached } from "@/lib/queries/stores";
 import { generateDmText } from "@/lib/templates/dm";
 import { generateTelScript } from "@/lib/templates/tel";
+import { resolveTenantId } from "@/lib/tenant/context";
 
 type Params = Promise<{ storeId: string }>;
 
@@ -17,8 +18,9 @@ export async function generateMetadata({
 }: {
   params: Params;
 }): Promise<Metadata> {
+  const tenantId = await resolveTenantId();
   const { storeId } = await params;
-  const store = await getStoreCached(storeId);
+  const store = await getStoreCached(tenantId, storeId);
   return { title: store ? `${store.name} のアクション` : "営業アクション" };
 }
 
@@ -27,8 +29,9 @@ export default async function ActionDetailPage({
 }: {
   params: Params;
 }) {
+  const tenantId = await resolveTenantId();
   const { storeId } = await params;
-  const store = await getStoreCached(storeId);
+  const store = await getStoreCached(tenantId, storeId);
   if (!store) notFound();
 
   const isDM = store.channel === "DM推奨";

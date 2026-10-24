@@ -5,6 +5,7 @@ import { PipelineFilters } from "./_components/pipeline-filters";
 import { KanbanSkeleton } from "@/components/ui/skeleton";
 import type { StoreFilter } from "@/types/store";
 import { getAllProfiles } from "@/lib/queries/profiles";
+import { resolveTenantId } from "@/lib/tenant/context";
 
 export const metadata: Metadata = {
   title: "パイプライン",
@@ -18,9 +19,10 @@ interface PageProps {
 }
 
 export default async function PipelinePage({ searchParams }: PageProps) {
+  const tenantId = await resolveTenantId();
   const [sp, profiles] = await Promise.all([
     searchParams,
-    getAllProfiles(),
+    getAllProfiles(tenantId),
   ]);
   const filter: StoreFilter = {};
   if (sp.q) filter.q = sp.q;

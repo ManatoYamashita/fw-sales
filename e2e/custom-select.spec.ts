@@ -1,6 +1,7 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import postgres from "postgres";
 import { e2eDatabaseUrl } from "./support/e2e-db";
+import { refreshServerCache } from "./support/fresh-cache";
 import { chooseOption } from "./support/select";
 
 /**
@@ -24,13 +25,16 @@ const STORE_URL = `/stores/${STORE_ID}`;
 
 const sql = postgres(e2eDatabaseUrl(), { prepare: false, max: 1 });
 
-test.beforeAll(async () => {
+test.beforeAll(async ({}, testInfo) => {
   await sql`DELETE FROM stores WHERE id = ${STORE_ID}`;
   await sql.begin(async (tx) => {
     await tx`CREATE TEMP TABLE e2e_store ON COMMIT DROP AS SELECT * FROM stores WHERE id = 'store_004'`;
     await tx`UPDATE e2e_store SET id = ${STORE_ID}, name = 'E2Eプルダウン', stage = '未調査'`;
     await tx`INSERT INTO stores SELECT * FROM e2e_store`;
   });
+  // 店舗と営業記録は 'use cache' で読む。CI の retry では前の試行の調査段階や営業記録が
+  // 画面に残るので、作り直した店舗を読み直させる (#390)。
+  await refreshServerCache(testInfo, [STORE_URL, `${STORE_URL}?tab=progress`]);
 });
 
 test.afterAll(async () => {

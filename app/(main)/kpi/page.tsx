@@ -6,6 +6,7 @@ import { JapaneseYen, Repeat } from "lucide-react";
 import { getKpiSnapshot } from "@/lib/queries/kpi";
 import { formatYen } from "@/lib/utils/format";
 import { cn } from "@/lib/utils/cn";
+import { resolveTenantId } from "@/lib/tenant/context";
 
 export const metadata: Metadata = { title: "KPI分析" };
 
@@ -18,7 +19,8 @@ const FUNNEL_BAR_TONE = [
 ];
 
 export default async function KpiPage() {
-  const snapshot = await getKpiSnapshot();
+  const tenantId = await resolveTenantId();
+  const snapshot = await getKpiSnapshot(tenantId);
   const maxFunnel = Math.max(...snapshot.funnel.map((s) => s.count), 1);
   const maxChannel = Math.max(
     ...snapshot.channelBreakdown.map((c) => c.count),
