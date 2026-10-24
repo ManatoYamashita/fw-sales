@@ -256,9 +256,9 @@ export async function getSnapshotForExportAction(): Promise<DbSnapshot> {
   const tenantId = await resolveTenantId();
   // 3 entity を DB から並列取得 (Req 8.1, 8.4)。
   const [dbDeals, dbStores, dbHandoffs] = await Promise.all([
-    repos.deal.list(),
+    repos.forTenant(tenantId).deal.list(),
     repos.forTenant(tenantId).store.list(),
-    repos.handoff.list(),
+    repos.forTenant(tenantId).handoff.list(),
   ]);
 
   return { stores: dbStores, deals: dbDeals, handoffs: dbHandoffs };

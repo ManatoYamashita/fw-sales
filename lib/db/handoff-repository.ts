@@ -3,9 +3,9 @@
  *
  * 役割:
  * - `lib/repositories/handoff-repository.ts` の `HandoffRepository` interface を Drizzle で 1:1 実装する
- * - `makeHandoffRepo(executor)` ファクトリで `DbClient` または `Tx` を受け取り、
+ * - `makeHandoffRepo(executor, tenantId)` で DB 接続とテナントを束縛し、
  *   トランザクション境界を呼び出し側 (Action 層) で制御できるようにする
- * - 既定 export `dbHandoffRepo` は `db` (singleton) を束縛したインスタンス
+ * - 未束縛の singleton は公開しない (#368)
  *
  * 制約:
  * - `import "server-only"` を必ず付け、Client バンドルへの混入を防ぐ (Req 9.4)
@@ -20,9 +20,9 @@
  */
 
 import "server-only";
-import { eq, desc } from "drizzle-orm";
-import { db, type DbClient, type Tx } from "./client";
-import { handoffs } from "./schema";
+import { and, eq, desc } from "drizzle-orm";
+import { type DbClient, type Tx } from "./client";
+import { deals, handoffs, stores } from "./schema";
 import type { Handoff, HandoffInput, HandoffPatch } from "@/types/handoff";
 import type { HandoffRepository } from "@/lib/repositories/handoff-repository";
 import { generateId } from "@/lib/utils/id";
@@ -32,23 +32,24 @@ import { today } from "@/lib/utils/date";
  * `HandoffRepository` を Drizzle で実装するファクトリ。
  *
  * - `executor` には `db` (singleton) または transaction `tx` を渡せる
- * - 内部状態は持たず、closure には `executor` のみを保持する
+ * - closure に executor と tenantId を保持する
  */
-export function makeHandoffRepo(executor: DbClient | Tx): HandoffRepository {
+export function makeHandoffRepo(executor: DbClient | Tx, tenantId: string): HandoffRepository {
+  const inTenant = eq(handoffs.tenant_id, tenantId);
+
+  async function validateReferences(input: Pick<HandoffInput, "store_id" | "deal_id">): Promise<void> {
+    const rows = await executor.select({ id: deals.id }).from(deals)
+      .innerJoin(stores, and(eq(stores.id, deals.store_id), eq(stores.tenant_id, tenantId)))
+      .where(and(eq(deals.tenant_id, tenantId), eq(deals.id, input.deal_id), eq(deals.store_id, input.store_id)))
+      .limit(1);
+    if (rows.length === 0) throw new Error("商談が見つかりません");
+  }
+
   return {
     async list(storeId) {
-      // 共通のソート条件 (created_at 降順) を先に適用し、
-      // storeId 指定時のみ where 句を追加する (mock 実装と同じセマンティクス)。
-      const rows = storeId
-        ? await executor
-            .select()
-            .from(handoffs)
-            .where(eq(handoffs.store_id, storeId))
-            .orderBy(desc(handoffs.created_at))
-        : await executor
-            .select()
-            .from(handoffs)
-            .orderBy(desc(handoffs.created_at));
+      const rows = await executor.select().from(handoffs)
+        .where(and(inTenant, storeId === undefined ? undefined : eq(handoffs.store_id, storeId)))
+        .orderBy(desc(handoffs.created_at));
       return rows as Handoff[];
     },
 
@@ -56,7 +57,7 @@ export function makeHandoffRepo(executor: DbClient | Tx): HandoffRepository {
       const rows = await executor
         .select()
         .from(handoffs)
-        .where(eq(handoffs.id, id))
+        .where(and(inTenant, eq(handoffs.id, id)))
         .limit(1);
       return (rows[0] as Handoff | undefined) ?? null;
     },
@@ -65,12 +66,13 @@ export function makeHandoffRepo(executor: DbClient | Tx): HandoffRepository {
       const rows = await executor
         .select()
         .from(handoffs)
-        .where(eq(handoffs.deal_id, dealId))
+        .where(and(inTenant, eq(handoffs.deal_id, dealId)))
         .limit(1);
       return (rows[0] as Handoff | undefined) ?? null;
     },
 
     async create(input: HandoffInput) {
+      await validateReferences(input);
       const now = today();
       const row: Handoff = {
         ...input,
@@ -78,7 +80,7 @@ export function makeHandoffRepo(executor: DbClient | Tx): HandoffRepository {
         created_at: now,
         updated_at: now,
       };
-      await executor.insert(handoffs).values(row);
+      await executor.insert(handoffs).values({ ...row, tenant_id: tenantId });
       return row;
     },
 
@@ -86,17 +88,22 @@ export function makeHandoffRepo(executor: DbClient | Tx): HandoffRepository {
       const current = await executor
         .select()
         .from(handoffs)
-        .where(eq(handoffs.id, id))
+        .where(and(inTenant, eq(handoffs.id, id)))
         .limit(1);
       const head = current[0] as Handoff | undefined;
       if (!head) return null;
-      const next: Handoff = {
-        ...head,
-        ...patch,
-        updated_at: today(),
-      };
-      await executor.update(handoffs).set(next).where(eq(handoffs.id, id));
-      return next;
+      if (patch.store_id !== undefined || patch.deal_id !== undefined) {
+        await validateReferences({
+          store_id: patch.store_id ?? head.store_id,
+          deal_id: patch.deal_id ?? head.deal_id,
+        });
+      }
+      const values = Object.fromEntries(Object.entries(patch).filter(([key, value]) =>
+        value !== undefined && !["tenant_id", "id", "created_at"].includes(key),
+      ));
+      const rows = await executor.update(handoffs).set({ ...values, updated_at: today() })
+        .where(and(inTenant, eq(handoffs.id, id))).returning();
+      return (rows[0] as Handoff | undefined) ?? null;
     },
 
     async delete(id) {
@@ -105,16 +112,9 @@ export function makeHandoffRepo(executor: DbClient | Tx): HandoffRepository {
       // `RETURNING id` を使って削除行の存在を確実に判定する。
       const deleted = await executor
         .delete(handoffs)
-        .where(eq(handoffs.id, id))
+        .where(and(inTenant, eq(handoffs.id, id)))
         .returning({ id: handoffs.id });
       return deleted.length > 0;
     },
   };
 }
-
-/**
- * `db` singleton を束縛した既定 `HandoffRepository` インスタンス。
- *
- * トランザクション内では呼び出し側で `makeHandoffRepo(tx)` を都度生成して使用する。
- */
-export const dbHandoffRepo: HandoffRepository = makeHandoffRepo(db);

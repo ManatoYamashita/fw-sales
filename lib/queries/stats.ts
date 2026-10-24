@@ -18,7 +18,7 @@ export interface DashboardStats {
 export async function getDashboardStats(tenantId: string): Promise<DashboardStats> {
   const [stores, handoffs] = await Promise.all([
     repos.forTenant(tenantId).store.list(),
-    repos.handoff.list(),
+    repos.forTenant(tenantId).handoff.list(),
   ]);
 
   const total = stores.length;
@@ -85,8 +85,8 @@ export async function getCacheableNavBadgeCounts(tenantId: string): Promise<Cach
 
   const [stores, deals, handoffs] = await Promise.all([
     needsStores ? repos.forTenant(tenantId).store.list() : Promise.resolve([] as Awaited<ReturnType<import("@/lib/repositories").StoreRepository["list"]>>),
-    needsDeals ? repos.deal.list() : Promise.resolve([] as Awaited<ReturnType<typeof repos.deal.list>>),
-    needsHandoffs ? repos.handoff.list() : Promise.resolve([] as Awaited<ReturnType<typeof repos.handoff.list>>),
+    needsDeals ? repos.forTenant(tenantId).deal.list() : Promise.resolve([] as Awaited<ReturnType<import("@/lib/repositories").DealRepository["list"]>>),
+    needsHandoffs ? repos.forTenant(tenantId).handoff.list() : Promise.resolve([] as Awaited<ReturnType<import("@/lib/repositories").HandoffRepository["list"]>>),
   ]);
 
   return {
