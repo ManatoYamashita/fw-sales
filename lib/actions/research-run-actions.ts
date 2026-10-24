@@ -204,7 +204,7 @@ export async function startResearchRunAction(
 
   // 監査は run の作成と Workflow の起動が成立した後に書く。失敗しても起動は取り消さない
   // (`writeAudit` は例外を投げない)。
-  await writeAudit({
+  await writeAudit(tenantId, {
     event: AUDIT_EVENTS.researchRunStart,
     actor: snapshotSessionActor(session),
     storeId,
@@ -216,7 +216,7 @@ export async function startResearchRunAction(
 }
 
 /**
- * run 進捗のポーリング用(PR4)。`repos.researchRun` は server-only のため、
+ * run 進捗のポーリング用(PR4)。`repos.forTenant(tenantId).researchRun` は server-only のため、
  * client component からは本 Action 経由で読む。`'use cache'` は使わない
  * (running中のrunを数秒間隔で読むため、Cache Componentsのキャッシュ対象外)。
  *
@@ -257,7 +257,7 @@ export interface RecordReviewDecisionInput {
  * 変更しない。採用でも、いまの値と同じ(正規化して一致)なら `basic_info` は変更しない (#319)。
  *
  * feat/research-review-write-integrity(MAJOR10・MAJOR11)での変更:
- * - `repos.transaction` + `getForUpdate`(`SELECT ... FOR UPDATE`)でrun行をロックし、
+ * - `repos.forTenant(tenantId).transaction` + `getForUpdate`(`SELECT ... FOR UPDATE`)でrun行をロックし、
  *   basic_info書込みとreview_decisions書込みを1トランザクションで原子化する。
  *   同一runへの並行操作(採用/却下/スキップ、一括採用、レビュー完了)を直列化する。
  * - 一度`review_decisions`に記録済みのitemKeyへの再判断は拒否する(immutable設計。
@@ -395,7 +395,7 @@ export async function recordReviewDecisionAction(
   // 監査と revalidate は transaction のコミット後にだけ行う(rollback 時に走らせない)。
   // 監査の書き込みに失敗しても判断の記録は取り消さない(`writeAudit` は例外を投げない)。
   if (result.ok && auditPayload) {
-    await writeAudit({
+    await writeAudit(tenantId, {
       event: AUDIT_EVENTS.researchReviewDecide,
       actor: snapshotSessionActor(session),
       storeId,
@@ -482,7 +482,7 @@ export async function completeReviewAction(
 
   // 監査と revalidate は transaction のコミット後にだけ行う(rollback 時に走らせない)。
   if (result.ok && auditPayload) {
-    await writeAudit({
+    await writeAudit(tenantId, {
       event: AUDIT_EVENTS.researchReviewComplete,
       actor: snapshotSessionActor(session),
       storeId,
@@ -648,7 +648,7 @@ export async function adoptBulkLaneAction(
   // 監査 DB が詰まったときの待ち時間は最大で 2 件分(`AUDIT_WRITE_WAIT_MS` × 2)になる。
   if (result.ok && auditEffectCounts) {
     const actor = snapshotSessionActor(session);
-    await writeAudit({
+    await writeAudit(tenantId, {
       event: AUDIT_EVENTS.researchReviewBulkAdopt,
       actor,
       storeId,
@@ -656,7 +656,7 @@ export async function adoptBulkLaneAction(
       payload: { itemKeys: expectedKeys, effectCounts: auditEffectCounts },
     });
     if (auditCompletePayload) {
-      await writeAudit({
+      await writeAudit(tenantId, {
         event: AUDIT_EVENTS.researchReviewComplete,
         actor,
         storeId,

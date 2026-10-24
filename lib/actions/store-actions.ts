@@ -140,7 +140,7 @@ function buildStoreInput(
 
 /**
  * StoreInput の `assigned_*_user_id` がいずれも有効な profile.id を指していることを
- * 検証する。`null` (未割当) は OK、UUID が profiles に存在しなければエラーメッセージを返す。
+ * 検証する。`null` (未割当) は OK、UUID が現在のテナントに所属しなければエラーメッセージを返す。
  * 不正値による FK 違反を Server Action 層で早期検出するための防御層。
  * 成功時は null を返す。
  */
@@ -151,7 +151,7 @@ async function validateAssignedUserIds(
     (id): id is string => id !== null && id !== "",
   );
   for (const id of ids) {
-    const profile = await repos.membership.find(await resolveTenantId(), id);
+    const profile = await repos.forTenant(await resolveTenantId()).membership.find(id);
     if (!profile) {
       return `担当者が見つかりませんでした (id: ${id})`;
     }
@@ -357,7 +357,7 @@ export async function updateSalesProgressAction(
   const tenantId = await resolveTenantId();
   const guard = await requireSignedInWithProfile();
   if (!guard.ok) {
-    await writeAudit({
+    await writeAudit(tenantId, {
       event: AUDIT_EVENTS.authzDenied, actor: null,
       storeId: null,
       payload: { operation: AUDIT_EVENTS.salesProgressUpdate, reason: "unauthenticated" },
@@ -397,7 +397,7 @@ export async function updateSalesProgressAction(
       // 「形式不正」と「存在しない」を UI 文言で区別しないのは、内部スキーマの
       // 情報を返さない既存方針に合わせるため。
       const wellFormed = profileIdSchema.safeParse(assigned).success;
-      if (!wellFormed || !(await repos.profile.findById(assigned))) {
+      if (!wellFormed || !(await repos.forTenant(tenantId).profile.findById(assigned))) {
         return failure("営業担当が見つかりませんでした");
       }
     }
@@ -433,7 +433,7 @@ export async function updateSalesProgressAction(
   }
   if (!receipt.updated) return failure("店舗が見つかりませんでした");
   if (receipt.changedFields.length > 0) {
-    await writeAudit({
+    await writeAudit(tenantId, {
       event: AUDIT_EVENTS.salesProgressUpdate,
       actor: snapshotActor(guard.profile), storeId: id,
       payload: { changedFields: receipt.changedFields },
@@ -492,7 +492,7 @@ export async function getStoreDeleteImpactAction(
 export async function deleteStoreAction(id: string): Promise<ActionResult> {
   const tenantId = await resolveTenantId();
   const guard = await requireAdmin(AUDIT_EVENTS.storeDelete, async ({ profile, reason }) => {
-    await writeAudit({
+    await writeAudit(tenantId, {
       event: AUDIT_EVENTS.authzDenied, actor: profile ? snapshotActor(profile) : null,
       storeId: null,
       payload: { operation: AUDIT_EVENTS.storeDelete, reason },
@@ -517,7 +517,7 @@ export async function deleteStoreAction(id: string): Promise<ActionResult> {
     if (parsed === null) dumpUnrecognizedErrorShape("[stores.delete]", err);
     return failure(formatUserMessage(parsed, "店舗の削除に失敗しました"));
   }
-  await writeAudit({
+  await writeAudit(tenantId, {
     event: AUDIT_EVENTS.storeDelete, actor: snapshotActor(guard.profile), storeId: id,
     payload: { deletionSucceeded: true },
   });

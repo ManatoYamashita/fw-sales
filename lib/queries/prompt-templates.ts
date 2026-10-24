@@ -11,5 +11,5 @@ export async function listPromptTemplatesCached(
   "use cache";
   cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.promptTemplates(tenantId));
-  return repos.promptTemplate.list(userId);
+  return repos.forTenant(tenantId).promptTemplate.list(userId);
 }

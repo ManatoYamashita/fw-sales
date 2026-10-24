@@ -2,46 +2,38 @@ import { describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
   const db = { transaction: vi.fn(async (work) => work("transaction-executor")) };
-  const legacyFactory = vi.fn(() => ({}));
-  const scopedFactory = () => vi.fn((executor, tenantId) => ({ executor, tenantId }));
-  return { db, legacyFactory, makeStoreRepo: scopedFactory(), makePlaceCandidateRepo: scopedFactory(), makeDealRepo: scopedFactory(), makeHandoffRepo: scopedFactory(), makeResearchRunRepo: scopedFactory() };
+  const factory = vi.fn((executor, tenantId) => ({ executor, tenantId }));
+  return { db, auditDb: { dedicated: true }, factory };
 });
 vi.mock("@/lib/db", () => ({
-  db: mocks.db,
-  makeStoreRepo: mocks.makeStoreRepo,
-  makePlaceCandidateRepo: mocks.makePlaceCandidateRepo,
-  makeDealRepo: mocks.makeDealRepo, makeHandoffRepo: mocks.makeHandoffRepo,
-  makeProfileRepo: mocks.legacyFactory, makeMembershipRepo: mocks.legacyFactory,
-  makeNotificationRepo: mocks.legacyFactory, makePromptTemplateRepo: mocks.legacyFactory,
-  makeAppSettingsRepo: mocks.legacyFactory, makeResearchRunRepo: mocks.makeResearchRunRepo,
-  dbEventLogRepo: {}, dbProfileRepo: {},
-  dbMembershipRepo: {}, dbNotificationRepo: {}, dbPromptTemplateRepo: {}, dbAppSettingsRepo: {},
+  db: mocks.db, auditDb: mocks.auditDb,
+  makeStoreRepo: mocks.factory, makePlaceCandidateRepo: mocks.factory,
+  makeDealRepo: mocks.factory, makeHandoffRepo: mocks.factory, makeResearchRunRepo: mocks.factory,
+  makeProfileRepo: mocks.factory, makeMembershipRepo: mocks.factory,
+  makeNotificationRepo: mocks.factory, makePromptTemplateRepo: mocks.factory,
+  makeAppSettingsRepo: mocks.factory, makeEventLogRepo: mocks.factory,
 }));
 const { repos } = await import("@/lib/repositories");
+const domains = ["store", "placeCandidate", "deal", "handoff", "researchRun", "profile", "membership", "notification", "promptTemplate", "appSettings"] as const;
 
-describe("テナントを束縛した repository の構築", () => {
-  it("通常 executor と transaction executor の両方に同じテナントを渡す", async () => {
-    const scoped = repos.forTenant("tenant-a");
-    for (const domain of ["store", "placeCandidate", "deal", "handoff", "researchRun"] as const) {
-      expect(scoped[domain]).toEqual({ executor: mocks.db, tenantId: "tenant-a" });
-      expect(repos.forTenant("tenant-b")[domain]).toEqual({ executor: mocks.db, tenantId: "tenant-b" });
+describe("テナントを束縛したrepositoryの構築", () => {
+  it("A/Bと通常/transactionの全repositoryがそれぞれの所属と接続を保つ", async () => {
+    const a = repos.forTenant("tenant-a"), b = repos.forTenant("tenant-b");
+    for (const domain of domains) {
+      expect(a[domain]).toEqual({ executor: mocks.db, tenantId: "tenant-a" });
+      expect(b[domain]).toEqual({ executor: mocks.db, tenantId: "tenant-b" });
     }
-    await scoped.transaction(async (tx) => {
-      for (const domain of ["store", "placeCandidate", "deal", "handoff", "researchRun"] as const) {
-        expect(tx[domain]).toEqual({ executor: "transaction-executor", tenantId: "tenant-a" });
-      }
-    });
-    expect(Object.isFrozen(scoped)).toBe(true);
+    for (const [tenantId, scoped] of [["tenant-a", a], ["tenant-b", b]] as const) {
+      await scoped.transaction(async (tx) => {
+        expect(Object.keys(tx).sort()).toEqual([...domains].sort());
+        for (const domain of domains) expect(tx[domain]).toEqual({ executor: "transaction-executor", tenantId });
+      });
+      expect(scoped.eventLog).toEqual({ executor: mocks.auditDb, tenantId });
+      expect(Object.isFrozen(scoped)).toBe(true);
+    }
   });
-  it("移行済みの領域はテナントの無い入口を持たず、空のテナントは拒否する", async () => {
-    for (const domain of ["store", "placeCandidate", "deal", "handoff", "researchRun"]) {
-      expect(repos).not.toHaveProperty(domain);
-    }
-    await repos.transaction(async (tx) => {
-      expect(tx).not.toHaveProperty("deal");
-      expect(tx).not.toHaveProperty("handoff");
-      expect(tx).not.toHaveProperty("researchRun");
-    });
+  it("root入口はforTenantだけで、空の所属は拒否する", () => {
+    expect(Object.keys(repos)).toEqual(["forTenant"]);
     expect(() => repos.forTenant(" ")).toThrow("テナント");
   });
 });

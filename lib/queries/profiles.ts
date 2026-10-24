@@ -23,7 +23,7 @@ export async function getAllProfiles(tenantId: string): Promise<readonly Profile
   "use cache";
   cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.profiles(tenantId));
-  return repos.membership.list(tenantId);
+  return repos.forTenant(tenantId).membership.list();
 }
 
 /**
@@ -41,7 +41,7 @@ export async function getTenantMembers(
   "use cache";
   cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.profiles(tenantId));
-  return repos.membership.list(tenantId, options);
+  return repos.forTenant(tenantId).membership.list(options);
 }
 
 /**
@@ -52,7 +52,7 @@ export async function getProfileById(tenantId: string, id: string): Promise<Prof
   "use cache";
   cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.profile(tenantId, id));
-  return repos.membership.find(tenantId, id);
+  return repos.forTenant(tenantId).membership.find(id);
 }
 
 /**
@@ -67,5 +67,5 @@ export async function getProfilesByIds(
   cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.profiles(tenantId));
   const wanted = new Set(ids);
-  return (await repos.membership.list(tenantId)).filter((profile) => wanted.has(profile.id));
+  return (await repos.forTenant(tenantId).membership.list()).filter((profile) => wanted.has(profile.id));
 }

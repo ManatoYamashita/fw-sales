@@ -4,10 +4,10 @@
  * `ai_prompt_templates` テーブルへのアクセス契約。
  *
  * 設計上の不変条件:
- * - 取得・更新・削除系のすべてのメソッドで `userId` 条件を必ず含める。
+ * - 取得・更新・削除系のすべてのメソッドで束縛したテナントと `userId` 条件を必ず含める。
  *   他ユーザーのテンプレートを参照・変更できないよう、repository 層でも防御する。
  * - `setDefault` は 2 ステップ (clearDefault → update) で構成される。
- *   原子性が必要な場合は呼び出し側が `repos.transaction()` で包むこと。
+ *   原子性が必要な場合は呼び出し側が `repos.forTenant(tenantId).transaction()` で包むこと。
  * - デフォルトテンプレートの削除拒否は DB trigger (migration 0009) で保証。
  *   Server Action 側でも二重ガードを行う (Phase 2 実装予定)。
  *
@@ -63,7 +63,7 @@ export interface PromptTemplateRepository {
   /**
    * 指定 id のテンプレートをデフォルトに設定する。
    * 内部で clearDefaultForUser → update(is_default: true) を実行する。
-   * 原子性が必要な場合は呼び出し側が `repos.transaction()` で包むこと。
+   * 原子性が必要な場合は呼び出し側が `repos.forTenant(tenantId).transaction()` で包むこと。
    * 対象が存在しない / 他ユーザーの場合は null を返す。
    */
   setDefault(id: string, userId: string): Promise<AiPromptTemplate | null>;

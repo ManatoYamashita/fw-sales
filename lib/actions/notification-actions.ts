@@ -34,7 +34,7 @@ export async function markNotificationReadAction(
   }
 
   try {
-    const updated = await repos.notification.markAsRead(
+    const updated = await repos.forTenant(tenantId).notification.markAsRead(
       notificationId,
       profile.id,
     );
@@ -62,7 +62,7 @@ export async function markAllNotificationsReadAction(): Promise<
   if (!profile) return failure(UNAUTHENTICATED_MESSAGE);
 
   try {
-    const count = await repos.notification.markAllAsRead(profile.id);
+    const count = await repos.forTenant(tenantId).notification.markAllAsRead(profile.id);
     if (count > 0) updateTag(CACHE_TAGS.notifications(tenantId));
     return success({ count });
   } catch (error) {

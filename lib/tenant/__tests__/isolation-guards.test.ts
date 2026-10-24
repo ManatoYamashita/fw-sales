@@ -6,30 +6,29 @@ import { getTableConfig, PgTable } from "drizzle-orm/pg-core";
 import * as schema from "@/lib/db/schema";
 import { CACHE_TAGS } from "@/lib/cache";
 import { unsafeCacheTagCalls } from "@/lib/tenant/cache-tag-guard";
-import type { Repos, TxRepos } from "@/lib/repositories";
+import type { Repos } from "@/lib/repositories";
+import type { makePlaceCandidateRepo } from "@/lib/db/place-candidate-repository";
 import type { makeStoreRepo } from "@/lib/db/store-repository";
 import type { makeDealRepo } from "@/lib/db/deal-repository";
 import type { makeHandoffRepo } from "@/lib/db/handoff-repository";
 
 import type { makeResearchRunRepo } from "@/lib/db/research-run-repository";
 
+import type { makeProfileRepo } from "@/lib/db/profile-repository";
+import type { makeMembershipRepo } from "@/lib/db/membership-repository";
+import type { makeNotificationRepo } from "@/lib/db/notification-repository";
+import type { makePromptTemplateRepo } from "@/lib/db/prompt-template-repository";
+import type { makeAppSettingsRepo } from "@/lib/db/app-settings-repository";
+import type { makeEventLogRepo } from "@/lib/db/event-log-repository";
+
 type Assert<T extends true> = T;
-// 未束縛入口が復活したら typecheck が落ちる。
-type NoUnboundStore = Assert<"store" extends keyof Repos ? false : true>;
-type NoUnboundCandidates = Assert<"placeCandidate" extends keyof Repos ? false : true>;
-type NoUnboundTxStore = Assert<"store" extends keyof TxRepos ? false : true>;
-type FactoryRequiresTenant = Assert<Parameters<typeof makeStoreRepo> extends [unknown, string] ? true : false>;
-type NoUnboundDeals = Assert<"deal" extends keyof Repos ? false : true>;
-type NoUnboundHandoffs = Assert<"handoff" extends keyof Repos ? false : true>;
-type NoUnboundTxDeals = Assert<"deal" extends keyof TxRepos ? false : true>;
-type NoUnboundTxHandoffs = Assert<"handoff" extends keyof TxRepos ? false : true>;
+type UserFactoriesRequireTenant = Assert<(Parameters<typeof makeProfileRepo> | Parameters<typeof makeMembershipRepo> | Parameters<typeof makeNotificationRepo> | Parameters<typeof makePromptTemplateRepo> | Parameters<typeof makeAppSettingsRepo> | Parameters<typeof makeEventLogRepo>) extends [unknown, string] ? true : false>;
+type SoleRootEntry = Assert<keyof Repos extends "forTenant" ? true : false>;
+type FactoryRequiresTenant = Assert<(Parameters<typeof makeStoreRepo> | Parameters<typeof makePlaceCandidateRepo>) extends [unknown, string] ? true : false>;
 type DealFactoryRequiresTenant = Assert<Parameters<typeof makeDealRepo> extends [unknown, string] ? true : false>;
 type HandoffFactoryRequiresTenant = Assert<Parameters<typeof makeHandoffRepo> extends [unknown, string] ? true : false>;
-type NoUnboundResearch = Assert<"researchRun" extends keyof Repos ? false : true>;
-type NoUnboundTxResearch = Assert<"researchRun" extends keyof TxRepos ? false : true>;
 type ResearchFactoryRequiresTenant = Assert<Parameters<typeof makeResearchRunRepo> extends [unknown, string] ? true : false>;
-export type TenantTypeGuards = [NoUnboundResearch, NoUnboundTxResearch, ResearchFactoryRequiresTenant, NoUnboundStore, NoUnboundCandidates, NoUnboundTxStore, FactoryRequiresTenant,
-  NoUnboundDeals, NoUnboundHandoffs, NoUnboundTxDeals, NoUnboundTxHandoffs, DealFactoryRequiresTenant, HandoffFactoryRequiresTenant];
+export type TenantTypeGuards = [UserFactoriesRequireTenant, SoleRootEntry, FactoryRequiresTenant, DealFactoryRequiresTenant, HandoffFactoryRequiresTenant, ResearchFactoryRequiresTenant];
 
 function source(file: string, text = readFileSync(file, "utf8")) {
   return ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, file.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);

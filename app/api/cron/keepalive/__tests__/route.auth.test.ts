@@ -23,7 +23,7 @@ vi.mock("server-only", () => ({}));
 const { mockSet } = vi.hoisted(() => ({ mockSet: vi.fn() }));
 
 vi.mock("@/lib/repositories", () => ({
-  repos: { appSettings: { set: mockSet } },
+  repos: { forTenant: (tenantId: string) => { expect(tenantId).toBe("cfe871a5-8fc7-42da-9677-3a050665cafb"); return { appSettings: { set: mockSet } }; } },
 }));
 
 const { GET } = await import("../route");

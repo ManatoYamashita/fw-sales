@@ -10,7 +10,7 @@
  * 店舗削除で結果が変わるため `CACHE_TAGS.stores` にも相乗りする。
  *
  * 注意: 現在この通知を発行する writer はアプリ内に存在しない
- * (`deep_research_*` の通知種別は #185 で撤去、`repos.notification` は
+ * (`deep_research_*` の通知種別は #185 で撤去、`repos.forTenant(tenantId).notification` は
  * 読み取りのみ)。`revalidateTag(CACHE_TAGS.notifications)` による失効契約だけを
  * 維持しており、writer を足す際はそのタグを叩くこと。
  *
@@ -49,7 +49,7 @@ export async function getRecentNotifications(
   if (!userId || userId.trim() === "") return [];
   const safeLimit = Math.min(Math.max(1, limit), MAX_LIMIT);
 
-  const all = await repos.notification.findByUserId(userId);
+  const all = await repos.forTenant(tenantId).notification.findByUserId(userId);
   // findByUserId は created_at DESC で返すパターンを Mock/DB ともに踏襲済
   return dropDeadStoreLinks(tenantId, all.slice(0, safeLimit));
 }

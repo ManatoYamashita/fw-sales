@@ -106,7 +106,7 @@ export async function createDealAction(storeId: string, _prev: ActionResult<{ id
   const store = await repos.forTenant(tenantId).store.get(storeId);
   if (!store) return failure("店舗が見つかりませんでした");
   const assigned = readNullableString(formData, "assigned_sales_user_id") ?? store.assigned_sales_user_id;
-  if (assigned && !(await repos.membership.find(tenantId, assigned))) return failure("営業担当が見つかりませんでした");
+  if (assigned && !(await repos.forTenant(tenantId).membership.find(assigned))) return failure("営業担当が見つかりませんでした");
   const status = (readString(formData, "status") || "初回接触") as DealStatus;
   const statusAmounts = normalizeDealStatusAmounts(status, {
     order_amount: readNullableNumber(formData, "order_amount"),
@@ -174,7 +174,7 @@ export async function updateDealAction(dealId: string, _prev: ActionResult<{ id:
   }
   if (formData.has("assigned_sales_user_id")) {
     const assigned = readNullableString(formData, "assigned_sales_user_id");
-    if (assigned && !(await repos.membership.find(tenantId, assigned))) return failure("営業担当が見つかりませんでした");
+    if (assigned && !(await repos.forTenant(tenantId).membership.find(assigned))) return failure("営業担当が見つかりませんでした");
     patch.assigned_sales_user_id = assigned;
   }
   if (formData.has("activity_memo")) patch.activity_memo = readNullableString(formData, "activity_memo");

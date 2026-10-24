@@ -1,7 +1,7 @@
 /**
  * ProfileRepository interface (auth-and-notifications spec, Issue #16)
  *
- * `profiles` テーブル (人の情報) への読み取り API を集約する境界層 interface。
+ * `profiles` テーブル (人の情報) を束縛テナントの所属で絞る読み取り API を集約する境界層 interface。
  * `auth.users` への INSERT 時の自動展開 (`handle_new_user` trigger) は **DB 側で完結**するため、
  * 本 interface にプロフィール作成 API は置かない (design.md §ProfileRepository)。
  *
