@@ -12,8 +12,9 @@ Issue: [#384](https://github.com/ManatoYamashita/fw-sales/issues/384) ／ Phase 
 ## Phase 1：merge前と適用後
 
 1. **merge前：** [手動バックアップと復元確認](manual-db-backup-runbook.md)を済ませ、結果をPR #387に記録します。Freeプランには自動バックアップがありません。
+   - **#384では実施していません。** 2026-10-24に、今回はバックアップの取得と復元確認を行わずに進める方針に変えました。そのため、#384の適用前の状態に戻すためのバックアップはありません。
 2. **merge前：** PR #387の「適用前の確認」のSELECTを、本番で取ります。
-3. **merge：** 利用の少ない時間帯に行います。`pg_dump`が終わっていることを確かめてから、mergeしてください。
+3. **merge：** 利用の少ない時間帯に行います。バックアップを取る場合は、`pg_dump`が終わっていることを確かめてから、mergeしてください。
 4. **適用後：** Apply Migrationsのmigrate-devとmigrate-prdが成功し、両方で`db:verify-hashes`と`db:verify-fks`がOKになることを確かめます。
 5. **適用後：** 次の「Phase 2の着手条件」のSQLを、本番とdevで実行します。
 6. **記録：** 結果を#384に記録します（対象SHA・日時・SQLの結果）。
