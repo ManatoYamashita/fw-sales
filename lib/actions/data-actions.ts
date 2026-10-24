@@ -10,13 +10,7 @@
  *   Issue #110 で旧 `research` テーブルを撤去したため 4 → 3 entity になった。
  *
  * 制約 / 例外:
- * - 本ファイルは design.md の "Allowed Dependencies / Documented exception" に
- *   従い、`lib/db/client.ts` (`db`) と `lib/db/schema.ts` (3 entity 全テーブル) を
- *   参照する。これは TRUNCATE / BULK UPSERT 等 Repository interface で
- *   表現できない DDL 級操作を扱うための data-actions.ts と scripts/seed.ts
- *   限定の例外であり、他ファイルでは追加してはならない。
- * - `lib/db/*` は **動的 import** で評価する。Next.js のバンドル解析性のため
- *   必ず文字列リテラルで記述すること (Issue 2 の既存パターンを踏襲)。
+ * - DB操作はテナントを束縛したdata repositoryへ委譲する (#370)。
  * - 既存の Server Action シグネチャ (`resetToSeedAction()` /
  *   `clearAllAction()` / `importJsonAction(_prev, formData)` /
  *   `getSnapshotForExportAction()`) と戻り値型は無修正で維持する (Req 9.1)。
@@ -30,13 +24,12 @@
  */
 
 import { revalidateTag } from "next/cache";
-import { SEED_STORES, SEED_DEALS, SEED_HANDOFFS } from "@/lib/db/seed-data";
 import type { DbSnapshot } from "@/lib/db/snapshot";
 import { repos } from "@/lib/repositories";
 import { clipForLog } from "@/lib/utils/log-sanitize";
 import { CACHE_TAGS } from "@/lib/cache";
 import { failure, success, type ActionResult } from "./_helpers";
-import { requireAdmin } from "./_authz";
+import { requireSignedIn, requireAdmin } from "./_authz";
 import {
   DATA_RESET_DENIED_MESSAGE,
   isDataResetAllowed,
@@ -86,44 +79,8 @@ export async function resetToSeedAction(): Promise<ActionResult> {
   if (envDenied) return envDenied;
   // 3 entity 全てを DB トランザクション内でリセット
   // (research-handoff-db-migration §8.3, §8.4, §8.5)。
-  // lib/db/* は DATABASE_URL 必須の副作用を持つため動的 import する (Issue 2)。
   try {
-    const { db } = await import("@/lib/db/client");
-    const { stores, deals, handoffs } = await import("@/lib/db/schema");
-    const { toDbRow: storeToDbRow } = await import(
-      "@/lib/db/store-repository"
-    );
-    await db.transaction(async (tx) => {
-      // FK 整合のため子→親の順で削除
-      // (handoffs.deal_id → deals, handoffs.store_id → stores,
-      //  deals.store_id → stores)
-      await tx.delete(handoffs);
-      await tx.delete(deals);
-      await tx.delete(stores);
-
-      // 親→子の順で upsert
-      // ai_analysis_result はオブジェクト ↔ text 列の変換のため toDbRow 経由
-      for (const s of SEED_STORES) {
-        const row = storeToDbRow(s);
-        await tx
-          .insert(stores)
-          .values(row)
-          .onConflictDoUpdate({ target: stores.id, set: row });
-      }
-      for (const d of SEED_DEALS) {
-        await tx
-          .insert(deals)
-          .values(d)
-          .onConflictDoUpdate({ target: deals.id, set: d });
-      }
-      // Handoff は primitive のみで toDbRow 不要
-      for (const h of SEED_HANDOFFS) {
-        await tx
-          .insert(handoffs)
-          .values(h)
-          .onConflictDoUpdate({ target: handoffs.id, set: h });
-      }
-    });
+    await repos.forTenant(tenantId).data.resetToSeed();
   } catch (e) {
     console.error("[data.reset] failed", {
       message: clipForLog(e instanceof Error ? e.message : String(e)),
@@ -147,16 +104,8 @@ export async function clearAllAction(): Promise<ActionResult> {
   if (envDenied) return envDenied;
   // 3 entity 全てを DB トランザクション内で全削除
   // (research-handoff-db-migration §8.4, §8.5)。
-  // lib/db/* は DATABASE_URL 必須の副作用を持つため動的 import する (Issue 2)。
   try {
-    const { db } = await import("@/lib/db/client");
-    const { stores, deals, handoffs } = await import("@/lib/db/schema");
-    await db.transaction(async (tx) => {
-      // FK 整合のため子→親の順で削除
-      await tx.delete(handoffs);
-      await tx.delete(deals);
-      await tx.delete(stores);
-    });
+    await repos.forTenant(tenantId).data.clear();
   } catch (e) {
     console.error("[data.clear] failed", {
       message: clipForLog(e instanceof Error ? e.message : String(e)),
@@ -199,43 +148,8 @@ export async function importJsonAction(
     // Issue #110 で撤去した旧 `research` キーを含む過去のエクスポート JSON も、
     // 各 entity を個別に取り出す下の構造により「読まれずに無視される」形で
     // そのまま受理される (バリデーションで弾かない)。
-    // lib/db/* は DATABASE_URL 必須の副作用を持つため動的 import する (Issue 2)。
     if (importedStores || importedDeals || importedHandoffs) {
-      const { db } = await import("@/lib/db/client");
-      const { stores, deals, handoffs } = await import("@/lib/db/schema");
-      const { toDbRow: storeToDbRow } = await import(
-        "@/lib/db/store-repository"
-      );
-      await db.transaction(async (tx) => {
-        // 親 → 子の順で upsert (FK 整合)
-        // ai_analysis_result はオブジェクト ↔ text 列の変換のため toDbRow 経由
-        if (importedStores) {
-          for (const s of importedStores) {
-            const row = storeToDbRow(s);
-            await tx
-              .insert(stores)
-              .values(row)
-              .onConflictDoUpdate({ target: stores.id, set: row });
-          }
-        }
-        if (importedDeals) {
-          for (const d of importedDeals) {
-            await tx
-              .insert(deals)
-              .values(d)
-              .onConflictDoUpdate({ target: deals.id, set: d });
-          }
-        }
-        // Handoff は primitive のみで toDbRow 不要
-        if (importedHandoffs) {
-          for (const h of importedHandoffs) {
-            await tx
-              .insert(handoffs)
-              .values(h)
-              .onConflictDoUpdate({ target: handoffs.id, set: h });
-          }
-        }
-      });
+      await repos.forTenant(tenantId).data.importSnapshot({ stores: importedStores, deals: importedDeals, handoffs: importedHandoffs });
     }
 
     invalidateAll(tenantId);
@@ -254,6 +168,8 @@ export async function importJsonAction(
 
 export async function getSnapshotForExportAction(): Promise<DbSnapshot> {
   const tenantId = await resolveTenantId();
+  const denied = await requireSignedIn();
+  if (denied) throw new Error("ログインが必要です");
   // 3 entity を DB から並列取得 (Req 8.1, 8.4)。
   const [dbDeals, dbStores, dbHandoffs] = await Promise.all([
     repos.forTenant(tenantId).deal.list(),

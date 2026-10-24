@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => {
 });
 vi.mock("@/lib/db", () => ({
   db: mocks.db, auditDb: mocks.auditDb,
+  makeDataRepo: mocks.factory,
   makeStoreRepo: mocks.factory, makePlaceCandidateRepo: mocks.factory,
   makeDealRepo: mocks.factory, makeHandoffRepo: mocks.factory, makeResearchRunRepo: mocks.factory,
   makeProfileRepo: mocks.factory, makeMembershipRepo: mocks.factory,
@@ -28,6 +29,8 @@ describe("テナントを束縛したrepositoryの構築", () => {
         expect(Object.keys(tx).sort()).toEqual([...domains].sort());
         for (const domain of domains) expect(tx[domain]).toEqual({ executor: "transaction-executor", tenantId });
       });
+      expect(Object.keys(scoped).sort()).toEqual([...domains, "data", "eventLog", "transaction"].sort());
+      expect(scoped.data).toEqual({ executor: mocks.db, tenantId });
       expect(scoped.eventLog).toEqual({ executor: mocks.auditDb, tenantId });
       expect(Object.isFrozen(scoped)).toBe(true);
     }

@@ -38,7 +38,7 @@
 1. 対象の一覧を出す (読み取りのみ。本番 DB を読むので `.env.local` の `DATABASE_URL` を使う)。
 
    ```bash
-   pnpm db:list-name-memos
+   pnpm db:list-name-memos --tenant=firstweb
    ```
 
    店舗 ID / 現在の店舗名 / メモ / 店舗名の候補 / 同名の別店舗 が Markdown の表で出る。
