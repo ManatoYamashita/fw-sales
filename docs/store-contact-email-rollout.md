@@ -123,9 +123,10 @@ Issue #384の「本番安全性レビュー」とPR #387の補足から、DBに�
 PR #388はPR #387のブランチを土台にしたPRです（stacked PR）。次の順に進め、どの段階でも条件を満たさなければ止めます。
 
 1. **PR #387のマージ前：** [手動バックアップと復元確認](manual-db-backup-runbook.md)を、PostgreSQL 17系で、エラー0件で終えます。結果は#387に記録します。PR #388はDraftのままにします。
+   - **#384では実施していません。** 2026-10-24に、今回はバックアップの取得と復元確認を行わずに進める方針に変えました。
 2. **PR #387をmainにマージする：** Apply Migrationsのmigrate-devとmigrate-prdが成功し、両方で`db:verify-hashes`と`db:verify-fks`がOKになることを確かめます。
 3. **「Phase 2の着手条件」のSQLを、本番とdevで実行する：** 期待どおりであることを確かめ、結果を#384に記録します。
-4. **PR #388のベースをmainに変える：** GitHubで「Edit」からbaseを`main`に変えます。#387がsquashではなく通常のmergeであれば、差分はPhase 2の分だけになります。squash mergeだった場合は、`git rebase --onto origin/main feat/issue-384-db-contact-email`でPhase 2のcommitだけを載せ直します。
+4. **PR #388のベースをmainに変える：** GitHubで「Edit」からbaseを`main`に変えます。#387がsquashではなく通常のmergeであれば、差分はPhase 2の分だけになります。squash mergeだった場合は、PR #388のブランチに`origin/main`をmergeします（PR #388はすでにmainの取り込みのmerge commitを含むため、rebaseで載せ直すと、解消済みの衝突をもう一度解くことになります）。
 5. **ほかのmigrationが先にmainへ入っていないかを確かめる：** mainの最後のmigrationが0033でなければ、0034の番号・journal・snapshot（prevId）を作り直します。生成し直したSQLの中身は、もう一度確認ブロックに置き換えます。そのうえで`pnpm db:generate`が`No schema changes`になることを確かめます。
 6. **Vercel Previewを再実行する：** devに0033が入った後は、Previewのビルドが通るはずです。通らない場合は、ログで`contact_email`以外の原因を調べます。PreviewはdevのDBを使います。Previewを通すためだけに、devへ手でmigrationを流すことはしません。
 7. **CIの全ジョブとPreviewが成功し、レビューが済んだら、PR #388をReady for reviewにする：** マージは利用の少ない時間帯に行います。0034は列の定義を確かめるだけなので、データは変わりません。
