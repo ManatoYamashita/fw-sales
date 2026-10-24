@@ -18,7 +18,7 @@ import { sql } from "drizzle-orm";
 import type { Store, StoreInput } from "@/types/store";
 
 const { db } = await import("@/lib/db/client");
-const { stores } = await import("@/lib/db/schema");
+const { stores, FIRSTWEB_TENANT_ID } = await import("@/lib/db/schema");
 const { makeStoreRepo, toDbRow } = await import("@/lib/db/store-repository");
 const { SEED_STORES } = await import("@/lib/db/seed-data");
 
@@ -49,7 +49,7 @@ async function readContactEmail(tx: Tx, id: string): Promise<unknown> {
 
 /** 列を知らないアプリで店舗を作り、アドレスだけを SQL で保存しておく。 */
 async function createStoreWithEmail(tx: Tx): Promise<Store> {
-  const created = await makeStoreRepo(tx).create({ ...SEED_INPUT, memo: "更新前のメモ" });
+  const created = await makeStoreRepo(tx, FIRSTWEB_TENANT_ID).create({ ...SEED_INPUT, memo: "更新前のメモ" });
   await tx.execute(sql`UPDATE stores SET contact_email = ${SAVED_EMAIL} WHERE id = ${created.id}`);
   return created;
 }
@@ -68,16 +68,16 @@ describe("stores.contact_email の列 (#384)", () => {
 
   it("列を知らないアプリが作った店舗は、空欄 (未登録) になる", async () => {
     await inRolledBackTransaction(async (tx) => {
-      const created = await makeStoreRepo(tx).create(SEED_INPUT);
+      const created = await makeStoreRepo(tx, FIRSTWEB_TENANT_ID).create(SEED_INPUT);
       expect(await readContactEmail(tx, created.id)).toBe("");
-      expect(await makeStoreRepo(tx).get(created.id)).toMatchObject({ id: created.id, name: SEED_INPUT.name });
+      expect(await makeStoreRepo(tx, FIRSTWEB_TENANT_ID).get(created.id)).toMatchObject({ id: created.id, name: SEED_INPUT.name });
     });
   });
 
   it("ほかの項目の部分更新では、保存済みのアドレスが残る", async () => {
     await inRolledBackTransaction(async (tx) => {
       const created = await createStoreWithEmail(tx);
-      const updated = await makeStoreRepo(tx).update(created.id, { memo: "更新後のメモ" });
+      const updated = await makeStoreRepo(tx, FIRSTWEB_TENANT_ID).update(created.id, { memo: "更新後のメモ" });
       expect(updated?.memo).toBe("更新後のメモ");
       expect(await readContactEmail(tx, created.id)).toBe(SAVED_EMAIL);
     });
@@ -86,7 +86,7 @@ describe("stores.contact_email の列 (#384)", () => {
   it("基本情報 (basic_info) の更新でも、保存済みのアドレスが残る", async () => {
     await inRolledBackTransaction(async (tx) => {
       const created = await createStoreWithEmail(tx);
-      await makeStoreRepo(tx).mergeBasicInfo(created.id, {}, "manual");
+      await makeStoreRepo(tx, FIRSTWEB_TENANT_ID).mergeBasicInfo(created.id, {}, "manual");
       expect(await readContactEmail(tx, created.id)).toBe(SAVED_EMAIL);
     });
   });
@@ -101,7 +101,7 @@ describe("stores.contact_email の列 (#384)", () => {
       await tx.insert(stores).values(row).onConflictDoUpdate({ target: stores.id, set: row });
 
       expect(await readContactEmail(tx, created.id)).toBe(SAVED_EMAIL);
-      expect((await makeStoreRepo(tx).get(created.id))?.memo).toBe("インポートしたメモ");
+      expect((await makeStoreRepo(tx, FIRSTWEB_TENANT_ID).get(created.id))?.memo).toBe("インポートしたメモ");
     });
   });
 
