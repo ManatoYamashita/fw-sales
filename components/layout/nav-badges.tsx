@@ -6,12 +6,13 @@ import {
   type CacheableNavBadgeCounts,
   type NavBadgeCounts,
 } from "@/lib/queries/stats";
+import { resolveTenantId } from "@/lib/tenant/context";
 
-async function loadCacheableNavBadgeCounts(): Promise<CacheableNavBadgeCounts> {
+async function loadCacheableNavBadgeCounts(tenantId: string): Promise<CacheableNavBadgeCounts> {
   "use cache";
   cacheLife("longBackstop");
-  cacheTag(CACHE_TAGS.stores, CACHE_TAGS.deals, CACHE_TAGS.handoffs);
-  return getCacheableNavBadgeCounts();
+  cacheTag(CACHE_TAGS.stores(tenantId), CACHE_TAGS.deals(tenantId), CACHE_TAGS.handoffs(tenantId));
+  return getCacheableNavBadgeCounts(tenantId);
 }
 
 /**
@@ -23,9 +24,10 @@ async function loadCacheableNavBadgeCounts(): Promise<CacheableNavBadgeCounts> {
  * 呼び出し元の `SidebarShell` は cookies() を読む動的な Suspense 配下にある。
  */
 export async function loadNavBadgeCounts(): Promise<NavBadgeCounts> {
+  const tenantId = await resolveTenantId();
   const [cacheable, research] = await Promise.all([
-    loadCacheableNavBadgeCounts(),
-    getResearchNavBadgeCount(),
+    loadCacheableNavBadgeCounts(tenantId),
+    getResearchNavBadgeCount(tenantId),
   ]);
   return { ...cacheable, research };
 }

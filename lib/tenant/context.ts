@@ -1,6 +1,6 @@
 import "server-only";
 
-import { FIRSTWEB_TENANT_ID } from "@/lib/db/schema";
+import { FIRSTWEB_TENANT_ID } from "./id";
 
 /**
  * いま処理しているテナントの ID を返す (マルチテナント化 #365 / #367)。

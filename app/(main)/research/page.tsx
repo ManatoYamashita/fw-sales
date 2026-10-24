@@ -1,13 +1,15 @@
 import type { Metadata } from "next";
 import { getResearchQueue } from "@/lib/queries/research";
 import { ResearchTabs } from "./_components/research-tabs";
+import { resolveTenantId } from "@/lib/tenant/context";
 
 export const metadata: Metadata = {
   title: "調査",
 };
 
 export default async function ResearchPage() {
-  const { needsReview, waiting, done } = await getResearchQueue();
+  const tenantId = await resolveTenantId();
+  const { needsReview, waiting, done } = await getResearchQueue(tenantId);
 
   return (
     <div className="space-y-4">

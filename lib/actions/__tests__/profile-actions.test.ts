@@ -43,7 +43,7 @@ vi.mock("@/lib/supabase/server", () => ({
 }));
 
 vi.mock("@/lib/repositories", () => ({
-  repos: {
+  repos: ((tenantRepos) => ({ ...tenantRepos, forTenant: () => tenantRepos }))({
     membership: {
       find: mockMembershipFind,
       countAdmins: mockCountAdmins,
@@ -53,7 +53,7 @@ vi.mock("@/lib/repositories", () => ({
     profile: {
       findById: mockProfileFindById,
     },
-  },
+  }),
 }));
 
 vi.mock("next/cache", () => ({
@@ -121,8 +121,8 @@ describe("updateProfileRoleAction", () => {
     if (result.ok) expect(result.data).toEqual(updated);
     expect(mockUpdateRole).toHaveBeenCalledWith(FIRSTWEB_TENANT_ID, "user-2", "admin");
     // profiles 集合 + 個別タグの両方を invalidate する
-    expect(mockUpdateTag).toHaveBeenCalledWith("profiles");
-    expect(mockUpdateTag).toHaveBeenCalledWith("profile:user-2");
+    expect(mockUpdateTag).toHaveBeenCalledWith("tenant:cfe871a5-8fc7-42da-9677-3a050665cafb:profiles");
+    expect(mockUpdateTag).toHaveBeenCalledWith("tenant:cfe871a5-8fc7-42da-9677-3a050665cafb:profile:user-2");
     expect(logSpy).toHaveBeenCalledWith(
       "[audit] profiles.updateRole",
       expect.objectContaining({

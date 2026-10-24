@@ -27,7 +27,8 @@ import type {
  * マルチテナント化 (#365) の移行期間は、業務テーブルの `tenant_id` の既定値でもあり、
  * `tenant_id` を指定しない書き込みは Firstweb に入る。既定値は #371 で外す。
  */
-export const FIRSTWEB_TENANT_ID = "cfe871a5-8fc7-42da-9677-3a050665cafb";
+import { FIRSTWEB_TENANT_ID } from "@/lib/tenant/id";
+export { FIRSTWEB_TENANT_ID };
 
 /**
  * tenants テーブル (マルチテナント化 #365 / #366)

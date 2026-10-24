@@ -57,8 +57,8 @@ export async function updateProfileRoleAction(
   const updated = await repos.membership.updateRole(tenantId, userId, role);
   if (!updated) return failure("ユーザーが見つかりません");
 
-  updateTag(CACHE_TAGS.profiles);
-  updateTag(CACHE_TAGS.profile(userId));
+  updateTag(CACHE_TAGS.profiles(tenantId));
+  updateTag(CACHE_TAGS.profile(tenantId, userId));
   console.log("[audit] profiles.updateRole", {
     by: guard.profile.email,
     tenantId,

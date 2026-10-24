@@ -34,6 +34,7 @@ import type {
   SearchCenter,
 } from "@/lib/places/types";
 import { success, failure, type ActionResult } from "./_helpers";
+import { resolveTenantId } from "@/lib/tenant/context";
 
 /**
  * エリア検索結果を `place_candidates` に保存する (候補DB保存の土台 / Issue #129 follow-up)。
@@ -48,8 +49,9 @@ async function persistAreaSearchCandidates(
   center: SearchCenter,
   radiusMeters: number,
 ): Promise<AreaSearchResultPayload["candidatePersistence"]> {
+  const tenantId = await resolveTenantId();
   try {
-    return await repos.placeCandidate.upsertFromAreaSearch({
+    return await repos.forTenant(tenantId).placeCandidate.upsertFromAreaSearch({
       places,
       keyword,
       area,
@@ -76,9 +78,10 @@ async function persistAreaSearchCandidates(
 async function attachAreaSearchCandidateInfo(
   viewModels: AreaSearchPlaceViewModel[],
 ): Promise<AreaSearchPlaceViewModel[]> {
+  const tenantId = await resolveTenantId();
   const placeIds = viewModels.map((vm) => vm.place.placeId).filter((id) => id !== "");
   try {
-    const candidates = await repos.placeCandidate.findByGooglePlaceIds(placeIds);
+    const candidates = await repos.forTenant(tenantId).placeCandidate.findByGooglePlaceIds(placeIds);
     return attachCandidateInfo(viewModels, candidates);
   } catch (e) {
     // 保存側と同じ理由でサニタイズ済みの構造化ログへ揃える (#221 review)。
@@ -104,7 +107,8 @@ async function attachAreaSearchCandidateInfo(
 async function createStoreFromPlaceTx(
   place: PlaceResult,
 ): Promise<{ id: string; name: string }> {
-  return repos.transaction(async ({ store }) => {
+  const tenantId = await resolveTenantId();
+  return repos.forTenant(tenantId).transaction(async ({ store }) => {
     const input = placeResultToStoreInput(place);
     const created = await store.create(input);
     const partial = placeResultToBasicInfo(place, new Date().toISOString());
@@ -234,6 +238,7 @@ export async function searchPlacesWithMatchesAction(
   radiusMeters: number,
   options?: SearchPlacesWithMatchesOptions,
 ): Promise<ActionResult<AreaSearchResultPayload>> {
+  const tenantId = await resolveTenantId();
   if (!keyword.trim()) {
     return failure("キーワードを入力してください");
   }
@@ -285,7 +290,7 @@ export async function searchPlacesWithMatchesAction(
       ...new Set(places.map((p) => p.placeId).filter((id) => id !== "")),
     ];
     const bounds = computePlacesBounds(places) ?? undefined;
-    const stores = await repos.store.findAreaSearchCandidates({ googlePlaceIds, bounds });
+    const stores = await repos.forTenant(tenantId).store.findAreaSearchCandidates({ googlePlaceIds, bounds });
 
     const discoverySource: AreaSearchDiscoverySource =
       options?.discoverySource ?? (options?.pageToken ? "loadMore" : "mainTextSearch");
@@ -397,6 +402,7 @@ export async function searchPlacesAction(
 export async function addStoreFromPlaceAction(
   placeId: string,
 ): Promise<ActionResult<{ id: string }>> {
+  const tenantId = await resolveTenantId();
   if (!placeId || typeof placeId !== "string") {
     return failure("placeId が不正です");
   }
@@ -406,12 +412,12 @@ export async function addStoreFromPlaceAction(
       return failure("店舗情報を取得できませんでした");
     }
     const created = await createStoreFromPlaceTx(place);
-    revalidateTag(CACHE_TAGS.stores, "max");
-    revalidateTag(CACHE_TAGS.stats, "max");
-    revalidateTag(CACHE_TAGS.pipeline, "max");
-    revalidateTag(CACHE_TAGS.kpi, "max");
-    revalidateTag(CACHE_TAGS.actionQueue, "max");
-    revalidateTag(CACHE_TAGS.store(created.id), "max");
+    revalidateTag(CACHE_TAGS.stores(tenantId), "max");
+    revalidateTag(CACHE_TAGS.stats(tenantId), "max");
+    revalidateTag(CACHE_TAGS.pipeline(tenantId), "max");
+    revalidateTag(CACHE_TAGS.kpi(tenantId), "max");
+    revalidateTag(CACHE_TAGS.actionQueue(tenantId), "max");
+    revalidateTag(CACHE_TAGS.store(tenantId, created.id), "max");
     return success({ id: created.id }, `「${created.name}」を追加しました`);
   } catch (e) {
     logAreaSearchFailure("addStoreFromPlaceAction", e, { placeId });
@@ -438,6 +444,7 @@ export async function bulkAddStoresFromPlacesAction(
     failedPlaceIds: string[];
   }>
 > {
+  const tenantId = await resolveTenantId();
   if (!Array.isArray(placeIds) || placeIds.length === 0) {
     return failure("追加する店舗を選択してください");
   }
@@ -468,13 +475,13 @@ export async function bulkAddStoresFromPlacesAction(
   }
 
   if (createdIds.length > 0) {
-    revalidateTag(CACHE_TAGS.stores, "max");
-    revalidateTag(CACHE_TAGS.stats, "max");
-    revalidateTag(CACHE_TAGS.pipeline, "max");
-    revalidateTag(CACHE_TAGS.kpi, "max");
-    revalidateTag(CACHE_TAGS.actionQueue, "max");
+    revalidateTag(CACHE_TAGS.stores(tenantId), "max");
+    revalidateTag(CACHE_TAGS.stats(tenantId), "max");
+    revalidateTag(CACHE_TAGS.pipeline(tenantId), "max");
+    revalidateTag(CACHE_TAGS.kpi(tenantId), "max");
+    revalidateTag(CACHE_TAGS.actionQueue(tenantId), "max");
     for (const id of createdIds) {
-      revalidateTag(CACHE_TAGS.store(id), "max");
+      revalidateTag(CACHE_TAGS.store(tenantId, id), "max");
     }
   }
 

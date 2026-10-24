@@ -58,7 +58,6 @@ export type {
  */
 export interface TxRepos {
   deal: DealRepository;
-  store: StoreRepository;
   handoff: HandoffRepository;
   profile: ProfileRepository;
   /** テナントへの所属とロール (マルチテナント化 #367) で追加。 */
@@ -68,8 +67,6 @@ export interface TxRepos {
   promptTemplate: PromptTemplateRepository;
   /** アプリ全体設定 key-value (Issue #122) で追加。 */
   appSettings: AppSettingsRepository;
-  /** エリア検索 候補DB保存の土台 (Issue #129 follow-up) で追加。 */
-  placeCandidate: PlaceCandidateRepository;
   /** AI 店舗調査 run (AI 店舗調査再設計 Plan v3.2, PR1) で追加。 */
   researchRun: ResearchRunRepository;
   // task 4.2 (PR3a): deepResearch を撤去 (#121 / #110 連動)。
@@ -79,9 +76,22 @@ export interface TxRepos {
 /**
  * アプリ全体で参照される repository 集約 + transaction API。
  */
-export interface Repos {
-  eventLog: EventLogRepository;
+/** 店舗以外の tx repository は後続 PR で移行する (#368)。 */
+export interface TenantTxRepos extends TxRepos {
   store: StoreRepository;
+  placeCandidate: PlaceCandidateRepository;
+}
+
+/** 移行済みの店舗領域はテナントを指定した入口からだけ利用できる。 */
+export interface TenantRepos {
+  store: StoreRepository;
+  placeCandidate: PlaceCandidateRepository;
+  transaction: <T>(fn: (tx: TenantTxRepos) => Promise<T>) => Promise<T>;
+}
+
+export interface Repos {
+  forTenant: (tenantId: string) => TenantRepos;
+  eventLog: EventLogRepository;
   deal: DealRepository;
   handoff: HandoffRepository;
   profile: ProfileRepository;
@@ -92,8 +102,6 @@ export interface Repos {
   promptTemplate: PromptTemplateRepository;
   /** アプリ全体設定 key-value (Issue #122) で追加。 */
   appSettings: AppSettingsRepository;
-  /** エリア検索 候補DB保存の土台 (Issue #129 follow-up) で追加。 */
-  placeCandidate: PlaceCandidateRepository;
   /** AI 店舗調査 run (AI 店舗調査再設計 Plan v3.2, PR1) で追加。 */
   researchRun: ResearchRunRepository;
   /**
@@ -110,14 +118,12 @@ async function buildRepos(): Promise<Repos> {
     db,
     dbEventLogRepo,
     dbDealRepo,
-    dbStoreRepo,
     dbHandoffRepo,
     dbProfileRepo,
     dbMembershipRepo,
     dbNotificationRepo,
     dbPromptTemplateRepo,
     dbAppSettingsRepo,
-    dbPlaceCandidateRepo,
     dbResearchRunRepo,
     makeDealRepo,
     makeStoreRepo,
@@ -131,9 +137,29 @@ async function buildRepos(): Promise<Repos> {
     makeResearchRunRepo,
   } = dbModule;
 
+  const legacyTxRepos = (executor: import("@/lib/db").DbClient | import("@/lib/db").Tx): TxRepos => ({
+    deal: makeDealRepo(executor), handoff: makeHandoffRepo(executor),
+    profile: makeProfileRepo(executor), membership: makeMembershipRepo(executor),
+    notification: makeNotificationRepo(executor), promptTemplate: makePromptTemplateRepo(executor),
+    appSettings: makeAppSettingsRepo(executor), researchRun: makeResearchRunRepo(executor),
+  });
+  const tenantTxRepos = (executor: import("@/lib/db").DbClient | import("@/lib/db").Tx, tenantId: string): TenantTxRepos => ({
+    ...legacyTxRepos(executor),
+    store: makeStoreRepo(executor, tenantId),
+    placeCandidate: makePlaceCandidateRepo(executor, tenantId),
+  });
+
   return Object.freeze({
+    forTenant(tenantId: string): TenantRepos {
+      if (!tenantId.trim()) throw new Error("テナントが指定されていません");
+      return Object.freeze({
+        store: makeStoreRepo(db, tenantId),
+        placeCandidate: makePlaceCandidateRepo(db, tenantId),
+        transaction: <T>(fn: (tx: TenantTxRepos) => Promise<T>) =>
+          db.transaction((tx) => fn(tenantTxRepos(tx, tenantId))),
+      });
+    },
     eventLog: dbEventLogRepo,
-    store: dbStoreRepo,
     deal: dbDealRepo,
     handoff: dbHandoffRepo,
     profile: dbProfileRepo,
@@ -141,23 +167,9 @@ async function buildRepos(): Promise<Repos> {
     notification: dbNotificationRepo,
     promptTemplate: dbPromptTemplateRepo,
     appSettings: dbAppSettingsRepo,
-    placeCandidate: dbPlaceCandidateRepo,
     researchRun: dbResearchRunRepo,
     transaction: <T>(fn: (tx: TxRepos) => Promise<T>): Promise<T> =>
-      db.transaction(async (tx) =>
-        fn({
-          deal: makeDealRepo(tx),
-          store: makeStoreRepo(tx),
-          handoff: makeHandoffRepo(tx),
-          profile: makeProfileRepo(tx),
-          membership: makeMembershipRepo(tx),
-          notification: makeNotificationRepo(tx),
-          promptTemplate: makePromptTemplateRepo(tx),
-          appSettings: makeAppSettingsRepo(tx),
-          placeCandidate: makePlaceCandidateRepo(tx),
-          researchRun: makeResearchRunRepo(tx),
-        }),
-      ),
+      db.transaction((tx) => fn(legacyTxRepos(tx))),
   }) satisfies Repos;
 }
 

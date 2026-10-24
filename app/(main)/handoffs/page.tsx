@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
 import { listHandoffsCached } from "@/lib/queries/handoffs";
 import { HandoffsTableView } from "./_components/handoffs-table-view";
+import { resolveTenantId } from "@/lib/tenant/context";
 
 export const metadata: Metadata = { title: "引き継ぎ" };
 
 export default async function HandoffsPage() {
-  const handoffs = await listHandoffsCached();
+  const tenantId = await resolveTenantId();
+  const handoffs = await listHandoffsCached(tenantId);
   return (
     <div className="space-y-4">
       <div>

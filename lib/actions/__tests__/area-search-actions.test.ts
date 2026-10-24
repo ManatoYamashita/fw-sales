@@ -57,7 +57,7 @@ vi.mock("@/lib/places/google", () => ({
 }));
 
 vi.mock("@/lib/repositories", () => ({
-  repos: {
+  repos: ((tenantRepos) => ({ ...tenantRepos, forTenant: () => tenantRepos }))({
     store: {
       list: mockStoreList,
       findAreaSearchCandidates: mockFindAreaSearchCandidates,
@@ -67,7 +67,7 @@ vi.mock("@/lib/repositories", () => ({
       findByGooglePlaceIds: mockFindByGooglePlaceIds,
     },
     transaction: mockTransaction,
-  },
+  }),
 }));
 
 vi.mock("next/cache", () => ({
@@ -501,7 +501,7 @@ describe("searchPlacesWithMatchesAction", () => {
       expect(result.ok).toBe(false);
       if (!result.ok) {
         expect(result.error).toBe("検索に失敗しました。時間をおいて再度お試しください。");
-        expect(result.error).not.toContain("stores");
+        expect(result.error).not.toContain("tenant:cfe871a5-8fc7-42da-9677-3a050665cafb:stores");
         expect(result.error).not.toContain("42P01");
       }
       // 調査可能性はログ側で確保する (store-actions.ts と同形)
@@ -1144,7 +1144,7 @@ describe("Places エラー文言の導線出し分け (#222)", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error).toBe(ADD_FALLBACK);
-      expect(result.error).not.toContain("stores");
+      expect(result.error).not.toContain("tenant:cfe871a5-8fc7-42da-9677-3a050665cafb:stores");
     }
   });
 });

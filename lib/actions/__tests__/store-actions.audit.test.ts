@@ -9,10 +9,10 @@ const mocks = vi.hoisted(() => ({
   updateTag: vi.fn(), revalidateTag: vi.fn(), redirect: vi.fn(),
 }));
 vi.mock("@/lib/supabase/server", () => ({ getCurrentProfile: mocks.profile }));
-vi.mock("@/lib/repositories", () => ({ repos: {
+vi.mock("@/lib/repositories", () => ({ repos: ((tenantRepos) => ({ ...tenantRepos, forTenant: () => tenantRepos }))({
   store: { delete: mocks.remove }, profile: { findById: mocks.findProfile },
   eventLog: { insert: mocks.insert }, transaction: mocks.transaction,
-} }));
+}) }));
 vi.mock("next/cache", () => ({ updateTag: mocks.updateTag, revalidateTag: mocks.revalidateTag }));
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
 

@@ -31,10 +31,10 @@ const { mockRepo, mockTransaction, mockGetCurrentSession, mockGetCurrentProfile 
   }));
 
 vi.mock("@/lib/repositories", () => ({
-  repos: {
+  repos: ((tenantRepos) => ({ ...tenantRepos, forTenant: () => tenantRepos }))({
     promptTemplate: mockRepo,
     transaction: mockTransaction,
-  },
+  }),
 }));
 
 // delete は #155 で requireAdmin (getCurrentProfile) 経由の admin ガードに昇格した。

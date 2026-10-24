@@ -3,16 +3,18 @@ import { cacheLife, cacheTag } from "next/cache";
 import { Card } from "@/components/ui/card";
 import { getPipelineSummary } from "@/lib/queries/pipeline";
 import { CACHE_TAGS } from "@/lib/cache";
+import { resolveTenantId } from "@/lib/tenant/context";
 
-async function loadSummary() {
+async function loadSummary(tenantId: string) {
   "use cache";
   cacheLife("longBackstop");
-  cacheTag(CACHE_TAGS.stores, CACHE_TAGS.pipeline);
-  return getPipelineSummary();
+  cacheTag(CACHE_TAGS.stores(tenantId), CACHE_TAGS.pipeline(tenantId));
+  return getPipelineSummary(tenantId);
 }
 
 export async function PipelineSummary() {
-  const rows = await loadSummary();
+  const tenantId = await resolveTenantId();
+  const rows = await loadSummary(tenantId);
   const max = Math.max(...rows.map((r) => r.count), 1);
 
   return (

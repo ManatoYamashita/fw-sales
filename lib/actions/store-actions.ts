@@ -37,6 +37,7 @@ import { requireAdmin, requireSignedInWithProfile } from "./_authz";
 import { AUDIT_EVENTS, SALES_PROGRESS_FIELDS, type SalesProgressField } from "@/lib/observability/events";
 import { snapshotActor } from "@/lib/observability/actor";
 import { writeAudit } from "@/lib/observability/audit";
+import { resolveTenantId } from "@/lib/tenant/context";
 
 function asPriority(value: string): Priority {
   return (PRIORITIES as readonly string[]).includes(value)
@@ -150,7 +151,7 @@ async function validateAssignedUserIds(
     (id): id is string => id !== null && id !== "",
   );
   for (const id of ids) {
-    const profile = await repos.profile.findById(id);
+    const profile = await repos.membership.find(await resolveTenantId(), id);
     if (!profile) {
       return `担当者が見つかりませんでした (id: ${id})`;
     }
@@ -165,17 +166,17 @@ async function validateAssignedUserIds(
  * (`revalidateTag(_, "max")`) で背景更新に任せる。
  * `invalidateDealScopes` (deal-actions.ts) と同じ切り分け。
  */
-function revalidateStoreAggregateScopes() {
-  revalidateTag(CACHE_TAGS.stats, "max");
-  revalidateTag(CACHE_TAGS.pipeline, "max");
-  revalidateTag(CACHE_TAGS.kpi, "max");
-  revalidateTag(CACHE_TAGS.actionQueue, "max");
+function revalidateStoreAggregateScopes(tenantId: string) {
+  revalidateTag(CACHE_TAGS.stats(tenantId), "max");
+  revalidateTag(CACHE_TAGS.pipeline(tenantId), "max");
+  revalidateTag(CACHE_TAGS.kpi(tenantId), "max");
+  revalidateTag(CACHE_TAGS.actionQueue(tenantId), "max");
 }
 
-function invalidateAllStoreScopes(id?: string) {
-  revalidateTag(CACHE_TAGS.stores, "max");
-  revalidateStoreAggregateScopes();
-  if (id) revalidateTag(CACHE_TAGS.store(id), "max");
+function invalidateAllStoreScopes(tenantId: string, id?: string) {
+  revalidateTag(CACHE_TAGS.stores(tenantId), "max");
+  revalidateStoreAggregateScopes(tenantId);
+  if (id) revalidateTag(CACHE_TAGS.store(tenantId, id), "max");
 }
 
 /**
@@ -192,10 +193,10 @@ function invalidateAllStoreScopes(id?: string) {
  * `invalidateAllStoreScopes` は create/update/delete が使う既存の失効なので、
  * そちらの意味は変えずに本関数を別途用意している。
  */
-function invalidateStoreScopesImmediate(id: string) {
-  updateTag(CACHE_TAGS.store(id));
-  updateTag(CACHE_TAGS.stores);
-  revalidateStoreAggregateScopes();
+function invalidateStoreScopesImmediate(tenantId: string, id: string) {
+  updateTag(CACHE_TAGS.store(tenantId, id));
+  updateTag(CACHE_TAGS.stores(tenantId));
+  revalidateStoreAggregateScopes(tenantId);
 }
 
 /**
@@ -225,6 +226,7 @@ export async function createStoreAction(
   _prev: ActionResult<{ id: string }> | null,
   formData: FormData,
 ): Promise<ActionResult<{ id: string }>> {
+  const tenantId = await resolveTenantId();
   const input: StoreInput = {
     ...buildStoreInput(formData),
     google_place_id: null,
@@ -237,8 +239,8 @@ export async function createStoreAction(
   const assigneeError = await validateAssignedUserIds(input);
   if (assigneeError) return failure(assigneeError);
 
-  const created = await repos.store.create(input);
-  invalidateAllStoreScopes(created.id);
+  const created = await repos.forTenant(tenantId).store.create(input);
+  invalidateAllStoreScopes(tenantId, created.id);
   return success(
     { id: created.id },
     `「${created.name}」を登録しました`,
@@ -246,6 +248,7 @@ export async function createStoreAction(
 }
 
 export async function createStoreAndRedirect(formData: FormData) {
+  const tenantId = await resolveTenantId();
   const input: StoreInput = {
     ...buildStoreInput(formData),
     google_place_id: null,
@@ -261,8 +264,8 @@ export async function createStoreAndRedirect(formData: FormData) {
   if (assigneeError) {
     throw new Error(assigneeError);
   }
-  const created = await repos.store.create(input);
-  invalidateAllStoreScopes(created.id);
+  const created = await repos.forTenant(tenantId).store.create(input);
+  invalidateAllStoreScopes(tenantId, created.id);
   redirect(`/stores/${created.id}`);
 }
 
@@ -271,13 +274,14 @@ export async function updateStoreAction(
   _prev: ActionResult<{ id: string }> | null,
   formData: FormData,
 ): Promise<ActionResult<{ id: string }>> {
+  const tenantId = await resolveTenantId();
   const input = buildStoreInput(formData);
   if (!input.name) return failure("店舗名を入力してください");
   const assigneeError = await validateAssignedUserIds(input);
   if (assigneeError) return failure(assigneeError);
-  const updated = await repos.store.update(id, input);
+  const updated = await repos.forTenant(tenantId).store.update(id, input);
   if (!updated) return failure("店舗が見つかりませんでした");
-  invalidateAllStoreScopes(id);
+  invalidateAllStoreScopes(tenantId, id);
   return success({ id }, "更新しました");
 }
 
@@ -285,12 +289,13 @@ export async function updateStoreStageAction(
   id: string,
   stage: StageId,
 ): Promise<ActionResult> {
-  const updated = await repos.store.update(id, { stage });
+  const tenantId = await resolveTenantId();
+  const updated = await repos.forTenant(tenantId).store.update(id, { stage });
   if (!updated) return failure("店舗が見つかりませんでした");
   // 店舗詳細の調査段階 Select は選んだ値をその場で表示し続ける (#334)。
   // stale-while-revalidate の失効だと、応答に載る再描画が旧値を返し、
   // 選んだ直後に元の段階へ戻って見える。
-  invalidateStoreScopesImmediate(id);
+  invalidateStoreScopesImmediate(tenantId, id);
   return success(undefined, `状態を「${stage}」に変更しました`);
 }
 
@@ -306,12 +311,13 @@ export async function updateStorePatchAction(
   id: string,
   patch: StorePatch,
 ): Promise<ActionResult> {
-  const updated = await repos.store.update(id, patch);
+  const tenantId = await resolveTenantId();
+  const updated = await repos.forTenant(tenantId).store.update(id, patch);
   if (!updated) return failure("店舗が見つかりませんでした");
   // 呼び出し元はすべて店舗詳細の「保存してその場で確認する」編集 (店舗名・業態 /
   // 基本情報 / 地図 / Web 資産 / 営業資料)。stale-while-revalidate だと保存直後の
   // router.refresh() が旧値を返し、店舗名を直したのに見出しが戻らない (#297 の E2E で検出)。
-  invalidateStoreScopesImmediate(id);
+  invalidateStoreScopesImmediate(tenantId, id);
   return success(undefined, "更新しました");
 }
 
@@ -348,6 +354,7 @@ export async function updateSalesProgressAction(
   id: string,
   formData: FormData,
 ): Promise<ActionResult> {
+  const tenantId = await resolveTenantId();
   const guard = await requireSignedInWithProfile();
   if (!guard.ok) {
     await writeAudit({
@@ -404,7 +411,7 @@ export async function updateSalesProgressAction(
   try {
     // Compare under the existing row-lock/transaction API so concurrent edits
     // cannot make changedFields fictional. No audit I/O while holding the lock.
-    receipt = await repos.transaction(async ({ store }) => {
+    receipt = await repos.forTenant(tenantId).transaction(async ({ store }) => {
       const current = await store.getForUpdate(id);
       if (!current) return { updated: false, changedFields: [] };
       const changedFields = SALES_PROGRESS_FIELDS.filter(
@@ -434,7 +441,7 @@ export async function updateSalesProgressAction(
   }
   // 営業担当 / アポ取得日 / 顧客共有メモはいずれも保存直後にこの画面と店舗一覧で
   // 目視される値なので、該当タグだけ即時失効する。
-  invalidateStoreScopesImmediate(id);
+  invalidateStoreScopesImmediate(tenantId, id);
   return success(undefined, "営業進捗を更新しました");
 }
 
@@ -450,6 +457,7 @@ export async function updateSalesProgressAction(
 export async function getStoreDeleteImpactAction(
   ids: readonly string[],
 ): Promise<ActionResult<StoreDeleteImpact>> {
+  const tenantId = await resolveTenantId();
   if (!Array.isArray(ids) || ids.length === 0) {
     return failure("削除対象の店舗が指定されていません");
   }
@@ -461,7 +469,7 @@ export async function getStoreDeleteImpactAction(
   }
 
   try {
-    const impact = await repos.store.getDeleteImpact(uniqueIds);
+    const impact = await repos.forTenant(tenantId).store.getDeleteImpact(uniqueIds);
     return success(impact);
   } catch (err) {
     const parsed = parsePostgresError(err);
@@ -482,6 +490,7 @@ export async function getStoreDeleteImpactAction(
 }
 
 export async function deleteStoreAction(id: string): Promise<ActionResult> {
+  const tenantId = await resolveTenantId();
   const guard = await requireAdmin(AUDIT_EVENTS.storeDelete, async ({ profile, reason }) => {
     await writeAudit({
       event: AUDIT_EVENTS.authzDenied, actor: profile ? snapshotActor(profile) : null,
@@ -491,7 +500,7 @@ export async function deleteStoreAction(id: string): Promise<ActionResult> {
   });
   if (!guard.ok) return guard.denied;
   try {
-    const removed = await repos.store.delete(id);
+    const removed = await repos.forTenant(tenantId).store.delete(id);
     if (!removed) return failure("店舗が見つかりませんでした");
   } catch (err) {
     const parsed = parsePostgresError(err);
@@ -517,11 +526,11 @@ export async function deleteStoreAction(id: string): Promise<ActionResult> {
   // 紐付け解除される。
   // task 4.2 (PR3a): Deep Research タグは撤去 (#121 / #110 連動)。
   // Issue #110: 旧手入力調査テーブルの research / researchByStore タグも撤去。
-  invalidateAllStoreScopes(id);
-  revalidateTag(CACHE_TAGS.deals, "max");
-  revalidateTag(CACHE_TAGS.dealsByStore(id), "max");
-  revalidateTag(CACHE_TAGS.handoffs, "max");
-  revalidateTag(CACHE_TAGS.handoffsByStore(id), "max");
+  invalidateAllStoreScopes(tenantId, id);
+  revalidateTag(CACHE_TAGS.deals(tenantId), "max");
+  revalidateTag(CACHE_TAGS.dealsByStore(tenantId, id), "max");
+  revalidateTag(CACHE_TAGS.handoffs(tenantId), "max");
+  revalidateTag(CACHE_TAGS.handoffsByStore(tenantId, id), "max");
   // Persistent audit above replaces the legacy success console (no duplicate).
   redirect("/stores");
 }
@@ -540,6 +549,7 @@ export interface BulkDeleteStoresResult {
 export async function bulkDeleteStoresAction(
   ids: string[],
 ): Promise<ActionResult<BulkDeleteStoresResult>> {
+  const tenantId = await resolveTenantId();
   const guard = await requireAdmin("stores.bulkDelete");
   if (!guard.ok) return guard.denied;
   if (!Array.isArray(ids) || ids.length === 0) {
@@ -554,7 +564,7 @@ export async function bulkDeleteStoresAction(
 
   let deletedCount: number;
   try {
-    deletedCount = await repos.store.bulkDelete(uniqueIds);
+    deletedCount = await repos.forTenant(tenantId).store.bulkDelete(uniqueIds);
   } catch (err) {
     const parsed = parsePostgresError(err);
     // Vercel logs に SQLSTATE / detail / constraint を必ず残し、UI 用の文言とは分離する。
@@ -576,15 +586,15 @@ export async function bulkDeleteStoresAction(
   // 集合タグを広く revalidate する。
   // task 4.2 (PR3a): Deep Research タグは撤去 (#121 / #110 連動)。
   // Issue #110: 旧手入力調査テーブルの research / researchByStore タグも撤去。
-  invalidateAllStoreScopes();
-  revalidateTag(CACHE_TAGS.deals, "max");
-  revalidateTag(CACHE_TAGS.handoffs, "max");
+  invalidateAllStoreScopes(tenantId);
+  revalidateTag(CACHE_TAGS.deals(tenantId), "max");
+  revalidateTag(CACHE_TAGS.handoffs(tenantId), "max");
   // 各店舗スコープの *ByStore タグも削除 ID 分だけ飛ばし、単一削除 (deleteStoreAction) と
   // 対称にする。これらでタグ付けされた店舗詳細側のキャッシュが古い関連データを返すのを防ぐ。
   for (const id of uniqueIds) {
-    revalidateTag(CACHE_TAGS.store(id), "max");
-    revalidateTag(CACHE_TAGS.dealsByStore(id), "max");
-    revalidateTag(CACHE_TAGS.handoffsByStore(id), "max");
+    revalidateTag(CACHE_TAGS.store(tenantId, id), "max");
+    revalidateTag(CACHE_TAGS.dealsByStore(tenantId, id), "max");
+    revalidateTag(CACHE_TAGS.handoffsByStore(tenantId, id), "max");
   }
 
   console.log("[audit] stores.bulkDelete", {

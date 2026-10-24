@@ -5,6 +5,7 @@ import { getStoreCached } from "@/lib/queries/stores";
 import { repos } from "@/lib/repositories";
 import { isApiKeyConfigured } from "@/lib/env";
 import { getResearchAvailability } from "@/lib/ai/research/availability";
+import { resolveTenantId } from "@/lib/tenant/context";
 
 type Params = Promise<{ storeId: string }>;
 
@@ -13,8 +14,9 @@ export async function generateMetadata({
 }: {
   params: Params;
 }): Promise<Metadata> {
+  const tenantId = await resolveTenantId();
   const { storeId } = await params;
-  const store = await getStoreCached(storeId);
+  const store = await getStoreCached(tenantId, storeId);
   return {
     title: store ? `${store.name} の調査` : "調査",
   };
@@ -25,9 +27,10 @@ export default async function ResearchDetailPage({
 }: {
   params: Params;
 }) {
+  const tenantId = await resolveTenantId();
   const { storeId } = await params;
   const [store, runs] = await Promise.all([
-    getStoreCached(storeId),
+    getStoreCached(tenantId, storeId),
     // 調査run一覧は running中の状態を含むため 'use cache' を経由しない
     // (`repos.researchRun.listForStore` 参照、PR4)。
     repos.researchRun.listForStore(storeId, 10),

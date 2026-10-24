@@ -54,7 +54,7 @@ describe("findAreaSearchCandidates", () => {
     { googlePlaceIds: [] as string[], bounds: undefined },
   ])("returns [] without DB access when no conditions exist", async (params) => {
     const mock = makeSelectExecutor([]);
-    const repo = makeStoreRepo(mock.executor);
+    const repo = makeStoreRepo(mock.executor, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     await expect(repo.findAreaSearchCandidates(params)).resolves.toEqual([]);
     expect(mock.select).not.toHaveBeenCalled();
@@ -62,20 +62,20 @@ describe("findAreaSearchCandidates", () => {
 
   it("compiles an ID-only google_place_id IN condition", async () => {
     const mock = makeSelectExecutor([]);
-    const repo = makeStoreRepo(mock.executor);
+    const repo = makeStoreRepo(mock.executor, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     await repo.findAreaSearchCandidates({ googlePlaceIds: ["ChIJ_A", "ChIJ_B"] });
 
     const query = mock.compiledWhere();
     const sql = normalizedSql(query.sql);
-    expect(sql).toContain('"stores"."google_place_id" in ($1, $2)');
+    expect(sql).toContain('"stores"."google_place_id" in ($2, $3)');
     expect(sql).not.toContain('"stores"."lat"');
-    expect(query.params).toEqual(["ChIJ_A", "ChIJ_B"]);
+    expect(query.params).toEqual(["cfe871a5-8fc7-42da-9677-3a050665cafb", "ChIJ_A", "ChIJ_B"]);
   });
 
   it("compiles bbox-only lat/lng bounds without a google_place_id null guard", async () => {
     const mock = makeSelectExecutor([]);
-    const repo = makeStoreRepo(mock.executor);
+    const repo = makeStoreRepo(mock.executor, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     await repo.findAreaSearchCandidates({
       googlePlaceIds: [],
@@ -84,18 +84,18 @@ describe("findAreaSearchCandidates", () => {
 
     const query = mock.compiledWhere();
     const sql = normalizedSql(query.sql);
-    expect(sql).toContain('"stores"."lat" >= $1');
-    expect(sql).toContain('"stores"."lat" <= $2');
-    expect(sql).toContain('"stores"."lng" >= $3');
-    expect(sql).toContain('"stores"."lng" <= $4');
+    expect(sql).toContain('"stores"."lat" >= $2');
+    expect(sql).toContain('"stores"."lat" <= $3');
+    expect(sql).toContain('"stores"."lng" >= $4');
+    expect(sql).toContain('"stores"."lng" <= $5');
     expect(sql).not.toContain("google_place_id");
     expect(sql).not.toContain("is null");
-    expect(query.params).toEqual([35, 36, 139, 140]);
+    expect(query.params).toEqual(["cfe871a5-8fc7-42da-9677-3a050665cafb", 35, 36, 139, 140]);
   });
 
   it("OR-combines exact IDs and bbox for null or non-null stale Place IDs", async () => {
     const mock = makeSelectExecutor([]);
-    const repo = makeStoreRepo(mock.executor);
+    const repo = makeStoreRepo(mock.executor, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     await repo.findAreaSearchCandidates({
       googlePlaceIds: ["ChIJ_NEW"],
@@ -104,21 +104,21 @@ describe("findAreaSearchCandidates", () => {
 
     const query = mock.compiledWhere();
     const sql = normalizedSql(query.sql);
-    expect(sql).toContain('"stores"."google_place_id" in ($1)');
+    expect(sql).toContain('"stores"."google_place_id" in ($2)');
     expect(sql).toContain(" or ");
-    expect(sql).toContain('"stores"."lat" >= $2');
-    expect(sql).toContain('"stores"."lat" <= $3');
-    expect(sql).toContain('"stores"."lng" >= $4');
-    expect(sql).toContain('"stores"."lng" <= $5');
+    expect(sql).toContain('"stores"."lat" >= $3');
+    expect(sql).toContain('"stores"."lat" <= $4');
+    expect(sql).toContain('"stores"."lng" >= $5');
+    expect(sql).toContain('"stores"."lng" <= $6');
     expect(sql).not.toContain("is null");
-    expect(query.params).toEqual(["ChIJ_NEW", 35, 36, 139, 140]);
+    expect(query.params).toEqual(["cfe871a5-8fc7-42da-9677-3a050665cafb", "ChIJ_NEW", 35, 36, 139, 140]);
     expect(mock.select).toHaveBeenCalledTimes(1);
   });
 
   it("uses one SELECT, so a row matching both ID and bbox cannot be duplicated by query union", async () => {
     const row = { id: "store_same" };
     const mock = makeSelectExecutor([row]);
-    const repo = makeStoreRepo(mock.executor);
+    const repo = makeStoreRepo(mock.executor, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     await repo.findAreaSearchCandidates({
       googlePlaceIds: ["ChIJ_A"],

@@ -24,9 +24,9 @@ const { mockBulkDelete, mockRevalidateTag, mockRedirect, mockGetCurrentProfile }
   }));
 
 vi.mock("@/lib/repositories", () => ({
-  repos: {
+  repos: ((tenantRepos) => ({ ...tenantRepos, forTenant: () => tenantRepos }))({
     store: { bulkDelete: mockBulkDelete },
-  },
+  }),
 }));
 
 vi.mock("next/cache", () => ({

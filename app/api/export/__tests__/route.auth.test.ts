@@ -24,11 +24,11 @@ const { mockRequireSignedIn, mockDealList, mockStoreList, mockHandoffList } =
 
 vi.mock("@/lib/actions/_authz", () => ({ requireSignedIn: mockRequireSignedIn }));
 vi.mock("@/lib/repositories", () => ({
-  repos: {
+  repos: ((tenantRepos) => ({ ...tenantRepos, forTenant: () => tenantRepos }))({
     deal: { list: mockDealList },
     store: { list: mockStoreList },
     handoff: { list: mockHandoffList },
-  },
+  }),
 }));
 
 const { GET } = await import("../route");

@@ -12,9 +12,10 @@ export interface PipelineColumn {
 }
 
 export async function getPipelineColumns(
+  tenantId: string,
   filter: StoreFilter = {},
 ): Promise<PipelineColumn[]> {
-  const stores = await repos.store.list(filter);
+  const stores = await repos.forTenant(tenantId).store.list(filter);
   return STAGES.map((stage) => ({
     id: stage.id,
     label: stage.label,
@@ -32,8 +33,8 @@ export interface PipelineSummaryRow {
   count: number;
 }
 
-export async function getPipelineSummary(): Promise<PipelineSummaryRow[]> {
-  const stores = await repos.store.list();
+export async function getPipelineSummary(tenantId: string): Promise<PipelineSummaryRow[]> {
+  const stores = await repos.forTenant(tenantId).store.list();
   return STAGES.map((stage) => ({
     stage: stage.id,
     label: stage.label,
