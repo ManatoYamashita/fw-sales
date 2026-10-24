@@ -10,8 +10,8 @@ import { expect, test, type Page } from "@playwright/test";
 /**
  * トラットリア SOLE (store_005 / 受注) を店舗名の検索で絞り込み、既定と違う並びで開く。
  *
- * 調査段階などの状態で絞り込まないのは、ほかの spec と `e2e-setup.mjs` が seed 店舗の
- * 状態を書き換えるため (store_005 は調査レビュー待ちの run を持つ)。店舗名は誰も変えない。
+ * 調査段階などの状態で絞り込まないのは、ほかの spec が seed 店舗の状態を書き換えるため
+ * (store_005 には調査レビューの spec がレビュー待ちの run を置く)。店舗名は誰も変えない。
  */
 const FILTERED_SORTED = "/stores?q=%E3%83%88%E3%83%A9%E3%83%83%E3%83%88%E3%83%AA%E3%82%A2&sort=next&dir=desc";
 

@@ -33,7 +33,7 @@ Playwrightが想定する版より古いブラウザでは、製品に問題が�
 3. DB接続を待機
 4. `pnpm db:migrate`で`drizzle/`のmigrationを適用
 5. `pnpm seed`で再現可能なseedデータを投入
-6. E2E用profileと、E2E用の通知・レビュー待ちの調査結果（store_005）を冪等に作り直す。調査結果の判断は一度記録すると変えられないため、流すたびに未判断へ戻す
+6. E2E用のprofileとテナントの所属を冪等に作り直す。通知やレビュー待ちの調査結果など、specが前提にする状態は各specの`beforeAll`で作り直す（[retryしても同じ状態から始める](#retryしても同じ状態から始める)）
 7. Next.js開発サーバーを起動し、Chromium E2Eを実行
 
 E2Eの再実行時は、同名のPostgreSQLコンテナを削除してから作り直します。アプリの通常開発用DBや本番Supabaseには影響しません。
@@ -84,6 +84,14 @@ container list   # fw-sales-e2e-ci の IP を確かめる（例: 192.168.64.20�
 E2E_DATABASE_URL=postgres://postgres:postgres@192.168.64.20:5432/postgres E2E_PORT=3297 pnpm e2e
 container delete --force fw-sales-e2e-ci
 ```
+
+## retryしても同じ状態から始める
+
+CIでは、落ちたテストを2回までretryします。serialのspecは1件落ちると、そのファイルのテストを先頭からまとめてretryします。retryは新しいworkerで`beforeAll`から始まりますが、準備処理（`pnpm e2e:setup`）はretryの前には走りません（#390）。
+
+- specが前提にする状態（通知、調査結果、店舗名・業態、営業記録など）は、そのspecの`beforeAll`で作り直します。準備処理、seed、テスト末尾の「元に戻す」には頼りません。テストの途中で落ちると、「元に戻す」まで進まないためです。
+- SQLで値を作り直したら、`e2e/support/fresh-cache.ts`の`refreshServerCache`で、specが開くページを読み直させます。店舗や通知は`'use cache'`で読むので、SQLで直しただけでは前の試行の値が画面に残ります。devサーバーは`Cache-Control: no-cache`の要求のときだけ、キャッシュを読まずに作り直します。
+- 確かめるときは、状態を変えた直後に`if (test.info().retry === 0) throw new Error("negative control")`を一時的に入れ、`pnpm e2e --reporter=line --retries 1 <spec>`を流します。retry #1で緑になれば、retryしても同じ状態から始められています（結果はflakyと表示されます）。
 
 ## 認証
 

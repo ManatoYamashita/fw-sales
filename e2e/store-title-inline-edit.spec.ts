@@ -1,4 +1,7 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import postgres from "postgres";
+import { e2eDatabaseUrl } from "./support/e2e-db";
+import { refreshServerCache } from "./support/fresh-cache";
 
 /**
  * 店舗タイトルのインライン編集 (#310 / #321)。
@@ -16,9 +19,24 @@ test.beforeEach(() => {
   test.slow();
 });
 
-const STORE_URL = "/stores/store_003";
+const STORE_ID = "store_003";
+const STORE_URL = `/stores/${STORE_ID}`;
 const ORIGINAL_NAME = "炭火焼鳥 鶴丸";
 const ORIGINAL_GENRE = "その他";
+
+const sql = postgres(e2eDatabaseUrl(), { prepare: false, max: 1 });
+
+// 保存のあと「元に戻す」より前で落ちると、変えた値のまま CI の retry が始まる。
+// retry でも元の値から始められるよう、毎回ここで seed の値へ戻す (#390)。
+test.beforeAll(async ({}, testInfo) => {
+  await sql`UPDATE stores SET name = ${ORIGINAL_NAME}, genre = ${ORIGINAL_GENRE} WHERE id = ${STORE_ID}`;
+  // 店舗は 'use cache' で読むので、戻した値を画面にも出させる。
+  await refreshServerCache(testInfo, [STORE_URL]);
+});
+
+test.afterAll(async () => {
+  await sql.end();
+});
 
 /** 折り返しの効く和文と、折り返し位置の無い英字列を両方含む長い店舗名。 */
 const LONG_NAME =
