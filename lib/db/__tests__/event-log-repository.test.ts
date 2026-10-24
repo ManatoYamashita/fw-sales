@@ -20,16 +20,16 @@ describe("event log repository", () => {
   it("inserts into event_logs without reading a now-deleted Store/profile", async () => {
     const values = vi.fn().mockResolvedValue(undefined);
     const insert = vi.fn().mockReturnValue({ values });
-    const repo = makeEventLogRepo({ insert } as unknown as DbClient);
+    const repo = makeEventLogRepo({ insert } as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
     await repo.insert(row);
     expect(insert).toHaveBeenCalledExactlyOnceWith(eventLogs);
-    expect(values).toHaveBeenCalledExactlyOnceWith(row);
+    expect(values).toHaveBeenCalledExactlyOnceWith({ ...row, tenant_id: "cfe871a5-8fc7-42da-9677-3a050665cafb" });
   });
 
   it("propagates SQL failure to the nonthrowing writer", async () => {
     const error = new Error("insert rejected");
     const values = vi.fn().mockRejectedValue(error);
-    const repo = makeEventLogRepo({ insert: () => ({ values }) } as unknown as DbClient);
+    const repo = makeEventLogRepo({ insert: () => ({ values }) } as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
     await expect(repo.insert(row)).rejects.toBe(error);
   });
 });

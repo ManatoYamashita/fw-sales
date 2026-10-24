@@ -15,7 +15,6 @@ import { sql } from "drizzle-orm";
 const { db } = await import("@/lib/db/client");
 const { makeMembershipRepo } = await import("@/lib/db/membership-repository");
 const { makeProfileRepo } = await import("@/lib/db/profile-repository");
-const { FIRSTWEB_TENANT_ID } = await import("@/lib/db/schema");
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -48,7 +47,7 @@ describe("MembershipRepository (#367)", () => {
       // profiles.role だけを admin にする。所属は member のまま
       await tx.execute(sql`UPDATE profiles SET role = 'admin' WHERE id = ${USER_A}`);
 
-      const member = await makeMembershipRepo(tx).find(FIRSTWEB_TENANT_ID, USER_A);
+      const member = await makeMembershipRepo(tx, "cfe871a5-8fc7-42da-9677-3a050665cafb").find(USER_A);
 
       expect(member).toMatchObject({ id: USER_A, email: "a-367@example.test", role: "member" });
     });
@@ -59,10 +58,10 @@ describe("MembershipRepository (#367)", () => {
       await createUser(tx, USER_A, "a-367@example.test");
       await createUser(tx, USER_B, "b-367@example.test");
       await tx.execute(sql`DELETE FROM memberships WHERE user_id = ${USER_B}`);
-      const repo = makeMembershipRepo(tx);
+      const repo = makeMembershipRepo(tx, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
-      expect(await repo.find(FIRSTWEB_TENANT_ID, USER_B)).toBeNull();
-      const ids = (await repo.list(FIRSTWEB_TENANT_ID)).map((m) => m.id);
+      expect(await repo.find(USER_B)).toBeNull();
+      const ids = (await repo.list()).map((m) => m.id);
       expect(ids).toContain(USER_A);
       expect(ids).not.toContain(USER_B);
     });
@@ -73,10 +72,10 @@ describe("MembershipRepository (#367)", () => {
       await createUser(tx, USER_A, "a-367@example.test");
       await createUser(tx, USER_C, "c-367@example.test");
       await tx.execute(sql`UPDATE memberships SET role = 'placeholder' WHERE user_id = ${USER_C}`);
-      const repo = makeMembershipRepo(tx);
+      const repo = makeMembershipRepo(tx, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
-      const all = (await repo.list(FIRSTWEB_TENANT_ID)).map((m) => m.id);
-      const real = (await repo.list(FIRSTWEB_TENANT_ID, { excludePlaceholders: true })).map((m) => m.id);
+      const all = (await repo.list()).map((m) => m.id);
+      const real = (await repo.list({ excludePlaceholders: true })).map((m) => m.id);
       expect(all).toEqual(expect.arrayContaining([USER_A, USER_C]));
       expect(real).toContain(USER_A);
       expect(real).not.toContain(USER_C);
@@ -93,18 +92,18 @@ describe("MembershipRepository (#367)", () => {
         VALUES (${OTHER_TENANT}, 'other-367', 'Other', '2026-10-19', '2026-10-19')`);
       await tx.execute(sql`INSERT INTO memberships (tenant_id, user_id, role, created_at, updated_at)
         VALUES (${OTHER_TENANT}, ${USER_B}, 'admin', '2026-10-19', '2026-10-19')`);
-      const repo = makeMembershipRepo(tx);
-      const before = await repo.countAdmins(FIRSTWEB_TENANT_ID);
+      const repo = makeMembershipRepo(tx, "cfe871a5-8fc7-42da-9677-3a050665cafb");
+      const before = await repo.countAdmins();
 
-      const updated = await repo.updateRole(FIRSTWEB_TENANT_ID, USER_A, "admin");
+      const updated = await repo.updateRole(USER_A, "admin");
 
       expect(updated).toMatchObject({ id: USER_A, role: "admin" });
-      expect(await repo.countAdmins(FIRSTWEB_TENANT_ID)).toBe(before + 1);
-      expect(await repo.countAdmins(OTHER_TENANT)).toBe(1);
+      expect(await repo.countAdmins()).toBe(before + 1);
+      expect(await makeMembershipRepo(tx, OTHER_TENANT).countAdmins()).toBe(1);
       // Firstweb に所属していない USER_B は、別テナントで admin でも更新できない
-      expect(await repo.updateRole(FIRSTWEB_TENANT_ID, USER_B, "admin")).toBeNull();
-      expect(await repo.find(FIRSTWEB_TENANT_ID, USER_B)).toBeNull();
-      expect(await repo.find(OTHER_TENANT, USER_B)).toMatchObject({ role: "admin" });
+      expect(await repo.updateRole(USER_B, "admin")).toBeNull();
+      expect(await repo.find(USER_B)).toBeNull();
+      expect(await makeMembershipRepo(tx, OTHER_TENANT).find(USER_B)).toMatchObject({ role: "admin" });
     });
   });
 });
@@ -113,7 +112,7 @@ describe("ProfileRepository (#367)", () => {
   it("人の情報だけを返し、role を持たない", async () => {
     await inRolledBackTransaction(async (tx) => {
       await createUser(tx, USER_A, "a-367@example.test");
-      const repo = makeProfileRepo(tx);
+      const repo = makeProfileRepo(tx, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
       const profile = await repo.findById(USER_A);
       const listed = (await repo.findAll()).find((p) => p.id === USER_A);

@@ -27,10 +27,12 @@ vi.mock("next/headers", () => ({
 }));
 
 vi.mock("@/lib/repositories", () => ({
-  repos: {
+  repos: { forTenant: (tenantId: string) => {
+    expect(tenantId).toBe(FIRSTWEB_TENANT_ID);
+    return {
     membership: { find: mockMembershipFind },
     profile: { findById: mockProfileFindById },
-  },
+  }; } },
 }));
 
 const { getCurrentProfile } = await import("../server");
@@ -82,7 +84,7 @@ describe("getCurrentProfile", () => {
     mockMembershipFind.mockResolvedValueOnce(MEMBER);
 
     await expect(getCurrentProfile()).resolves.toEqual(MEMBER);
-    expect(mockMembershipFind).toHaveBeenCalledWith(FIRSTWEB_TENANT_ID, "user-1");
+    expect(mockMembershipFind).toHaveBeenCalledWith("user-1");
     expect(warnSpy).not.toHaveBeenCalled();
   });
 

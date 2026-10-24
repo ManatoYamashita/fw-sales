@@ -8,7 +8,7 @@
  * - すべての取得・更新・削除クエリで `user_id = userId` 条件を必ず含める
  *   (他ユーザーのテンプレートへのアクセスを repository 層で防御)
  * - `setDefault` は clearDefaultForUser → update の 2 ステップで構成。
- *   原子性が必要な場合は呼び出し側が `repos.transaction()` で包み、
+ *   原子性が必要な場合は呼び出し側が `repos.forTenant(tenantId).transaction()` で包み、
  *   Tx executor を渡すこと。
  * - デフォルトテンプレートの削除は DB trigger (migration 0010) で拒否される。
  *   Server Action 側でも二重ガードを実装済み。
@@ -19,8 +19,8 @@
 import "server-only";
 
 import { and, desc, eq, sql } from "drizzle-orm";
-import { db, type DbClient, type Tx } from "./client";
-import { aiPromptTemplates } from "./schema";
+import { type DbClient, type Tx } from "./client";
+import { aiPromptTemplates, memberships } from "./schema";
 import type { PromptTemplateRepository } from "@/lib/repositories/prompt-template-repository";
 import type { AiPromptTemplate } from "@/types/ai-prompt-template";
 import { today } from "@/lib/utils/date";
@@ -41,13 +41,15 @@ function fromDbRow(row: TemplateRow): AiPromptTemplate {
 
 export function makePromptTemplateRepo(
   executor: DbClient | Tx,
+  tenantId: string,
 ): PromptTemplateRepository {
+  const inTenant = eq(aiPromptTemplates.tenant_id, tenantId);
   return {
     async list(userId) {
       const rows = await executor
         .select()
         .from(aiPromptTemplates)
-        .where(eq(aiPromptTemplates.user_id, userId))
+        .where(and(inTenant, eq(aiPromptTemplates.user_id, userId)))
         .orderBy(desc(aiPromptTemplates.created_at));
       return rows.map(fromDbRow);
     },
@@ -58,6 +60,7 @@ export function makePromptTemplateRepo(
         .from(aiPromptTemplates)
         .where(
           and(
+            inTenant,
             eq(aiPromptTemplates.id, id),
             eq(aiPromptTemplates.user_id, userId),
           ),
@@ -68,10 +71,14 @@ export function makePromptTemplateRepo(
     },
 
     async insert(input) {
+      const member = await executor.select({ id: memberships.user_id }).from(memberships)
+        .where(and(eq(memberships.tenant_id, tenantId), eq(memberships.user_id, input.user_id))).limit(1);
+      if (member.length === 0) throw new Error("ユーザーが見つかりません");
       const now = today();
       const rows = await executor
         .insert(aiPromptTemplates)
         .values({
+          tenant_id: tenantId,
           user_id: input.user_id,
           name: input.name,
           is_default: input.is_default,
@@ -89,9 +96,10 @@ export function makePromptTemplateRepo(
       const now = today();
       const rows = await executor
         .update(aiPromptTemplates)
-        .set({ ...patch, updated_at: now })
+        .set({ name: patch.name, body: patch.body, is_default: patch.is_default, updated_at: now })
         .where(
           and(
+            inTenant,
             eq(aiPromptTemplates.id, id),
             eq(aiPromptTemplates.user_id, userId),
           ),
@@ -106,6 +114,7 @@ export function makePromptTemplateRepo(
         .delete(aiPromptTemplates)
         .where(
           and(
+            inTenant,
             eq(aiPromptTemplates.id, id),
             eq(aiPromptTemplates.user_id, userId),
           ),
@@ -118,7 +127,7 @@ export function makePromptTemplateRepo(
       const rows = await executor
         .select({ count: sql<number>`count(*)::int` })
         .from(aiPromptTemplates)
-        .where(eq(aiPromptTemplates.user_id, userId));
+        .where(and(inTenant, eq(aiPromptTemplates.user_id, userId)));
       return rows[0]?.count ?? 0;
     },
 
@@ -128,6 +137,7 @@ export function makePromptTemplateRepo(
         .set({ is_default: false, updated_at: today() })
         .where(
           and(
+            inTenant,
             eq(aiPromptTemplates.user_id, userId),
             eq(aiPromptTemplates.is_default, true),
           ),
@@ -142,6 +152,7 @@ export function makePromptTemplateRepo(
         .from(aiPromptTemplates)
         .where(
           and(
+            inTenant,
             eq(aiPromptTemplates.id, id),
             eq(aiPromptTemplates.user_id, userId),
           ),
@@ -158,6 +169,7 @@ export function makePromptTemplateRepo(
         .set({ is_default: false, updated_at: today() })
         .where(
           and(
+            inTenant,
             eq(aiPromptTemplates.user_id, userId),
             eq(aiPromptTemplates.is_default, true),
           ),
@@ -169,6 +181,7 @@ export function makePromptTemplateRepo(
         .set({ is_default: true, updated_at: today() })
         .where(
           and(
+            inTenant,
             eq(aiPromptTemplates.id, id),
             eq(aiPromptTemplates.user_id, userId),
           ),
@@ -179,6 +192,3 @@ export function makePromptTemplateRepo(
     },
   };
 }
-
-export const dbPromptTemplateRepo: PromptTemplateRepository =
-  makePromptTemplateRepo(db);

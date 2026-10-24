@@ -138,7 +138,7 @@ export async function generateSalesAssetsAction(
   let assignedSales = "";
   if (store.assigned_sales_user_id) {
     try {
-      const profile = await repos.membership.find(tenantId, store.assigned_sales_user_id);
+      const profile = await repos.forTenant(tenantId).membership.find(store.assigned_sales_user_id);
       assignedSales = profile?.display_name ?? "";
     } catch {
       assignedSales = "";

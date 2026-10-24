@@ -15,6 +15,8 @@ import type { EventLogInsert } from "@/lib/repositories/event-log-repository";
 // AUDIT_DB_STATEMENT_TIMEOUT_MS < AUDIT_WRITE_WAIT_MS.
 export const AUDIT_WRITE_WAIT_MS = 1_500;
 
+type TenantAuditRow = EventLogInsert & { readonly tenant_id: string };
+
 type WriteOutcome =
   | { status: "persisted" }
   | { status: "rejected"; error: unknown }
@@ -22,7 +24,7 @@ type WriteOutcome =
 
 function consoleFallback(
   event: "audit.write_failed" | "audit.write_timed_out",
-  row: EventLogInsert | null,
+  row: TenantAuditRow | null,
   error?: unknown,
 ): void {
   try {
@@ -53,13 +55,14 @@ function consoleFallback(
  * intermediary, a timed-out INSERT may still settle after the caller continued;
  * the timed_out fallback therefore reports an unknown outcome.
  */
-export async function writeAudit(input: AuditInput): Promise<void> {
-  let row: EventLogInsert | undefined;
+export async function writeAudit(tenantId: string, input: AuditInput): Promise<void> {
+  let row: TenantAuditRow | undefined;
   try {
     const safe = serializeAuditInput(input);
     const denied = safe.event === AUDIT_EVENTS.authzDenied;
     row = {
       id: `evt_${randomUUID()}`,
+      tenant_id: tenantId,
       occurred_at: new Date(),
       level: denied ? "warn" : "info",
       kind: denied ? "authz_denied" : "mutation",
@@ -81,7 +84,7 @@ export async function writeAudit(input: AuditInput): Promise<void> {
     // rejection. There is deliberately no retry.
     const settledWrite: Promise<WriteOutcome> = (async () => {
       const { repos } = await import("@/lib/repositories");
-      await repos.eventLog.insert(row!);
+      await repos.forTenant(tenantId).eventLog.insert(row!);
     })().then(
       (): WriteOutcome => ({ status: "persisted" }),
       (error: unknown): WriteOutcome => ({ status: "rejected", error }),

@@ -135,7 +135,7 @@ export async function getCurrentProfile(): Promise<Member | null> {
   const session = await getCurrentSession();
   if (!session) return null;
   const tenantId = await resolveTenantId();
-  const member = await repos.membership.find(tenantId, session.userId);
+  const member = await repos.forTenant(tenantId).membership.find(session.userId);
   if (!member) {
     console.warn("[authz] no membership", { userId: session.userId, tenantId });
   }

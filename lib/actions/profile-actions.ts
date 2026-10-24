@@ -47,14 +47,14 @@ export async function updateProfileRoleAction(
 
   // 降格 (admin 以外へ) の場合のみ、最後の管理者を守る。
   if (role !== "admin") {
-    const target = await repos.membership.find(tenantId, userId);
+    const target = await repos.forTenant(tenantId).membership.find(userId);
     if (!target) return failure("ユーザーが見つかりません");
-    if (target.role === "admin" && (await repos.membership.countAdmins(tenantId)) <= 1) {
+    if (target.role === "admin" && (await repos.forTenant(tenantId).membership.countAdmins()) <= 1) {
       return failure("最後の管理者は降格できません");
     }
   }
 
-  const updated = await repos.membership.updateRole(tenantId, userId, role);
+  const updated = await repos.forTenant(tenantId).membership.updateRole(userId, role);
   if (!updated) return failure("ユーザーが見つかりません");
 
   updateTag(CACHE_TAGS.profiles(tenantId));

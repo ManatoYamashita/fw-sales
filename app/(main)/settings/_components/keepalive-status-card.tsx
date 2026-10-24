@@ -1,3 +1,4 @@
+import { resolveTenantId } from "@/lib/tenant/context";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { repos } from "@/lib/repositories";
@@ -19,13 +20,14 @@ import { formatDateTime } from "@/lib/utils/date";
  * (GitHub の 60 日 auto-disable が発火するのはまさにその期間) なので、
  * 実際に異常を人へ push する役目は GitHub Actions 版 keepalive の赤に負わせる。
  *
- * `repos.appSettings.get` は PK 一致の 1 行 SELECT で `use cache` を被せる価値が
+ * `repos.forTenant(tenantId).appSettings.get` は PK 一致の 1 行 SELECT で `use cache` を被せる価値が
  * 無く、そもそも鮮度を映すカードをキャッシュするのは自己矛盾なので、素の IO を
  * 呼び出し側 (settings/page.tsx) の <Suspense> で隔離して dynamic hole にする
  * (UserManagementCard / AiPromptTemplatesCard と同型)。
  */
 export async function KeepaliveStatusCard() {
-  const lastRun = await repos.appSettings.get(KEEPALIVE_LAST_RUN_KEY);
+  const tenantId = await resolveTenantId();
+  const lastRun = await repos.forTenant(tenantId).appSettings.get(KEEPALIVE_LAST_RUN_KEY);
   const stale = isKeepaliveStale(lastRun);
 
   return (

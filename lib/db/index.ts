@@ -21,25 +21,23 @@
 
 import "server-only";
 
+export { auditDb } from "./audit-client";
 export { db, sql } from "./client";
-export { makeEventLogRepo, dbEventLogRepo } from "./event-log-repository";
+export { makeEventLogRepo } from "./event-log-repository";
 export type { DbClient, Tx } from "./client";
 export { makeDealRepo } from "./deal-repository";
 export { makeStoreRepo } from "./store-repository";
 export { makeHandoffRepo } from "./handoff-repository";
-export { makeProfileRepo, dbProfileRepo } from "./profile-repository";
-export { makeMembershipRepo, dbMembershipRepo } from "./membership-repository";
+export { makeProfileRepo } from "./profile-repository";
+export { makeMembershipRepo } from "./membership-repository";
 export {
   makeNotificationRepo,
-  dbNotificationRepo,
 } from "./notification-repository";
 export {
   makePromptTemplateRepo,
-  dbPromptTemplateRepo,
 } from "./prompt-template-repository";
 export {
   makeAppSettingsRepo,
-  dbAppSettingsRepo,
 } from "./app-settings-repository";
 export {
   makePlaceCandidateRepo,

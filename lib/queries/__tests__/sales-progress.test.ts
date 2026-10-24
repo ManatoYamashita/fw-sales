@@ -75,7 +75,7 @@ describe("listSalesProgressRows の getAllProfiles 呼び出し", () => {
 
   it("テナント ID を渡して同じ所属一覧のキャッシュを使う", async () => {
     await listSalesProgressRows("cfe871a5-8fc7-42da-9677-3a050665cafb");
-    expect(mockFindAll).toHaveBeenCalledWith("cfe871a5-8fc7-42da-9677-3a050665cafb");
+    expect(mockFindAll).toHaveBeenCalledWith();
   });
 
   it("取得した profile を salesName へ解決する (呼び出し側から渡さなくても解決される)", async () => {
