@@ -27,7 +27,7 @@ export async function getKpiSnapshot(tenantId: string): Promise<KpiSnapshot> {
 
   const [stores, handoffs] = await Promise.all([
     repos.forTenant(tenantId).store.list(),
-    repos.handoff.list(),
+    repos.forTenant(tenantId).handoff.list(),
   ]);
   const total = stores.length || 1;
   const surveyed = stores.filter((s) => s.stage !== "未調査").length;

@@ -3,17 +3,18 @@ import { describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => {
   const db = { transaction: vi.fn(async (work) => work("transaction-executor")) };
   const legacyFactory = vi.fn(() => ({}));
-  return { db, legacyFactory, makeStoreRepo: vi.fn((executor, tenantId) => ({ executor, tenantId })), makePlaceCandidateRepo: vi.fn((executor, tenantId) => ({ executor, tenantId })) };
+  const scopedFactory = () => vi.fn((executor, tenantId) => ({ executor, tenantId }));
+  return { db, legacyFactory, makeStoreRepo: scopedFactory(), makePlaceCandidateRepo: scopedFactory(), makeDealRepo: scopedFactory(), makeHandoffRepo: scopedFactory() };
 });
 vi.mock("@/lib/db", () => ({
   db: mocks.db,
   makeStoreRepo: mocks.makeStoreRepo,
   makePlaceCandidateRepo: mocks.makePlaceCandidateRepo,
-  makeDealRepo: mocks.legacyFactory, makeHandoffRepo: mocks.legacyFactory,
+  makeDealRepo: mocks.makeDealRepo, makeHandoffRepo: mocks.makeHandoffRepo,
   makeProfileRepo: mocks.legacyFactory, makeMembershipRepo: mocks.legacyFactory,
   makeNotificationRepo: mocks.legacyFactory, makePromptTemplateRepo: mocks.legacyFactory,
   makeAppSettingsRepo: mocks.legacyFactory, makeResearchRunRepo: mocks.legacyFactory,
-  dbEventLogRepo: {}, dbDealRepo: {}, dbHandoffRepo: {}, dbProfileRepo: {},
+  dbEventLogRepo: {}, dbProfileRepo: {},
   dbMembershipRepo: {}, dbNotificationRepo: {}, dbPromptTemplateRepo: {}, dbAppSettingsRepo: {}, dbResearchRunRepo: {},
 }));
 const { repos } = await import("@/lib/repositories");
@@ -21,18 +22,25 @@ const { repos } = await import("@/lib/repositories");
 describe("テナントを束縛した repository の構築", () => {
   it("通常 executor と transaction executor の両方に同じテナントを渡す", async () => {
     const scoped = repos.forTenant("tenant-a");
-    expect(scoped.store).toEqual({ executor: mocks.db, tenantId: "tenant-a" });
-    expect(scoped.placeCandidate).toEqual({ executor: mocks.db, tenantId: "tenant-a" });
+    for (const domain of ["store", "placeCandidate", "deal", "handoff"] as const) {
+      expect(scoped[domain]).toEqual({ executor: mocks.db, tenantId: "tenant-a" });
+      expect(repos.forTenant("tenant-b")[domain]).toEqual({ executor: mocks.db, tenantId: "tenant-b" });
+    }
     await scoped.transaction(async (tx) => {
-      expect(tx.store).toEqual({ executor: "transaction-executor", tenantId: "tenant-a" });
-      expect(tx.placeCandidate).toEqual({ executor: "transaction-executor", tenantId: "tenant-a" });
+      for (const domain of ["store", "placeCandidate", "deal", "handoff"] as const) {
+        expect(tx[domain]).toEqual({ executor: "transaction-executor", tenantId: "tenant-a" });
+      }
     });
-    expect(repos.forTenant("tenant-b").store).toEqual({ executor: mocks.db, tenantId: "tenant-b" });
     expect(Object.isFrozen(scoped)).toBe(true);
   });
-  it("テナントの無い店舗入口を持たず、空のテナントは拒否する", () => {
-    expect(repos).not.toHaveProperty("store");
-    expect(repos).not.toHaveProperty("placeCandidate");
+  it("移行済みの領域はテナントの無い入口を持たず、空のテナントは拒否する", async () => {
+    for (const domain of ["store", "placeCandidate", "deal", "handoff"]) {
+      expect(repos).not.toHaveProperty(domain);
+    }
+    await repos.transaction(async (tx) => {
+      expect(tx).not.toHaveProperty("deal");
+      expect(tx).not.toHaveProperty("handoff");
+    });
     expect(() => repos.forTenant(" ")).toThrow("テナント");
   });
 });

@@ -8,12 +8,12 @@ export async function listHandoffsCached(tenantId: string): Promise<Handoff[]> {
   "use cache";
   cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.handoffs(tenantId));
-  return repos.handoff.list();
+  return repos.forTenant(tenantId).handoff.list();
 }
 
 export async function getHandoffCached(tenantId: string, id: string): Promise<Handoff | null> {
   "use cache";
   cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.handoff(tenantId, id), CACHE_TAGS.handoffs(tenantId));
-  return repos.handoff.get(id);
+  return repos.forTenant(tenantId).handoff.get(id);
 }

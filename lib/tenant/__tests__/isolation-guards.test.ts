@@ -8,6 +8,8 @@ import { CACHE_TAGS } from "@/lib/cache";
 import { unsafeCacheTagCalls } from "@/lib/tenant/cache-tag-guard";
 import type { Repos, TxRepos } from "@/lib/repositories";
 import type { makeStoreRepo } from "@/lib/db/store-repository";
+import type { makeDealRepo } from "@/lib/db/deal-repository";
+import type { makeHandoffRepo } from "@/lib/db/handoff-repository";
 
 type Assert<T extends true> = T;
 // 未束縛入口が復活したら typecheck が落ちる。
@@ -15,7 +17,14 @@ type NoUnboundStore = Assert<"store" extends keyof Repos ? false : true>;
 type NoUnboundCandidates = Assert<"placeCandidate" extends keyof Repos ? false : true>;
 type NoUnboundTxStore = Assert<"store" extends keyof TxRepos ? false : true>;
 type FactoryRequiresTenant = Assert<Parameters<typeof makeStoreRepo> extends [unknown, string] ? true : false>;
-export type TenantTypeGuards = [NoUnboundStore, NoUnboundCandidates, NoUnboundTxStore, FactoryRequiresTenant];
+type NoUnboundDeals = Assert<"deal" extends keyof Repos ? false : true>;
+type NoUnboundHandoffs = Assert<"handoff" extends keyof Repos ? false : true>;
+type NoUnboundTxDeals = Assert<"deal" extends keyof TxRepos ? false : true>;
+type NoUnboundTxHandoffs = Assert<"handoff" extends keyof TxRepos ? false : true>;
+type DealFactoryRequiresTenant = Assert<Parameters<typeof makeDealRepo> extends [unknown, string] ? true : false>;
+type HandoffFactoryRequiresTenant = Assert<Parameters<typeof makeHandoffRepo> extends [unknown, string] ? true : false>;
+export type TenantTypeGuards = [NoUnboundStore, NoUnboundCandidates, NoUnboundTxStore, FactoryRequiresTenant,
+  NoUnboundDeals, NoUnboundHandoffs, NoUnboundTxDeals, NoUnboundTxHandoffs, DealFactoryRequiresTenant, HandoffFactoryRequiresTenant];
 
 function source(file: string, text = readFileSync(file, "utf8")) {
   return ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, file.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);

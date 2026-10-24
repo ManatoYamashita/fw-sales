@@ -75,7 +75,7 @@ APP_ENV=local DATABASE_URL='<専用DB>' DATABASE_POOL_MAX=1 pnpm test:integratio
 
 現在の Google Place ID の一意制約はグローバルのまま。A と B が同じ候補を保存しようとすると新規 INSERT は一意制約で失敗するが、他社の既存行は更新しない。両社がそれぞれ保存できることは #371 の完了条件である。
 
-TenantRepos が直接公開するのは移行済みの店舗と候補だけ。transaction コールバックの店舗以外の repository、および root のほかの repository は移行途中で、テナント分離を保証しない。
+店舗段階の PR で TenantRepos が直接公開するのは店舗と候補だけ。商談段階の移行と検証は [商談領域の記録](issue-368-commercial-tenant-migration.md) を参照する。調査・ユーザー領域の repository は引き続き移行途中で、テナント分離を保証しない。
 
 ## 今回の知見とルール更新提案
 

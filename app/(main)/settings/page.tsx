@@ -42,8 +42,8 @@ async function loadCounts(tenantId: string) {
   const [stores, researchRuns, deals, handoffs] = await Promise.all([
     repos.forTenant(tenantId).store.list(),
     repos.researchRun.count(),
-    repos.deal.list(),
-    repos.handoff.list(),
+    repos.forTenant(tenantId).deal.list(),
+    repos.forTenant(tenantId).handoff.list(),
   ]);
   return {
     stores: stores.length,

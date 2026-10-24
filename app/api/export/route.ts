@@ -44,9 +44,9 @@ export async function GET() {
   // research-handoff-db-migration §8.1 / §8.4 で Mock 経由を排除済。
   // Issue #110 で旧 `research` テーブルを撤去したため 4 → 3 entity になった。
   const [deals, stores, handoffs] = await Promise.all([
-    repos.deal.list(),
+    repos.forTenant(tenantId).deal.list(),
     repos.forTenant(tenantId).store.list(),
-    repos.handoff.list(),
+    repos.forTenant(tenantId).handoff.list(),
   ]);
   const snapshot: DbSnapshot = { stores, deals, handoffs };
 

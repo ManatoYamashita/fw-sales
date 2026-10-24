@@ -24,9 +24,9 @@ import "server-only";
 export { db, sql } from "./client";
 export { makeEventLogRepo, dbEventLogRepo } from "./event-log-repository";
 export type { DbClient, Tx } from "./client";
-export { makeDealRepo, dbDealRepo } from "./deal-repository";
+export { makeDealRepo } from "./deal-repository";
 export { makeStoreRepo } from "./store-repository";
-export { makeHandoffRepo, dbHandoffRepo } from "./handoff-repository";
+export { makeHandoffRepo } from "./handoff-repository";
 export { makeProfileRepo, dbProfileRepo } from "./profile-repository";
 export { makeMembershipRepo, dbMembershipRepo } from "./membership-repository";
 export {

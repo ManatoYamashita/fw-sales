@@ -19,7 +19,7 @@ vi.mock("@/lib/repositories", () => ({
   repos: ((tenantRepos) => ({ ...tenantRepos, forTenant: () => tenantRepos }))({
     store: { get: mocks.getStore },
     deal: { get: mocks.getDeal, create: mocks.create, update: mocks.update },
-    profile: { findById: mocks.findProfile },
+    membership: { find: mocks.findProfile },
     transaction: mocks.transaction,
   }),
 }));

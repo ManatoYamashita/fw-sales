@@ -369,7 +369,7 @@ export function makeStoreRepo(executor: DbClient | Tx, tenantId: string): StoreR
       //
       // feat/ai-research-quality-ux-hardening(最終レビュー指摘1):
       // - 現在値の読み出しに **行ロック**(`SELECT ... FOR UPDATE`)を付ける。
-      //   トランザクション内(`repos.transaction` 経由)で呼ばれた場合、
+      //   トランザクション内(`repos.forTenant(tenantId).transaction` 経由)で呼ばれた場合、
       //   他の `basic_info` writer と直列化される。
       // - 書き込みは **`basic_info` 列だけ**に絞る(旧実装は `toDbRow(next)` で全列 SET
       //   していたため、並行する `stage`/`memo` 更新等を巻き戻す余地があった)。

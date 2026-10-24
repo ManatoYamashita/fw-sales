@@ -8,19 +8,19 @@ export async function listDealsCached(tenantId: string): Promise<Deal[]> {
   "use cache";
   cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.deals(tenantId));
-  return repos.deal.list();
+  return repos.forTenant(tenantId).deal.list();
 }
 
 export async function getDealCached(tenantId: string, id: string): Promise<Deal | null> {
   "use cache";
   cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.deal(tenantId, id), CACHE_TAGS.deals(tenantId));
-  return repos.deal.get(id);
+  return repos.forTenant(tenantId).deal.get(id);
 }
 
 export async function listDealsByStoreCached(tenantId: string, storeId: string): Promise<Deal[]> {
   "use cache";
   cacheLife("longBackstop");
   cacheTag(CACHE_TAGS.dealsByStore(tenantId, storeId), CACHE_TAGS.deals(tenantId));
-  return repos.deal.list(storeId);
+  return repos.forTenant(tenantId).deal.list(storeId);
 }

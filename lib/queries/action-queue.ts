@@ -13,7 +13,7 @@ export interface ActionQueue {
 export async function getActionQueue(tenantId: string): Promise<ActionQueue> {
   const [stores, handoffs] = await Promise.all([
     repos.forTenant(tenantId).store.list(),
-    repos.handoff.list(),
+    repos.forTenant(tenantId).handoff.list(),
   ]);
 
   return {

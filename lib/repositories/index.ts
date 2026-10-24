@@ -52,13 +52,11 @@ export type {
  * `transaction` のコールバックに渡される `tx` 引数の型。
  *
  * research-handoff-db-migration spec で `research` / `handoff` を追加した。
- * 構造的型付けのため、既存の `repos.transaction(async ({ deal, store }) => ...)`
+ * 構造的型付けのため、`repos.forTenant(tenantId).transaction(async ({ deal, store }) => ...)`
  * 利用箇所(`createDealAction` / `updateDealAction`)は分割代入で 2 entity しか
  * 参照しないため非破壊で動作する。
  */
 export interface TxRepos {
-  deal: DealRepository;
-  handoff: HandoffRepository;
   profile: ProfileRepository;
   /** テナントへの所属とロール (マルチテナント化 #367) で追加。 */
   membership: MembershipRepository;
@@ -76,14 +74,18 @@ export interface TxRepos {
 /**
  * アプリ全体で参照される repository 集約 + transaction API。
  */
-/** 店舗以外の tx repository は後続 PR で移行する (#368)。 */
+/** 調査・ユーザー領域の tx repository は後続 PR で移行する (#368)。 */
 export interface TenantTxRepos extends TxRepos {
+  deal: DealRepository;
+  handoff: HandoffRepository;
   store: StoreRepository;
   placeCandidate: PlaceCandidateRepository;
 }
 
-/** 移行済みの店舗領域はテナントを指定した入口からだけ利用できる。 */
+/** 移行済みの店舗・商談領域はテナントを指定した入口からだけ利用できる。 */
 export interface TenantRepos {
+  deal: DealRepository;
+  handoff: HandoffRepository;
   store: StoreRepository;
   placeCandidate: PlaceCandidateRepository;
   transaction: <T>(fn: (tx: TenantTxRepos) => Promise<T>) => Promise<T>;
@@ -92,8 +94,6 @@ export interface TenantRepos {
 export interface Repos {
   forTenant: (tenantId: string) => TenantRepos;
   eventLog: EventLogRepository;
-  deal: DealRepository;
-  handoff: HandoffRepository;
   profile: ProfileRepository;
   /** テナントへの所属とロール (マルチテナント化 #367) で追加。 */
   membership: MembershipRepository;
@@ -117,8 +117,6 @@ async function buildRepos(): Promise<Repos> {
   const {
     db,
     dbEventLogRepo,
-    dbDealRepo,
-    dbHandoffRepo,
     dbProfileRepo,
     dbMembershipRepo,
     dbNotificationRepo,
@@ -138,13 +136,14 @@ async function buildRepos(): Promise<Repos> {
   } = dbModule;
 
   const legacyTxRepos = (executor: import("@/lib/db").DbClient | import("@/lib/db").Tx): TxRepos => ({
-    deal: makeDealRepo(executor), handoff: makeHandoffRepo(executor),
     profile: makeProfileRepo(executor), membership: makeMembershipRepo(executor),
     notification: makeNotificationRepo(executor), promptTemplate: makePromptTemplateRepo(executor),
     appSettings: makeAppSettingsRepo(executor), researchRun: makeResearchRunRepo(executor),
   });
   const tenantTxRepos = (executor: import("@/lib/db").DbClient | import("@/lib/db").Tx, tenantId: string): TenantTxRepos => ({
     ...legacyTxRepos(executor),
+    deal: makeDealRepo(executor, tenantId),
+    handoff: makeHandoffRepo(executor, tenantId),
     store: makeStoreRepo(executor, tenantId),
     placeCandidate: makePlaceCandidateRepo(executor, tenantId),
   });
@@ -153,6 +152,8 @@ async function buildRepos(): Promise<Repos> {
     forTenant(tenantId: string): TenantRepos {
       if (!tenantId.trim()) throw new Error("テナントが指定されていません");
       return Object.freeze({
+        deal: makeDealRepo(db, tenantId),
+        handoff: makeHandoffRepo(db, tenantId),
         store: makeStoreRepo(db, tenantId),
         placeCandidate: makePlaceCandidateRepo(db, tenantId),
         transaction: <T>(fn: (tx: TenantTxRepos) => Promise<T>) =>
@@ -160,8 +161,6 @@ async function buildRepos(): Promise<Repos> {
       });
     },
     eventLog: dbEventLogRepo,
-    deal: dbDealRepo,
-    handoff: dbHandoffRepo,
     profile: dbProfileRepo,
     membership: dbMembershipRepo,
     notification: dbNotificationRepo,

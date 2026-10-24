@@ -60,7 +60,7 @@ export async function createHandoffAction(
   formData: FormData,
 ): Promise<ActionResult<{ id: string }>> {
   const tenantId = await resolveTenantId();
-  const deal = await repos.deal.get(dealId);
+  const deal = await repos.forTenant(tenantId).deal.get(dealId);
   if (!deal) return failure("商談が見つかりませんでした");
 
   const input = buildInput(formData, {
@@ -96,10 +96,10 @@ export async function updateHandoffAction(
   formData: FormData,
 ): Promise<ActionResult<{ id: string }>> {
   const tenantId = await resolveTenantId();
-  const current = await repos.handoff.get(handoffId);
+  const current = await repos.forTenant(tenantId).handoff.get(handoffId);
   if (!current) return failure("引き継ぎが見つかりませんでした");
 
-  const updated = await repos.handoff.update(handoffId, {
+  const updated = await repos.forTenant(tenantId).handoff.update(handoffId, {
     contract_services: readString(formData, "contract_services"),
     initial_fee: readNumber(formData, "initial_fee", 0),
     monthly_fee: readNumber(formData, "monthly_fee", 0),
@@ -124,7 +124,7 @@ export async function completeHandoffAction(
   handoffId: string,
 ): Promise<ActionResult> {
   const tenantId = await resolveTenantId();
-  const current = await repos.handoff.get(handoffId);
+  const current = await repos.forTenant(tenantId).handoff.get(handoffId);
   if (!current) return failure("引き継ぎが見つかりませんでした");
 
   try {
@@ -153,9 +153,9 @@ export async function deleteHandoffAction(
   const tenantId = await resolveTenantId();
   const guard = await requireAdmin("handoffs.delete");
   if (!guard.ok) return guard.denied;
-  const current = await repos.handoff.get(handoffId);
+  const current = await repos.forTenant(tenantId).handoff.get(handoffId);
   if (!current) return failure("引き継ぎが見つかりませんでした");
-  await repos.handoff.delete(handoffId);
+  await repos.forTenant(tenantId).handoff.delete(handoffId);
   invalidate(tenantId, handoffId, current.store_id);
   console.log("[audit] handoffs.delete", { by: guard.profile.email, handoffId });
   redirect("/handoffs");
