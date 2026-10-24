@@ -10,43 +10,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-const { mockRequireAdmin, mockTransaction, mockDelete, mockInsert } =
-  vi.hoisted(() => {
-    const mockOnConflictDoUpdate = vi.fn().mockResolvedValue(undefined);
-    const mockInsert = vi.fn(() => ({
-      values: () => ({ onConflictDoUpdate: mockOnConflictDoUpdate }),
-    }));
-    const mockDelete = vi.fn().mockResolvedValue(undefined);
-    const mockTransaction = vi.fn(
-      async (fn: (tx: unknown) => Promise<void>) =>
-        fn({ insert: mockInsert, delete: mockDelete }),
-    );
-    return {
-      mockRequireAdmin: vi.fn(),
-      mockTransaction,
-      mockDelete,
-      mockInsert,
-    };
-  });
-
+const { mockRequireAdmin, mockReset, mockClear, mockForTenant } = vi.hoisted(() => ({
+  mockRequireAdmin: vi.fn(), mockReset: vi.fn(), mockClear: vi.fn(), mockForTenant: vi.fn(),
+}));
 vi.mock("../_authz", () => ({ requireAdmin: mockRequireAdmin }));
 vi.mock("next/cache", () => ({ revalidateTag: vi.fn() }));
-vi.mock("@/lib/db/client", () => ({ db: { transaction: mockTransaction } }));
-vi.mock("@/lib/db/schema", () => ({
-  stores: { _name: "stores", id: "id" },
-  deals: { _name: "deals", id: "id" },
-  handoffs: { _name: "handoffs", id: "id" },
-}));
-vi.mock("@/lib/db/store-repository", () => ({
-  toDbRow: (store: Record<string, unknown>) => store,
-}));
-vi.mock("@/lib/repositories", () => ({
-  repos: ((tenantRepos) => ({ ...tenantRepos, forTenant: () => tenantRepos }))({
-    store: { list: vi.fn() },
-    deal: { list: vi.fn() },
-    handoff: { list: vi.fn() },
-  }),
-}));
+vi.mock("@/lib/repositories", () => ({ repos: { forTenant: mockForTenant } }));
 
 const { resetToSeedAction, clearAllAction } = await import("../data-actions");
 const { isDataResetAllowed, DATA_RESET_DENIED_MESSAGE } = await import(
@@ -60,6 +29,7 @@ const ACTIONS = [
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockForTenant.mockImplementation((tenantId) => { expect(tenantId).toBe("cfe871a5-8fc7-42da-9677-3a050665cafb"); return { data: { resetToSeed: mockReset, clear: mockClear } }; });
   vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.spyOn(console, "log").mockImplementation(() => {});
   mockRequireAdmin.mockResolvedValue({
@@ -97,9 +67,7 @@ describe.each(ACTIONS)("%s の環境ガード", (_name, action) => {
     const result = await action();
 
     expect(result).toEqual({ ok: false, error: DATA_RESET_DENIED_MESSAGE });
-    expect(mockTransaction).not.toHaveBeenCalled();
-    expect(mockDelete).not.toHaveBeenCalled();
-    expect(mockInsert).not.toHaveBeenCalled();
+    expect(mockForTenant).not.toHaveBeenCalled();
   });
 
   it("フラグの無い環境 (本番 DB を指す next dev 等) でも拒否する", async () => {
@@ -109,7 +77,7 @@ describe.each(ACTIONS)("%s の環境ガード", (_name, action) => {
     const result = await action();
 
     expect(result.ok).toBe(false);
-    expect(mockTransaction).not.toHaveBeenCalled();
+    expect(mockForTenant).not.toHaveBeenCalled();
   });
 
   it("フラグを立てた本番以外の環境では実行する", async () => {
@@ -119,8 +87,8 @@ describe.each(ACTIONS)("%s の環境ガード", (_name, action) => {
     const result = await action();
 
     expect(result.ok).toBe(true);
-    expect(mockTransaction).toHaveBeenCalledTimes(1);
-    expect(mockDelete).toHaveBeenCalledTimes(3);
+    expect(mockForTenant).toHaveBeenCalledTimes(1);
+    expect(_name === "resetToSeedAction" ? mockReset : mockClear).toHaveBeenCalledTimes(1);
   });
 
   it("admin でなければ環境に関係なく admin ガードの結果を返す", async () => {
@@ -129,6 +97,6 @@ describe.each(ACTIONS)("%s の環境ガード", (_name, action) => {
     mockRequireAdmin.mockResolvedValue({ ok: false, denied });
 
     expect(await action()).toBe(denied);
-    expect(mockTransaction).not.toHaveBeenCalled();
+    expect(mockForTenant).not.toHaveBeenCalled();
   });
 });

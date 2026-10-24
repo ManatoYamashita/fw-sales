@@ -1,3 +1,4 @@
+// #370: 専用E2E DBのschema/auth fixtureを構築する例外。業務seedの対象はFirstwebを明示する。
 import postgres from "postgres";
 import {
   buildAppEnv,
@@ -61,7 +62,7 @@ async function main() {
 
   // 既存のDrizzle migrationとseedをローカルDBへ適用します。
   runPnpm(["db:migrate"], appEnv);
-  runPnpm(["seed"], appEnv);
+  runPnpm(["seed", "--tenant=firstweb"], appEnv);
   await ensureE2eProfile(localEnv, e2eConfig);
   // 通知や調査結果など、spec が前提にする状態は各 spec の beforeAll で作り直す。
   // ここは retry の前には走らないため (#390)。
