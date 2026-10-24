@@ -64,7 +64,7 @@ describe("/deals/[id] (LegacyDealPage)", () => {
       LegacyDealPage({ params: Promise.resolve({ id: "deal_1" }) }),
     ).rejects.toThrow("NEXT_REDIRECT");
 
-    expect(mockGetDealCached).toHaveBeenCalledWith("deal_1");
+    expect(mockGetDealCached).toHaveBeenCalledWith("cfe871a5-8fc7-42da-9677-3a050665cafb", "deal_1");
     expect(mockRedirect).toHaveBeenCalledWith("/stores/store_9?tab=progress&activity=deal_1");
     expect(mockNotFound).not.toHaveBeenCalled();
   });
@@ -88,7 +88,7 @@ describe("/deals/new (LegacyNewDealPage)", () => {
       LegacyNewDealPage({ searchParams: Promise.resolve({ store: "store_9" }) }),
     ).rejects.toThrow("NEXT_REDIRECT");
 
-    expect(mockGetStoreCached).toHaveBeenCalledWith("store_9");
+    expect(mockGetStoreCached).toHaveBeenCalledWith("cfe871a5-8fc7-42da-9677-3a050665cafb", "store_9");
     expect(mockRedirect).toHaveBeenCalledWith("/stores/store_9?tab=progress&action=new");
   });
 

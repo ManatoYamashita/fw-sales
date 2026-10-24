@@ -15,9 +15,11 @@ const mocks = vi.hoisted(() => ({
 vi.mock("next/cache", () => ({ cacheLife: vi.fn(), cacheTag: vi.fn() }));
 vi.mock("@/lib/repositories", () => ({
   repos: {
-    store: { list: mocks.list, get: mocks.get },
-    handoff: { list: vi.fn().mockResolvedValue([]) },
-    researchRun: { listStoreIdsNeedingReview: vi.fn().mockResolvedValue(["store_review"]) },
+    forTenant: () => ({
+      store: { list: mocks.list, get: mocks.get },
+      handoff: { list: vi.fn().mockResolvedValue([]) },
+      researchRun: { listStoreIdsNeedingReview: vi.fn().mockResolvedValue(["store_review"]) },
+    }),
   },
 }));
 
@@ -25,6 +27,8 @@ const { listStores, getStoreCached } = await import("../stores");
 const { getPipelineColumns } = await import("../pipeline");
 const { getActionQueue } = await import("../action-queue");
 const { getResearchQueue } = await import("../research");
+
+const TENANT_ID = "00000000-0000-4000-8000-000000000384";
 
 const STORES = [
   { id: "store_new", name: "未調査の店", stage: "未調査", updated_at: "2026-10-01", contact_email: "a@example.com" },
@@ -43,25 +47,25 @@ function expectNoContactEmail(stores: readonly object[]) {
 
 describe("一覧系のクエリはアドレスを外す", () => {
   it("店舗一覧 (listStores)", async () => {
-    expectNoContactEmail(await listStores());
+    expectNoContactEmail(await listStores(TENANT_ID));
   });
 
   it("パイプライン (getPipelineColumns)", async () => {
-    expectNoContactEmail((await getPipelineColumns()).flatMap((column) => column.stores));
+    expectNoContactEmail((await getPipelineColumns(TENANT_ID)).flatMap((column) => column.stores));
   });
 
   it("ダッシュボード (getActionQueue)", async () => {
-    expectNoContactEmail((await getActionQueue()).needsResearch);
+    expectNoContactEmail((await getActionQueue(TENANT_ID)).needsResearch);
   });
 
   it("AI 調査一覧 (getResearchQueue)", async () => {
-    const queue = await getResearchQueue();
+    const queue = await getResearchQueue(TENANT_ID);
     expectNoContactEmail([...queue.needsReview, ...queue.waiting, ...queue.done]);
   });
 });
 
 describe("店舗 1 件のクエリ", () => {
   it("店舗詳細・店舗編集が使う getStoreCached はアドレスを残す", async () => {
-    expect(await getStoreCached("store_new")).toMatchObject({ contact_email: "a@example.com" });
+    expect(await getStoreCached(TENANT_ID, "store_new")).toMatchObject({ contact_email: "a@example.com" });
   });
 });

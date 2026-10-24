@@ -52,7 +52,7 @@ function normalizedSql(sql: string) {
 describe("getDeleteImpact", () => {
   it("空配列は DB へ問い合わせず全カテゴリ 0 を返す", async () => {
     const { execute, executor } = makeExecutor([]);
-    const repo = makeStoreRepo(executor);
+    const repo = makeStoreRepo(executor, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     await expect(repo.getDeleteImpact([])).resolves.toEqual({
       deals: 0,
@@ -67,7 +67,7 @@ describe("getDeleteImpact", () => {
     const { execute, executor } = makeExecutor([
       { deals: 3, store_research_runs: 22, handoffs: 1, place_candidates: 4 },
     ]);
-    const repo = makeStoreRepo(executor);
+    const repo = makeStoreRepo(executor, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     await expect(
       repo.getDeleteImpact(["store_a", "store_b"]),
@@ -82,7 +82,7 @@ describe("getDeleteImpact", () => {
 
   it("結果行が欠落した場合は防御的に全カテゴリ 0 を返す", async () => {
     const { execute, executor } = makeExecutor([]);
-    const repo = makeStoreRepo(executor);
+    const repo = makeStoreRepo(executor, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     await expect(repo.getDeleteImpact(["store_a"])).resolves.toEqual({
       deals: 0,
@@ -102,7 +102,7 @@ describe("getDeleteImpact", () => {
         place_candidates: null,
       },
     ]);
-    const repo = makeStoreRepo(executor);
+    const repo = makeStoreRepo(executor, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
     await expect(repo.getDeleteImpact(["store_a"])).resolves.toEqual({
       deals: 5,
@@ -118,7 +118,7 @@ describe("getDeleteImpact", () => {
     const { executor, compiledQuery } = makeExecutor([
       { deals: 0, store_research_runs: 0, handoffs: 0, place_candidates: 0 },
     ]);
-    const repo = makeStoreRepo(executor);
+    const repo = makeStoreRepo(executor, "cfe871a5-8fc7-42da-9677-3a050665cafb");
     const ids = ["store_a", "store_b"];
     await repo.getDeleteImpact(ids);
 
@@ -145,6 +145,6 @@ describe("getDeleteImpact", () => {
 
     // ID 群は inArray で子テーブルの本数ぶん展開される (sql テンプレートへの直埋めは
     // `any(($1))` の不正 SQL になるため禁止 / store-repository.ts のコメント参照)。
-    expect(query.params).toEqual(storeChildFks.flatMap(() => ids));
+    expect(query.params).toEqual(storeChildFks.flatMap(() => ["cfe871a5-8fc7-42da-9677-3a050665cafb", ...ids, "cfe871a5-8fc7-42da-9677-3a050665cafb"]));
   });
 });

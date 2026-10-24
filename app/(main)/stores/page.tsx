@@ -25,6 +25,7 @@ import {
   type ProgressSortKey,
   type SalesProgressFilter,
 } from "@/lib/domain/sales-progress";
+import { resolveTenantId } from "@/lib/tenant/context";
 
 export const metadata: Metadata = { title: "店舗・営業一覧" };
 
@@ -109,7 +110,8 @@ function StoresTableFallback() {
  * `'use cache'` のキャッシュエントリは両者で共有される。
  */
 async function ProgressFilterBarSlot() {
-  const profiles = await getAllProfiles();
+  const tenantId = await resolveTenantId();
+  const profiles = await getAllProfiles(tenantId);
   return <ProgressFilterBar profileEntries={profiles.map((p) => [p.id, p.display_name] as const)} />;
 }
 

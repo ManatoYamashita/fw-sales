@@ -46,10 +46,10 @@ vi.mock("@/lib/ai/client", async (importOriginal) => {
 });
 
 vi.mock("@/lib/repositories", () => ({
-  repos: {
+  repos: ((tenantRepos) => ({ ...tenantRepos, forTenant: () => tenantRepos }))({
     store: { get: mockStoreGet, update: mockStoreUpdate },
-    profile: { findById: mockProfileFindById },
-  },
+    membership: { find: mockProfileFindById },
+  }),
 }));
 
 vi.mock("next/cache", () => ({ revalidateTag: mockRevalidateTag }));

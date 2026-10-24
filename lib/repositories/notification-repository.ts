@@ -1,7 +1,7 @@
 /**
  * NotificationRepository interface (auth-and-notifications spec, Issue #16)
  *
- * アプリ内通知の user_id ベース取得契約を提供する。テーブル本体と通知ベル UI は
+ * アプリ内通知の 束縛したテナントと user_id による取得契約を提供する。テーブル本体と通知ベル UI は
  * 別仕様 (#14) が所有し、本仕様は user_id 絞り込み契約のみを担う
  * (design.md §Boundary Commitments)。
  *

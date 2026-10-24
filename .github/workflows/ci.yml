@@ -164,5 +164,5 @@ jobs:
 
       # skip 条件は置いていないため、接続先が未設定ならここで明示的に失敗する
       # (「0 件 skip で緑」という偽の成功にならない)。
-      - name: Run audit DB integration tests
+      - name: Run tenant isolation and audit DB integration tests
         run: pnpm test:integration

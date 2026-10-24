@@ -15,8 +15,10 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/repositories", () => ({
   repos: {
-    store: { update: mocks.update, getDeleteImpact: mocks.getDeleteImpact },
-    profile: { findById: mocks.findProfile },
+    forTenant: () => ({
+      store: { update: mocks.update, getDeleteImpact: mocks.getDeleteImpact },
+      membership: { find: mocks.findProfile },
+    }),
   },
 }));
 vi.mock("next/cache", () => ({ revalidateTag: vi.fn(), updateTag: vi.fn() }));

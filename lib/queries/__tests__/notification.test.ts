@@ -18,10 +18,10 @@ const { mockFindByUserId, mockStoreGet, mockCacheTag } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/repositories", () => ({
-  repos: {
+  repos: ((tenantRepos) => ({ ...tenantRepos, forTenant: () => tenantRepos }))({
     notification: { findByUserId: mockFindByUserId },
     store: { get: mockStoreGet },
-  },
+  }),
 }));
 
 vi.mock("next/cache", () => ({
@@ -67,7 +67,7 @@ describe("getRecentNotifications", () => {
       id === "store_alive" ? { id } : null,
     );
 
-    const result = await getRecentNotifications("user-1");
+    const result = await getRecentNotifications("cfe871a5-8fc7-42da-9677-3a050665cafb", "user-1");
 
     expect(result.map((n) => [n.id, n.link_url])).toEqual([
       ["alive", "/stores/store_alive#deep-research"],
@@ -82,13 +82,13 @@ describe("getRecentNotifications", () => {
 
   it("店舗削除で結果が変わるため stores タグにも相乗りする", async () => {
     mockFindByUserId.mockResolvedValue([]);
-    await getRecentNotifications("user-1");
-    expect(mockCacheTag).toHaveBeenCalledWith("notifications", "stores");
+    await getRecentNotifications("cfe871a5-8fc7-42da-9677-3a050665cafb", "user-1");
+    expect(mockCacheTag).toHaveBeenCalledWith("tenant:cfe871a5-8fc7-42da-9677-3a050665cafb:notifications", "tenant:cfe871a5-8fc7-42da-9677-3a050665cafb:stores");
   });
 
   it("店舗リンクが無ければ店舗を引かない", async () => {
     mockFindByUserId.mockResolvedValue([makeNotification("none", null)]);
-    await getRecentNotifications("user-1");
+    await getRecentNotifications("cfe871a5-8fc7-42da-9677-3a050665cafb", "user-1");
     expect(mockStoreGet).not.toHaveBeenCalled();
   });
 
@@ -98,7 +98,7 @@ describe("getRecentNotifications", () => {
       makeNotification("b", "/stores/store_b"),
     ]);
     mockStoreGet.mockResolvedValue({ id: "x" });
-    const result = await getRecentNotifications("user-1", 1);
+    const result = await getRecentNotifications("cfe871a5-8fc7-42da-9677-3a050665cafb", "user-1", 1);
     expect(result.map((n) => n.id)).toEqual(["a"]);
     expect(mockStoreGet).toHaveBeenCalledTimes(1);
   });

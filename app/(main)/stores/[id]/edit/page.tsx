@@ -6,6 +6,7 @@ import StoreEditLoading from "./loading";
 import { StoreEditForm } from "./_components/store-edit-form";
 import { getStoreCached } from "@/lib/queries/stores";
 import { getAllProfiles } from "@/lib/queries/profiles";
+import { resolveTenantId } from "@/lib/tenant/context";
 
 type Params = Promise<{ id: string }>;
 
@@ -14,8 +15,9 @@ export async function generateMetadata({
 }: {
   params: Params;
 }): Promise<Metadata> {
+  const tenantId = await resolveTenantId();
   const { id } = await params;
-  const store = await getStoreCached(id);
+  const store = await getStoreCached(tenantId, id);
   return { title: store ? `${store.name} を編集` : "店舗を編集" };
 }
 
@@ -32,10 +34,11 @@ async function StoreEditContent({
 }: {
   params: Params;
 }) {
+  const tenantId = await resolveTenantId();
   const { id } = await params;
   const [store, profiles] = await Promise.all([
-    getStoreCached(id),
-    getAllProfiles(),
+    getStoreCached(tenantId, id),
+    getAllProfiles(tenantId),
   ]);
   if (!store) notFound();
   // task 4.2 (PR3a): AiAnalysisPanel 撤去に伴い isApiKeyConfigured / promptTemplates の

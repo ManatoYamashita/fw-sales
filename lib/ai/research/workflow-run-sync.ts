@@ -101,12 +101,12 @@ export interface WorkflowRunSyncDeps {
   timeoutMs: number;
 }
 
-const defaultDeps: WorkflowRunSyncDeps = {
+const defaultDeps = (tenantId: string): WorkflowRunSyncDeps => ({
   getWorkflowRunStatus: (workflowRunId) => getRun(workflowRunId).status,
-  runs: repos.researchRun,
+  runs: repos.forTenant(tenantId).researchRun,
   now: nowIso,
   timeoutMs: WORKFLOW_STATUS_TIMEOUT_MS,
-};
+});
 
 /** 例外の中身は出さず、種類だけをログに残す (`research-run-actions.ts` と同じ規約)。 */
 function errorIdentity(err: unknown) {
@@ -123,9 +123,10 @@ function errorIdentity(err: unknown) {
  * できない run は、従来どおり `expires_at` を過ぎた時点で時間超過として扱われる)。
  */
 export async function linkWorkflowRun(
+  tenantId: string,
   runId: string,
   workflowRunId: string,
-  runs: Pick<RunWriter, "updateIfRunning"> = repos.researchRun,
+  runs: Pick<RunWriter, "updateIfRunning"> = repos.forTenant(tenantId).researchRun,
 ): Promise<void> {
   try {
     await runs.updateIfRunning(runId, { token_usage: { [WORKFLOW_RUN_ID_KEY]: workflowRunId } });
@@ -155,8 +156,9 @@ export interface WorkflowRunSyncResult {
  * 失敗とは断定せず、アプリの run をそのまま返す。
  */
 export async function syncRunWithWorkflow(
+  tenantId: string,
   run: StoreResearchRun,
-  deps: WorkflowRunSyncDeps = defaultDeps,
+  deps: WorkflowRunSyncDeps = defaultDeps(tenantId),
 ): Promise<WorkflowRunSyncResult> {
   const unchanged = { run, markedFailed: false };
   if (run.status !== "running") return unchanged;

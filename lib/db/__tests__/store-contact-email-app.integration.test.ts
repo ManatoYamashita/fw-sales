@@ -38,7 +38,7 @@ vi.mock("@/lib/actions/_authz", () => ({
 vi.mock("next/cache", () => ({ revalidateTag: vi.fn(), updateTag: vi.fn() }));
 
 const { db } = await vi.importActual<typeof import("@/lib/db/client")>("@/lib/db/client");
-const { deals } = await import("@/lib/db/schema");
+const { deals, FIRSTWEB_TENANT_ID } = await import("@/lib/db/schema");
 const { makeStoreRepo } = await import("@/lib/db/store-repository");
 const { SEED_STORES, SEED_DEALS } = await import("@/lib/db/seed-data");
 const { importJsonAction } = await import("@/lib/actions/data-actions");
@@ -78,7 +78,7 @@ function jsonFile(payload: unknown): FormData {
 
 /** 店舗と、その店舗の商談を 1 件作る。 */
 async function createStoreWithDeal(tx: Tx, contact_email: string): Promise<Store> {
-  const created = await makeStoreRepo(tx).create({ ...SEED_INPUT, contact_email });
+  const created = await makeStoreRepo(tx, FIRSTWEB_TENANT_ID).create({ ...SEED_INPUT, contact_email });
   await tx.insert(deals).values({ ...SEED_DEALS[0]!, id: `deal_${created.id}`, store_id: created.id });
   return created;
 }
@@ -86,14 +86,14 @@ async function createStoreWithDeal(tx: Tx, contact_email: string): Promise<Store
 describe("repository の作成・部分更新 (#384 Phase 2)", () => {
   it("作成したアドレスを読み出せる", async () => {
     await inRolledBackTransaction(async (tx) => {
-      const created = await makeStoreRepo(tx).create({ ...SEED_INPUT, contact_email: "a@example.com" });
-      expect(await makeStoreRepo(tx).get(created.id)).toMatchObject({ contact_email: "a@example.com" });
+      const created = await makeStoreRepo(tx, FIRSTWEB_TENANT_ID).create({ ...SEED_INPUT, contact_email: "a@example.com" });
+      expect(await makeStoreRepo(tx, FIRSTWEB_TENANT_ID).get(created.id)).toMatchObject({ contact_email: "a@example.com" });
     });
   });
 
   it("キーが無い・undefined の patch では残り、空文字の patch で消える", async () => {
     await inRolledBackTransaction(async (tx) => {
-      const repo = makeStoreRepo(tx);
+      const repo = makeStoreRepo(tx, FIRSTWEB_TENANT_ID);
       const created = await repo.create({ ...SEED_INPUT, contact_email: "keep@example.com" });
       await repo.update(created.id, { memo: "メモ" });
       await repo.update(created.id, { genre: "居酒屋", contact_email: undefined });
@@ -113,7 +113,7 @@ describe("JSON インポート (#384 Phase 2)", () => {
       const result = await importJsonAction(null, jsonFile({ stores: [legacy] }));
       expect(result).toMatchObject({ ok: true });
       expect(await readContactEmail(tx, created.id)).toBe("saved@example.com");
-      expect((await makeStoreRepo(tx).get(created.id))?.memo).toBe("旧JSONのメモ");
+      expect((await makeStoreRepo(tx, FIRSTWEB_TENANT_ID).get(created.id))?.memo).toBe("旧JSONのメモ");
     });
   });
 
@@ -121,7 +121,7 @@ describe("JSON インポート (#384 Phase 2)", () => {
     await inRolledBackTransaction(async (tx) => {
       const withEmail = await createStoreWithDeal(tx, "export@example.com");
       const withoutEmail = await createStoreWithDeal(tx, "");
-      const repo = makeStoreRepo(tx);
+      const repo = makeStoreRepo(tx, FIRSTWEB_TENANT_ID);
       const exported = (await repo.list()).filter((s) => [withEmail.id, withoutEmail.id].includes(s.id));
       expect(exported.map((s) => s.contact_email).sort()).toEqual(["", "export@example.com"]);
 
@@ -148,7 +148,7 @@ describe("JSON インポート (#384 Phase 2)", () => {
       expect(result).toMatchObject({ ok: false });
       expect(await readContactEmail(tx, first.id)).toBe("first@example.com");
       expect(await readContactEmail(tx, second.id)).toBe("second@example.com");
-      expect((await makeStoreRepo(tx).get(first.id))?.memo).toBe(SEED_INPUT.memo);
+      expect((await makeStoreRepo(tx, FIRSTWEB_TENANT_ID).get(first.id))?.memo).toBe(SEED_INPUT.memo);
       const dealRows = (await tx.execute(
         sql`SELECT id FROM deals WHERE store_id IN (${first.id}, ${second.id}) ORDER BY id`,
       )) as unknown as Array<{ id: string }>;

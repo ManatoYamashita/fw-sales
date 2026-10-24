@@ -63,7 +63,7 @@ vi.mock("workflow/api", () => ({
 }));
 vi.mock("@/workflows/store-research", () => ({ storeResearchWorkflow: vi.fn() }));
 vi.mock("@/lib/repositories", () => ({
-  repos: {
+  repos: ((tenantRepos) => ({ ...tenantRepos, forTenant: () => tenantRepos }))({
     store: { get: mockStoreGet, update: mockStoreUpdate },
     researchRun: {
       getLatestForStore: mockGetLatestForStore,
@@ -75,7 +75,7 @@ vi.mock("@/lib/repositories", () => ({
     // 監査 (#320) の書き込み先。監査そのものの検証は research-run-actions.audit.test.ts で行う。
     eventLog: { insert: vi.fn() },
     transaction: mockTransaction,
-  },
+  }),
 }));
 
 // review系Actionは `repos.transaction(async (tx) => ...)` 経由でtxのメソッドを呼ぶ。
@@ -288,7 +288,7 @@ describe("startResearchRunAction", () => {
     });
     expect(mockStart).toHaveBeenCalledTimes(1);
     const startArgs = mockStart.mock.calls[0];
-    expect(startArgs?.[1]).toEqual(["research_run_1", storeId]);
+    expect(startArgs?.[1]).toEqual(["research_run_1", storeId, "cfe871a5-8fc7-42da-9677-3a050665cafb"]);
     expect(mockRevalidateTag).toHaveBeenCalled();
   });
 

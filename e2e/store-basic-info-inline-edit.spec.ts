@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import postgres from "postgres";
+import { refreshServerCache } from "./support/fresh-cache";
 
 /**
  * 店舗の調査情報 (基本情報 53 項目) のインライン編集 (#335)。
@@ -40,13 +41,16 @@ function e2eDatabaseUrl(): string {
 
 const sql = postgres(e2eDatabaseUrl(), { prepare: false, max: 1 });
 
-test.beforeAll(async () => {
+test.beforeAll(async ({}, testInfo) => {
   await sql`DELETE FROM stores WHERE id = ${STORE_ID}`;
   await sql.begin(async (tx) => {
     await tx`CREATE TEMP TABLE e2e_store ON COMMIT DROP AS SELECT * FROM stores WHERE id = 'store_005'`;
     await tx`UPDATE e2e_store SET id = ${STORE_ID}, name = 'E2E基本情報', basic_info = '{}'::jsonb`;
     await tx`INSERT INTO stores SELECT * FROM e2e_store`;
   });
+  // 店舗は 'use cache' で読む。保存のあと空欄へ戻す前に落ちると、CI の retry では前の試行で
+  // 保存した値が画面に残るので、作り直した店舗を読み直させる (#390)。
+  await refreshServerCache(testInfo, [STORE_URL]);
 });
 
 test.afterAll(async () => {

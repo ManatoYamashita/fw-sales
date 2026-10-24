@@ -4,17 +4,19 @@ import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
 import type { Store } from "@/types/store";
 import { RecentStoresTableView } from "./recent-stores-table-view";
+import { resolveTenantId } from "@/lib/tenant/context";
 
-async function loadRecentStores(): Promise<Store[]> {
+async function loadRecentStores(tenantId: string): Promise<Store[]> {
   "use cache";
   cacheLife("longBackstop");
-  cacheTag(CACHE_TAGS.stores);
-  const all = await repos.store.list();
+  cacheTag(CACHE_TAGS.stores(tenantId));
+  const all = await repos.forTenant(tenantId).store.list();
   return all.slice(0, 5);
 }
 
 export async function RecentStoresTable() {
-  const rows = await loadRecentStores();
+  const tenantId = await resolveTenantId();
+  const rows = await loadRecentStores(tenantId);
   return <RecentStoresTableView rows={rows} />;
 }
 

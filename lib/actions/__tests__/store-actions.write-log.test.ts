@@ -11,8 +11,10 @@ vi.mock("server-only", () => ({}));
 const mocks = vi.hoisted(() => ({ create: vi.fn(), update: vi.fn(), findProfile: vi.fn() }));
 vi.mock("@/lib/repositories", () => ({
   repos: {
-    store: { create: mocks.create, update: mocks.update },
-    profile: { findById: mocks.findProfile },
+    forTenant: () => ({
+      store: { create: mocks.create, update: mocks.update },
+      membership: { find: mocks.findProfile },
+    }),
   },
 }));
 vi.mock("next/cache", () => ({ revalidateTag: vi.fn(), updateTag: vi.fn() }));

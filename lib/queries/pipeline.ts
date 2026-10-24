@@ -13,10 +13,11 @@ export interface PipelineColumn {
 }
 
 export async function getPipelineColumns(
+  tenantId: string,
   filter: StoreFilter = {},
 ): Promise<PipelineColumn[]> {
   // カンバンのカードはアドレスを表示しないため、クライアントへ渡す前に外す (#384)。
-  const stores = (await repos.store.list(filter)).map(omitContactEmail);
+  const stores = (await repos.forTenant(tenantId).store.list(filter)).map(omitContactEmail);
   return STAGES.map((stage) => ({
     id: stage.id,
     label: stage.label,
@@ -34,8 +35,8 @@ export interface PipelineSummaryRow {
   count: number;
 }
 
-export async function getPipelineSummary(): Promise<PipelineSummaryRow[]> {
-  const stores = await repos.store.list();
+export async function getPipelineSummary(tenantId: string): Promise<PipelineSummaryRow[]> {
+  const stores = await repos.forTenant(tenantId).store.list();
   return STAGES.map((stage) => ({
     stage: stage.id,
     label: stage.label,

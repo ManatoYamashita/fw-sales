@@ -10,6 +10,7 @@ import { CurrentUserProvider } from "@/components/layout/current-user-provider";
 import { loadNavBadgeCounts } from "@/components/layout/nav-badges";
 import { getCurrentProfile, getCurrentSession } from "@/lib/supabase/server";
 import { getRecentNotifications } from "@/lib/queries/notification";
+import { resolveTenantId } from "@/lib/tenant/context";
 
 async function SidebarShell({
   defaultCollapsed,
@@ -47,12 +48,13 @@ async function SidebarShell({
  * データを守るのは、テナントをリクエストから決めて静的シェルを組み直す #373 の役目。
  */
 async function TopbarShell() {
+  const tenantId = await resolveTenantId();
   // getCurrentProfile() の cookies() 読取で動的化されるため connection() は不要。
   const profile = await getCurrentProfile();
   if (!profile) {
     redirect((await getCurrentSession()) ? "/login?error=no_membership" : "/login");
   }
-  const notifications = await getRecentNotifications(profile.id, 10);
+  const notifications = await getRecentNotifications(tenantId, profile.id, 10);
   return <Topbar currentProfile={profile} notifications={notifications} />;
 }
 

@@ -11,10 +11,10 @@ export interface ActionQueue {
   pendingHandoffs: Handoff[];
 }
 
-export async function getActionQueue(): Promise<ActionQueue> {
+export async function getActionQueue(tenantId: string): Promise<ActionQueue> {
   const [allStores, handoffs] = await Promise.all([
-    repos.store.list(),
-    repos.handoff.list(),
+    repos.forTenant(tenantId).store.list(),
+    repos.forTenant(tenantId).handoff.list(),
   ]);
   // ダッシュボードのカードはアドレスを表示しないため、クライアントへ渡す前に外す (#384)。
   const stores = allStores.map(omitContactEmail);

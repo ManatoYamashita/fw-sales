@@ -51,7 +51,7 @@ function withHardTimeout<T>(work: PromiseLike<T>, ms: number, message: string): 
 }
 
 describe("audit writes against a real PostgreSQL pool", () => {
-  let writeAudit: (input: AuditInput) => Promise<void>;
+  let writeAudit: (tenantId: string, input: AuditInput) => Promise<void>;
   let businessSql: ReturnType<typeof postgres>;
   let auditSql: ReturnType<typeof postgres>;
   let admin: ReturnType<typeof postgres>;
@@ -118,7 +118,7 @@ describe("audit writes against a real PostgreSQL pool", () => {
   }
 
   it("TEST 1: persists an audit event through the dedicated pool", async () => {
-    await withHardTimeout(writeAudit(auditInput("store_normal")), HARD_TIMEOUT_MS, "normal audit write hung");
+    await withHardTimeout(writeAudit("cfe871a5-8fc7-42da-9677-3a050665cafb", auditInput("store_normal")), HARD_TIMEOUT_MS, "normal audit write hung");
 
     const rows = await admin<{ event: string; actor_email: string; payload: unknown; store_id: string }[]>`
       select event, actor_email, payload, store_id from event_logs where store_id = 'store_normal'
@@ -134,7 +134,7 @@ describe("audit writes against a real PostgreSQL pool", () => {
   }, TEST_TIMEOUT_MS);
 
   it("TEST 1b: persists an AI research review event with the run as its target (#320)", async () => {
-    await withHardTimeout(writeAudit({
+    await withHardTimeout(writeAudit("cfe871a5-8fc7-42da-9677-3a050665cafb", {
       event: AUDIT_EVENTS.researchReviewDecide,
       actor: ACTOR,
       storeId: "store_research",
@@ -159,7 +159,7 @@ describe("audit writes against a real PostgreSQL pool", () => {
     await withEventLogsLocked(async () => {
       const auditStartedAt = Date.now();
       let auditSettled = false;
-      const auditWrite = writeAudit(auditInput("store_blocked"))
+      const auditWrite = writeAudit("cfe871a5-8fc7-42da-9677-3a050665cafb", auditInput("store_blocked"))
         .finally(() => { auditSettled = true; });
 
       // 監査 write が未完了である間ずっと、業務 query を流し続けて計測する。
@@ -197,7 +197,7 @@ describe("audit writes against a real PostgreSQL pool", () => {
   it("TEST 3: the audit pool is bounded and recovers after the stall", async () => {
     await withEventLogsLocked(async () => {
       await withHardTimeout(
-        writeAudit(auditInput("store_bounded")),
+        writeAudit("cfe871a5-8fc7-42da-9677-3a050665cafb", auditInput("store_bounded")),
         HARD_TIMEOUT_MS,
         "audit write never returned while blocked",
       );
@@ -213,7 +213,7 @@ describe("audit writes against a real PostgreSQL pool", () => {
 
     // ブロック解除後、次の監査書込みが正常に永続化できる。
     await withHardTimeout(
-      writeAudit(auditInput("store_recovered")),
+      writeAudit("cfe871a5-8fc7-42da-9677-3a050665cafb", auditInput("store_recovered")),
       HARD_TIMEOUT_MS,
       "audit write hung after recovery",
     );
@@ -224,7 +224,7 @@ describe("audit writes against a real PostgreSQL pool", () => {
   it("TEST 4: a failed audit write never becomes a business failure", async () => {
     await withEventLogsLocked(async () => {
       await expect(
-        withHardTimeout(writeAudit(auditInput("store_failed")), HARD_TIMEOUT_MS, "audit write never returned"),
+        withHardTimeout(writeAudit("cfe871a5-8fc7-42da-9677-3a050665cafb", auditInput("store_failed")), HARD_TIMEOUT_MS, "audit write never returned"),
       ).resolves.toBeUndefined();
     });
 

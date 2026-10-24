@@ -43,7 +43,7 @@ vi.mock("@/lib/supabase/server", () => ({
 }));
 
 vi.mock("@/lib/repositories", () => ({
-  repos: {
+  repos: ((tenantRepos) => ({ ...tenantRepos, forTenant: () => tenantRepos }))({
     membership: {
       find: mockMembershipFind,
       countAdmins: mockCountAdmins,
@@ -53,7 +53,7 @@ vi.mock("@/lib/repositories", () => ({
     profile: {
       findById: mockProfileFindById,
     },
-  },
+  }),
 }));
 
 vi.mock("next/cache", () => ({
@@ -119,10 +119,10 @@ describe("updateProfileRoleAction", () => {
 
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.data).toEqual(updated);
-    expect(mockUpdateRole).toHaveBeenCalledWith(FIRSTWEB_TENANT_ID, "user-2", "admin");
+    expect(mockUpdateRole).toHaveBeenCalledWith("user-2", "admin");
     // profiles 集合 + 個別タグの両方を invalidate する
-    expect(mockUpdateTag).toHaveBeenCalledWith("profiles");
-    expect(mockUpdateTag).toHaveBeenCalledWith("profile:user-2");
+    expect(mockUpdateTag).toHaveBeenCalledWith("tenant:cfe871a5-8fc7-42da-9677-3a050665cafb:profiles");
+    expect(mockUpdateTag).toHaveBeenCalledWith("tenant:cfe871a5-8fc7-42da-9677-3a050665cafb:profile:user-2");
     expect(logSpy).toHaveBeenCalledWith(
       "[audit] profiles.updateRole",
       expect.objectContaining({
@@ -142,8 +142,8 @@ describe("updateProfileRoleAction", () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toMatch(/最後の管理者/);
-    expect(mockMembershipFind).toHaveBeenCalledWith(FIRSTWEB_TENANT_ID, "admin-1");
-    expect(mockCountAdmins).toHaveBeenCalledWith(FIRSTWEB_TENANT_ID);
+    expect(mockMembershipFind).toHaveBeenCalledWith("admin-1");
+    expect(mockCountAdmins).toHaveBeenCalledWith();
     expect(mockUpdateRole).not.toHaveBeenCalled();
   });
 
@@ -156,7 +156,7 @@ describe("updateProfileRoleAction", () => {
     const result = await updateProfileRoleAction("admin-2", "member");
 
     expect(result.ok).toBe(true);
-    expect(mockUpdateRole).toHaveBeenCalledWith(FIRSTWEB_TENANT_ID, "admin-2", "member");
+    expect(mockUpdateRole).toHaveBeenCalledWith("admin-2", "member");
   });
 
   it("member への降格でも対象が member なら最後の admin 判定をせず更新する", async () => {
@@ -169,7 +169,7 @@ describe("updateProfileRoleAction", () => {
 
     expect(result.ok).toBe(true);
     expect(mockCountAdmins).not.toHaveBeenCalled();
-    expect(mockUpdateRole).toHaveBeenCalledWith(FIRSTWEB_TENANT_ID, "user-3", "member");
+    expect(mockUpdateRole).toHaveBeenCalledWith("user-3", "member");
   });
 
   it("member/admin 以外の role は拒否され、updateRole を呼ばない", async () => {

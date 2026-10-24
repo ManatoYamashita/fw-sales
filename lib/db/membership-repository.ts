@@ -1,13 +1,13 @@
 /**
  * MembershipRepository の Drizzle 実装 (マルチテナント化 #365 / #367)
  *
- * - `makeMembershipRepo(executor)` で `DbClient` か `Tx` を受け取る (他の repository と同じ)
+ * - `makeMembershipRepo(executor, tenantId)` で `DbClient` か `Tx` を受け取る (他の repository と同じ)
  * - プロフィールの列は明示して選び、`profiles.role` は読まない (#376 で撤去する列)
  */
 
 import "server-only";
 import { and, count, eq, inArray } from "drizzle-orm";
-import { db, type DbClient, type Tx } from "./client";
+import { type DbClient, type Tx } from "./client";
 import { memberships, profiles } from "./schema";
 import type { MembershipRepository } from "@/lib/repositories/membership-repository";
 import type { Member, ProfileRole } from "@/types/profile";
@@ -58,8 +58,8 @@ function toMember(row: MemberRow): Member {
 /**
  * `MembershipRepository` を Drizzle で実装するファクトリ。
  */
-export function makeMembershipRepo(executor: DbClient | Tx): MembershipRepository {
-  async function find(tenantId: string, userId: string): Promise<Member | null> {
+export function makeMembershipRepo(executor: DbClient | Tx, tenantId: string): MembershipRepository {
+  async function find(userId: string): Promise<Member | null> {
     const rows = await executor
       .select(memberColumns)
       .from(memberships)
@@ -73,7 +73,7 @@ export function makeMembershipRepo(executor: DbClient | Tx): MembershipRepositor
   return {
     find,
 
-    async list(tenantId, options = {}) {
+    async list(options = {}) {
       const inTenant = eq(memberships.tenant_id, tenantId);
       const rows = await executor
         .select(memberColumns)
@@ -87,7 +87,7 @@ export function makeMembershipRepo(executor: DbClient | Tx): MembershipRepositor
       return rows.map(toMember);
     },
 
-    async countAdmins(tenantId) {
+    async countAdmins() {
       const rows = await executor
         .select({ n: count() })
         .from(memberships)
@@ -95,7 +95,7 @@ export function makeMembershipRepo(executor: DbClient | Tx): MembershipRepositor
       return rows[0]?.n ?? 0;
     },
 
-    async updateRole(tenantId, userId, role) {
+    async updateRole(userId, role) {
       // 純粋な UPDATE。認可・最後の管理者保護は Server Action 層 (#155) の責務。
       const updated = await executor
         .update(memberships)
@@ -103,12 +103,7 @@ export function makeMembershipRepo(executor: DbClient | Tx): MembershipRepositor
         .where(and(eq(memberships.tenant_id, tenantId), eq(memberships.user_id, userId)))
         .returning({ userId: memberships.user_id });
       if (updated.length === 0) return null;
-      return find(tenantId, userId);
+      return find(userId);
     },
   };
 }
-
-/**
- * `db` singleton を束縛した既定 `MembershipRepository` インスタンス。
- */
-export const dbMembershipRepo: MembershipRepository = makeMembershipRepo(db);

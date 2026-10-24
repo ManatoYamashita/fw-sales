@@ -4,7 +4,7 @@ import { serializeAuditError, serializeAuditInput } from "../serialize";
 import { AUDIT_WRITE_WAIT_MS, writeAudit } from "../audit";
 
 const { insert } = vi.hoisted(() => ({ insert: vi.fn() }));
-vi.mock("@/lib/repositories", () => ({ repos: { eventLog: { insert } } }));
+vi.mock("@/lib/repositories", () => ({ repos: { forTenant: () => ({ eventLog: { insert } }) } }));
 
 const input: AuditInput = {
   event: AUDIT_EVENTS.salesProgressUpdate,
@@ -23,9 +23,10 @@ afterEach(() => {
 
 describe("persistent audit writer", () => {
   it("persists a bounded, actor-attributed event once", async () => {
-    await writeAudit(input);
+    await writeAudit("cfe871a5-8fc7-42da-9677-3a050665cafb", input);
     expect(insert).toHaveBeenCalledTimes(1);
     expect(insert).toHaveBeenCalledWith({
+      tenant_id: "cfe871a5-8fc7-42da-9677-3a050665cafb",
       id: expect.stringMatching(/^evt_[0-9a-f-]{36}$/), occurred_at: expect.any(Date),
       event: "stores.salesProgress.update", kind: "mutation", level: "info",
       actor_user_id: input.actor!.userId, actor_email: "actor@example.com",
@@ -39,7 +40,7 @@ describe("persistent audit writer", () => {
     let release!: () => void;
     insert.mockImplementation(() => new Promise<void>((resolve) => { release = resolve; }));
     let completed = false;
-    const pending = writeAudit(input).then(() => { completed = true; });
+    const pending = writeAudit("cfe871a5-8fc7-42da-9677-3a050665cafb", input).then(() => { completed = true; });
     await vi.waitFor(() => expect(insert).toHaveBeenCalledOnce());
     expect(completed).toBe(false);
     release();
@@ -51,7 +52,7 @@ describe("persistent audit writer", () => {
     insert.mockImplementation(() => new Promise<void>(() => undefined));
 
     let completed = false;
-    const pending = writeAudit(input).then(() => { completed = true; });
+    const pending = writeAudit("cfe871a5-8fc7-42da-9677-3a050665cafb", input).then(() => { completed = true; });
     await vi.advanceTimersByTimeAsync(0);
     expect(insert).toHaveBeenCalledOnce();
 
@@ -77,7 +78,7 @@ describe("persistent audit writer", () => {
       rejectWrite = reject;
     }));
 
-    const pending = writeAudit(input);
+    const pending = writeAudit("cfe871a5-8fc7-42da-9677-3a050665cafb", input);
     await vi.advanceTimersByTimeAsync(AUDIT_WRITE_WAIT_MS);
     await pending;
     rejectWrite(new Error("late driver failure"));
@@ -91,7 +92,7 @@ describe("persistent audit writer", () => {
   it("catches insert failure; one safe console fallback, no retry", async () => {
     const error = Object.assign(new Error("password=secret SQL params CUSTOMER TEXT"), { detail: "PRIVATE" });
     insert.mockRejectedValue(error);
-    await expect(writeAudit(input)).resolves.toBeUndefined();
+    await expect(writeAudit("cfe871a5-8fc7-42da-9677-3a050665cafb", input)).resolves.toBeUndefined();
     expect(insert).toHaveBeenCalledOnce();
     expect(console.error).toHaveBeenCalledOnce();
     const fallback = JSON.parse(vi.mocked(console.error).mock.calls[0]![0]);
@@ -104,7 +105,7 @@ describe("persistent audit writer", () => {
   it("does not throw even when the fallback sink throws", async () => {
     insert.mockRejectedValue(new Error("offline"));
     vi.mocked(console.error).mockImplementation(() => { throw new Error("sink broken"); });
-    await expect(writeAudit(input)).resolves.toBeUndefined();
+    await expect(writeAudit("cfe871a5-8fc7-42da-9677-3a050665cafb", input)).resolves.toBeUndefined();
   });
 
   it("does not leak a multiline driver message through the console fallback", async () => {
@@ -112,7 +113,7 @@ describe("persistent audit writer", () => {
     error.stack = `${error.name}: ${error.message}\n    at persist (D:/app/audit.ts:10:4)`;
     insert.mockRejectedValue(error);
 
-    await writeAudit(input);
+    await writeAudit("cfe871a5-8fc7-42da-9677-3a050665cafb", input);
 
     expect(console.error).toHaveBeenCalledOnce();
     const fallback = JSON.parse(vi.mocked(console.error).mock.calls[0]![0]);
@@ -135,7 +136,7 @@ describe("persistent audit writer", () => {
       payload: { operation: AUDIT_EVENTS.storeDelete, reason: "unauthenticated" } },
   ])("rejects unsafe input at runtime without leaking it", async (unsafe) => {
     expect(() => serializeAuditInput(unsafe as AuditInput)).toThrow();
-    await expect(writeAudit(unsafe as AuditInput)).resolves.toBeUndefined();
+    await expect(writeAudit("cfe871a5-8fc7-42da-9677-3a050665cafb", unsafe as AuditInput)).resolves.toBeUndefined();
     expect(insert).not.toHaveBeenCalled();
     const fallback = JSON.parse(vi.mocked(console.error).mock.calls[0]![0]);
     expect(fallback.audit).toBeNull();
@@ -143,7 +144,7 @@ describe("persistent audit writer", () => {
   });
 
   it("supports nullable actor for denial, but not a mutation", async () => {
-    await writeAudit({ event: AUDIT_EVENTS.authzDenied, actor: null, storeId: null,
+    await writeAudit("cfe871a5-8fc7-42da-9677-3a050665cafb", { event: AUDIT_EVENTS.authzDenied, actor: null, storeId: null,
       payload: { operation: AUDIT_EVENTS.storeDelete, reason: "unauthenticated" } });
     expect(insert).toHaveBeenCalledWith(expect.objectContaining({ kind: "authz_denied", level: "warn", actor_user_id: null }));
   });
@@ -169,7 +170,7 @@ describe("AI research review events (#320)", () => {
   };
 
   it.each([decide, bulk, complete, start])("persists $event with the run as target and the store kept", async (event) => {
-    await writeAudit(event);
+    await writeAudit("cfe871a5-8fc7-42da-9677-3a050665cafb", event);
     expect(insert).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       event: event.event, kind: "mutation", level: "info", error: null,
       actor_user_id: ACTOR.userId, actor_email: ACTOR.email,
@@ -210,7 +211,7 @@ describe("AI research review events (#320)", () => {
     { ...input, runId: "research_run_1" },
   ])("rejects unsafe research input at runtime without leaking it (%#)", async (unsafe) => {
     expect(() => serializeAuditInput(unsafe as AuditInput)).toThrow();
-    await expect(writeAudit(unsafe as AuditInput)).resolves.toBeUndefined();
+    await expect(writeAudit("cfe871a5-8fc7-42da-9677-3a050665cafb", unsafe as AuditInput)).resolves.toBeUndefined();
     expect(insert).not.toHaveBeenCalled();
     const fallback = JSON.parse(vi.mocked(console.error).mock.calls[0]![0]);
     expect(fallback.audit).toBeNull();
@@ -279,9 +280,9 @@ describe("error serialization", () => {
 // Compile-time contract as well as runtime validation above.
 function typeContract() {
   // @ts-expect-error arbitrary payload fields are not accepted
-  void writeAudit({ ...input, payload: { memo: "forbidden" } });
+  void writeAudit("cfe871a5-8fc7-42da-9677-3a050665cafb", { ...input, payload: { memo: "forbidden" } });
   // @ts-expect-error AI research events require the run ID
-  void writeAudit({
+  void writeAudit("cfe871a5-8fc7-42da-9677-3a050665cafb", {
     event: AUDIT_EVENTS.researchReviewDecide, actor: input.actor!, storeId: "store_123",
     payload: { itemKey: "address", decision: "skipped" },
   });

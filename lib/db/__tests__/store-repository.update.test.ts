@@ -101,7 +101,7 @@ function makeMergeExecutor(currentRow: Record<string, unknown> = DB_ROW) {
 describe("update — patch で指定された列だけを SET する", () => {
   it("{ memo } は memo と updated_at だけを SET する", async () => {
     const { executor, capturedSet } = makeUpdateExecutor();
-    await makeStoreRepo(executor).update("store-1", { memo: "架電済み" });
+    await makeStoreRepo(executor, "cfe871a5-8fc7-42da-9677-3a050665cafb").update("store-1", { memo: "架電済み" });
 
     const payload = capturedSet();
     expect(Object.keys(payload).sort()).toEqual(["memo", "updated_at"]);
@@ -110,7 +110,7 @@ describe("update — patch で指定された列だけを SET する", () => {
 
   it("{ stage } は stage と updated_at だけを SET する", async () => {
     const { executor, capturedSet } = makeUpdateExecutor();
-    await makeStoreRepo(executor).update("store-1", { stage: "調査済み" });
+    await makeStoreRepo(executor, "cfe871a5-8fc7-42da-9677-3a050665cafb").update("store-1", { stage: "調査済み" });
 
     expect(Object.keys(capturedSet()).sort()).toEqual(["stage", "updated_at"]);
   });
@@ -125,7 +125,7 @@ describe("update — patch で指定された列だけを SET する", () => {
       },
     };
     const { executor, capturedSet } = makeUpdateExecutor();
-    await makeStoreRepo(executor).update("store-1", { basic_info: basicInfo });
+    await makeStoreRepo(executor, "cfe871a5-8fc7-42da-9677-3a050665cafb").update("store-1", { basic_info: basicInfo });
 
     const payload = capturedSet();
     expect(Object.keys(payload).sort()).toEqual(["basic_info", "updated_at"]);
@@ -134,7 +134,7 @@ describe("update — patch で指定された列だけを SET する", () => {
 
   it("**patch に無い列(basic_info 等)を SET payload へ含めない**(lost update 防止の本体)", async () => {
     const { executor, capturedSet } = makeUpdateExecutor();
-    await makeStoreRepo(executor).update("store-1", { stage: "調査済み" });
+    await makeStoreRepo(executor, "cfe871a5-8fc7-42da-9677-3a050665cafb").update("store-1", { stage: "調査済み" });
 
     const payload = capturedSet();
     for (const key of ["basic_info", "memo", "name", "ai_analysis_result", "phone"]) {
@@ -144,7 +144,7 @@ describe("update — patch で指定された列だけを SET する", () => {
 
   it("複数フィールドの patch は指定分だけを SET する", async () => {
     const { executor, capturedSet } = makeUpdateExecutor();
-    await makeStoreRepo(executor).update("store-1", {
+    await makeStoreRepo(executor, "cfe871a5-8fc7-42da-9677-3a050665cafb").update("store-1", {
       stage: "調査済み",
       channel: "テレアポ推奨",
     });
@@ -157,7 +157,7 @@ describe("update — 値の変換と null/undefined の扱い", () => {
   it("ai_analysis_result(オブジェクト)は JSON 文字列へ変換して SET する", async () => {
     const analysis = { summary: "テスト" } as never;
     const { executor, capturedSet } = makeUpdateExecutor();
-    await makeStoreRepo(executor).update("store-1", { ai_analysis_result: analysis });
+    await makeStoreRepo(executor, "cfe871a5-8fc7-42da-9677-3a050665cafb").update("store-1", { ai_analysis_result: analysis });
 
     const payload = capturedSet();
     expect(typeof payload.ai_analysis_result).toBe("string");
@@ -166,7 +166,7 @@ describe("update — 値の変換と null/undefined の扱い", () => {
 
   it("ai_analysis_result: null は文字列化せず null を SET する", async () => {
     const { executor, capturedSet } = makeUpdateExecutor();
-    await makeStoreRepo(executor).update("store-1", { ai_analysis_result: null });
+    await makeStoreRepo(executor, "cfe871a5-8fc7-42da-9677-3a050665cafb").update("store-1", { ai_analysis_result: null });
 
     const payload = capturedSet();
     expect(payload.ai_analysis_result).toBeNull();
@@ -175,7 +175,7 @@ describe("update — 値の変換と null/undefined の扱い", () => {
 
   it("nullable フィールドを null にする patch が失われない", async () => {
     const { executor, capturedSet } = makeUpdateExecutor();
-    await makeStoreRepo(executor).update("store-1", {
+    await makeStoreRepo(executor, "cfe871a5-8fc7-42da-9677-3a050665cafb").update("store-1", {
       appointment_acquired_date: null,
       next_action_date: null,
       next_action_note: null,
@@ -193,7 +193,7 @@ describe("update — 値の変換と null/undefined の扱い", () => {
 
   it("undefined の値は「変更しない」として SET payload から除外する", async () => {
     const { executor, capturedSet } = makeUpdateExecutor();
-    await makeStoreRepo(executor).update("store-1", {
+    await makeStoreRepo(executor, "cfe871a5-8fc7-42da-9677-3a050665cafb").update("store-1", {
       memo: "x",
       appointment_acquired_date: undefined,
     });
@@ -205,7 +205,7 @@ describe("update — 値の変換と null/undefined の扱い", () => {
 
   it("空 patch でも updated_at だけは更新する(従来挙動を維持)", async () => {
     const { executor, capturedSet } = makeUpdateExecutor();
-    await makeStoreRepo(executor).update("store-1", {});
+    await makeStoreRepo(executor, "cfe871a5-8fc7-42da-9677-3a050665cafb").update("store-1", {});
 
     expect(Object.keys(capturedSet())).toEqual(["updated_at"]);
   });
@@ -214,7 +214,7 @@ describe("update — 値の変換と null/undefined の扱い", () => {
 describe("update — 戻り値", () => {
   it("更新後の行を Store として返す", async () => {
     const { executor } = makeUpdateExecutor([{ ...DB_ROW, stage: "調査済み" }]);
-    const result = await makeStoreRepo(executor).update("store-1", { stage: "調査済み" });
+    const result = await makeStoreRepo(executor, "cfe871a5-8fc7-42da-9677-3a050665cafb").update("store-1", { stage: "調査済み" });
 
     expect(result?.id).toBe("store-1");
     expect(result?.stage).toBe("調査済み");
@@ -222,14 +222,14 @@ describe("update — 戻り値", () => {
 
   it("該当行が無ければ null を返す(従来挙動を維持)", async () => {
     const { executor } = makeUpdateExecutor([]);
-    await expect(makeStoreRepo(executor).update("missing", { stage: "調査済み" })).resolves.toBeNull();
+    await expect(makeStoreRepo(executor, "cfe871a5-8fc7-42da-9677-3a050665cafb").update("missing", { stage: "調査済み" })).resolves.toBeNull();
   });
 });
 
 describe("mergeBasicInfo — basic_info 列だけを SET する", () => {
   it("SET payload は basic_info と updated_at のみ", async () => {
     const { executor, capturedSet } = makeMergeExecutor();
-    await makeStoreRepo(executor).mergeBasicInfo(
+    await makeStoreRepo(executor, "cfe871a5-8fc7-42da-9677-3a050665cafb").mergeBasicInfo(
       "store-1",
       {
         review_avg: {
@@ -247,7 +247,7 @@ describe("mergeBasicInfo — basic_info 列だけを SET する", () => {
 
   it("patch 外の列(name / stage 等)を巻き戻さない", async () => {
     const { executor, capturedSet } = makeMergeExecutor();
-    await makeStoreRepo(executor).mergeBasicInfo("store-1", {}, "places");
+    await makeStoreRepo(executor, "cfe871a5-8fc7-42da-9677-3a050665cafb").mergeBasicInfo("store-1", {}, "places");
 
     const payload = capturedSet();
     for (const key of ["name", "stage", "memo", "ai_analysis_result"]) {

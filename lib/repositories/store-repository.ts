@@ -74,7 +74,7 @@ export interface StoreRepository {
    *
    * ## 使い方
    *
-   * **`repos.transaction()` の `tx.store` 経由で呼ぶこと。** トランザクション外で
+   * **`repos.forTenant(tenantId).transaction()` の `tx.store` 経由で呼ぶこと。** トランザクション外で
    * 呼んでもロックは当該 SELECT 文の実行後すぐ解放され、目的を果たさない。
    *
    * ## lock order

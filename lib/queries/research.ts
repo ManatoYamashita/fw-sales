@@ -19,10 +19,10 @@ export type ResearchQueue = ResearchQueueBuckets;
  * Issue #110: 旧 `research` テーブルを読む `getResearchByStore` は撤去した。
  * 本ファイルに残るのは AI 店舗調査 (`store_research_runs`) 側のクエリのみ。
  */
-export async function getResearchQueue(): Promise<ResearchQueue> {
+export async function getResearchQueue(tenantId: string): Promise<ResearchQueue> {
   const [stores, needsReviewStoreIds] = await Promise.all([
-    repos.store.list(),
-    repos.researchRun.listStoreIdsNeedingReview(),
+    repos.forTenant(tenantId).store.list(),
+    repos.forTenant(tenantId).researchRun.listStoreIdsNeedingReview(),
   ]);
 
   // 調査一覧はアドレスを表示しないため、クライアントへ渡す前に外す (#384)。
@@ -35,13 +35,13 @@ export async function getResearchQueue(): Promise<ResearchQueue> {
  * `/research` の「レビュー待ち」タブと**同じ関数の結果の件数**を返す。別の述語で
  * 数え直すと、#299 のように「バッジ 5 / タブ 4」と食い違う。
  */
-export async function getResearchReviewCount(): Promise<number> {
-  return (await getResearchQueue()).needsReview.length;
+export async function getResearchReviewCount(tenantId: string): Promise<number> {
+  return (await getResearchQueue(tenantId)).needsReview.length;
 }
 
 /** 未レビューの AI 調査結果を持つ店舗の id 集合 (#299, `/stores` の調査段階列用)。 */
-export async function getStoreIdsNeedingReview(): Promise<ReadonlySet<string>> {
-  return new Set(await repos.researchRun.listStoreIdsNeedingReview());
+export async function getStoreIdsNeedingReview(tenantId: string): Promise<ReadonlySet<string>> {
+  return new Set(await repos.forTenant(tenantId).researchRun.listStoreIdsNeedingReview());
 }
 
 /**
@@ -50,6 +50,6 @@ export async function getStoreIdsNeedingReview(): Promise<ReadonlySet<string>> {
  * 判定の SQL を 1 本に保つため、店舗単位の専用クエリを作らず
  * {@link getStoreIdsNeedingReview} と同じ一覧から引く。
  */
-export async function storeNeedsResearchReview(storeId: string): Promise<boolean> {
-  return (await getStoreIdsNeedingReview()).has(storeId);
+export async function storeNeedsResearchReview(tenantId: string, storeId: string): Promise<boolean> {
+  return (await getStoreIdsNeedingReview(tenantId)).has(storeId);
 }

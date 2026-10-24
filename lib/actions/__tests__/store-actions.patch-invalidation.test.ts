@@ -10,7 +10,7 @@ import { CACHE_TAGS } from "@/lib/cache";
 
 vi.mock("server-only", () => ({}));
 const mocks = vi.hoisted(() => ({ update: vi.fn(), revalidateTag: vi.fn(), updateTag: vi.fn() }));
-vi.mock("@/lib/repositories", () => ({ repos: { store: { update: mocks.update } } }));
+vi.mock("@/lib/repositories", () => ({ repos: ((tenantRepos) => ({ ...tenantRepos, forTenant: () => tenantRepos }))({ store: { update: mocks.update } }) }));
 vi.mock("next/cache", () => ({ revalidateTag: mocks.revalidateTag, updateTag: mocks.updateTag }));
 vi.mock("next/navigation", () => ({ redirect: vi.fn() }));
 // updateStorePatchAction はログイン済みであることを先に確かめる (#384)。
@@ -29,15 +29,15 @@ describe("updateStorePatchAction の失効", () => {
   it("店舗詳細と店舗一覧のタグを即時失効する (updateTag)", async () => {
     const result = await updateStorePatchAction("store_1", { name: "炉端ジュン" });
     expect(result.ok).toBe(true);
-    expect(mocks.updateTag).toHaveBeenCalledWith(CACHE_TAGS.store("store_1"));
-    expect(mocks.updateTag).toHaveBeenCalledWith(CACHE_TAGS.stores);
+    expect(mocks.updateTag).toHaveBeenCalledWith(CACHE_TAGS.store("cfe871a5-8fc7-42da-9677-3a050665cafb", "store_1"));
+    expect(mocks.updateTag).toHaveBeenCalledWith(CACHE_TAGS.stores("cfe871a5-8fc7-42da-9677-3a050665cafb"));
   });
 
   it("店舗詳細・一覧のタグを stale-while-revalidate で失効しない", async () => {
     await updateStorePatchAction("store_1", { name: "炉端ジュン" });
     const swrTags = mocks.revalidateTag.mock.calls.map(([tag]) => tag);
-    expect(swrTags).not.toContain(CACHE_TAGS.store("store_1"));
-    expect(swrTags).not.toContain(CACHE_TAGS.stores);
+    expect(swrTags).not.toContain(CACHE_TAGS.store("cfe871a5-8fc7-42da-9677-3a050665cafb", "store_1"));
+    expect(swrTags).not.toContain(CACHE_TAGS.stores("cfe871a5-8fc7-42da-9677-3a050665cafb"));
   });
 
   it("店舗が無ければ何も失効しない", async () => {

@@ -31,7 +31,7 @@
  */
 
 import { db, sql } from "@/lib/db/client";
-import { dbStoreRepo } from "@/lib/db/store-repository";
+import { makeStoreRepo } from "@/lib/db/store-repository";
 import { stores as storesTable } from "@/lib/db/schema";
 import type { Store } from "@/types/store";
 import { scalarToBasicInfo } from "./_basic-info-mapping";
@@ -51,6 +51,11 @@ interface BackfillStats {
 
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
+  const tenantId = argv[argv.indexOf("--tenant-id") + 1];
+  if (!argv.includes("--tenant-id") || !tenantId || tenantId.startsWith("--")) {
+    throw new Error("--tenant-id <UUID> を指定してください");
+  }
+  const dbStoreRepo = makeStoreRepo(db, tenantId);
   const apply = argv.includes("--apply");
   const dryRun = !apply;
   const mode = dryRun ? "[DRY-RUN]" : "[APPLY]";

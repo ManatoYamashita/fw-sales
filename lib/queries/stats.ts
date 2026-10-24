@@ -15,10 +15,10 @@ export interface DashboardStats {
   monthlyRev: number;
 }
 
-export async function getDashboardStats(): Promise<DashboardStats> {
+export async function getDashboardStats(tenantId: string): Promise<DashboardStats> {
   const [stores, handoffs] = await Promise.all([
-    repos.store.list(),
-    repos.handoff.list(),
+    repos.forTenant(tenantId).store.list(),
+    repos.forTenant(tenantId).handoff.list(),
   ]);
 
   const total = stores.length;
@@ -76,7 +76,7 @@ export type CacheableNavBadgeCounts = Omit<NavBadgeCounts, "research">;
  * テーブルだけから数えるため、呼び出し側でキャッシュしてよい
  * (`components/layout/nav-badges.tsx`)。
  */
-export async function getCacheableNavBadgeCounts(): Promise<CacheableNavBadgeCounts> {
+export async function getCacheableNavBadgeCounts(tenantId: string): Promise<CacheableNavBadgeCounts> {
   const enabledBadgeKeys = enabledNavBadgeKeys();
   const needsStores =
     enabledBadgeKeys.has("stores") || enabledBadgeKeys.has("pipeline");
@@ -84,9 +84,9 @@ export async function getCacheableNavBadgeCounts(): Promise<CacheableNavBadgeCou
   const needsHandoffs = enabledBadgeKeys.has("handoffs");
 
   const [stores, deals, handoffs] = await Promise.all([
-    needsStores ? repos.store.list() : Promise.resolve([] as Awaited<ReturnType<typeof repos.store.list>>),
-    needsDeals ? repos.deal.list() : Promise.resolve([] as Awaited<ReturnType<typeof repos.deal.list>>),
-    needsHandoffs ? repos.handoff.list() : Promise.resolve([] as Awaited<ReturnType<typeof repos.handoff.list>>),
+    needsStores ? repos.forTenant(tenantId).store.list() : Promise.resolve([] as Awaited<ReturnType<import("@/lib/repositories").StoreRepository["list"]>>),
+    needsDeals ? repos.forTenant(tenantId).deal.list() : Promise.resolve([] as Awaited<ReturnType<import("@/lib/repositories").DealRepository["list"]>>),
+    needsHandoffs ? repos.forTenant(tenantId).handoff.list() : Promise.resolve([] as Awaited<ReturnType<import("@/lib/repositories").HandoffRepository["list"]>>),
   ]);
 
   return {
@@ -113,7 +113,7 @@ export async function getCacheableNavBadgeCounts(): Promise<CacheableNavBadgeCou
  * 未レビューかどうかは Vercel Workflow の step が書き込み、`revalidateTag` が
  * 効く経路に乗らないため、この件数は**キャッシュしない** (`getResearchQueue` と同じ扱い)。
  */
-export async function getResearchNavBadgeCount(): Promise<number> {
+export async function getResearchNavBadgeCount(tenantId: string): Promise<number> {
   if (!enabledNavBadgeKeys().has("research")) return 0;
-  return getResearchReviewCount();
+  return getResearchReviewCount(tenantId);
 }

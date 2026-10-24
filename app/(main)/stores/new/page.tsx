@@ -3,6 +3,7 @@ import { StoreRegistrationTabs } from "./_components/store-registration-tabs";
 import { isPlacesApiKeyConfigured } from "@/lib/env";
 import { getAllProfiles } from "@/lib/queries/profiles";
 import { getCurrentProfile } from "@/lib/supabase/server";
+import { resolveTenantId } from "@/lib/tenant/context";
 
 export const metadata: Metadata = {
   title: "店舗登録",
@@ -23,13 +24,14 @@ export default async function NewStorePage({
 }: {
   searchParams: SearchParams;
 }) {
+  const tenantId = await resolveTenantId();
   // GOOGLE_PLACES_API_KEY の有無を SSR で判定し、Client へ boolean のみで渡す。
   // (旧 GEMINI_API_KEY 用 isApiKeyConfigured / プロンプトテンプレート取得は task 4.2 / PR3a で
   // AiAnalysisPanel 撤去に伴い不要になった。営業資産生成は /research/[storeId] の SalesAssetSection に統一 (#300)。)
   const placesApiConfigured = isPlacesApiKeyConfigured();
   // 担当者選択肢 + 現在ログイン中ユーザを SSR で取得し props 経由で渡す (Phase 7.3)。
   const [profiles, currentProfile, sp] = await Promise.all([
-    getAllProfiles(),
+    getAllProfiles(tenantId),
     getCurrentProfile(),
     searchParams,
   ]);

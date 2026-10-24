@@ -10,6 +10,7 @@ import {
   success,
   type ActionResult,
 } from "./_helpers";
+import { resolveTenantId } from "@/lib/tenant/context";
 
 const RESULT_TO_STAGE: Record<string, StageId | undefined> = {
   送信済み: "架電済み",
@@ -26,25 +27,26 @@ export async function recordActionAction(
   _prev: ActionResult<{ nextStage: StageId | null }> | null,
   formData: FormData,
 ): Promise<ActionResult<{ nextStage: StageId | null }>> {
+  const tenantId = await resolveTenantId();
   const result = readString(formData, "result");
   const memo = readString(formData, "memo");
 
-  const store = await repos.store.get(storeId);
+  const store = await repos.forTenant(tenantId).store.get(storeId);
   if (!store) return failure("店舗が見つかりませんでした");
 
   const nextStage = RESULT_TO_STAGE[result];
   const memoLine = memo ? `\n[${result}] ${memo}` : "";
 
-  await repos.store.update(storeId, {
+  await repos.forTenant(tenantId).store.update(storeId, {
     ...(nextStage ? { stage: nextStage } : {}),
     memo: store.memo + memoLine,
   });
 
-  revalidateTag(CACHE_TAGS.stores, "max");
-  revalidateTag(CACHE_TAGS.store(storeId), "max");
-  revalidateTag(CACHE_TAGS.stats, "max");
-  revalidateTag(CACHE_TAGS.actionQueue, "max");
-  revalidateTag(CACHE_TAGS.pipeline, "max");
+  revalidateTag(CACHE_TAGS.stores(tenantId), "max");
+  revalidateTag(CACHE_TAGS.store(tenantId, storeId), "max");
+  revalidateTag(CACHE_TAGS.stats(tenantId), "max");
+  revalidateTag(CACHE_TAGS.actionQueue(tenantId), "max");
+  revalidateTag(CACHE_TAGS.pipeline(tenantId), "max");
 
   return success(
     { nextStage: nextStage ?? null },

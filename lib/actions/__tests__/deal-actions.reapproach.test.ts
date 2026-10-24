@@ -16,12 +16,12 @@ vi.mock("@/lib/supabase/server", () => ({ getCurrentProfile: mocks.getProfile })
 vi.mock("next/cache", () => ({ revalidateTag: mocks.revalidate, updateTag: mocks.updateTag }));
 vi.mock("next/navigation", () => ({ redirect: vi.fn() }));
 vi.mock("@/lib/repositories", () => ({
-  repos: {
+  repos: ((tenantRepos) => ({ ...tenantRepos, forTenant: () => tenantRepos }))({
     store: { get: mocks.getStore },
     deal: { get: mocks.getDeal, create: mocks.create, update: mocks.update },
-    profile: { findById: mocks.findProfile },
+    membership: { find: mocks.findProfile },
     transaction: mocks.transaction,
-  },
+  }),
 }));
 
 const { createDealAction, updateDealAction } = await import("../deal-actions");

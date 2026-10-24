@@ -8,6 +8,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CACHE_TAGS } from "@/lib/cache";
+import { FIRSTWEB_TENANT_ID } from "@/lib/tenant/id";
 
 vi.mock("server-only", () => ({}));
 const mocks = vi.hoisted(() => ({
@@ -20,8 +21,10 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/repositories", () => ({
   repos: {
-    store: { create: mocks.create, update: mocks.update },
-    profile: { findById: mocks.findProfile },
+    forTenant: () => ({
+      store: { create: mocks.create, update: mocks.update },
+      membership: { find: mocks.findProfile },
+    }),
   },
 }));
 vi.mock("next/cache", () => ({ revalidateTag: vi.fn(), updateTag: mocks.updateTag }));
@@ -44,7 +47,7 @@ function storeForm(fields: Record<string, string>): FormData {
   return formData;
 }
 
-/** 最後の `repos.store.update` に渡した patch。 */
+/** 最後の `store.update` に渡した patch。 */
 function lastUpdatePatch(): Record<string, unknown> {
   return mocks.update.mock.calls.at(-1)![1] as Record<string, unknown>;
 }
@@ -110,8 +113,8 @@ describe("updateStoreAction (店舗全体の編集)", () => {
 
   it("保存後に移る店舗詳細が新しい値を表示するよう、店舗のキャッシュを即時に失効する", async () => {
     await updateStoreAction("store_1", null, storeForm({ contact_email: "new@example.com" }));
-    expect(mocks.updateTag).toHaveBeenCalledWith(CACHE_TAGS.store("store_1"));
-    expect(mocks.updateTag).toHaveBeenCalledWith(CACHE_TAGS.stores);
+    expect(mocks.updateTag).toHaveBeenCalledWith(CACHE_TAGS.store(FIRSTWEB_TENANT_ID, "store_1"));
+    expect(mocks.updateTag).toHaveBeenCalledWith(CACHE_TAGS.stores(FIRSTWEB_TENANT_ID));
   });
 
   it("空文字を送ったときだけ、アドレスを消す", async () => {

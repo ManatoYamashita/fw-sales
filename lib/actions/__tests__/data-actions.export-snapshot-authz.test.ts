@@ -15,9 +15,11 @@ vi.mock("@/lib/supabase/server", () => ({ getCurrentProfile: mocks.getCurrentPro
 vi.mock("next/cache", () => ({ revalidateTag: vi.fn() }));
 vi.mock("@/lib/repositories", () => ({
   repos: {
-    store: { list: mocks.storeList },
-    deal: { list: mocks.dealList },
-    handoff: { list: mocks.handoffList },
+    forTenant: () => ({
+      store: { list: mocks.storeList },
+      deal: { list: mocks.dealList },
+      handoff: { list: mocks.handoffList },
+    }),
   },
 }));
 

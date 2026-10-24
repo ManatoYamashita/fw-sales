@@ -42,6 +42,7 @@ import {
   DATA_RESET_DENIED_MESSAGE,
   isDataResetAllowed,
 } from "@/lib/data-reset-policy";
+import { resolveTenantId } from "@/lib/tenant/context";
 
 /**
  * 全削除系 (reset / clear) の環境ガード (#298)。admin 判定の後に呼ぶ。
@@ -61,21 +62,22 @@ function denyDataResetOutsideAllowedEnv(
   return failure(DATA_RESET_DENIED_MESSAGE);
 }
 
-function invalidateAll() {
+function invalidateAll(tenantId: string) {
   for (const tag of [
-    CACHE_TAGS.stores,
-    CACHE_TAGS.deals,
-    CACHE_TAGS.handoffs,
-    CACHE_TAGS.stats,
-    CACHE_TAGS.kpi,
-    CACHE_TAGS.pipeline,
-    CACHE_TAGS.actionQueue,
+    CACHE_TAGS.stores(tenantId),
+    CACHE_TAGS.deals(tenantId),
+    CACHE_TAGS.handoffs(tenantId),
+    CACHE_TAGS.stats(tenantId),
+    CACHE_TAGS.kpi(tenantId),
+    CACHE_TAGS.pipeline(tenantId),
+    CACHE_TAGS.actionQueue(tenantId),
   ]) {
     revalidateTag(tag, "max");
   }
 }
 
 export async function resetToSeedAction(): Promise<ActionResult> {
+  const tenantId = await resolveTenantId();
   const guard = await requireAdmin("data.resetToSeed");
   if (!guard.ok) return guard.denied;
   const envDenied = denyDataResetOutsideAllowedEnv(
@@ -130,12 +132,13 @@ export async function resetToSeedAction(): Promise<ActionResult> {
     return failure("シードデータに戻せませんでした。時間をおいて、もう一度お試しください。");
   }
 
-  invalidateAll();
+  invalidateAll(tenantId);
   console.log("[audit] data.resetToSeed", { by: guard.profile.email });
   return success(undefined, "シードデータにリセットしました");
 }
 
 export async function clearAllAction(): Promise<ActionResult> {
+  const tenantId = await resolveTenantId();
   const guard = await requireAdmin("data.clearAll");
   if (!guard.ok) return guard.denied;
   const envDenied = denyDataResetOutsideAllowedEnv(
@@ -162,7 +165,7 @@ export async function clearAllAction(): Promise<ActionResult> {
     return failure("データを削除できませんでした。時間をおいて、もう一度お試しください。");
   }
 
-  invalidateAll();
+  invalidateAll(tenantId);
   console.log("[audit] data.clearAll", { by: guard.profile.email });
   return success(undefined, "全データを削除しました");
 }
@@ -196,6 +199,7 @@ export async function importJsonAction(
   _prev: ActionResult | null,
   formData: FormData,
 ): Promise<ActionResult> {
+  const tenantId = await resolveTenantId();
   const guard = await requireAdmin("data.import");
   if (!guard.ok) return guard.denied;
   const file = formData.get("file");
@@ -266,7 +270,7 @@ export async function importJsonAction(
       });
     }
 
-    invalidateAll();
+    invalidateAll(tenantId);
     console.log("[audit] data.import", { by: guard.profile.email });
     return success(undefined, "インポートに成功しました");
   } catch (e) {
@@ -284,11 +288,12 @@ export async function getSnapshotForExportAction(): Promise<DbSnapshot> {
   // 全件 (契約連絡先メール・電話番号を含む) を返すため、`/api/export` と同じく
   // ログインを要求する (#384 のレビュー)。権限の範囲 (admin に絞るか) は変えていない。
   if (await requireSignedIn()) throw new Error("ログインが必要です");
+  const tenantId = await resolveTenantId();
   // 3 entity を DB から並列取得 (Req 8.1, 8.4)。
   const [dbDeals, dbStores, dbHandoffs] = await Promise.all([
-    repos.deal.list(),
-    repos.store.list(),
-    repos.handoff.list(),
+    repos.forTenant(tenantId).deal.list(),
+    repos.forTenant(tenantId).store.list(),
+    repos.forTenant(tenantId).handoff.list(),
   ]);
 
   return { stores: dbStores, deals: dbDeals, handoffs: dbHandoffs };

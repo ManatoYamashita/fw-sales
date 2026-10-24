@@ -10,12 +10,12 @@ vi.mock("@/lib/supabase/server", () => ({ getCurrentProfile: mocks.getProfile })
 vi.mock("next/cache", () => ({ revalidateTag: mocks.revalidate, updateTag: mocks.updateTag }));
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
 vi.mock("@/lib/repositories", () => ({
-  repos: {
+  repos: ((tenantRepos) => ({ ...tenantRepos, forTenant: () => tenantRepos }))({
     store: { get: mocks.getStore },
     deal: { get: mocks.getDeal, create: mocks.create, update: mocks.update, delete: mocks.dealDelete },
-    profile: { findById: mocks.findProfile },
+    membership: { find: mocks.findProfile },
     transaction: mocks.transaction,
-  },
+  }),
 }));
 
 const { createDealAction, updateDealAction, deleteSalesActivityAction } = await import("../deal-actions");
@@ -331,19 +331,19 @@ describe("cache invalidation (read-your-own-writes) (#172)", () => {
     mocks.create.mockImplementation(async (input) => ({ ...input, id: "deal-new" }));
     await createDealAction("store-1", null, valid());
     const updated = mocks.updateTag.mock.calls.map((c) => c[0]);
-    expect(updated).toEqual(expect.arrayContaining(["deals", "deal:deal-new", "deals:store:store-1", "store:store-1", "stores"]));
+    expect(updated).toEqual(expect.arrayContaining(["tenant:cfe871a5-8fc7-42da-9677-3a050665cafb:deals", "tenant:cfe871a5-8fc7-42da-9677-3a050665cafb:deal:deal-new", "tenant:cfe871a5-8fc7-42da-9677-3a050665cafb:deals:store:store-1", "tenant:cfe871a5-8fc7-42da-9677-3a050665cafb:store:store-1", "tenant:cfe871a5-8fc7-42da-9677-3a050665cafb:stores"]));
     const revalidated = mocks.revalidate.mock.calls.map((c) => c[0]);
-    expect(revalidated).toEqual(expect.arrayContaining(["stats", "kpi", "pipeline"]));
+    expect(revalidated).toEqual(expect.arrayContaining(["tenant:cfe871a5-8fc7-42da-9677-3a050665cafb:stats", "tenant:cfe871a5-8fc7-42da-9677-3a050665cafb:kpi", "tenant:cfe871a5-8fc7-42da-9677-3a050665cafb:pipeline"]));
     // 店舗詳細/一覧の閲覧系タグを SWR (revalidateTag) 側へ落とさない
-    expect(revalidated).not.toContain("deals:store:store-1");
-    expect(revalidated).not.toContain("store:store-1");
+    expect(revalidated).not.toContain("tenant:cfe871a5-8fc7-42da-9677-3a050665cafb:deals:store:store-1");
+    expect(revalidated).not.toContain("tenant:cfe871a5-8fc7-42da-9677-3a050665cafb:store:store-1");
   });
 
   it("update 成功時も同じタグ構成で失効する", async () => {
     mocks.update.mockResolvedValueOnce({ id: "deal-1" });
     await updateDealAction("deal-1", null, data({ activity_memo: "更新" }));
     const updated = mocks.updateTag.mock.calls.map((c) => c[0]);
-    expect(updated).toEqual(expect.arrayContaining(["deals", "deal:deal-1", "deals:store:store-1", "store:store-1", "stores"]));
+    expect(updated).toEqual(expect.arrayContaining(["tenant:cfe871a5-8fc7-42da-9677-3a050665cafb:deals", "tenant:cfe871a5-8fc7-42da-9677-3a050665cafb:deal:deal-1", "tenant:cfe871a5-8fc7-42da-9677-3a050665cafb:deals:store:store-1", "tenant:cfe871a5-8fc7-42da-9677-3a050665cafb:store:store-1", "tenant:cfe871a5-8fc7-42da-9677-3a050665cafb:stores"]));
   });
 
   it("バリデーション失敗時はどのタグも失効しない", async () => {
@@ -396,7 +396,7 @@ describe("deleteSalesActivityAction (#172)", () => {
   it("成功時は対象 Deal と店舗スコープのタグを即時失効する (storeId の取り違えなし)", async () => {
     await deleteSalesActivityAction("deal-1");
     const updated = mocks.updateTag.mock.calls.map((c) => c[0]);
-    expect(updated).toEqual(expect.arrayContaining(["deals", "deal:deal-1", "deals:store:store-1", "store:store-1", "stores"]));
+    expect(updated).toEqual(expect.arrayContaining(["tenant:cfe871a5-8fc7-42da-9677-3a050665cafb:deals", "tenant:cfe871a5-8fc7-42da-9677-3a050665cafb:deal:deal-1", "tenant:cfe871a5-8fc7-42da-9677-3a050665cafb:deals:store:store-1", "tenant:cfe871a5-8fc7-42da-9677-3a050665cafb:store:store-1", "tenant:cfe871a5-8fc7-42da-9677-3a050665cafb:stores"]));
   });
 
   it("repository 例外は利用者向けメッセージへ変換し、内部情報とキャッシュ失効を漏らさない", async () => {

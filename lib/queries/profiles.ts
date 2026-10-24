@@ -15,15 +15,15 @@ import { CACHE_TAGS } from "@/lib/cache";
 import type { Member, Profile } from "@/types/profile";
 
 /**
- * 全プロフィール取得 (担当者選択 UI・担当者名の表示用)。ロールは含まない。
+ * テナント所属者のプロフィール取得 (担当者選択 UI・担当者名の表示用)。
  *
- * 引数を持たないので、呼び出し元がいくつあってもキャッシュの 1 エントリを共有する。
+ * 同じ tenantId の呼び出し元同士でキャッシュを共有する。
  */
-export async function getAllProfiles(): Promise<readonly Profile[]> {
+export async function getAllProfiles(tenantId: string): Promise<readonly Profile[]> {
   "use cache";
   cacheLife("longBackstop");
-  cacheTag(CACHE_TAGS.profiles);
-  return repos.profile.findAll();
+  cacheTag(CACHE_TAGS.profiles(tenantId));
+  return repos.forTenant(tenantId).membership.list();
 }
 
 /**
@@ -40,19 +40,19 @@ export async function getTenantMembers(
 ): Promise<readonly Member[]> {
   "use cache";
   cacheLife("longBackstop");
-  cacheTag(CACHE_TAGS.profiles);
-  return repos.membership.list(tenantId, options);
+  cacheTag(CACHE_TAGS.profiles(tenantId));
+  return repos.forTenant(tenantId).membership.list(options);
 }
 
 /**
  * id でプロフィールを取得。
  * 個別 profile 単位の cache タグ (`profile:${id}`) で stale-while-revalidate する。
  */
-export async function getProfileById(id: string): Promise<Profile | null> {
+export async function getProfileById(tenantId: string, id: string): Promise<Profile | null> {
   "use cache";
   cacheLife("longBackstop");
-  cacheTag(CACHE_TAGS.profile(id));
-  return repos.profile.findById(id);
+  cacheTag(CACHE_TAGS.profile(tenantId, id));
+  return repos.forTenant(tenantId).membership.find(id);
 }
 
 /**
@@ -60,10 +60,12 @@ export async function getProfileById(id: string): Promise<Profile | null> {
  * 集合 cache タグ (`profiles`) で revalidate する。
  */
 export async function getProfilesByIds(
+  tenantId: string,
   ids: readonly string[],
 ): Promise<readonly Profile[]> {
   "use cache";
   cacheLife("longBackstop");
-  cacheTag(CACHE_TAGS.profiles);
-  return repos.profile.findManyByIds(ids);
+  cacheTag(CACHE_TAGS.profiles(tenantId));
+  const wanted = new Set(ids);
+  return (await repos.forTenant(tenantId).membership.list()).filter((profile) => wanted.has(profile.id));
 }

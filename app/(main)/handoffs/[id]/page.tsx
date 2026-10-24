@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { HandoffForm } from "./_components/handoff-form";
 import { getHandoffCached } from "@/lib/queries/handoffs";
+import { resolveTenantId } from "@/lib/tenant/context";
 
 type Params = Promise<{ id: string }>;
 
@@ -11,8 +12,9 @@ export async function generateMetadata({
 }: {
   params: Params;
 }): Promise<Metadata> {
+  const tenantId = await resolveTenantId();
   const { id } = await params;
-  const handoff = await getHandoffCached(id);
+  const handoff = await getHandoffCached(tenantId, id);
   return { title: handoff ? `${handoff.store_name} 引き継ぎ` : "引き継ぎ" };
 }
 
@@ -21,8 +23,9 @@ export default async function HandoffDetailPage({
 }: {
   params: Params;
 }) {
+  const tenantId = await resolveTenantId();
   const { id } = await params;
-  const handoff = await getHandoffCached(id);
+  const handoff = await getHandoffCached(tenantId, id);
   if (!handoff) notFound();
 
   return (

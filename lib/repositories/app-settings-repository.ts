@@ -1,7 +1,7 @@
 /**
  * AppSettingsRepository interface (store-flow-guidance / Issue #122)
  *
- * `app_settings` テーブル (key-value) へのアクセス契約。アプリ全体の汎用設定を
+ * `app_settings` テーブル (key-value) へのアクセス契約。束縛したテナントの汎用設定を
  * キー単位で読み書きする。現状の利用は調査用 Gem の URL のみ。
  *
  * 関連: Issue #122, lib/db/app-settings-repository.ts

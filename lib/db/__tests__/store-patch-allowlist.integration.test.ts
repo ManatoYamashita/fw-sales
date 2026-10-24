@@ -2,9 +2,10 @@
  * 店舗詳細のインライン編集 (`updateStorePatchAction`) が、許可した列だけを更新することを
  * 実 PostgreSQL で確かめる (#384 のレビュー)。
  *
- * repository の `update` は渡されたキーをそのまま SET する。最初のテストでそれを示したうえで、
- * action を通すと `tenant_id` などを含む patch は何も書かず、各画面の patch は許可した列だけを
- * 書くことを確かめる。
+ * repository の `update` は `tenant_id`・`id`・`created_at` を捨てる (#368) が、ほかのキーは
+ * どの画面も編集しない列 (段階・メモ・基本情報など) でもそのまま SET する。最初のテストでそれを
+ * 示したうえで、action を通すと許可していないキーを含む patch は何も書かず、各画面の patch は
+ * 許可した列だけを書くことを確かめる。
  *
  * 他の結合テストと DB を共有するため、各テストはトランザクション内で行い、最後に ROLLBACK する。
  * action が使う repository は、そのトランザクションに束ねたものへ差し替える。
@@ -21,15 +22,17 @@ const holder = vi.hoisted(() => ({ tx: null as unknown }));
 
 vi.mock("@/lib/repositories", async () => {
   const { makeStoreRepo } = await import("@/lib/db/store-repository");
-  const { makeProfileRepo } = await import("@/lib/db/profile-repository");
+  const { makeMembershipRepo } = await import("@/lib/db/membership-repository");
   const bound = () => {
     if (!holder.tx) throw new Error("テスト用のトランザクションの中で呼ぶ");
     return holder.tx as never;
   };
   return {
     repos: {
-      store: { update: (id: string, patch: never) => makeStoreRepo(bound()).update(id, patch) },
-      profile: { findById: (id: string) => makeProfileRepo(bound()).findById(id) },
+      forTenant: (tenantId: string) => ({
+        store: { update: (id: string, patch: never) => makeStoreRepo(bound(), tenantId).update(id, patch) },
+        membership: { find: (id: string) => makeMembershipRepo(bound(), tenantId).find(id) },
+      }),
     },
   };
 });
@@ -38,6 +41,7 @@ vi.mock("next/cache", () => ({ revalidateTag: vi.fn(), updateTag: vi.fn() }));
 
 const { db } = await import("@/lib/db/client");
 const { makeStoreRepo } = await import("@/lib/db/store-repository");
+const { FIRSTWEB_TENANT_ID } = await import("@/lib/db/schema");
 const { SEED_STORES } = await import("@/lib/db/seed-data");
 const { updateStorePatchAction } = await import("@/lib/actions/store-actions");
 
@@ -82,16 +86,25 @@ async function setUp(tx: Tx): Promise<string> {
     INSERT INTO profiles (id, email, display_name, created_at, updated_at)
     VALUES (${PROFILE_ID}, 'sales-384@example.test', '営業384', '2026-10-21', '2026-10-21')
     ON CONFLICT (id) DO NOTHING`);
-  const created = await makeStoreRepo(tx).create({ ...SEED_INPUT, memo: "元のメモ", genre: "元の業態" });
+  // 担当者は Firstweb の所属であること (#368 の membership.find) を確かめるため、所属も作る
+  await tx.execute(sql`
+    INSERT INTO memberships (tenant_id, user_id, role, created_at, updated_at)
+    VALUES (${FIRSTWEB_TENANT_ID}, ${PROFILE_ID}, 'member', '2026-10-21', '2026-10-21')
+    ON CONFLICT (tenant_id, user_id) DO NOTHING`);
+  const created = await makeStoreRepo(tx, FIRSTWEB_TENANT_ID).create({ ...SEED_INPUT, memo: "元のメモ", genre: "元の業態" });
   return created.id;
 }
 
 describe("updateStorePatchAction の許可リスト (実 DB)", () => {
-  it("repository の update だけでは tenant_id も書き換わる (action で絞る理由)", async () => {
+  it("repository の update は tenant_id を捨てるが、編集画面の無い列は書き換える (action で絞る理由)", async () => {
     await inRolledBackTransaction(async (tx) => {
       const id = await setUp(tx);
-      await makeStoreRepo(tx).update(id, { tenant_id: OTHER_TENANT_ID } as never);
-      expect((await readRow(tx, id)).tenant_id).toBe(OTHER_TENANT_ID);
+      await makeStoreRepo(tx, FIRSTWEB_TENANT_ID).update(id, {
+        tenant_id: OTHER_TENANT_ID,
+        stage: "受注",
+        memo: "書き換え",
+      } as never);
+      expect(await readRow(tx, id)).toMatchObject({ tenant_id: FIRSTWEB_TENANT_ID, stage: "受注", memo: "書き換え" });
     });
   });
 

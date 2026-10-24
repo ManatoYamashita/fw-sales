@@ -6,10 +6,10 @@
  * CRUD + setDefault の 5 アクションを提供する。
  *
  * 設計上のポイント:
- * - `getCurrentSession()` でログインユーザーを取得し、未ログインは即 failure
+ * - `getCurrentProfile()` でログインユーザーを取得し、未ログインは即 failure
  * - `is_default` はクライアント入力を信用しない (insert は count===0 のみ true)
  * - `update` は name / body のみ変更する (is_default は setDefault 経由)
- * - `setDefault` は repos.transaction() で原子性を保証 (clearDefault → set の 2 ステップ)
+ * - `setDefault` は repos.forTenant(tenantId).transaction() で原子性を保証 (clearDefault → set の 2 ステップ)
  * - デフォルトテンプレートの削除は Server Action 側でも事前に拒否する (DB trigger の二重ガード)
  *
  * 関連: Issue #42, lib/db/prompt-template-repository.ts,
@@ -22,7 +22,7 @@ import { z } from "zod";
 import { updateTag } from "next/cache";
 import { repos } from "@/lib/repositories";
 import { CACHE_TAGS } from "@/lib/cache";
-import { getCurrentSession } from "@/lib/supabase/server";
+import { getCurrentProfile } from "@/lib/supabase/server";
 import { failure, readString, success, type ActionResult } from "./_helpers";
 import { requireAdmin } from "./_authz";
 import {
@@ -32,6 +32,7 @@ import {
   MAX_FREEFORM_LENGTH,
   type AiPromptTemplate,
 } from "@/types/ai-prompt-template";
+import { resolveTenantId } from "@/lib/tenant/context";
 
 // ---------------------------------------------------------------------------
 // Zod schemas
@@ -132,10 +133,11 @@ function validateBody(
 export async function listPromptTemplatesAction(): Promise<
   ActionResult<AiPromptTemplate[]>
 > {
-  const session = await getCurrentSession();
+  const tenantId = await resolveTenantId();
+  const session = await getCurrentProfile();
   if (!session) return failure("ログインが必要です");
 
-  const templates = await repos.promptTemplate.list(session.userId);
+  const templates = await repos.forTenant(tenantId).promptTemplate.list(session.id);
   return success(templates);
 }
 
@@ -147,7 +149,8 @@ export async function listPromptTemplatesAction(): Promise<
 export async function createPromptTemplateAction(
   formData: FormData,
 ): Promise<ActionResult<AiPromptTemplate>> {
-  const session = await getCurrentSession();
+  const tenantId = await resolveTenantId();
+  const session = await getCurrentProfile();
   if (!session) return failure("ログインが必要です");
 
   const rawName = readString(formData, "name");
@@ -161,18 +164,18 @@ export async function createPromptTemplateAction(
   if (!bodyResult.ok) return failure(bodyResult.error);
 
   try {
-    const template = await repos.transaction(async (tx) => {
-      const count = await tx.promptTemplate.countByUser(session.userId);
+    const template = await repos.forTenant(tenantId).transaction(async (tx) => {
+      const count = await tx.promptTemplate.countByUser(session.id);
       if (count >= 5) throw new Error("LIMIT_EXCEEDED");
       return tx.promptTemplate.insert({
-        user_id: session.userId,
+        user_id: session.id,
         name: nameResult.data,
         is_default: count === 0,
         body: bodyResult.normalized,
       });
     });
 
-    updateTag(CACHE_TAGS.promptTemplates);
+    updateTag(CACHE_TAGS.promptTemplates(tenantId));
     return success(template);
   } catch (e) {
     if (e instanceof Error && e.message === "LIMIT_EXCEEDED") {
@@ -189,7 +192,8 @@ export async function createPromptTemplateAction(
 export async function updatePromptTemplateAction(
   formData: FormData,
 ): Promise<ActionResult<AiPromptTemplate>> {
-  const session = await getCurrentSession();
+  const tenantId = await resolveTenantId();
+  const session = await getCurrentProfile();
   if (!session) return failure("ログインが必要です");
 
   const id = readString(formData, "id");
@@ -208,14 +212,14 @@ export async function updatePromptTemplateAction(
   const bodyResult = validateBody(rawBody);
   if (!bodyResult.ok) return failure(bodyResult.error);
 
-  const updated = await repos.promptTemplate.update(validId, session.userId, {
+  const updated = await repos.forTenant(tenantId).promptTemplate.update(validId, session.id, {
     name: nameResult.data,
     body: bodyResult.normalized,
   });
 
   if (!updated) return failure("テンプレートが見つかりません");
 
-  updateTag(CACHE_TAGS.promptTemplates);
+  updateTag(CACHE_TAGS.promptTemplates(tenantId));
   return success(updated);
 }
 
@@ -226,6 +230,7 @@ export async function updatePromptTemplateAction(
 export async function deletePromptTemplateAction(
   id: string,
 ): Promise<ActionResult<boolean>> {
+  const tenantId = await resolveTenantId();
   // 破壊的操作のため admin ロールを要求する (#155)。所有スコープ (自分のテンプレート
   // のみ操作可) は guard.profile.id で従前どおり維持する。
   const guard = await requireAdmin("promptTemplates.delete");
@@ -234,16 +239,16 @@ export async function deletePromptTemplateAction(
   const validId = parseTemplateId(id);
   if (!validId) return failure("テンプレートが見つかりません");
 
-  const template = await repos.promptTemplate.findById(validId, guard.profile.id);
+  const template = await repos.forTenant(tenantId).promptTemplate.findById(validId, guard.profile.id);
   if (!template) return failure("テンプレートが見つかりません");
   if (template.is_default) {
     return failure("デフォルトテンプレートは削除できません");
   }
 
-  const deleted = await repos.promptTemplate.delete(validId, guard.profile.id);
+  const deleted = await repos.forTenant(tenantId).promptTemplate.delete(validId, guard.profile.id);
   if (!deleted) return failure("テンプレートが見つかりません");
 
-  updateTag(CACHE_TAGS.promptTemplates);
+  updateTag(CACHE_TAGS.promptTemplates(tenantId));
   console.log("[audit] promptTemplates.delete", {
     by: guard.profile.email,
     templateId: validId,
@@ -253,27 +258,28 @@ export async function deletePromptTemplateAction(
 
 /**
  * デフォルトテンプレートを切り替える。
- * repos.transaction() で clearDefault → set の 2 ステップを原子的に実行する。
+ * repos.forTenant(tenantId).transaction() で clearDefault → set の 2 ステップを原子的に実行する。
  */
 export async function setDefaultPromptTemplateAction(
   id: string,
 ): Promise<ActionResult<AiPromptTemplate>> {
-  const session = await getCurrentSession();
+  const tenantId = await resolveTenantId();
+  const session = await getCurrentProfile();
   if (!session) return failure("ログインが必要です");
 
   const validId = parseTemplateId(id);
   if (!validId) return failure("テンプレートが見つかりません");
 
-  const template = await repos.promptTemplate.findById(validId, session.userId);
+  const template = await repos.forTenant(tenantId).promptTemplate.findById(validId, session.id);
   if (!template) return failure("テンプレートが見つかりません");
 
   try {
-    const updated = await repos.transaction((tx) =>
-      tx.promptTemplate.setDefault(validId, session.userId),
+    const updated = await repos.forTenant(tenantId).transaction((tx) =>
+      tx.promptTemplate.setDefault(validId, session.id),
     );
     if (!updated) return failure("デフォルトテンプレートを変更できませんでした");
 
-    updateTag(CACHE_TAGS.promptTemplates);
+    updateTag(CACHE_TAGS.promptTemplates(tenantId));
     return success(updated);
   } catch {
     return failure("デフォルトテンプレートを変更できませんでした");

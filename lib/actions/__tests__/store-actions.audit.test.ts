@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { TxRepos } from "@/lib/repositories";
+import type { TenantTxRepos } from "@/lib/repositories";
 import { AUDIT_EVENTS } from "@/lib/observability/events";
 import { AUDIT_WRITE_WAIT_MS } from "@/lib/observability/audit";
 
@@ -9,10 +9,10 @@ const mocks = vi.hoisted(() => ({
   updateTag: vi.fn(), revalidateTag: vi.fn(), redirect: vi.fn(),
 }));
 vi.mock("@/lib/supabase/server", () => ({ getCurrentProfile: mocks.profile }));
-vi.mock("@/lib/repositories", () => ({ repos: {
+vi.mock("@/lib/repositories", () => ({ repos: ((tenantRepos) => ({ ...tenantRepos, forTenant: () => tenantRepos }))({
   store: { delete: mocks.remove }, profile: { findById: mocks.findProfile },
   eventLog: { insert: mocks.insert }, transaction: mocks.transaction,
-} }));
+}) }));
 vi.mock("next/cache", () => ({ updateTag: mocks.updateTag, revalidateTag: mocks.revalidateTag }));
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
 
@@ -39,8 +39,8 @@ beforeEach(() => {
   mocks.getForUpdate.mockImplementation(async () => { order.push("lock"); return { ...current }; });
   mocks.update.mockImplementation(async () => { order.push("update"); return { ...current }; });
   mocks.remove.mockImplementation(async () => { order.push("delete"); return true; });
-  mocks.transaction.mockImplementation(async (fn: (tx: TxRepos) => Promise<unknown>) => {
-    const result = await fn({ store: { getForUpdate: mocks.getForUpdate, update: mocks.update } } as unknown as TxRepos);
+  mocks.transaction.mockImplementation(async (fn: (tx: TenantTxRepos) => Promise<unknown>) => {
+    const result = await fn({ store: { getForUpdate: mocks.getForUpdate, update: mocks.update } } as unknown as TenantTxRepos);
     order.push("commit");
     return result;
   });
@@ -114,8 +114,8 @@ describe("updateSalesProgressAction persistent audit", () => {
   });
 
   it("does not audit when the transaction rejects after its callback (rollback/commit failure)", async () => {
-    mocks.transaction.mockImplementation(async (fn: (tx: TxRepos) => Promise<unknown>) => {
-      await fn({ store: { getForUpdate: mocks.getForUpdate, update: mocks.update } } as unknown as TxRepos);
+    mocks.transaction.mockImplementation(async (fn: (tx: TenantTxRepos) => Promise<unknown>) => {
+      await fn({ store: { getForUpdate: mocks.getForUpdate, update: mocks.update } } as unknown as TenantTxRepos);
       expect(mocks.insert).not.toHaveBeenCalled();
       throw new Error("transaction rolled back");
     });

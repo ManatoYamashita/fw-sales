@@ -1,21 +1,57 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import postgres from "postgres";
 import { e2eDatabaseUrl } from "./support/e2e-db";
+import { refreshServerCache } from "./support/fresh-cache";
 
 /**
  * 調査レビューの項目ごとの判断で、押したボタンだけが処理中になる (#337)。
  *
- * `scripts/e2e-setup.mjs` が store_005 に置くレビュー待ちの調査結果 (電話番号・営業時間・
- * 席数の 3 項目) を使う。判断は一度記録すると変えられないので、テストごとに別の項目を
- * 判断する。E2E を流し直すと準備処理が未判断へ戻す。
+ * store_005 にレビュー待ちの調査結果 (電話番号・営業時間・席数の 3 項目) を置いて使う。
+ * 判断は一度記録すると変えられないので、テストごとに別の項目を判断する。CI の retry でも
+ * 未判断から始められるよう、`beforeAll` で毎回作り直す (#390)。
  *
  * 処理中の表示は応答が返るまでの短い間しか出ないため、判断の Server Action の送信を
  * 遅らせて観測する。
  */
-const RESEARCH_PATH = "/research/store_005";
-/** `scripts/e2e-setup.mjs` の `E2E_RESEARCH_RUN_ID`。 */
+const STORE_ID = "store_005";
+const RESEARCH_PATH = `/research/${STORE_ID}`;
 const RUN_ID = "run_e2e_review_pending";
 const ACTION_DELAY_MS = 3_000;
+
+/**
+ * レビュー待ちの調査結果。どの項目も個別に判断する欄 (individual / choose) に入るよう、
+ * 基本情報が空の店舗に推測 (inferred) と競合 (conflict) だけを置く。
+ */
+const REVIEW_ITEMS = [
+  {
+    key: "phone",
+    research_policy: "FACT",
+    status: "inferred",
+    value: "03-0000-0001",
+    evidence: "E2E 用の推測値です。",
+    source_ids: [],
+  },
+  {
+    key: "business_hours_holidays",
+    research_policy: "FACT",
+    status: "conflict",
+    value: null,
+    evidence: "E2E 用の競合です。",
+    source_ids: [],
+    candidates: [
+      { candidate_id: "cand_a", label: "公式サイト", value: "11:30-22:00 / 月曜定休", evidence: "E2E 候補A", source_ids: [] },
+      { candidate_id: "cand_b", label: "Google Places", value: "11:00-23:00 / 無休", evidence: "E2E 候補B", source_ids: [] },
+    ],
+  },
+  {
+    key: "seat_count",
+    research_policy: "FACT",
+    status: "inferred",
+    value: "20席",
+    evidence: "E2E 用の推測値です。",
+    source_ids: [],
+  },
+];
 
 // 同じ調査結果を順に判断していくので、並列にしない。後のテストは、先に判断した項目の
 // ボタンが消えた画面を前提にしない書き方にしている。
@@ -28,6 +64,29 @@ test.beforeEach(() => {
 });
 
 const sql = postgres(e2eDatabaseUrl(), { prepare: false, max: 1 });
+
+test.beforeAll(async ({}, testInfo) => {
+  await sql`DELETE FROM store_research_runs WHERE store_id = ${STORE_ID}`;
+  // 判断の監査ログは件数を確かめるので、前の試行で残った分も消す。
+  await sql`DELETE FROM event_logs WHERE target_id = ${RUN_ID}`;
+  // 採用した値が残っていると「上書き」の言い換えに変わるので、基本情報も空に戻す。
+  await sql`UPDATE stores SET basic_info = '{}'::jsonb WHERE id = ${STORE_ID}`;
+  const now = new Date();
+  const startedAt = new Date(now.getTime() - 10 * 60 * 1000).toISOString();
+  await sql`
+    INSERT INTO store_research_runs (
+      id, store_id, requested_by_user_id, status, stage, result, source_registry,
+      review_decisions, review_completed_at, warnings, started_at, expires_at, finished_at
+    )
+    VALUES (
+      ${RUN_ID}, ${STORE_ID}, ${null}, ${"succeeded"}, ${"done"},
+      ${JSON.stringify(REVIEW_ITEMS)}::jsonb, ${"[]"}::jsonb, ${"{}"}::jsonb, ${null},
+      ${"[]"}::jsonb, ${startedAt}, ${now.toISOString()}, ${now.toISOString()}
+    )
+  `;
+  // 店舗の基本情報は 'use cache' で読むので、空に戻した値を画面にも出させる。
+  await refreshServerCache(testInfo, [RESEARCH_PATH]);
+});
 
 test.afterAll(async () => {
   await sql.end();

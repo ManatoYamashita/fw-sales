@@ -114,7 +114,7 @@ describe("makePromptTemplateRepo", () => {
     it("指定ユーザーのテンプレートを配列で返す", async () => {
       const rows = [makeTemplateRow(), makeTemplateRow({ id: "t2", name: "B" })];
       executor.select.mockReturnValue(makeQueryProxy(rows));
-      const repo = makePromptTemplateRepo(executor as unknown as DbClient);
+      const repo = makePromptTemplateRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
       const result = await repo.list(USER_A);
 
@@ -125,7 +125,7 @@ describe("makePromptTemplateRepo", () => {
 
     it("テンプレートが 0 件の場合は空配列を返す", async () => {
       executor.select.mockReturnValue(makeQueryProxy([]));
-      const repo = makePromptTemplateRepo(executor as unknown as DbClient);
+      const repo = makePromptTemplateRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
       const result = await repo.list(USER_A);
 
@@ -140,7 +140,7 @@ describe("makePromptTemplateRepo", () => {
     it("自分のテンプレートを返す", async () => {
       const row = makeTemplateRow();
       executor.select.mockReturnValue(makeQueryProxy([row]));
-      const repo = makePromptTemplateRepo(executor as unknown as DbClient);
+      const repo = makePromptTemplateRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
       const result = await repo.findById(TEMPLATE_ID, USER_A);
 
@@ -152,7 +152,7 @@ describe("makePromptTemplateRepo", () => {
     it("userId 不一致 (他ユーザー) の場合は null を返す", async () => {
       // DB は userId 条件でフィルタするため行が返らない → 空配列
       executor.select.mockReturnValue(makeQueryProxy([]));
-      const repo = makePromptTemplateRepo(executor as unknown as DbClient);
+      const repo = makePromptTemplateRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
       const result = await repo.findById(TEMPLATE_ID, USER_B);
 
@@ -161,7 +161,7 @@ describe("makePromptTemplateRepo", () => {
 
     it("対象 id が存在しない場合は null を返す", async () => {
       executor.select.mockReturnValue(makeQueryProxy([]));
-      const repo = makePromptTemplateRepo(executor as unknown as DbClient);
+      const repo = makePromptTemplateRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
       const result = await repo.findById("nonexistent-id", USER_A);
 
@@ -173,10 +173,11 @@ describe("makePromptTemplateRepo", () => {
   // insert
   // -------------------------------------------------------------------------
   describe("insert(input)", () => {
+    beforeEach(() => { executor.select.mockReturnValue(makeQueryProxy([{ id: USER_A }])); });
     it("新規テンプレートを挿入して返す", async () => {
       const created = makeTemplateRow({ name: "新規テンプレ" });
       executor.insert.mockReturnValue(makeQueryProxy([created]));
-      const repo = makePromptTemplateRepo(executor as unknown as DbClient);
+      const repo = makePromptTemplateRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
       const result = await repo.insert({
         user_id: USER_A,
@@ -192,7 +193,7 @@ describe("makePromptTemplateRepo", () => {
 
     it("insert が行を返さない場合は throw する", async () => {
       executor.insert.mockReturnValue(makeQueryProxy([]));
-      const repo = makePromptTemplateRepo(executor as unknown as DbClient);
+      const repo = makePromptTemplateRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
       await expect(
         repo.insert({
@@ -212,7 +213,7 @@ describe("makePromptTemplateRepo", () => {
     it("自分のテンプレートを更新して返す", async () => {
       const updated = makeTemplateRow({ name: "更新後" });
       executor.update.mockReturnValue(makeQueryProxy([updated]));
-      const repo = makePromptTemplateRepo(executor as unknown as DbClient);
+      const repo = makePromptTemplateRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
       const result = await repo.update(TEMPLATE_ID, USER_A, { name: "更新後" });
 
@@ -223,7 +224,7 @@ describe("makePromptTemplateRepo", () => {
     it("他ユーザーのテンプレートは更新しない (null を返す)", async () => {
       // DB は userId 条件でフィルタするため更新行なし
       executor.update.mockReturnValue(makeQueryProxy([]));
-      const repo = makePromptTemplateRepo(executor as unknown as DbClient);
+      const repo = makePromptTemplateRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
       const result = await repo.update(TEMPLATE_ID, USER_B, { name: "X" });
 
@@ -232,7 +233,7 @@ describe("makePromptTemplateRepo", () => {
 
     it("対象 id が存在しない場合は null を返す", async () => {
       executor.update.mockReturnValue(makeQueryProxy([]));
-      const repo = makePromptTemplateRepo(executor as unknown as DbClient);
+      const repo = makePromptTemplateRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
       const result = await repo.update("nonexistent", USER_A, { name: "Y" });
 
@@ -246,7 +247,7 @@ describe("makePromptTemplateRepo", () => {
   describe("delete(id, userId)", () => {
     it("自分のテンプレートを削除して true を返す", async () => {
       executor.delete.mockReturnValue(makeQueryProxy([{ id: TEMPLATE_ID }]));
-      const repo = makePromptTemplateRepo(executor as unknown as DbClient);
+      const repo = makePromptTemplateRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
       const result = await repo.delete(TEMPLATE_ID, USER_A);
 
@@ -257,7 +258,7 @@ describe("makePromptTemplateRepo", () => {
     it("他ユーザーのテンプレートは削除できず false を返す", async () => {
       // DB は userId 条件でフィルタするため削除行なし
       executor.delete.mockReturnValue(makeQueryProxy([]));
-      const repo = makePromptTemplateRepo(executor as unknown as DbClient);
+      const repo = makePromptTemplateRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
       const result = await repo.delete(TEMPLATE_ID, USER_B);
 
@@ -266,7 +267,7 @@ describe("makePromptTemplateRepo", () => {
 
     it("対象 id が存在しない場合は false を返す", async () => {
       executor.delete.mockReturnValue(makeQueryProxy([]));
-      const repo = makePromptTemplateRepo(executor as unknown as DbClient);
+      const repo = makePromptTemplateRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
       const result = await repo.delete("nonexistent", USER_A);
 
@@ -280,7 +281,7 @@ describe("makePromptTemplateRepo", () => {
   describe("countByUser(userId)", () => {
     it("指定ユーザーのテンプレート件数を返す", async () => {
       executor.select.mockReturnValue(makeQueryProxy([{ count: 3 }]));
-      const repo = makePromptTemplateRepo(executor as unknown as DbClient);
+      const repo = makePromptTemplateRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
       const result = await repo.countByUser(USER_A);
 
@@ -289,7 +290,7 @@ describe("makePromptTemplateRepo", () => {
 
     it("0 件の場合は 0 を返す", async () => {
       executor.select.mockReturnValue(makeQueryProxy([{ count: 0 }]));
-      const repo = makePromptTemplateRepo(executor as unknown as DbClient);
+      const repo = makePromptTemplateRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
       const result = await repo.countByUser(USER_A);
 
@@ -298,7 +299,7 @@ describe("makePromptTemplateRepo", () => {
 
     it("select が空配列の場合は 0 にフォールバックする", async () => {
       executor.select.mockReturnValue(makeQueryProxy([]));
-      const repo = makePromptTemplateRepo(executor as unknown as DbClient);
+      const repo = makePromptTemplateRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
       const result = await repo.countByUser(USER_A);
 
@@ -312,7 +313,7 @@ describe("makePromptTemplateRepo", () => {
   describe("clearDefaultForUser(userId)", () => {
     it("default=true の行だけを対象にして void を返す", async () => {
       executor.update.mockReturnValue(makeQueryProxy([]));
-      const repo = makePromptTemplateRepo(executor as unknown as DbClient);
+      const repo = makePromptTemplateRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
       const result = await repo.clearDefaultForUser(USER_A);
 
@@ -335,7 +336,7 @@ describe("makePromptTemplateRepo", () => {
         .mockReturnValueOnce(makeQueryProxy([]))
         // Step 3: is_default: true に更新 → 更新済み行を返す
         .mockReturnValueOnce(makeQueryProxy([defaultRow]));
-      const repo = makePromptTemplateRepo(executor as unknown as DbClient);
+      const repo = makePromptTemplateRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
       const result = await repo.setDefault(TEMPLATE_ID, USER_A);
 
@@ -350,7 +351,7 @@ describe("makePromptTemplateRepo", () => {
       const alreadyDefaultRow = makeTemplateRow({ is_default: true });
       // Step 1: 存在確認 select → is_default: true の行が返る
       executor.select.mockReturnValueOnce(makeQueryProxy([alreadyDefaultRow]));
-      const repo = makePromptTemplateRepo(executor as unknown as DbClient);
+      const repo = makePromptTemplateRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
       const result = await repo.setDefault(TEMPLATE_ID, USER_A);
 
@@ -364,7 +365,7 @@ describe("makePromptTemplateRepo", () => {
     it("対象テンプレートが存在しない (他ユーザー) 場合は null を返す (旧挙動との互換検証)", async () => {
       // 新実装: select が空 → update は呼ばれない
       executor.select.mockReturnValue(makeQueryProxy([]));
-      const repo = makePromptTemplateRepo(executor as unknown as DbClient);
+      const repo = makePromptTemplateRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
       const result = await repo.setDefault(TEMPLATE_ID, USER_B);
 
@@ -375,7 +376,7 @@ describe("makePromptTemplateRepo", () => {
     it("存在しない id で setDefault しても既存 default が維持される (select が空 → update 未呼び出し)", async () => {
       // select で空配列 → 存在確認失敗 → update は一切呼ばれない
       executor.select.mockReturnValue(makeQueryProxy([]));
-      const repo = makePromptTemplateRepo(executor as unknown as DbClient);
+      const repo = makePromptTemplateRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
       const result = await repo.setDefault("nonexistent-id", USER_A);
 
@@ -386,7 +387,7 @@ describe("makePromptTemplateRepo", () => {
     it("他ユーザーの id で setDefault しても既存 default が維持される (select が空 → update 未呼び出し)", async () => {
       // USER_B の id を USER_A として検索 → select で空配列 → update は一切呼ばれない
       executor.select.mockReturnValue(makeQueryProxy([]));
-      const repo = makePromptTemplateRepo(executor as unknown as DbClient);
+      const repo = makePromptTemplateRepo(executor as unknown as DbClient, "cfe871a5-8fc7-42da-9677-3a050665cafb");
 
       const result = await repo.setDefault(TEMPLATE_ID, USER_B);
 
