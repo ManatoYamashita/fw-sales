@@ -170,10 +170,11 @@ const cases = {
       expect(await repo.appSettings.get("setting-b")).toBeNull(); expect(await repo.appSettings.get("missing")).toBeNull();
       expect(await repo.appSettings.get("setting-a")).toBe("a");
     },
-    set: async ({ repo }) => {
+    set: async ({ repo, tx }) => {
       await repo.appSettings.set("setting-a", "updated"); expect(await repo.appSettings.get("setting-a")).toBe("updated");
       await repo.appSettings.set("setting-new", "new"); expect(await repo.appSettings.get("setting-new")).toBe("new");
-      await expect(repo.appSettings.set("setting-b", "overwrite")).rejects.toThrow("設定を保存できませんでした");
+      // expand期間は旧global PKが拒否する。DBエラーはsavepoint内に閉じる。
+      await expect(tx.transaction(inner => makeAppSettingsRepo(inner, A).set("setting-b", "overwrite"))).rejects.toThrow("設定を保存できませんでした");
     },
   },
   eventLog: {
