@@ -232,6 +232,13 @@
       "when": 1792191226126,
       "tag": "0032_add_tenants_and_memberships",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1792914064360,
+      "tag": "0033_tenant_constraints_expand",
+      "breakpoints": true
     }
   ]
 }
