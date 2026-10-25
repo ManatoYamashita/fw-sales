@@ -64,7 +64,7 @@ type StoreSelectRow = typeof stores.$inferSelect;
  *
  * @see fromDbRow - 逆変換
  */
-export function toDbRow(store: Store): StoreInsertRow {
+export function toDbRow(store: Store): Omit<StoreInsertRow, "tenant_id"> {
   return {
     ...store,
     ai_analysis_result:

@@ -135,7 +135,9 @@ describe("getDeleteImpact", () => {
       // 別名は「StoreDeleteImpact のキー = 子テーブル名」規約に従う
       // (規約自体は store-cascade-fk-coverage.test.ts が機械検証する)。
       expect(sql, `${child} のサブクエリが無い`).toContain(`from "${child}"`);
-      expect(sql, `${child} の絞り込み列が違う`).toContain(`"${child}"."${column}"`);
+      for (const key of column.split(",")) {
+        expect(sql, `${child} の絞り込み列 ${key} が無い`).toContain(`"${child}"."${key}"`);
+      }
       expect(sql, `${child} の別名が無い`).toContain(`as ${child}`);
     }
     expect(

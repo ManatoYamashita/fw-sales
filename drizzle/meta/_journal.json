@@ -239,6 +239,20 @@
       "when": 1792914064360,
       "tag": "0033_tenant_constraints_expand",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1792914297160,
+      "tag": "0034_tenant_constraints_contract",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1792915040471,
+      "tag": "0035_tenant_index_order",
+      "breakpoints": true
     }
   ]
 }

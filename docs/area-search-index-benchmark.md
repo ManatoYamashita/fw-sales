@@ -36,7 +36,7 @@ OR の片腕に index が無いと Postgres は BitmapOr を組めず Seq Scan �
 
 ## 2. 本番の現状(計測日: 2026-07-19)
 
-`pnpm db:diagnose-area-search` による実測。PostgreSQL 17.6 (Supabase)。
+`pnpm db:diagnose-area-search --tenant=firstweb` による実測。PostgreSQL 17.6 (Supabase)。
 
 | 項目 | 実測値 |
 |------|--------|
@@ -339,7 +339,7 @@ C1/C3(index あり)の差は測れない**ためである。実 index を張る�
 **手順 1 — 実分布を観測する**
 
 ```bash
-pnpm db:diagnose-area-search
+pnpm db:diagnose-area-search --tenant=firstweb
 ```
 
 行数・NULL 率・現行 plan に加えて、末尾に**手順 2 用のコマンドが実分布を反映した形で出力される**。
@@ -461,4 +461,4 @@ E2E p95 の実測は Issue #162 に未達項目として残す(本 PR では #16
 - Issue [#129](https://github.com/ManatoYamashita/fw-sales/issues/129)(M4: エリア検索の全件 scan 回避)
 - PR [#159](https://github.com/ManatoYamashita/fw-sales/pull/159)(`findAreaSearchCandidates` の導入)
 - `scripts/bench-area-search-index.sh` / `.mjs`(本調査の再実行手段)
-- `scripts/diagnose-area-search-plan.mjs`(`pnpm db:diagnose-area-search`。再評価用)
+- `scripts/diagnose-area-search-plan.mjs`(`pnpm db:diagnose-area-search --tenant=firstweb`。再評価用)

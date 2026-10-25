@@ -18,24 +18,16 @@
  * 期待する ON DELETE 挙動。
  * `deltype` は `pg_constraint.confdeltype` の生値 (下の DELTYPE_LABEL のキー)。
  *
- * `stores` を親としない `handoffs_deal_id_deals_id_fk` を含む点に注意。
+ * `stores` を親としない `handoffs_tenant_deal_fk` を含む点に注意。
  * 「stores を親とする FK の全数」と本配列を突き合わせるときは、この 1 件を
  * 母集合から外す必要がある (件数の単純比較は誤検知する)。
  */
 export const EXPECTED = [
-  { child: "deals", conname: "deals_store_id_stores_id_fk", deltype: "c" },
-  {
-    child: "store_research_runs",
-    conname: "store_research_runs_store_id_stores_id_fk",
-    deltype: "c",
-  },
-  { child: "handoffs", conname: "handoffs_store_id_stores_id_fk", deltype: "c" },
-  { child: "handoffs", conname: "handoffs_deal_id_deals_id_fk", deltype: "c" },
-  {
-    child: "place_candidates",
-    conname: "place_candidates_matched_store_id_stores_id_fk",
-    deltype: "n",
-  },
+  { child: "deals", conname: "deals_tenant_store_fk", parent: "stores", columns: ["tenant_id", "store_id"], foreignColumns: ["tenant_id", "id"], deltype: "c", setNullColumns: [] },
+  { child: "store_research_runs", conname: "store_research_runs_tenant_store_fk", parent: "stores", columns: ["tenant_id", "store_id"], foreignColumns: ["tenant_id", "id"], deltype: "c", setNullColumns: [] },
+  { child: "handoffs", conname: "handoffs_tenant_store_fk", parent: "stores", columns: ["tenant_id", "store_id"], foreignColumns: ["tenant_id", "id"], deltype: "c", setNullColumns: [] },
+  { child: "handoffs", conname: "handoffs_tenant_deal_fk", parent: "deals", columns: ["tenant_id", "deal_id"], foreignColumns: ["tenant_id", "id"], deltype: "c", setNullColumns: [] },
+  { child: "place_candidates", conname: "place_candidates_tenant_store_fk", parent: "stores", columns: ["tenant_id", "matched_store_id"], foreignColumns: ["tenant_id", "id"], deltype: "n", setNullColumns: ["matched_store_id"] },
 ];
 
 /** `pg_constraint.confdeltype` の生値と SQL 上の表記の対応。 */

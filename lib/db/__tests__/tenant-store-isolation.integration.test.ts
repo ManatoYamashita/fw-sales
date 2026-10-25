@@ -114,8 +114,8 @@ const candidateCases = {
     expect(await candidates.upsertFromAreaSearch(candidateInput("place_new"))).toMatchObject({ insertedCount: 1 });
     const [created] = await candidates.findByGooglePlaceIds(["place_new"]);
     expect(created).toMatchObject({ tenant_id: A });
-    // google_place_id のグローバル一意制約は #371 まで残る。他社の行を更新せず安全に失敗する。
-    await expect(tx.transaction((savepoint) => makePlaceCandidateRepo(savepoint, A).upsertFromAreaSearch(candidateInput("place_b")))).rejects.toThrow();
+    // 同じPlace IDを自社へ新規保存する。他社の行はfixtureの全行比較で不変を確認する。
+    expect(await makePlaceCandidateRepo(tx, A).upsertFromAreaSearch(candidateInput("place_b"))).toMatchObject({ insertedCount: 1 });
     await expect(candidates.upsertFromAreaSearch(candidateInput("invalid_match", "store_368_b"))).rejects.toThrow("店舗が見つかりません");
   },
 } satisfies Record<keyof PlaceCandidateRepository, IsolationCase>;

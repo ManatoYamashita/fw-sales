@@ -112,6 +112,16 @@ describe("所属を束縛した移送repository全メソッド", () => {
     it.each(["deal", "handoff", "run", "candidate"])(`${method}: 古い他社%s参照によるcascade/SET NULLも拒否`, async (kind) => fixture(async ({ repo }) => {
       await expect(repo[method]()).rejects.toThrow("関連データを確認してください");
     }, async tx => {
+      // contract後も旧schemaでのアプリ保護を検証する。DDLはfixtureのrollbackで戻す。
+      const legacy = {
+        deal: ["deals", "deals_tenant_store_fk", "store_id", "stores", "cascade"],
+        handoff: ["handoffs", "handoffs_tenant_deal_fk", "deal_id", "deals", "cascade"],
+        run: ["store_research_runs", "store_research_runs_tenant_store_fk", "store_id", "stores", "cascade"],
+        candidate: ["place_candidates", "place_candidates_tenant_store_fk", "matched_store_id", "stores", "set null"],
+      }[kind as "deal" | "handoff" | "run" | "candidate"];
+      const [table, constraint, column, parent, onDelete] = legacy;
+      await tx.execute(sql.raw(`ALTER TABLE ${table} DROP CONSTRAINT ${constraint}`));
+      await tx.execute(sql.raw(`ALTER TABLE ${table} ADD CONSTRAINT ${constraint} FOREIGN KEY (${column}) REFERENCES ${parent}(id) ON DELETE ${onDelete}`));
       if (kind === "deal") await tx.update(deals).set({ store_id: SB }).where(eq(deals.id, DA));
       if (kind === "handoff") await tx.update(handoffs).set({ deal_id: DB }).where(eq(handoffs.id, HA));
       if (kind === "run") await tx.update(storeResearchRuns).set({ store_id: SB }).where(eq(storeResearchRuns.id, `run_${SA}`));

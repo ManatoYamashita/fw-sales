@@ -109,6 +109,7 @@ const CITY_LNG = [
   130.5571, 141.1527, 133.5311, 127.6809,
 ];
 
+const FIRSTWEB_TENANT_ID = "cfe871a5-8fc7-42da-9677-3a050665cafb"; // 所有確認済みの破棄専用DBのfixture
 const IN_LIST_SIZE = 20; // Places 1 ページの最大件数
 
 if (!Number.isInteger(BBOX_CENTER_I) || BBOX_CENTER_I < 0 || BBOX_CENTER_I >= CITY_LAT.length) {
@@ -128,7 +129,7 @@ if (HIT_RATES.some((r) => r < 0 || r > 1)) {
 // index 候補
 // ---------------------------------------------------------------------------
 const CANDIDATES = [
-  { id: "C0", label: "index なし (baseline)", ddl: [] },
+  { id: "C0", label: "位置索引なし (baseline)", ddl: [] },
   { id: "C1", label: "(lat,lng) 複合", ddl: ['create index stores_lat_lng_idx on stores using btree (lat, lng)'] },
   {
     id: "C2",
@@ -153,7 +154,8 @@ const CANDIDATES = [
   },
 ];
 
-const INDEX_NAMES = ["stores_lat_lng_idx", "stores_lat_idx", "stores_lng_idx"];
+const INDEX_NAMES = ["stores_lat_lng_idx", "stores_lat_idx", "stores_lng_idx", "stores_tenant_lat_lng_idx"];
+CANDIDATES.push({ id: "C5", label: "(tenant_id,lat,lng) 部分", ddl: ['create index stores_tenant_lat_lng_idx on stores (tenant_id, lat, lng) where lat is not null and lng is not null'] });
 
 const sql = postgres(url, {
   prepare: false,
@@ -378,11 +380,11 @@ async function buildWorkload(bbox, hitRate, totalRows) {
   // seed が同じなら何度実行しても同じ ID 集合が選ばれる。
   const hitRows = await sql.unsafe(
     `select google_place_id from stores
-      where google_place_id is not null
+      where tenant_id = $6 and google_place_id is not null
         and lat >= $1 and lat <= $2 and lng >= $3 and lng <= $4
       order by md5(google_place_id)
       limit $5`,
-    [...bbox, requestedHits],
+    [...bbox, requestedHits, FIRSTWEB_TENANT_ID],
   );
 
   const ids = hitRows.map((r) => r.google_place_id);
@@ -394,8 +396,8 @@ async function buildWorkload(bbox, hitRate, totalRows) {
 
   const [sel] = await sql.unsafe(
     `select count(*)::int as n from stores
-      where lat >= $1 and lat <= $2 and lng >= $3 and lng <= $4`,
-    bbox,
+      where tenant_id = $5 and lat >= $1 and lat <= $2 and lng >= $3 and lng <= $4`,
+    [...bbox, FIRSTWEB_TENANT_ID],
   );
 
   return {
@@ -416,28 +418,28 @@ const B = (o) => [`$${o + 1}`, `$${o + 2}`, `$${o + 3}`, `$${o + 4}`];
 const QUERIES = {
   Q1: {
     label: "bbox のみ + ORDER BY",
-    sql: `select * from stores where (lat >= ${B(0)[0]} and lat <= ${B(0)[1]} and lng >= ${B(0)[2]} and lng <= ${B(0)[3]}) order by created_at desc`,
-    params: (ids, bbox) => bbox,
+    sql: `select * from stores where tenant_id = $5 and (lat >= ${B(0)[0]} and lat <= ${B(0)[1]} and lng >= ${B(0)[2]} and lng <= ${B(0)[3]}) order by created_at desc`,
+    params: (ids, bbox) => [...bbox, FIRSTWEB_TENANT_ID],
   },
   Q2: {
     label: "place_id IN のみ + ORDER BY",
-    sql: `select * from stores where google_place_id in (${IN_PLACEHOLDERS}) order by created_at desc`,
-    params: (ids) => ids,
+    sql: `select * from stores where tenant_id = $21 and google_place_id in (${IN_PLACEHOLDERS}) order by created_at desc`,
+    params: (ids) => [...ids, FIRSTWEB_TENANT_ID],
   },
   Q3: {
     label: "IN OR bbox + ORDER BY (本番の実クエリ形状)",
-    sql: `select * from stores where google_place_id in (${IN_PLACEHOLDERS}) or (lat >= $${IN_LIST_SIZE + 1} and lat <= $${IN_LIST_SIZE + 2} and lng >= $${IN_LIST_SIZE + 3} and lng <= $${IN_LIST_SIZE + 4}) order by created_at desc`,
-    params: (ids, bbox) => [...ids, ...bbox],
+    sql: `select * from stores where tenant_id = $25 and (google_place_id in (${IN_PLACEHOLDERS}) or (lat >= $${IN_LIST_SIZE + 1} and lat <= $${IN_LIST_SIZE + 2} and lng >= $${IN_LIST_SIZE + 3} and lng <= $${IN_LIST_SIZE + 4})) order by created_at desc`,
+    params: (ids, bbox) => [...ids, ...bbox, FIRSTWEB_TENANT_ID],
   },
   Q4: {
     label: "Q3 から ORDER BY を除去",
-    sql: `select * from stores where google_place_id in (${IN_PLACEHOLDERS}) or (lat >= $${IN_LIST_SIZE + 1} and lat <= $${IN_LIST_SIZE + 2} and lng >= $${IN_LIST_SIZE + 3} and lng <= $${IN_LIST_SIZE + 4})`,
-    params: (ids, bbox) => [...ids, ...bbox],
+    sql: `select * from stores where tenant_id = $25 and (google_place_id in (${IN_PLACEHOLDERS}) or (lat >= $${IN_LIST_SIZE + 1} and lat <= $${IN_LIST_SIZE + 2} and lng >= $${IN_LIST_SIZE + 3} and lng <= $${IN_LIST_SIZE + 4}))`,
+    params: (ids, bbox) => [...ids, ...bbox, FIRSTWEB_TENANT_ID],
   },
   Q5: {
     label: "Q3 の projection を縮小",
-    sql: `select id, name, lat, lng, google_place_id from stores where google_place_id in (${IN_PLACEHOLDERS}) or (lat >= $${IN_LIST_SIZE + 1} and lat <= $${IN_LIST_SIZE + 2} and lng >= $${IN_LIST_SIZE + 3} and lng <= $${IN_LIST_SIZE + 4}) order by created_at desc`,
-    params: (ids, bbox) => [...ids, ...bbox],
+    sql: `select id, name, lat, lng, google_place_id from stores where tenant_id = $25 and (google_place_id in (${IN_PLACEHOLDERS}) or (lat >= $${IN_LIST_SIZE + 1} and lat <= $${IN_LIST_SIZE + 2} and lng >= $${IN_LIST_SIZE + 3} and lng <= $${IN_LIST_SIZE + 4})) order by created_at desc`,
+    params: (ids, bbox) => [...ids, ...bbox, FIRSTWEB_TENANT_ID],
   },
 };
 
@@ -623,10 +625,10 @@ try {
     await applyCandidate(c);
     // (i) バインドパラメータ
     const bound = await explain(
-      `select * from stores where lat >= $1 and lat <= $2 and lng >= $3 and lng <= $4`, bbox);
+      `select * from stores where tenant_id = $5 and lat >= $1 and lat <= $2 and lng >= $3 and lng <= $4`, [...bbox, FIRSTWEB_TENANT_ID]);
     // (ii) SQL リテラル直書き
     const literal = await explain(
-      `select * from stores where lat >= ${bbox[0]} and lat <= ${bbox[1]} and lng >= ${bbox[2]} and lng <= ${bbox[3]}`, []);
+      `select * from stores where tenant_id = $1 and lat >= ${bbox[0]} and lat <= ${bbox[1]} and lng >= ${bbox[2]} and lng <= ${bbox[3]}`, [FIRSTWEB_TENANT_ID]);
     const condB = findIndexCond(bound.raw);
     const condL = findIndexCond(literal.raw);
     console.log(`${c.id} ${c.label}`);

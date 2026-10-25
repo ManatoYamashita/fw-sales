@@ -170,11 +170,11 @@ const cases = {
       expect(await repo.appSettings.get("setting-b")).toBeNull(); expect(await repo.appSettings.get("missing")).toBeNull();
       expect(await repo.appSettings.get("setting-a")).toBe("a");
     },
-    set: async ({ repo, tx }) => {
+    set: async ({ repo }) => {
       await repo.appSettings.set("setting-a", "updated"); expect(await repo.appSettings.get("setting-a")).toBe("updated");
       await repo.appSettings.set("setting-new", "new"); expect(await repo.appSettings.get("setting-new")).toBe("new");
-      // expand期間は旧global PKが拒否する。DBエラーはsavepoint内に閉じる。
-      await expect(tx.transaction(inner => makeAppSettingsRepo(inner, A).set("setting-b", "overwrite"))).rejects.toThrow("設定を保存できませんでした");
+      await repo.appSettings.set("setting-b", "own value");
+      expect(await repo.appSettings.get("setting-b")).toBe("own value");
     },
   },
   eventLog: {
@@ -197,14 +197,12 @@ describe("ユーザーrepository全メソッドのテナント分離", () => {
   for (const [domain, methods] of Object.entries(cases)) {
     it.each(Object.entries(methods))(`${domain}.%s`, async (_, run) => fixture(run));
   }
-  it("Bに既定がある兼務者の切替はglobal unique変更前でもBを解除しない", async () => fixture(async ({ tx, repo }) => {
+  it("Bに既定がある兼務者もAの既定を設定でき、Bを解除しない", async () => fixture(async ({ tx, repo }) => {
     await repo.promptTemplate.clearDefaultForUser(SHARED);
-    // fixture設定のみ。A/Bともdefault=trueは現行global indexが拒否する (#371)。
+    // 同一ユーザーの既定をテナントごとに持てる。
     await tx.update(aiPromptTemplates).set({ is_default: true }).where(eq(aiPromptTemplates.id, TB));
-    await expect(tx.transaction(async (savepoint) => {
-      await makePromptTemplateRepo(savepoint, A).setDefault(TA, SHARED);
-    })).rejects.toThrow();
-    expect(await repo.promptTemplate.findById(TA, SHARED)).toMatchObject({ is_default: false });
+    await makePromptTemplateRepo(tx, A).setDefault(TA, SHARED);
+    expect(await repo.promptTemplate.findById(TA, SHARED)).toMatchObject({ is_default: true });
     expect((await tx.select().from(aiPromptTemplates).where(eq(aiPromptTemplates.id, TB)))[0]).toMatchObject({ is_default: true });
     // fixture前後のB不変比較の基準へ戻す。
     await tx.update(aiPromptTemplates).set({ is_default: false }).where(eq(aiPromptTemplates.id, TB));

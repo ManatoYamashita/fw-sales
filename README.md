@@ -186,7 +186,7 @@ DB 側の read-only 診断コマンド:
 ```bash
 pnpm db:check                  # drizzle migration と _journal.json の整合
 pnpm db:verify-fks             # 店舗系 FK の ON DELETE 実態 (#152)
-pnpm db:diagnose-area-search   # エリア検索 bbox 候補取得の実行計画と index 要否 (#162)
+pnpm db:diagnose-area-search --tenant=firstweb   # エリア検索 bbox 候補取得の実行計画と index 要否 (#162)
 ```
 
 動作確認は次の E2E が標準手順です(詳細は `.kiro/specs/deals-stores-db-migration/requirements.md` §11):
