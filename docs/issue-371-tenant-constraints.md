@@ -14,6 +14,8 @@ Issue指定に従い、次の3つのPRを順に反映する。ローカルでは
 | [#398](https://github.com/ManatoYamashita/fw-sales/pull/398) code | 設定のupsertを(tenant_id,key)へ切替。旧global PKによる衝突も汎用エラーへ変換 | expandの両DB反映後にマージし、このコードの本番配備がReadyになったことを確認 |
 | [#399](https://github.com/ManatoYamashita/fw-sales/pull/399) contract | 0034: DEFAULT・旧unique/PK・単一列業務FKの撤去と複合FK・上限triggerへの切替。0035: 降順索引をSQLのNULLS FIRSTへ合わせる | codeの本番反映後にマージ。migrationとVercelの起動順は保証されないため、同時マージしない |
 
+レビュー時の差分を分けるため、現在の#398はexpandブランチ、#399はcodeブランチをbaseにしている。前段をmainへ取り込んだら、次のPRのbaseをmainへ変更し、CIを再確認してから取り込む。祖先関係を保つためmerge commitで順に取り込む。
+
 expandは旧コード・新コードの両方を受理する。contract後はON CONFLICT(key)を使う旧コードへ戻さず、複合キー対応済みのcode段階以降を使う。DDLの復旧が必要なら、現状の制約と重複を調査したうえで、新しいforward migrationを作る。適用済みSQL・journalの書換えはしない。
 
 ## DO
