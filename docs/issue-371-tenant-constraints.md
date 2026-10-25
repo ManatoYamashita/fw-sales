@@ -10,9 +10,9 @@ Issue指定に従い、次の3つのPRを順に反映する。ローカルでは
 
 | 段階 | 内容 | 反映条件 |
 | --- | --- | --- |
-| expand | 0033: 親のUNIQUE(tenant_id,id)、候補・設定・既定テンプレートの複合unique、所属付き索引を追加。旧制約・DEFAULTは維持 | 最初にマージ。既存workflowで同じcommitをdev→prdへ適用し、成功を確認 |
-| code | 設定のupsertを(tenant_id,key)へ切替。旧global PKによる衝突も汎用エラーへ変換 | expandの両DB反映後にマージし、このコードの本番配備がReadyになったことを確認 |
-| contract | 0034: DEFAULT・旧unique/PK・単一列業務FKの撤去と複合FK・上限triggerへの切替。0035: 降順索引をSQLのNULLS FIRSTへ合わせる | codeの本番反映後にマージ。migrationとVercelの起動順は保証されないため、同時マージしない |
+| [#397](https://github.com/ManatoYamashita/fw-sales/pull/397) expand | 0033: 親のUNIQUE(tenant_id,id)、候補・設定・既定テンプレートの複合unique、所属付き索引を追加。旧制約・DEFAULTは維持 | 最初にマージ。既存workflowで同じcommitをdev→prdへ適用し、成功を確認 |
+| [#398](https://github.com/ManatoYamashita/fw-sales/pull/398) code | 設定のupsertを(tenant_id,key)へ切替。旧global PKによる衝突も汎用エラーへ変換 | expandの両DB反映後にマージし、このコードの本番配備がReadyになったことを確認 |
+| [#399](https://github.com/ManatoYamashita/fw-sales/pull/399) contract | 0034: DEFAULT・旧unique/PK・単一列業務FKの撤去と複合FK・上限triggerへの切替。0035: 降順索引をSQLのNULLS FIRSTへ合わせる | codeの本番反映後にマージ。migrationとVercelの起動順は保証されないため、同時マージしない |
 
 expandは旧コード・新コードの両方を受理する。contract後はON CONFLICT(key)を使う旧コードへ戻さず、複合キー対応済みのcode段階以降を使う。DDLの復旧が必要なら、現状の制約と重複を調査したうえで、新しいforward migrationを作る。適用済みSQL・journalの書換えはしない。
 
@@ -76,7 +76,8 @@ bash scripts/bench-area-search-index.sh --rows=10000,100000 --null-rates=0.5 --r
 - [x] 自社だけのCASCADE、候補の所属を維持する指定列SET NULL
 - [x] 実際のSQLによるexpand互換、contract失敗時の全体rollback、移行後の拒否と削除
 - [x] 実DB14ファイル140件、型、lint、本番向けbuild、FK検証
-- [ ] 最終単体・反証・E2EとPR CI（最終結果はPR / Issueへ記録）
+- [x] 反証6種（DEFAULT / 複合FK / migrationの所属列 / SET NULL列指定 / ロック / 件数単位）で実テスト失敗、復元後成功を確認
+- 単体・E2E・PR CIの最終結果と対象SHAは、各PR / Issueの完了記録へ記載する。
 
 旧DEFAULTを前提にした基盤・ローカルidentity移行のfixtureは、明示tenantへ更新した。旧他社参照のアプリ保護テストはtransaction内で旧FKを再現して残し、新DB自身の拒否とは分けて検証する。
 
