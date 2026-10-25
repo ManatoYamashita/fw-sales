@@ -68,6 +68,23 @@ pnpm local:stop
 
 `pnpm dev:local`と通常開発／E2EのNext.jsサーバーは同じ`.next`を使うため、同一チェックアウトで同時起動しません。切り替える場合は先に起動中のサーバーを終了してください。
 
+### 応答しなくなったとき
+
+画面遷移が終わらない、`/login`も返らないなど、サーバーが応答しなくなったら、**再起動する前に**別ターミナルで次を実行します（[#328](https://github.com/ManatoYamashita/fw-sales/issues/328)）。プロセスとポートが残っていても応答しないことがあるため、稼働はタイムアウト付きの応答確認で判断します。
+
+```bash
+pnpm local:diagnose
+```
+
+`LOCAL_PREVIEW_PORT`（既定3200）で待ち受ける、このチェックアウトの`next-server`について、次を`.local-preview/diagnostics/<日時>/`へ書き出します。サーバーは止めません。
+
+- タイムアウト付きの`/login`の応答
+- CPU・メモリ・スレッドごとのCPU、全スレッドのネイティブスタック（macOSの`sample`。TurbopackのRustスレッドを含む）、開いているファイル
+- その瞬間のJSスタック、CPUプロファイル、Nodeの診断レポート、ヒープ使用量（SIGUSR1で開くinspector経由。採取後に閉じる）
+- `.next/dev/trace`と開発ログ（`.next/dev/logs/next-development.log`）の写し
+
+起動ターミナルに`Debugger listening on ws://127.0.0.1:9229/…`と出るのは、inspectorを開いたためで、異常ではありません。9229番を別のプロセスが使っている場合は、inspector経由の採取だけを省きます。書き出したフォルダを#328に共有してから、起動ターミナルでCtrl+Cし、`pnpm dev:local`で起動し直してください。
+
 ## dev／prdを分離する際のルール
 
 1. DBとAuthを同じ環境へセットで切り替えます。Supabase URL、公開キー、Service Role Key、DB接続URLを個別に混在させません。
