@@ -1,3 +1,4 @@
+import { FIRSTWEB_TENANT_ID } from "../lib/tenant/id";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import postgres from "postgres";
 import { e2eDatabaseUrl } from "./support/e2e-db";
@@ -71,11 +72,11 @@ async function createStoreWithRun(
   const now = new Date().toISOString();
   await sql`
     INSERT INTO store_research_runs (
-      id, store_id, requested_by_user_id, status, stage, result, source_registry,
+      id, tenant_id, store_id, requested_by_user_id, status, stage, result, source_registry,
       review_decisions, review_completed_at, warnings, started_at, expires_at, finished_at
     )
     VALUES (
-      ${runId}, ${storeId}, ${null}, ${"succeeded"}, ${"done"},
+      ${runId}, ${FIRSTWEB_TENANT_ID}, ${storeId}, ${null}, ${"succeeded"}, ${"done"},
       ${JSON.stringify(items)}::jsonb, ${"[]"}::jsonb, ${"{}"}::jsonb, ${null},
       ${"[]"}::jsonb, ${now}, ${now}, ${now}
     )

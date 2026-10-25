@@ -20,8 +20,8 @@
  *   (既存編集を上書きしない、手動 backfill 再実行に対する idempotency)
  *
  * 実行例:
- * - `pnpm db:backfill-basic-info`         # dry-run
- * - `pnpm db:backfill-basic-info --apply` # 適用
+ * - `pnpm db:backfill-basic-info --tenant=firstweb`         # dry-run
+ * - `pnpm db:backfill-basic-info --tenant=firstweb --apply` # 適用
  *
  * 制約 (seed.ts 同様):
  * - `lib/db/*` を直接 import (design Allowed Dependencies / Documented exception)
@@ -30,15 +30,14 @@
  * 関連: requirements.md §8.1 §8.2 §8.3, design.md §Migration Strategy PR1
  */
 
-import { db, sql } from "@/lib/db/client";
+import { parseTenantSelection, resolveScriptTenant } from "./_tenant-args.mjs";
 import { makeStoreRepo } from "@/lib/db/store-repository";
 import { stores as storesTable } from "@/lib/db/schema";
 import type { Store } from "@/types/store";
 import { scalarToBasicInfo } from "./_basic-info-mapping";
 
 // 射影純関数は `_basic-info-mapping.ts` に分離 (vitest 副作用 import 回避)。
-// 本ファイル top-level の `db`/`sql` import が test 環境で接続初期化を起こすため、
-// 純関数のみ独立 import 可能な別モジュールに切り出している。
+// DB接続の初期化を避け、純関数だけを検証できるよう独立したmoduleに置く。
 
 interface BackfillStats {
   total: number;
@@ -51,77 +50,76 @@ interface BackfillStats {
 
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
-  const tenantId = argv[argv.indexOf("--tenant-id") + 1];
-  if (!argv.includes("--tenant-id") || !tenantId || tenantId.startsWith("--")) {
-    throw new Error("--tenant-id <UUID> を指定してください");
-  }
-  const dbStoreRepo = makeStoreRepo(db, tenantId);
-  const apply = argv.includes("--apply");
-  const dryRun = !apply;
-  const mode = dryRun ? "[DRY-RUN]" : "[APPLY]";
+  const selection = parseTenantSelection(argv);
+  const { db, sql } = await import("@/lib/db/client");
+  try {
+    const tenant = await resolveScriptTenant(sql, selection);
+    const dbStoreRepo = makeStoreRepo(db, tenant.id);
+    const apply = argv.includes("--apply");
+    const dryRun = !apply;
+    const mode = dryRun ? "[DRY-RUN]" : "[APPLY]";
 
-  console.log(`${mode} backfill-basic-info: 開始`);
+    console.log(`${mode} backfill-basic-info: 開始`);
 
-  const all: Store[] = await dbStoreRepo.list();
-  const stats: BackfillStats = {
-    total: all.length,
-    alreadyFilled: 0,
-    noScalarData: 0,
-    willMerge: 0,
-    applied: 0,
-    errors: 0,
-  };
+    const all: Store[] = await dbStoreRepo.list();
+    const stats: BackfillStats = {
+      total: all.length,
+      alreadyFilled: 0,
+      noScalarData: 0,
+      willMerge: 0,
+      applied: 0,
+      errors: 0,
+    };
 
-  for (const store of all) {
-    // 既存 basic_info に 1 キー以上あれば skip (idempotency)
-    if (store.basic_info && Object.keys(store.basic_info).length > 0) {
-      stats.alreadyFilled += 1;
-      continue;
-    }
+    for (const store of all) {
+      // 既存 basic_info に 1 キー以上あれば skip (idempotency)
+      if (store.basic_info && Object.keys(store.basic_info).length > 0) {
+        stats.alreadyFilled += 1;
+        continue;
+      }
 
-    const now = new Date().toISOString();
-    const partial = scalarToBasicInfo(store, now);
-    if (Object.keys(partial).length === 0) {
-      stats.noScalarData += 1;
-      continue;
-    }
+      const now = new Date().toISOString();
+      const partial = scalarToBasicInfo(store, now);
+      if (Object.keys(partial).length === 0) {
+        stats.noScalarData += 1;
+        continue;
+      }
 
-    stats.willMerge += 1;
-    const partialKeys = Object.keys(partial).join(", ");
-    console.log(
-      `${mode} ${store.id} (${store.name}): ${Object.keys(partial).length} 項目 → ${partialKeys}`,
-    );
+      stats.willMerge += 1;
+      const partialKeys = Object.keys(partial).join(", ");
+      console.log(
+        `${mode} ${store.id} (${store.name}): ${Object.keys(partial).length} 項目 → ${partialKeys}`,
+      );
 
-    if (apply) {
-      try {
-        await dbStoreRepo.mergeBasicInfo(store.id, partial, "manual");
-        stats.applied += 1;
-      } catch (err) {
-        stats.errors += 1;
-        console.error(
-          `${mode} ${store.id}: mergeBasicInfo 失敗`,
-          err instanceof Error ? err.message : err,
-        );
+      if (apply) {
+        try {
+          await dbStoreRepo.mergeBasicInfo(store.id, partial, "manual");
+          stats.applied += 1;
+        } catch (err) {
+          stats.errors += 1;
+          console.error(
+            `${mode} ${store.id}: mergeBasicInfo 失敗`,
+            err instanceof Error ? err.message : err,
+          );
+        }
       }
     }
-  }
 
-  console.log("---");
-  console.log(`${mode} 結果サマリ:`);
-  console.log(`  全店舗数:              ${stats.total}`);
-  console.log(`  既に basic_info あり:  ${stats.alreadyFilled} (skip)`);
-  console.log(`  スカラー値なし:        ${stats.noScalarData} (skip)`);
-  console.log(`  backfill 対象:         ${stats.willMerge}`);
-  if (apply) {
-    console.log(`  適用成功:              ${stats.applied}`);
-    console.log(`  エラー:                ${stats.errors}`);
-  } else {
-    console.log("  → DB は変更していません。--apply で実行してください。");
-  }
+    console.log("---");
+    console.log(`${mode} 結果サマリ:`);
+    console.log(`  全店舗数:              ${stats.total}`);
+    console.log(`  既に basic_info あり:  ${stats.alreadyFilled} (skip)`);
+    console.log(`  スカラー値なし:        ${stats.noScalarData} (skip)`);
+    console.log(`  backfill 対象:         ${stats.willMerge}`);
+    if (apply) {
+      console.log(`  適用成功:              ${stats.applied}`);
+      console.log(`  エラー:                ${stats.errors}`);
+    } else {
+      console.log("  → DB は変更していません。--apply で実行してください。");
+    }
 
-  // ESM 環境で `db` の保留接続を確実に閉じる (seed.ts 同様)。
-  void db; // 副作用 import の suppress
-  await sql.end();
+    // ESM 環境で `db` の保留接続を確実に閉じる (seed.ts 同様)。
+  } finally { await sql.end({ timeout: 5 }); }
   void storesTable; // table reference を tree-shaking から守る (lint 抑止用)
 }
 
@@ -131,5 +129,5 @@ main()
   })
   .catch((err) => {
     console.error("backfill-basic-info: 異常終了", err);
-    sql.end().finally(() => process.exit(1));
+    process.exitCode = 1;
   });

@@ -10,11 +10,12 @@
  * メモを除いた名前が同じ別店舗)。最後の列は「（Rアポハマロスト）炉端ジュン」と
  * 「炉端ジュン」が別レコードで並んでいるような重複登録の手掛かり。
  *
- * 実行: `pnpm db:list-name-memos` (DATABASE_URL は .env.local または環境変数)。
+ * 実行: `pnpm db:list-name-memos --tenant=firstweb` (DATABASE_URL は .env.local または環境変数)。
  * 接続様式は verify-store-cascade-fks.mjs と同じ (Node postgres / prepare:false / 単一接続)。
  * SELECT しか発行しない。tsx (CJS 出力) はトップレベル await を通さないため main() で包む。
  */
 import postgres from "postgres";
+import { parseTenantSelection, resolveScriptTenant } from "./_tenant-args.mjs";
 import { assertDatabaseTarget } from "../lib/environment-isolation.mjs";
 import { splitStoreNameMemo } from "../lib/domain/store-name-memo";
 
@@ -22,6 +23,7 @@ import { splitStoreNameMemo } from "../lib/domain/store-name-memo";
 const cell = (value: string) => value.replace(/\|/g, "\\|").replace(/\s+/g, " ");
 
 async function main() {
+  const selection = parseTenantSelection(process.argv.slice(2));
   const url = process.env.DATABASE_URL;
   if (!url) {
     console.error("ERROR: DATABASE_URL is not set.");
@@ -30,8 +32,10 @@ async function main() {
   assertDatabaseTarget();
   const sql = postgres(url, { prepare: false, max: 1, idle_timeout: 5, connect_timeout: 10 });
   try {
+    const tenant = await resolveScriptTenant(sql, selection);
+    console.log(`tenant: ${tenant.slug}`);
     const rows = await sql<{ id: string; name: string }[]>`
-      select id, name from stores order by name`;
+      select id, name from stores where tenant_id = ${tenant.id} order by name`;
 
     const idsByName = new Map<string, string[]>();
     for (const row of rows) {

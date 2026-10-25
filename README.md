@@ -158,8 +158,10 @@ pnpm drizzle-kit push             # スキーマ差分を直接反映 (本番運
 `SEED_STORES` / `SEED_DEALS` / `SEED_HANDOFFS` (`lib/db/seed-data.ts`) の 3 entity データを Postgres に upsert します。FK 整合のため `stores → deals → handoffs` の順で投入され、`ON CONFLICT DO UPDATE` でベキ等です。
 
 ```bash
-pnpm seed
+pnpm seed --tenant=firstweb
 ```
+
+対象テナントの指定は必須です。slugの代わりに`--tenant-id=<UUID>`も使えます。Firstwebの既存IDは維持し、ほかの会社では会社ごとのIDと親子参照を生成します。他社IDとの衝突時は全体を取り消します。
 
 内部的に `NODE_OPTIONS='--conditions=react-server' tsx scripts/seed.ts` を実行します(`server-only` パッケージを `react-server` condition で `empty.js` に解決させ、CLI 単体実行を可能にするため)。
 
@@ -280,7 +282,7 @@ pause しない。
      (本番プロジェクトは Site URL `https://sales.firstweb-works.com` / Redirect URLs に `https://sales.firstweb-works.com/**` を登録済み。下記「本番ドメイン」参照)
    - Authentication → Providers → Google を Enable + Google Cloud Console で OAuth 2.0 Client (Web) を作成し Authorized redirect URIs に `https://<project-ref>.supabase.co/auth/v1/callback` を登録 → Client ID/Secret を Supabase の Google Provider 設定に貼り付け
 4. **DB マイグレーション適用**: `pnpm db:migrate` (#27 で導入された short-cut、`.env.local` を自動読込)
-5. (任意) **シード投入**: `pnpm seed`
+5. (任意) **シード投入**: `pnpm seed --tenant=firstweb`
 6. **開発サーバ起動**: `pnpm dev`
 7. **動作確認**: http://localhost:3000/login → Google でサインイン → `/stores` に着地、ヘッダーにアバター + 表示名
 
