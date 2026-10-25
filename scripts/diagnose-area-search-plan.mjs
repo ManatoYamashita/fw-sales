@@ -1,4 +1,4 @@
-// #370例外: 共有DBのplanner/statisticsと現行global indexを診断するため、全テナントを対象にする。個別の業務行更新は行わない。#371でtenant indexを検証するときはSQLにもtenant条件を追加する。
+// #371: 業務行の計測は明示テナントへ絞る。共有planner/statisticsはDB全体。
 /**
  * エリア検索 bbox 候補取得の実行計画を診断する読み取り専用スクリプト (Issue #162)。
  *
@@ -22,15 +22,16 @@
  * statement_timeout を張って対象 DB を長時間占有しないようにする。
  *
  * 使い方:
- *   pnpm db:diagnose-area-search
- *   pnpm db:diagnose-area-search --bbox=35.65,139.68,35.69,139.72   (minLat,minLng,maxLat,maxLng)
- *   pnpm db:diagnose-area-search --json                             (機械可読出力)
+ *   pnpm db:diagnose-area-search --tenant=firstweb
+ *   pnpm db:diagnose-area-search --tenant=firstweb --bbox=35.65,139.68,35.69,139.72   (minLat,minLng,maxLat,maxLng)
+ *   pnpm db:diagnose-area-search --tenant=firstweb --json                             (機械可読出力)
  *
  * 接続様式は supabase-keepalive.yml と同一 (Node postgres / prepare:false / 単一接続)。
  * psql (libpq) は DATABASE_URL 中の特殊文字を host と誤読するため使わない。
  * 接続文字列の値はログに出力しない。
  */
 import postgres from "postgres";
+import { parseTenantSelection, resolveScriptTenant } from "./_tenant-args.mjs";
 import { assertDatabaseTarget } from "../lib/environment-isolation.mjs";
 
 /** Places 1 ページの最大件数。IN リストの長さを実運用に合わせる。 */
@@ -57,6 +58,7 @@ function parseArgs(argv) {
   return out;
 }
 
+const selection = parseTenantSelection(process.argv.slice(2));
 const args = parseArgs(process.argv.slice(2));
 
 let cliBbox = null;
@@ -101,6 +103,8 @@ function collect(node, key, acc = []) {
 const out = {};
 
 try {
+  const tenant = await resolveScriptTenant(sql, selection);
+  out.tenant = tenant;
   const [version] = await sql`select version() as v`;
   out.version = version.v.split(",")[0];
 
@@ -113,7 +117,7 @@ try {
            count(lng)::int                                            as with_lng,
            count(google_place_id)::int                                as with_place_id,
            count(*) filter (where lat is not null and lng is not null)::int as with_coords
-    from stores`;
+    from stores WHERE tenant_id = ${tenant.id}`;
   out.counts = counts;
 
   // -------------------------------------------------------------------------
@@ -122,7 +126,7 @@ try {
   const [size] = await sql`
     select pg_size_pretty(pg_relation_size('stores'))       as heap,
            pg_size_pretty(pg_total_relation_size('stores')) as total,
-           (select round(avg(pg_column_size(t.*)))::int from stores t) as avg_row_bytes,
+           (select round(avg(pg_column_size(t.*)))::int from stores t WHERE tenant_id = ${tenant.id}) as avg_row_bytes,
            (select sum(avg_width)::int from pg_stats
              where schemaname = 'public' and tablename = 'stores')     as planner_width`;
   out.size = size;
@@ -155,14 +159,14 @@ try {
   // 5. 代表的なパラメータの決定
   // -------------------------------------------------------------------------
   const idRows = await sql`
-    select google_place_id from stores where google_place_id is not null limit ${IN_LIST_SIZE}`;
+    select google_place_id from stores where tenant_id = ${tenant.id} and google_place_id is not null limit ${IN_LIST_SIZE}`;
   const ids = idRows.map((r) => r.google_place_id);
 
   let bbox = cliBbox;
   let bboxSource = cliBbox ? "--bbox 引数" : null;
   if (!bbox) {
     const [sample] = await sql`
-      select lat, lng from stores where lat is not null and lng is not null limit 1`;
+      select lat, lng from stores where tenant_id = ${tenant.id} and lat is not null and lng is not null limit 1`;
     if (sample) {
       bbox = {
         minLat: sample.lat - 0.02, maxLat: sample.lat + 0.02,
@@ -192,18 +196,18 @@ try {
   const QUERIES = [
     {
       id: "Q1", label: "bbox のみ + ORDER BY",
-      sql: `select * from stores where (lat >= $1 and lat <= $2 and lng >= $3 and lng <= $4) order by created_at desc`,
-      params: [bbox.minLat, bbox.maxLat, bbox.minLng, bbox.maxLng],
+      sql: `select * from stores where tenant_id = $5 and (lat >= $1 and lat <= $2 and lng >= $3 and lng <= $4) order by created_at desc`,
+      params: [bbox.minLat, bbox.maxLat, bbox.minLng, bbox.maxLng, tenant.id],
     },
     {
       id: "Q2", label: "place_id IN のみ + ORDER BY",
-      sql: `select * from stores where google_place_id in (${inPlaceholders}) order by created_at desc`,
-      params: paddedIds,
+      sql: `select * from stores where tenant_id = $21 and google_place_id in (${inPlaceholders}) order by created_at desc`,
+      params: [...paddedIds, tenant.id],
     },
     {
       id: "Q3", label: "IN OR bbox + ORDER BY (本番の実クエリ形状)",
-      sql: `select * from stores where google_place_id in (${inPlaceholders}) or (lat >= $${b + 1} and lat <= $${b + 2} and lng >= $${b + 3} and lng <= $${b + 4}) order by created_at desc`,
-      params: [...paddedIds, bbox.minLat, bbox.maxLat, bbox.minLng, bbox.maxLng],
+      sql: `select * from stores where tenant_id = $25 and (google_place_id in (${inPlaceholders}) or (lat >= $${b + 1} and lat <= $${b + 2} and lng >= $${b + 3} and lng <= $${b + 4})) order by created_at desc`,
+      params: [...paddedIds, bbox.minLat, bbox.maxLat, bbox.minLng, bbox.maxLng, tenant.id],
     },
   ];
 
@@ -241,6 +245,7 @@ try {
 
   if (hypo) {
     const HYPO_CANDIDATES = [
+      { id: "C5", label: "(tenant_id,lat,lng) 部分", ddl: "create index on stores (tenant_id, lat, lng) where lat is not null and lng is not null" },
       { id: "C1", label: "(lat,lng) 複合", ddl: "create index on stores (lat, lng)" },
       {
         id: "C3", label: "(lat,lng) 部分",

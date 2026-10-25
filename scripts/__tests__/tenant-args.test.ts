@@ -9,7 +9,7 @@ describe("明示テナントのCLI引数", () => {
   it.each([["--tenant=firstweb"], ["--tenant", "firstweb"]])("slugを受け付ける: %j", (...args) => { expect(parseTenantSelection(args)).toEqual({ kind: "tenant", value: "firstweb" }); });
   it.each([[`--tenant-id=${A}`], ["--tenant-id", A]])("UUIDを受け付ける: %j", (...args) => { expect(parseTenantSelection(args)).toEqual({ kind: "tenant-id", value: A }); });
   it.each([[], ["--tenant"], ["--tenant="], ["--tenant", "--apply"], ["--tenant-id=bad"], ["--tenant=../bad"], ["--tenant=a", "--tenant=b"], ["--tenant=a", `--tenant-id=${A}`]])("未指定・不正・重複を拒否: %j", (...args) => { expect(() => parseTenantSelection(args)).toThrow(); });
-  it.each(["scripts/seed.ts", "scripts/backfill-basic-info.ts", "scripts/list-store-name-memos.ts", "scripts/set-profile-role.mjs"])("%sは対象未指定ならDB初期化前に失敗する", (file) => {
+  it.each(["scripts/seed.ts", "scripts/backfill-basic-info.ts", "scripts/list-store-name-memos.ts", "scripts/set-profile-role.mjs", "scripts/diagnose-area-search-plan.mjs"])("%sは対象未指定ならDB初期化前に失敗する", (file) => {
     const args = file.endsWith(".ts") ? ["node_modules/tsx/dist/cli.mjs", file] : [file];
     const result = spawnSync(process.execPath, args, { env: { ...process.env, NODE_OPTIONS: "--conditions=react-server", DATABASE_URL: "postgres://not-a-real-database.invalid/db" }, encoding: "utf8", timeout: 5000 });
     expect(result.status).not.toBe(0); expect(result.stderr).toContain("--tenant");

@@ -44,12 +44,12 @@ async function seedLegacyUser(tx: postgres.TransactionSql): Promise<void> {
   await tx`UPDATE memberships SET role = 'admin' WHERE user_id = ${LEGACY_LOCAL_USER_ID}`;
   await tx`INSERT INTO auth.users (id, email, raw_user_meta_data)
     VALUES (${OTHER_USER_ID}, 'other@example.test', '{}'::jsonb)`;
-  await tx`INSERT INTO notifications (id, user_id, kind, title, body, created_at, updated_at) VALUES
-    ('notif_355_legacy', ${LEGACY_LOCAL_USER_ID}, 'research_job_completed', 't', 'b', '2026-10-01', '2026-10-01'),
-    ('notif_355_other', ${OTHER_USER_ID}, 'research_job_completed', 't', 'b', '2026-10-01', '2026-10-01')`;
+  await tx`INSERT INTO notifications (tenant_id, id, user_id, kind, title, body, created_at, updated_at) VALUES
+    (${FIRSTWEB_TENANT_ID}, 'notif_355_legacy', ${LEGACY_LOCAL_USER_ID}, 'research_job_completed', 't', 'b', '2026-10-01', '2026-10-01'),
+    (${FIRSTWEB_TENANT_ID}, 'notif_355_other', ${OTHER_USER_ID}, 'research_job_completed', 't', 'b', '2026-10-01', '2026-10-01')`;
   // ON DELETE CASCADE の参照。旧ユーザーを消す前に付け替えないと、一緒に消える。
-  await tx`INSERT INTO ai_prompt_templates (user_id, name, is_default, body, created_at, updated_at)
-    VALUES (${LEGACY_LOCAL_USER_ID}, '既定', true, '{"fewshots":[]}', '2026-10-01', '2026-10-01')`;
+  await tx`INSERT INTO ai_prompt_templates (tenant_id, user_id, name, is_default, body, created_at, updated_at)
+    VALUES (${FIRSTWEB_TENANT_ID}, ${LEGACY_LOCAL_USER_ID}, '既定', true, '{"fewshots":[]}', '2026-10-01', '2026-10-01')`;
 }
 
 describe("migrateLegacyLocalUser (#355)", () => {

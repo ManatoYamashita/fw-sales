@@ -1,15 +1,6 @@
-/**
- * テナント基盤の migration (0032, #366) が DB に作るものを、実 PostgreSQL で確かめる。
- *
- * 0032 は `lib/db/schema.ts` を変えない expand の migration で、アプリはまだ `tenant_id` を知らない。
- * この段階の約束 (既定値で Firstweb に入る・新規ユーザーに所属が作られる・クライアントから読めない) は、
- * DB のカタログと実際の INSERT でしか確かめられない。CI の `Audit DB integration` job
- * (migration 適用済みの postgres:15-alpine) で実行する。
- *
- * 既存データの移し替え (profiles → memberships、既存行の tenant_id) は、CI の DB が migration の
- * 時点で空のため、ここでは確かめられない。データの入った DB へ適用して確認する (#366 の PR に記録)。
- *
- * 他の結合テストと DB を共有するため、書き込むテストはトランザクション内で行い、最後に ROLLBACK する。
+/** テナント基盤とcontract後のDB制約を実Postgresで確認する (#366 / #371)。
+ * DEFAULT撤去後もFirstwebとmembershipの基盤・Data API権限を維持する。
+ * 書込みは各transactionの最後にrollbackする。
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import postgres from "postgres";
@@ -68,7 +59,7 @@ describe("テナント基盤の migration (#366)", () => {
       .toEqual([{ id: FIRSTWEB_TENANT_ID, slug: "firstweb", name: "Firstweb" }]);
   });
 
-  it("業務テーブルの tenant_id は NOT NULL で、既定値が Firstweb", async () => {
+  it("業務テーブルの tenant_id は NOT NULL で、DEFAULTを持たない", async () => {
     const columns = await sql`
       SELECT table_name, data_type, is_nullable, column_default
       FROM information_schema.columns
@@ -77,7 +68,7 @@ describe("テナント基盤の migration (#366)", () => {
     expect(columns.map((column) => column.table_name).sort()).toEqual([...TENANT_SCOPED_TABLES].sort());
     for (const column of columns) {
       expect(column, column.table_name).toMatchObject({ data_type: "uuid", is_nullable: "NO" });
-      expect(column.column_default, column.table_name).toContain(FIRSTWEB_TENANT_ID);
+      expect(column.column_default, column.table_name).toBeNull();
     }
   });
 
@@ -97,18 +88,18 @@ describe("テナント基盤の migration (#366)", () => {
     }
 
     await inRolledBackTransaction(sql, async (tx) => {
-      await tx`INSERT INTO app_settings (key, value, updated_at)
-        VALUES ('tenant_foundation_restrict', 'v', '2026-10-17')`;
+      await tx`INSERT INTO app_settings (tenant_id, key, value, updated_at)
+        VALUES (${FIRSTWEB_TENANT_ID}, 'tenant_foundation_restrict', 'v', '2026-10-17')`;
       await expect(tx.savepoint((sp) => sp`DELETE FROM tenants WHERE id = ${FIRSTWEB_TENANT_ID}`))
         .rejects.toMatchObject({ code: "23503" });
     });
   });
 
-  it("tenant_id を指定しない INSERT は Firstweb に入る (tenant_id を知らない今のアプリの書き込み)", async () => {
+  it("tenant_id を指定しない INSERT はNOT NULL違反となり、Firstwebへ補完しない", async () => {
     await inRolledBackTransaction(sql, async (tx) => {
-      const rows = await tx`INSERT INTO app_settings (key, value, updated_at)
-        VALUES ('tenant_foundation_default', 'v', '2026-10-17') RETURNING tenant_id`;
-      expect(rows).toEqual([{ tenant_id: FIRSTWEB_TENANT_ID }]);
+      await expect(tx.savepoint(sp => sp`INSERT INTO app_settings (key, value, updated_at)
+        VALUES ('tenant_foundation_default', 'v', '2026-10-17')`)).rejects.toMatchObject({ code: "23502", column_name: "tenant_id" });
+      expect(await tx`SELECT key FROM app_settings WHERE key='tenant_foundation_default'`).toHaveLength(0);
     });
   });
 

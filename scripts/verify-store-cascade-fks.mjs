@@ -52,11 +52,18 @@ try {
   // stores を親とする FK を全数取得する。後者が逆方向チェックの母集合になる。
   const rows = await sql`
     select conname,
+           convalidated,
+           ARRAY(SELECT a.attname FROM unnest(c.conkey) WITH ORDINALITY k(num, ord)
+                 JOIN pg_attribute a ON a.attrelid=c.conrelid AND a.attnum=k.num ORDER BY k.ord) AS columns,
+           ARRAY(SELECT a.attname FROM unnest(c.confkey) WITH ORDINALITY k(num, ord)
+                 JOIN pg_attribute a ON a.attrelid=c.confrelid AND a.attnum=k.num ORDER BY k.ord) AS foreign_columns,
+           ARRAY(SELECT a.attname FROM unnest(c.confdelsetcols) WITH ORDINALITY k(num, ord)
+                 JOIN pg_attribute a ON a.attrelid=c.conrelid AND a.attnum=k.num ORDER BY k.ord) AS set_null_columns,
            conrelid::regclass::text as child,
            confrelid::regclass::text as parent,
            confdeltype,
            pg_get_constraintdef(oid) as def
-    from pg_constraint
+    from pg_constraint c
     where contype = 'f'
       and (conname = any(${EXPECTED.map((e) => e.conname)})
            or confrelid = 'stores'::regclass)`;
@@ -72,11 +79,14 @@ try {
       console.error(`   expected: ON DELETE ${want} / actual: 制約が存在しません`);
       continue;
     }
-    if (actual.child !== expected.child || actual.confdeltype !== expected.deltype) {
+    if (actual.child !== expected.child || actual.parent !== expected.parent || actual.confdeltype !== expected.deltype || !actual.convalidated
+        || JSON.stringify(actual.columns) !== JSON.stringify(expected.columns)
+        || JSON.stringify(actual.foreign_columns) !== JSON.stringify(expected.foreignColumns)
+        || JSON.stringify(actual.set_null_columns) !== JSON.stringify(expected.setNullColumns)) {
       failures++;
       const got = DELTYPE_LABEL[actual.confdeltype] ?? actual.confdeltype;
       console.error(`NG ${actual.child} | ${expected.conname}`);
-      console.error(`   expected: ON DELETE ${want} / actual: ON DELETE ${got}`);
+      console.error(`   expected: (${expected.columns}) → ${expected.parent}(${expected.foreignColumns}), ON DELETE ${want}, SET NULL列(${expected.setNullColumns}), VALIDATED / actual: ON DELETE ${got}`);
       console.error(`   def: ${actual.def}`);
       continue;
     }

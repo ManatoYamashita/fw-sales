@@ -108,20 +108,20 @@ describe("stores を参照する子テーブルと削除影響カテゴリの整
       a.child.localeCompare(b.child),
     );
     expect(fks).toEqual([
-      { child: "deals", column: "store_id", onDelete: "cascade" },
+      { child: "deals", column: "tenant_id,store_id", onDelete: "cascade" },
       {
         child: "handoffs",
-        column: "store_id",
+        column: "tenant_id,store_id",
         onDelete: "cascade",
       },
       {
         child: "place_candidates",
-        column: "matched_store_id",
+        column: "tenant_id,matched_store_id",
         onDelete: "set null",
       },
       {
         child: "store_research_runs",
-        column: "store_id",
+        column: "tenant_id,store_id",
         onDelete: "cascade",
       },
     ]);
@@ -190,6 +190,6 @@ describe("FK ポリシー期待値 (EXPECTED) と schema.ts 宣言の整合 (#24
       .map((expected) => expected.conname)
       .sort();
 
-    expect(nonStoreParents).toEqual(["handoffs_deal_id_deals_id_fk"]);
+    expect(nonStoreParents).toEqual(["handoffs_tenant_deal_fk"]);
   });
 });

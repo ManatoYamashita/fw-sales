@@ -48,7 +48,18 @@ describe("テナント分離の静的ガード (#369 骨格)", () => {
     for (const table of tables) {
       const config = getTableConfig(table);
       if (["tenants", "profiles", "memberships"].includes(config.name)) continue;
-      expect(config.columns.find((column) => column.name === "tenant_id")?.notNull, config.name).toBe(true);
+      const tenant = config.columns.find((column) => column.name === "tenant_id");
+      expect(tenant?.notNull, config.name).toBe(true);
+      expect(tenant?.hasDefault, config.name).toBe(false);
+      for (const fk of config.foreignKeys) {
+        const ref = fk.reference();
+        const parent = getTableConfig(ref.foreignTable);
+        // tenantsは所属の参照、profilesは会社を跨ぐidentity。業務行同士は複合FKを必須にする。
+        if (["tenants", "profiles", "memberships"].includes(parent.name)) continue;
+        const childTenant = ref.columns.findIndex(column => column.name === "tenant_id");
+        expect(childTenant, fk.getName()).toBeGreaterThanOrEqual(0);
+        expect(ref.foreignColumns[childTenant]?.name, fk.getName()).toBe("tenant_id");
+      }
     }
   });
   it("全タグがテナントを必須とし、同じ ID でも別テナントとは一致しない", () => {

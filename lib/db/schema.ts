@@ -7,6 +7,7 @@ import {
   index,
   uniqueIndex,
   unique,
+  foreignKey,
   uuid,
   jsonb,
   boolean,
@@ -25,8 +26,7 @@ import type {
 /**
  * Firstweb テナントの ID (migration 0032 が固定値で作る)。
  *
- * マルチテナント化 (#365) の移行期間は、業務テーブルの `tenant_id` の既定値でもあり、
- * `tenant_id` を指定しない書き込みは Firstweb に入る。既定値は #371 で外す。
+ * 業務テーブルのtenant_idにはDEFAULTを持たせず、すべての書込みで所属を明示する (#371)。
  */
 import { FIRSTWEB_TENANT_ID } from "@/lib/tenant/id";
 export { FIRSTWEB_TENANT_ID };
@@ -51,12 +51,11 @@ export const tenants = pgTable("tenants", {
 
 /**
  * 業務テーブルの所属テナント。データが残っているテナントは削除できない (ON DELETE RESTRICT)。
- * 既定値は移行期間だけのもので、#371 で外す。
+ * DEFAULTを持たせず、書き忘れをNOT NULL違反として拒否する。
  */
 function tenantIdColumn() {
   return uuid("tenant_id")
     .notNull()
-    .default(FIRSTWEB_TENANT_ID)
     .references(() => tenants.id, { onDelete: "restrict" });
 }
 
@@ -70,7 +69,7 @@ function tenantIdColumn() {
 export const eventLogs = pgTable("event_logs", {
   id: text("id").primaryKey(),
   /** 証跡を残すため、tenants への FK も張らない (上記の方針)。 */
-  tenant_id: uuid("tenant_id").notNull().default(FIRSTWEB_TENANT_ID),
+  tenant_id: uuid("tenant_id").notNull(),
   occurred_at: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
   level: text("level").$type<"info" | "warn">().notNull(),
   kind: text("kind").$type<"mutation" | "authz_denied">().notNull(),
@@ -171,7 +170,9 @@ export const notifications = pgTable("notifications", {
   read_at: text("read_at"),
   created_at: text("created_at").notNull(),
   updated_at: text("updated_at").notNull(),
-}).enableRLS();
+}, (table) => [
+  index("notifications_tenant_user_created_idx").on(table.tenant_id, table.user_id, table.created_at.desc().nullsFirst()),
+]).enableRLS();
 
 /**
  * stores テーブル
@@ -248,11 +249,10 @@ export const stores = pgTable("stores", {
   updated_at: text("updated_at").notNull(),
 }, (table) => [
   unique("stores_tenant_id_id_unique").on(table.tenant_id, table.id),
-  index("stores_tenant_created_idx").on(table.tenant_id, table.created_at.desc()),
+  index("stores_tenant_created_idx").on(table.tenant_id, table.created_at.desc().nullsFirst()),
   index("stores_tenant_google_place_idx").on(table.tenant_id, table.google_place_id),
   index("stores_tenant_lat_lng_idx").on(table.tenant_id, table.lat, table.lng)
     .where(sql`${table.lat} is not null and ${table.lng} is not null`),
-  index("stores_google_place_id_idx").on(table.google_place_id),
 ]).enableRLS();
 
 /**
@@ -269,8 +269,7 @@ export const deals = pgTable("deals", {
   id: text("id").primaryKey(),
   tenant_id: tenantIdColumn(),
   store_id: text("store_id")
-    .notNull()
-    .references(() => stores.id, { onDelete: "cascade" }),
+    .notNull(),
   store_name: text("store_name").notNull(),
   date: text("date").notNull(),
   meeting_type: text("meeting_type").notNull(),
@@ -304,10 +303,10 @@ export const deals = pgTable("deals", {
 }, (table) => [
   unique("deals_tenant_id_id_unique").on(table.tenant_id, table.id),
   index("deals_tenant_store_idx").on(table.tenant_id, table.store_id),
-  index("deals_tenant_created_idx").on(table.tenant_id, table.created_at.desc()),
+  index("deals_tenant_created_idx").on(table.tenant_id, table.created_at.desc().nullsFirst()),
   // store-cascade-delete (#152): FK 列インデックス。cascade 削除の子走査と
   // 削除影響カウント (getDeleteImpact) の seq scan を回避する。
-  index("deals_store_id_idx").on(table.store_id),
+  foreignKey({ name: "deals_tenant_store_fk", columns: [table.tenant_id, table.store_id], foreignColumns: [stores.tenant_id, stores.id] }).onDelete("cascade"),
 ]).enableRLS();
 
 // Issue #110: 旧手入力調査テーブル `research` を撤去。
@@ -332,12 +331,10 @@ export const handoffs = pgTable("handoffs", {
   id: text("id").primaryKey(),
   tenant_id: tenantIdColumn(),
   store_id: text("store_id")
-    .notNull()
-    .references(() => stores.id, { onDelete: "cascade" }),
+    .notNull(),
   store_name: text("store_name").notNull(),
   deal_id: text("deal_id")
-    .notNull()
-    .references(() => deals.id, { onDelete: "cascade" }),
+    .notNull(),
   contract_services: text("contract_services").notNull(),
   initial_fee: integer("initial_fee").notNull(),
   monthly_fee: integer("monthly_fee").notNull(),
@@ -357,43 +354,18 @@ export const handoffs = pgTable("handoffs", {
 }, (table) => [
   index("handoffs_tenant_store_idx").on(table.tenant_id, table.store_id),
   index("handoffs_tenant_deal_idx").on(table.tenant_id, table.deal_id),
-  index("handoffs_tenant_created_idx").on(table.tenant_id, table.created_at.desc()),
+  index("handoffs_tenant_created_idx").on(table.tenant_id, table.created_at.desc().nullsFirst()),
   // store-cascade-delete (#152): FK 列インデックス (deals_store_id_idx と同趣旨)。
   // deal_id は deals 削除の cascade 走査も受けるため両列に張る。
-  index("handoffs_store_id_idx").on(table.store_id),
-  index("handoffs_deal_id_idx").on(table.deal_id),
+  foreignKey({ name: "handoffs_tenant_store_fk", columns: [table.tenant_id, table.store_id], foreignColumns: [stores.tenant_id, stores.id] }).onDelete("cascade"),
+  foreignKey({ name: "handoffs_tenant_deal_fk", columns: [table.tenant_id, table.deal_id], foreignColumns: [deals.tenant_id, deals.id] }).onDelete("cascade"),
 ]).enableRLS();
 
 /**
- * ai_prompt_templates テーブル (Issue #42)
- *
- * 各ユーザーが保持する Gemini プロンプトの Few-shot テンプレート。
- *
- * - `id` は uuid PK、`gen_random_uuid()` で自動生成 (`.defaultRandom()`)
- * - `user_id` は `profiles.id` への FK (ON DELETE CASCADE)
- * - `body` は `{ fewshots: FewShotExample[] }` を JSON 文字列として格納 (既存 ai_analysis_result 規約に揃える)
- * - `is_default` = true の partial unique index は migration 0010 で raw SQL として追加
- *   (下記「partial index と Drizzle」を参照)
- * - デフォルトテンプレート削除拒否は migration 0010 の DB trigger で保証
- * - `created_at` / `updated_at` は `YYYY-MM-DD` 形式 text (既存規約に揃える)
- * - RLSはDrizzle migrationで管理し、Data API用のクライアントポリシーは作成しない (#46)
- *
- * ## partial index と Drizzle
- *
- * 本 JSDoc は当初「Drizzle ORM が partial unique index の WHERE 句を直接サポートしない」と
- * 記載していたが、**現行の drizzle-orm では誤り**である。`IndexBuilder` は `.where(condition: SQL)`
- * を持ち (`node_modules/drizzle-orm/pg-core/indexes.d.ts`)、`index()` / `uniqueIndex()` の
- * どちらからでも `uniqueIndex("...").on(table.user_id).where(sql`...`)` と表現できる。
- * raw SQL で持っているのは 0010 作成当時の制約に由来する歴史的経緯であり、現在の制約ではない。
- *
- * ただし **schema.ts 側へ移す場合は snapshot との同期に注意**すること。
- * `ai_prompt_templates_default_idx` は drizzle の snapshot に載っておらず
- * (`drizzle/meta/*_snapshot.json` の indexes は `ai_prompt_templates_user_idx` のみ)、
- * schema.ts に宣言を足すと `pnpm db:generate` が「DB に無い index」とみなして
- * 重複した `CREATE UNIQUE INDEX` を生成する。移行するなら生成物の確認が必須。
- * 現状は動作しているため、本コミットでは記述の訂正のみを行い宣言は移していない。
- *
- * 関連: Issue #42, drizzle/0010_add_ai_prompt_templates.sql
+ * ユーザーのプロンプトテンプレート。1社×1ユーザーにつき既定1件・最大5件。
+ * 部分uniqueは0033でschema/snapshotへ登録し、0010の旧global indexは0034で撤去する。
+ * 件数上限は0034のtriggerが同じ会社×ユーザーのtransaction lockを取得して強制する。
+ * profile参照と既定の直接削除拒否は維持する。所属削除で履歴を消さない (#371)。
  */
 export const aiPromptTemplates = pgTable(
   "ai_prompt_templates",
@@ -411,12 +383,11 @@ export const aiPromptTemplates = pgTable(
     updated_at: text("updated_at").notNull(),
   },
   (table) => [
-    index("ai_prompt_templates_tenant_user_created_idx").on(table.tenant_id, table.user_id, table.created_at.desc()),
+    index("ai_prompt_templates_tenant_user_created_idx").on(table.tenant_id, table.user_id, table.created_at.desc().nullsFirst()),
     uniqueIndex("ai_prompt_templates_tenant_user_default_idx")
       .on(table.tenant_id, table.user_id).where(sql`${table.is_default} = true`),
     index("ai_prompt_templates_user_idx").on(table.user_id),
-    // partial unique index (WHERE is_default = true) は migration 0010 に raw SQL で追加。
-    // Drizzle でも .where() で表現できるが snapshot 未登録のため移行には注意 (上の JSDoc 参照)
+    // 旧global default index (0010) はcontract migration 0034で撤去する。
   ],
 ).enableRLS();
 
@@ -425,20 +396,20 @@ export const aiPromptTemplates = pgTable(
  *
  * テナントごとの設定をキー・バリュー形式で保持する汎用テーブル。
  *
- * - `key` は現在global PK。#371で (tenant_id, key) に移す。
- * - repositoryのupsertは同じtenant_idの行だけを更新し、他社とのキー衝突は失敗する。
+ * - 主キーは (tenant_id, key)。同名の設定を会社ごとに保持する。
+ * - repositoryのupsertは (tenant_id, key) で衝突を解決する。
  * - keepalive cronは暫定的にFirstwebを明示し、設定画面は現在のテナントの記録を読む。
  * - `updated_at` は既存規約の YYYY-MM-DD 形式text（keepalive値自体はISO日時）。
  *
  * 関連: Issue #122, drizzle/0019_add_app_settings.sql
  */
 export const appSettings = pgTable("app_settings", {
-  key: text("key").primaryKey(),
+  key: text("key").notNull(),
   tenant_id: tenantIdColumn(),
   value: text("value").notNull(),
   updated_at: text("updated_at").notNull(),
 }, (table) => [
-  uniqueIndex("app_settings_tenant_key_idx").on(table.tenant_id, table.key),
+  primaryKey({ name: "app_settings_tenant_key_pk", columns: [table.tenant_id, table.key] }),
 ]).enableRLS();
 
 /**
@@ -449,7 +420,7 @@ export const appSettings = pgTable("app_settings", {
  * 等の土台であり、本テーブル自体の一覧表示・再利用は別実装とする。
  *
  * - `id` は `<entity>_<id>` 形式の text PK (既存規約)
- * - `google_place_id` は UNIQUE。同じ候補は1レコードに統合し、`seen_count` を加算する
+ * - `(tenant_id, google_place_id)` は UNIQUE。同じ候補は1レコードに統合し、`seen_count` を加算する
  * - `status` は `'candidate' | 'added' | 'ignored' | 'stale'` (`PlaceCandidateStatus`)。
  *   Postgres ENUM 化せず text として保持し、値の妥当性は repository / TS 型で担保する
  * - `discovery_sources` は `AreaSearchDiscoverySource[]` を jsonb 配列として保持する
@@ -479,18 +450,16 @@ export const placeCandidates = pgTable("place_candidates", {
   last_radius_meters: integer("last_radius_meters"),
   last_distance_meters: real("last_distance_meters"),
   last_is_within_radius: boolean("last_is_within_radius"),
-  matched_store_id: text("matched_store_id").references(() => stores.id, {
-    onDelete: "set null",
-  }),
+  matched_store_id: text("matched_store_id"),
   created_at: text("created_at").notNull(),
   updated_at: text("updated_at").notNull(),
 }, (table) => [
   uniqueIndex("place_candidates_tenant_google_place_idx").on(table.tenant_id, table.google_place_id),
   index("place_candidates_tenant_matched_store_idx").on(table.tenant_id, table.matched_store_id),
-  uniqueIndex("place_candidates_google_place_id_idx").on(table.google_place_id),
   // store-cascade-delete (#152): FK 列インデックス。店舗削除時の SET NULL 走査と
   // 削除影響カウント (getDeleteImpact) の seq scan を回避する。
-  index("place_candidates_matched_store_id_idx").on(table.matched_store_id),
+  // 指定列SET NULLはDrizzleで表現できないため、migration 0034のraw SQLでmatched_store_idだけをNULLにする。
+  foreignKey({ name: "place_candidates_tenant_store_fk", columns: [table.tenant_id, table.matched_store_id], foreignColumns: [stores.tenant_id, stores.id] }).onDelete("set null"),
 ]).enableRLS();
 
 /**
@@ -526,8 +495,7 @@ export const storeResearchRuns = pgTable(
     id: text("id").primaryKey(),
     tenant_id: tenantIdColumn(),
     store_id: text("store_id")
-      .notNull()
-      .references(() => stores.id, { onDelete: "cascade" }),
+      .notNull(),
     /** 起動者の監査用。`profiles.id` への FK (nullable、システム起動等を許容)。 */
     requested_by_user_id: uuid("requested_by_user_id").references(
       () => profiles.id,
@@ -574,17 +542,12 @@ export const storeResearchRuns = pgTable(
     }),
   },
   (table) => [
-    index("store_research_runs_tenant_store_started_idx").on(table.tenant_id, table.store_id, table.started_at.desc()),
+    index("store_research_runs_tenant_store_started_idx").on(table.tenant_id, table.store_id, table.started_at.desc().nullsFirst()),
     uniqueIndex("store_research_runs_tenant_running_store_idx")
       .on(table.tenant_id, table.store_id).where(sql`${table.status} = 'running'`),
     // 店舗ごとの最新run取得用 (「レビュー待ち」判定・過去run一覧に使用)。
-    index("store_research_runs_store_started_idx").on(
-      table.store_id,
-      table.started_at,
-    ),
+    foreignKey({ name: "store_research_runs_tenant_store_fk", columns: [table.tenant_id, table.store_id], foreignColumns: [stores.tenant_id, stores.id] }).onDelete("cascade"),
     // 二重実行防止: 同一店舗で status='running' の行は1件のみ許可する。
-    uniqueIndex("store_research_runs_running_store_idx")
-      .on(table.store_id)
-      .where(sql`${table.status} = 'running'`),
+
   ],
 ).enableRLS();
