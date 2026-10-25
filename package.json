@@ -9,6 +9,7 @@
     "local:setup": "node --env-file-if-exists=.env.local-preview scripts/local-preview.mjs setup",
     "local:open": "node --env-file-if-exists=.env.local-preview scripts/local-preview.mjs open",
     "local:status": "node --env-file-if-exists=.env.local-preview scripts/local-preview.mjs status",
+    "local:diagnose": "node --env-file-if-exists=.env.local-preview scripts/diagnose-dev-server.mjs",
     "local:stop": "node scripts/local-preview.mjs stop",
     "build": "node --env-file-if-exists=.env.local scripts/check-required-env.mjs && next build",
     "start": "next start",
