@@ -6,6 +6,7 @@ import {
   real,
   index,
   uniqueIndex,
+  unique,
   uuid,
   jsonb,
   boolean,
@@ -246,6 +247,11 @@ export const stores = pgTable("stores", {
   created_at: text("created_at").notNull(),
   updated_at: text("updated_at").notNull(),
 }, (table) => [
+  unique("stores_tenant_id_id_unique").on(table.tenant_id, table.id),
+  index("stores_tenant_created_idx").on(table.tenant_id, table.created_at.desc()),
+  index("stores_tenant_google_place_idx").on(table.tenant_id, table.google_place_id),
+  index("stores_tenant_lat_lng_idx").on(table.tenant_id, table.lat, table.lng)
+    .where(sql`${table.lat} is not null and ${table.lng} is not null`),
   index("stores_google_place_id_idx").on(table.google_place_id),
 ]).enableRLS();
 
@@ -296,6 +302,9 @@ export const deals = pgTable("deals", {
   created_at: text("created_at").notNull(),
   updated_at: text("updated_at").notNull(),
 }, (table) => [
+  unique("deals_tenant_id_id_unique").on(table.tenant_id, table.id),
+  index("deals_tenant_store_idx").on(table.tenant_id, table.store_id),
+  index("deals_tenant_created_idx").on(table.tenant_id, table.created_at.desc()),
   // store-cascade-delete (#152): FK 列インデックス。cascade 削除の子走査と
   // 削除影響カウント (getDeleteImpact) の seq scan を回避する。
   index("deals_store_id_idx").on(table.store_id),
@@ -346,6 +355,9 @@ export const handoffs = pgTable("handoffs", {
   created_at: text("created_at").notNull(),
   updated_at: text("updated_at").notNull(),
 }, (table) => [
+  index("handoffs_tenant_store_idx").on(table.tenant_id, table.store_id),
+  index("handoffs_tenant_deal_idx").on(table.tenant_id, table.deal_id),
+  index("handoffs_tenant_created_idx").on(table.tenant_id, table.created_at.desc()),
   // store-cascade-delete (#152): FK 列インデックス (deals_store_id_idx と同趣旨)。
   // deal_id は deals 削除の cascade 走査も受けるため両列に張る。
   index("handoffs_store_id_idx").on(table.store_id),
@@ -399,6 +411,9 @@ export const aiPromptTemplates = pgTable(
     updated_at: text("updated_at").notNull(),
   },
   (table) => [
+    index("ai_prompt_templates_tenant_user_created_idx").on(table.tenant_id, table.user_id, table.created_at.desc()),
+    uniqueIndex("ai_prompt_templates_tenant_user_default_idx")
+      .on(table.tenant_id, table.user_id).where(sql`${table.is_default} = true`),
     index("ai_prompt_templates_user_idx").on(table.user_id),
     // partial unique index (WHERE is_default = true) は migration 0010 に raw SQL で追加。
     // Drizzle でも .where() で表現できるが snapshot 未登録のため移行には注意 (上の JSDoc 参照)
@@ -422,7 +437,9 @@ export const appSettings = pgTable("app_settings", {
   tenant_id: tenantIdColumn(),
   value: text("value").notNull(),
   updated_at: text("updated_at").notNull(),
-}).enableRLS();
+}, (table) => [
+  uniqueIndex("app_settings_tenant_key_idx").on(table.tenant_id, table.key),
+]).enableRLS();
 
 /**
  * place_candidates テーブル (エリア検索 候補DB保存の土台 / Issue #129 follow-up)
@@ -468,6 +485,8 @@ export const placeCandidates = pgTable("place_candidates", {
   created_at: text("created_at").notNull(),
   updated_at: text("updated_at").notNull(),
 }, (table) => [
+  uniqueIndex("place_candidates_tenant_google_place_idx").on(table.tenant_id, table.google_place_id),
+  index("place_candidates_tenant_matched_store_idx").on(table.tenant_id, table.matched_store_id),
   uniqueIndex("place_candidates_google_place_id_idx").on(table.google_place_id),
   // store-cascade-delete (#152): FK 列インデックス。店舗削除時の SET NULL 走査と
   // 削除影響カウント (getDeleteImpact) の seq scan を回避する。
@@ -555,6 +574,9 @@ export const storeResearchRuns = pgTable(
     }),
   },
   (table) => [
+    index("store_research_runs_tenant_store_started_idx").on(table.tenant_id, table.store_id, table.started_at.desc()),
+    uniqueIndex("store_research_runs_tenant_running_store_idx")
+      .on(table.tenant_id, table.store_id).where(sql`${table.status} = 'running'`),
     // 店舗ごとの最新run取得用 (「レビュー待ち」判定・過去run一覧に使用)。
     index("store_research_runs_store_started_idx").on(
       table.store_id,
