@@ -11,10 +11,11 @@ Issue: [#384](https://github.com/ManatoYamashita/fw-sales/issues/384) ／ Phase 
 
 ## Phase 1：merge前と適用後
 
-1. **merge前：** [手動バックアップと復元確認](manual-db-backup-runbook.md)を済ませ、結果をPR #387に記録します。Freeプランには自動バックアップがありません。
-   - **#384では実施していません。** 2026-10-24に、今回はバックアップの取得と復元確認を行わずに進める方針に変えました。そのため、#384の適用前の状態に戻すためのバックアップはありません。
-2. **merge前：** PR #387の「適用前の確認」のSELECTを、本番で取ります。
-3. **merge：** 利用の少ない時間帯に行います。バックアップを取る場合は、`pg_dump`が終わっていることを確かめてから、mergeしてください。
+1. **バックアップ（#384では今回は省略する方針）：** Freeプランには自動バックアップがありません。本番のスキーマを変えるmigrationでは、原則として[手動バックアップと復元確認](manual-db-backup-runbook.md)を行います。ただし#384では、2026-10-24に、バックアップの取得と復元確認を今回は省略する方針にしました。
+   - **残るリスク：** #384の適用前の本番の状態に戻すバックアップはありません。適用後に業務データが壊れても、全体を戻す手段がありません。
+   - 定期バックアップと復元テストの体制は、Issue [#400](https://github.com/ManatoYamashita/fw-sales/issues/400)で整えます。手順書は、今後使えるように残しています。
+2. **merge前：** PR #387の「適用前の確認」のSELECTを、本番で取ります。バックアップが無い分、適用の前後で業務データが変わっていないことを示す記録になります。
+3. **merge：** 利用の少ない時間帯に行います。今後バックアップを取る場合は、`pg_dump`が終わっていることを確かめてから、mergeしてください（`pg_dump`のロックで、migrationがロック待ちの打ち切りになるため）。
 4. **適用後：** Apply Migrationsのmigrate-devとmigrate-prdが成功し、両方で`db:verify-hashes`と`db:verify-fks`がOKになることを確かめます。
 5. **適用後：** 次の「Phase 2の着手条件」のSQLを、本番とdevで実行します。
 6. **記録：** 結果を#384に記録します（対象SHA・日時・SQLの結果）。
@@ -59,7 +60,9 @@ ALTER TABLE "stores" ADD COLUMN "contact_email" text DEFAULT '' NOT NULL;
 
 ```sql
 -- 0033 で追加済みの stores.contact_email が、schema.ts と同じ定義 (text / NOT NULL / DEFAULT '') かを確かめる (#384)。
--- 列を足す DDL ではないため、stores のロックは取らない。定義が違えば migration 全体を失敗させる。
+-- information_schema.columns を読む間だけ stores の AccessShare ロックを一瞬取るため、待ちを 3 秒で打ち切る。
+SET LOCAL lock_timeout = '3s';
+--> statement-breakpoint
 DO $$
 DECLARE
   col record;
@@ -84,7 +87,9 @@ END $$;
 | --- | --- |
 | 生成された`ADD COLUMN`のまま | 列のあるdev・prdで`column already exists`になり、Apply Migrationsが失敗する。Vercelはアプリを先に配信するので、migrationの来歴が止まったまま本番が動くことになる |
 | `ADD COLUMN IF NOT EXISTS` | 既存の列の型・NOT NULL・DEFAULTが違っていても、NOTICEを出すだけで通る（NULL許容の列で再現済み）。さらに、何もしない場合でも`stores`のACCESS EXCLUSIVEロックを取る |
-| 確認ブロック（採用） | カタログを読むだけで、`stores`のロックを取らない。列が無い場合と定義が違う場合は、migration全体を失敗させる |
+| 確認ブロック（採用） | 列の定義を読むだけ。列が無い場合と定義が違う場合は、migration全体を失敗させる |
+
+確認ブロックは`information_schema.columns`を読む間だけ、`stores`のAccessShareロックを一瞬取り、読み終えるとすぐ放します。通常の読み書きとはぶつかりません。ただ、ほかのDDLが`stores`の排他ロックを持っていると、その間は待たされます（PostgreSQL 17.11で再現済み）。そのため、0033と同じく`lock_timeout`を3秒にしています。
 
 ### 2. レビューで確かめること（PRのチェックリストに写す）
 
