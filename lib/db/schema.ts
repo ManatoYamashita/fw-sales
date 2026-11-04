@@ -198,6 +198,7 @@ export const stores = pgTable("stores", {
   site_url: text("site_url").notNull(),
   instagram_url: text("instagram_url").notNull(),
   phone: text("phone").notNull(),
+  contact_email: text("contact_email").notNull().default(""),
   target_service: text("target_service").notNull(),
   review_count: integer("review_count").notNull(),
   review_avg: real("review_avg").notNull(),

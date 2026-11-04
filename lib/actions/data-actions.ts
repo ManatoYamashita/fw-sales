@@ -26,6 +26,7 @@
 import { revalidateTag } from "next/cache";
 import type { DbSnapshot } from "@/lib/db/snapshot";
 import { repos } from "@/lib/repositories";
+import { normalizeContactEmail } from "@/lib/domain/store-contact-email";
 import { clipForLog } from "@/lib/utils/log-sanitize";
 import { CACHE_TAGS } from "@/lib/cache";
 import { failure, success, type ActionResult } from "./_helpers";
@@ -118,6 +119,34 @@ export async function clearAllAction(): Promise<ActionResult> {
   return success(undefined, "全データを削除しました");
 }
 
+/**
+ * インポートする店舗の契約連絡先メールを正規化する (#384)。キーがある店舗だけを検証し、
+ * エラー文言には何件目かだけを含める (アドレスそのものは画面にもログにも出さない)。
+ * キーの無い店舗 (旧 JSON) はキーを省いたまま返す。`toDbRow` も列ごと省き、
+ * data repository の `rowFor` は入力にあるキーだけを upsert の SET に入れるため、
+ * 保存済みのアドレスは変わらない。
+ */
+function normalizeImportedContactEmails(
+  importedStores: DbSnapshot["stores"],
+): { ok: true; stores: DbSnapshot["stores"] } | { ok: false; error: string } {
+  const out: DbSnapshot["stores"] = [];
+  for (const [index, s] of importedStores.entries()) {
+    if (s == null || typeof s !== "object" || !Object.hasOwn(s, "contact_email")) {
+      out.push(s);
+      continue;
+    }
+    const normalized = normalizeContactEmail(s.contact_email);
+    if (!normalized.ok) {
+      return {
+        ok: false,
+        error: `${index + 1}件目の店舗の契約連絡先メールアドレスが不正なため、インポートしませんでした。`,
+      };
+    }
+    out.push({ ...s, contact_email: normalized.value });
+  }
+  return { ok: true, stores: out };
+}
+
 export async function importJsonAction(
   _prev: ActionResult | null,
   formData: FormData,
@@ -133,9 +162,14 @@ export async function importJsonAction(
     const text = await file.text();
     const parsed = JSON.parse(text);
 
-    const importedStores = Array.isArray(parsed?.stores)
+    const rawStores = Array.isArray(parsed?.stores)
       ? (parsed.stores as DbSnapshot["stores"])
       : undefined;
+    // 契約連絡先メール (#384) は DB に書く前 (トランザクションの開始前) に全件を検証し、
+    // 1 件でも不正なら repository を呼ばずに失敗を返す。
+    const checkedStores = rawStores ? normalizeImportedContactEmails(rawStores) : undefined;
+    if (checkedStores && !checkedStores.ok) return failure(checkedStores.error);
+    const importedStores = checkedStores?.stores;
     const importedDeals = Array.isArray(parsed?.deals)
       ? (parsed.deals as DbSnapshot["deals"])
       : undefined;

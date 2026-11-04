@@ -1,5 +1,6 @@
 import "server-only";
 import { repos } from "@/lib/repositories";
+import { omitContactEmail } from "@/lib/domain/store-contact-email";
 import type { Store, StoreFilter } from "@/types/store";
 import { STAGES, type StageId } from "@/types/stage";
 
@@ -15,7 +16,8 @@ export async function getPipelineColumns(
   tenantId: string,
   filter: StoreFilter = {},
 ): Promise<PipelineColumn[]> {
-  const stores = await repos.forTenant(tenantId).store.list(filter);
+  // カンバンのカードはアドレスを表示しないため、クライアントへ渡す前に外す (#384)。
+  const stores = (await repos.forTenant(tenantId).store.list(filter)).map(omitContactEmail);
   return STAGES.map((stage) => ({
     id: stage.id,
     label: stage.label,

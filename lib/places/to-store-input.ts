@@ -93,6 +93,7 @@ export function placeResultToStoreInput(place: PlaceResult): StoreInput {
     site_url: "",
     instagram_url: "",
     phone: place.phone,
+    contact_email: "",
     target_service: "",
     review_count: place.userRatingsTotal ?? 0,
     review_avg: place.rating ?? 0,

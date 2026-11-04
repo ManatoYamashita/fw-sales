@@ -65,8 +65,12 @@ type StoreSelectRow = typeof stores.$inferSelect;
  * @see fromDbRow - 逆変換
  */
 export function toDbRow(store: Store): StoreInsertRow {
+  // 旧 JSON に contact_email が無い場合、INSERT は DB DEFAULT を利用し、
+  // upsert の SET 側にも列を含めず既存値を維持する。
+  const { contact_email, ...rest } = store;
   return {
-    ...store,
+    ...rest,
+    ...(contact_email === undefined ? {} : { contact_email }),
     ai_analysis_result:
       store.ai_analysis_result === null
         ? null

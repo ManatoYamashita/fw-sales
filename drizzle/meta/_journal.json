@@ -239,6 +239,13 @@
       "when": 1792555307007,
       "tag": "0033_add_store_contact_email",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1792563512000,
+      "tag": "0034_assert_store_contact_email",
+      "breakpoints": true
     }
   ]
 }
