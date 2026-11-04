@@ -1,3 +1,4 @@
+import { FIRSTWEB_TENANT_ID } from "../lib/tenant/id";
 import { expect, test, type Page } from "@playwright/test";
 import postgres from "postgres";
 import { e2eDatabaseUrl } from "./support/e2e-db";
@@ -25,8 +26,8 @@ const minutesFromNow = (minutes: number) => new Date(Date.now() + minutes * 60_0
 
 async function insertRun(id: string, fields: { started_at: string; expires_at: string }) {
   await sql`
-    INSERT INTO store_research_runs (id, store_id, status, stage, started_at, expires_at)
-    VALUES (${id}, ${STORE_ID}, 'running', 'discovering', ${fields.started_at}, ${fields.expires_at})
+    INSERT INTO store_research_runs (id, tenant_id, store_id, status, stage, started_at, expires_at)
+    VALUES (${id}, ${FIRSTWEB_TENANT_ID}, ${STORE_ID}, 'running', 'discovering', ${fields.started_at}, ${fields.expires_at})
   `;
 }
 

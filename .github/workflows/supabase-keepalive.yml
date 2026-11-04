@@ -1,3 +1,4 @@
+# #370例外: DB自動停止の防止はDB全体の疎通確認。app_settingsの件数だけを読み、業務行の変更や個別データの出力は行わない。
 # dev/prdをそれぞれのGitHub Environment Secretで日次pingします (#46)。
 # Vercel CronはProductionのみ。本workflowがdevの自動停止を防ぎます。
 # 書込みをせず、実接続先のproject refを検証してからapp_settingsを読みます。

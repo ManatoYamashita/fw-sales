@@ -1,45 +1,26 @@
 /**
- * `importJsonAction` の契約連絡先メール (#384)。
+ * `importJsonAction` の契約連絡先メール (#384)。#395 のテナント単位の data repository を通す。
  *
  * - 列の追加前に書き出した JSON (店舗に `contact_email` のキーが無い) は、キーを省いたまま
- *   upsert へ渡す。`toDbRow` が列ごと省くため、保存済みのアドレスは変わらない
- *   (実 DB での確認は `lib/db/__tests__/store-contact-email-app.integration.test.ts`)
+ *   `repos.forTenant(tenantId).data.importSnapshot` へ渡す。`toDbRow` も `rowFor` も列ごと省くため、
+ *   保存済みのアドレスは変わらない (実 DB での確認は
+ *   `lib/db/__tests__/store-contact-email-import.integration.test.ts`)
  * - キーがある店舗は、画面と同じ規則で検証・正規化する
- * - 1 件でも不正なら、トランザクションを始める前に断り、何も書かない
+ * - 1 件でも不正なら、repository を呼ぶ前 (トランザクションの開始前) に断り、何も書かない
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("server-only", () => ({}));
-
-const mocks = vi.hoisted(() => {
-  const storeRows: Array<Record<string, unknown>> = [];
-  const onConflictDoUpdate = vi.fn().mockResolvedValue(undefined);
-  const insert = vi.fn((table: { _name: string }) => ({
-    values: (row: Record<string, unknown>) => {
-      if (table._name === "stores") storeRows.push(row);
-      return { onConflictDoUpdate };
-    },
-  }));
-  return {
-    storeRows,
-    requireAdmin: vi.fn(),
-    transaction: vi.fn(async (fn: (tx: unknown) => Promise<void>) => fn({ insert })),
-    consoleError: vi.fn(),
-  };
-});
-
-vi.mock("../_authz", () => ({ requireAdmin: mocks.requireAdmin }));
-vi.mock("next/cache", () => ({ revalidateTag: vi.fn() }));
-vi.mock("@/lib/db/client", () => ({ db: { transaction: mocks.transaction } }));
-vi.mock("@/lib/db/schema", () => ({
-  stores: { _name: "stores", id: "id" },
-  deals: { _name: "deals", id: "id" },
-  handoffs: { _name: "handoffs", id: "id" },
+const mocks = vi.hoisted(() => ({
+  admin: vi.fn(),
+  importSnapshot: vi.fn(),
+  forTenant: vi.fn(),
+  tag: vi.fn(),
 }));
-vi.mock("@/lib/db/store-repository", () => ({
-  toDbRow: (store: Record<string, unknown>) => store,
-}));
-vi.mock("@/lib/repositories", () => ({ repos: {} }));
+
+vi.mock("../_authz", () => ({ requireAdmin: mocks.admin, requireSignedIn: vi.fn() }));
+vi.mock("next/cache", () => ({ revalidateTag: mocks.tag }));
+vi.mock("@/lib/tenant/context", () => ({ resolveTenantId: async () => "tenant-a" }));
+vi.mock("@/lib/repositories", () => ({ repos: { forTenant: mocks.forTenant } }));
 
 const { importJsonAction } = await import("../data-actions");
 
@@ -49,24 +30,29 @@ function formDataWith(payload: unknown): FormData {
   return fd;
 }
 
+function importedStores(): Array<Record<string, unknown>> {
+  expect(mocks.importSnapshot).toHaveBeenCalledTimes(1);
+  return mocks.importSnapshot.mock.calls[0]![0].stores;
+}
+
 beforeEach(() => {
-  mocks.storeRows.length = 0;
-  mocks.transaction.mockClear();
-  mocks.requireAdmin.mockResolvedValue({
-    ok: true,
-    profile: { id: "u1", email: "admin@example.com", role: "admin" },
+  vi.resetAllMocks();
+  mocks.admin.mockResolvedValue({ ok: true, profile: { id: "u1", email: "admin@example.com", role: "admin" } });
+  mocks.forTenant.mockImplementation((id: string) => {
+    expect(id).toBe("tenant-a");
+    return { data: { importSnapshot: mocks.importSnapshot } };
   });
-  vi.spyOn(console, "error").mockImplementation(mocks.consoleError);
+  mocks.importSnapshot.mockResolvedValue(undefined);
+  vi.spyOn(console, "error").mockImplementation(() => {});
   vi.spyOn(console, "log").mockImplementation(() => {});
-  mocks.consoleError.mockClear();
 });
 
 describe("importJsonAction の契約連絡先メール (#384)", () => {
-  it("キーの無い旧 JSON の店舗は、キーを省いたまま upsert へ渡す", async () => {
+  it("キーの無い旧 JSON の店舗は、キーを省いたまま束縛済みの入口へ渡す", async () => {
     const result = await importJsonAction(null, formDataWith({ stores: [{ id: "store_001", name: "導楽" }] }));
     expect(result.ok).toBe(true);
-    expect(mocks.storeRows).toHaveLength(1);
-    expect(mocks.storeRows[0]).not.toHaveProperty("contact_email");
+    const [row] = importedStores();
+    expect(row).not.toHaveProperty("contact_email");
   });
 
   it("キーがある店舗は前後の空白を除き、空文字はそのまま (アドレスを消す) 渡す", async () => {
@@ -78,10 +64,12 @@ describe("importJsonAction の契約連絡先メール (#384)", () => {
       ],
     }));
     expect(result.ok).toBe(true);
-    expect(mocks.storeRows.map((row) => row.contact_email)).toEqual(["a@example.com", "", undefined]);
+    const rows = importedStores();
+    expect(rows.map((row) => row.contact_email)).toEqual(["a@example.com", "", undefined]);
+    expect(rows[2]).not.toHaveProperty("contact_email");
   });
 
-  it("1 件でも不正なアドレスがあれば、何件目かを示して何も書かない", async () => {
+  it("1 件でも不正なアドレスがあれば、何件目かを示し、repository を呼ばない", async () => {
     const result = await importJsonAction(null, formDataWith({
       stores: [
         { id: "store_001", contact_email: "a@example.com" },
@@ -94,8 +82,9 @@ describe("importJsonAction の契約連絡先メール (#384)", () => {
       expect(result.error).toContain("2件目");
       expect(result.error).not.toContain("leak-check");
     }
-    expect(mocks.transaction).not.toHaveBeenCalled();
-    expect(mocks.storeRows).toEqual([]);
+    expect(mocks.forTenant).not.toHaveBeenCalled();
+    expect(mocks.importSnapshot).not.toHaveBeenCalled();
+    expect(mocks.tag).not.toHaveBeenCalled();
   });
 
   it("null や数値などの文字列でない値も断る", async () => {
@@ -103,7 +92,7 @@ describe("importJsonAction の契約連絡先メール (#384)", () => {
       const result = await importJsonAction(null, formDataWith({ stores: [{ id: "store_001", contact_email }] }));
       expect(result.ok).toBe(false);
     }
-    expect(mocks.transaction).not.toHaveBeenCalled();
+    expect(mocks.importSnapshot).not.toHaveBeenCalled();
   });
 
   it("書き出した JSON (アドレス入り) をそのまま戻せる", async () => {
@@ -115,13 +104,13 @@ describe("importJsonAction の契約連絡先メール (#384)", () => {
     };
     const result = await importJsonAction(null, formDataWith(exported));
     expect(result.ok).toBe(true);
-    expect(mocks.storeRows).toEqual(exported.stores);
+    expect(importedStores()).toEqual(exported.stores);
   });
 
-  it("admin でなければ、検証より前に断る", async () => {
-    mocks.requireAdmin.mockResolvedValue({ ok: false, denied: { ok: false, error: "権限がありません" } });
+  it("admin でなければ、検証より前に断り、repository を呼ばない", async () => {
+    mocks.admin.mockResolvedValue({ ok: false, denied: { ok: false, error: "権限がありません" } });
     const result = await importJsonAction(null, formDataWith({ stores: [{ id: "store_001", contact_email: "wrong" }] }));
     expect(result).toEqual({ ok: false, error: "権限がありません" });
-    expect(mocks.transaction).not.toHaveBeenCalled();
+    expect(mocks.forTenant).not.toHaveBeenCalled();
   });
 });

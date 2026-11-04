@@ -3,10 +3,14 @@
 -- (docs/store-contact-email-rollout.md)。列の追加・削除・変更はしない。列が無い場合と定義が違う場合は
 -- migration 全体を失敗させ、トランザクションごと ROLLBACK する。
 --
--- information_schema.columns を読む間だけ、stores の AccessShare ロックを一瞬取る (読み終えるとすぐ放す)。
--- 通常の読み書きとはぶつからないが、ほかの DDL が stores の排他ロックを持っていると待つため、0033 と同じく
--- 待ちを 3 秒で打ち切る (打ち切った場合は何も変わらないので、Apply Migrations の失敗したジョブを再実行する)。
+-- 確かめる前に stores の ACCESS SHARE ロックを取り、migration のトランザクションが終わるまで持つ。
+-- information_schema.columns を読むだけではロックが残らず、確かめた後に別の DDL が列を変えると、
+-- 定義の違う列のまま 0034 が適用済みになりうるため (#388 のレビュー)。ACCESS SHARE は通常の
+-- SELECT・INSERT・UPDATE とはぶつからない。ほかの DDL が stores の排他ロックを持っていると待つため、
+-- 0033 と同じく待ちを 3 秒で打ち切る (打ち切った場合は何も変わらないので、失敗したジョブを再実行する)。
 SET LOCAL lock_timeout = '3s';
+--> statement-breakpoint
+LOCK TABLE public.stores IN ACCESS SHARE MODE;
 --> statement-breakpoint
 DO $$
 DECLARE

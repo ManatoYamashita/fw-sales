@@ -1,3 +1,4 @@
+// #370例外: 所有tokenで検証した破棄専用のlocal cluster内だけを対象に、DB全体をベンチする。運用DBに接続しない。
 /**
  * エリア検索 bbox 候補取得 (findAreaSearchCandidates) の index ベンチマーク (Issue #162)。
  *
@@ -279,13 +280,14 @@ async function populate(rows, nullRate) {
   await sql.unsafe(
     `
     insert into stores (
-      id, name, prefecture, city, address, genre, priority, stage, channel,
+      id, tenant_id, name, prefecture, city, address, genre, priority, stage, channel,
       has_contact_form, map_url, site_url, instagram_url, phone, target_service,
       review_count, review_avg, memo, operator_type, operator_name,
       lat, lng, google_place_id, basic_info, created_at, updated_at
     )
     select
       'store_' || lpad(i::text, 9, '0'),
+      (select id from tenants where slug = 'firstweb'),
       '合成店舗' || i,
       '東京都',
       '世田谷区北沢' || (i % 900),

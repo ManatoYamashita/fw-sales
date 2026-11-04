@@ -1,3 +1,4 @@
+// #370例外: 共有DBのplanner/statisticsと現行global indexを診断するため、全テナントを対象にする。個別の業務行更新は行わない。#371でtenant indexを検証するときはSQLにもtenant条件を追加する。
 /**
  * エリア検索 bbox 候補取得の実行計画を診断する読み取り専用スクリプト (Issue #162)。
  *

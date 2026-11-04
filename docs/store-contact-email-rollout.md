@@ -11,10 +11,11 @@ Issue: [#384](https://github.com/ManatoYamashita/fw-sales/issues/384) ／ Phase 
 
 ## Phase 1：merge前と適用後
 
-1. **merge前：** [手動バックアップと復元確認](manual-db-backup-runbook.md)を済ませ、結果をPR #387に記録します。Freeプランには自動バックアップがありません。
-   - **#384では実施していません。** 2026-10-24に、今回はバックアップの取得と復元確認を行わずに進める方針に変えました。そのため、#384の適用前の状態に戻すためのバックアップはありません。
-2. **merge前：** PR #387の「適用前の確認」のSELECTを、本番で取ります。
-3. **merge：** 利用の少ない時間帯に行います。バックアップを取る場合は、`pg_dump`が終わっていることを確かめてから、mergeしてください。
+1. **バックアップ（#384では今回は省略する方針）：** Freeプランには自動バックアップがありません。本番のスキーマを変えるmigrationでは、原則として[手動バックアップと復元確認](manual-db-backup-runbook.md)を行います。ただし#384では、2026-10-24に、バックアップの取得と復元確認を今回は省略する方針にしました。
+   - **残るリスク：** #384の適用前の本番の状態に戻すバックアップはありません。適用後に業務データが壊れても、全体を戻す手段がありません。
+   - 定期バックアップと復元テストの体制は、Issue [#400](https://github.com/ManatoYamashita/fw-sales/issues/400)で整えます。手順書は、今後使えるように残しています。
+2. **merge前：** PR #387の「適用前の確認」のSELECTを、本番で取ります。バックアップが無い分、適用の前後で業務データが変わっていないことを示す記録になります。
+3. **merge：** 利用の少ない時間帯に行います。今後バックアップを取る場合は、`pg_dump`が終わっていることを確かめてから、mergeしてください（`pg_dump`のロックで、migrationがロック待ちの打ち切りになるため）。
 4. **適用後：** Apply Migrationsのmigrate-devとmigrate-prdが成功し、両方で`db:verify-hashes`と`db:verify-fks`がOKになることを確かめます。
 5. **適用後：** 次の「Phase 2の着手条件」のSQLを、本番とdevで実行します。
 6. **記録：** 結果を#384に記録します（対象SHA・日時・SQLの結果）。
@@ -58,9 +59,19 @@ ALTER TABLE "stores" ADD COLUMN "contact_email" text DEFAULT '' NOT NULL;
 - 違いが無ければ、生成されたSQLファイルの中身を、**下のブロックに丸ごと置き換えます**。一緒に生成されたsnapshotは、そのままにします（列を含むsnapshotになり、`schema.ts`と一致します）。
 
 ```sql
--- 0033 で追加済みの stores.contact_email が、schema.ts と同じ定義 (text / NOT NULL / DEFAULT '') かを確かめる (#384)。
--- information_schema.columns を読む間だけ stores の AccessShare ロックを一瞬取るため、待ちを 3 秒で打ち切る。
+-- #384 Phase 2: 0033 で追加済みの stores.contact_email が、schema.ts と同じ定義 (text / NOT NULL / DEFAULT '') かを確かめる。
+-- schema.ts に列を足すと db:generate は同じ ADD COLUMN を再び作るため、その中身をこの確認ブロックに置き換えた
+-- (docs/store-contact-email-rollout.md)。列の追加・削除・変更はしない。列が無い場合と定義が違う場合は
+-- migration 全体を失敗させ、トランザクションごと ROLLBACK する。
+--
+-- 確かめる前に stores の ACCESS SHARE ロックを取り、migration のトランザクションが終わるまで持つ。
+-- information_schema.columns を読むだけではロックが残らず、確かめた後に別の DDL が列を変えると、
+-- 定義の違う列のまま 0034 が適用済みになりうるため (#388 のレビュー)。ACCESS SHARE は通常の
+-- SELECT・INSERT・UPDATE とはぶつからない。ほかの DDL が stores の排他ロックを持っていると待つため、
+-- 0033 と同じく待ちを 3 秒で打ち切る (打ち切った場合は何も変わらないので、失敗したジョブを再実行する)。
 SET LOCAL lock_timeout = '3s';
+--> statement-breakpoint
+LOCK TABLE public.stores IN ACCESS SHARE MODE;
 --> statement-breakpoint
 DO $$
 DECLARE
@@ -71,10 +82,13 @@ BEGIN
     FROM information_schema.columns
    WHERE table_schema = 'public' AND table_name = 'stores' AND column_name = 'contact_email';
   IF NOT FOUND THEN
-    RAISE EXCEPTION 'stores.contact_email がありません。0033_add_store_contact_email の適用を確認してください。';
+    RAISE EXCEPTION 'stores.contact_email がありません。0033 の適用を確認してください。';
   END IF;
-  IF col.data_type <> 'text' OR col.is_nullable <> 'NO' OR col.column_default IS DISTINCT FROM '''''::text' THEN
-    RAISE EXCEPTION 'stores.contact_email の定義が想定と違います (type=%, nullable=%, default=%)。',
+  IF col.data_type <> 'text'
+    OR col.is_nullable <> 'NO'
+    OR col.column_default IS DISTINCT FROM '''''::text'
+  THEN
+    RAISE EXCEPTION 'stores.contact_email の定義が異なります(type=%, nullable=%, default=%)',
       col.data_type, col.is_nullable, col.column_default;
   END IF;
 END $$;
@@ -88,7 +102,7 @@ END $$;
 | `ADD COLUMN IF NOT EXISTS` | 既存の列の型・NOT NULL・DEFAULTが違っていても、NOTICEを出すだけで通る（NULL許容の列で再現済み）。さらに、何もしない場合でも`stores`のACCESS EXCLUSIVEロックを取る |
 | 確認ブロック（採用） | 列の定義を読むだけ。列が無い場合と定義が違う場合は、migration全体を失敗させる |
 
-確認ブロックは`information_schema.columns`を読む間だけ、`stores`のAccessShareロックを一瞬取り、読み終えるとすぐ放します。通常の読み書きとはぶつかりません。ただ、ほかのDDLが`stores`の排他ロックを持っていると、その間は待たされます（PostgreSQL 17.11で再現済み）。そのため、0033と同じく`lock_timeout`を3秒にしています。
+`information_schema.columns`を読むだけでは、`stores`のロックは残りません（読む間に一瞬待たされることはありますが、読み終えると放します。PostgreSQL 17.11で確認）。そのままだと、確かめた後に別のDDLが列を変えても、0034が適用済みとして記録されえます。そのため、確かめる前に`LOCK TABLE public.stores IN ACCESS SHARE MODE`でロックを取り、migrationのトランザクションが終わるまで持ちます。ACCESS SHAREは通常のSELECT・INSERT・UPDATEとはぶつかりません。ほかのDDLが`stores`の排他ロックを持っていると待たされるため、0033と同じく`lock_timeout`を3秒にしています。
 
 ### 2. レビューで確かめること（PRのチェックリストに写す）
 
@@ -122,15 +136,16 @@ Issue #384の「本番安全性レビュー」とPR #387の補足から、DBに�
 
 PR #388はPR #387のブランチを土台にしたPRです（stacked PR）。次の順に進め、どの段階でも条件を満たさなければ止めます。
 
-1. **PR #387のマージ前：** [手動バックアップと復元確認](manual-db-backup-runbook.md)を、PostgreSQL 17系で、エラー0件で終えます。結果は#387に記録します。PR #388はDraftのままにします。
-   - **#384では実施していません。** 2026-10-24に、今回はバックアップの取得と復元確認を行わずに進める方針に変えました。
+> **手順1〜4は完了しています（2026-11-04）。** PR #387は`e6cef0c`で通常のmergeをし、Apply Migrationsのmigrate-dev・migrate-prdが成功しました（`db:verify-hashes`・`db:verify-fks`もOK）。本番とdevで`contact_email`が`text`／`NO`／`''::text`、`filled = 0`、`max(created_at)`が0033の`when`であることを、読み取り専用で確かめています。#387のブランチを削除したため、PR #388のbaseは自動で`main`に変わりました。PR #388には`origin/main`をmergeしています（#395のテナント単位のデータ移送との衝突を解消済み）。
+
+1. **バックアップ（#384では今回は省略する方針）：** 本番のスキーマを変えるmigrationでは、原則として[手動バックアップと復元確認](manual-db-backup-runbook.md)を行います。#384では、2026-10-24に、今回は省略する方針にしました。Phase 2（0034）も列の定義を確かめるだけで、データは変えません。定期バックアップの体制はIssue [#400](https://github.com/ManatoYamashita/fw-sales/issues/400)で整えます。PR #388はDraftのままにします。
 2. **PR #387をmainにマージする：** Apply Migrationsのmigrate-devとmigrate-prdが成功し、両方で`db:verify-hashes`と`db:verify-fks`がOKになることを確かめます。
 3. **「Phase 2の着手条件」のSQLを、本番とdevで実行する：** 期待どおりであることを確かめ、結果を#384に記録します。
 4. **PR #388のベースをmainに変える：** GitHubで「Edit」からbaseを`main`に変えます。#387がsquashではなく通常のmergeであれば、差分はPhase 2の分だけになります。squash mergeだった場合は、PR #388のブランチに`origin/main`をmergeします（PR #388はすでにmainの取り込みのmerge commitを含むため、rebaseで載せ直すと、解消済みの衝突をもう一度解くことになります）。
 5. **ほかのmigrationが先にmainへ入っていないかを確かめる：** mainの最後のmigrationが0033でなければ、0034の番号・journal・snapshot（prevId）を作り直します。生成し直したSQLの中身は、もう一度確認ブロックに置き換えます。そのうえで`pnpm db:generate`が`No schema changes`になることを確かめます。
 6. **Vercel Previewを再実行する：** devに0033が入った後は、Previewのビルドが通るはずです。通らない場合は、ログで`contact_email`以外の原因を調べます。PreviewはdevのDBを使います。Previewを通すためだけに、devへ手でmigrationを流すことはしません。
 7. **CIの全ジョブとPreviewが成功し、レビューが済んだら、PR #388をReady for reviewにする：** マージは利用の少ない時間帯に行います。0034は列の定義を確かめるだけなので、データは変わりません。
-8. **PR #388をマージした後：** Apply Migrationsが成功し、来歴が35件（`max(created_at)`が0034の`when`）になることを確かめます。そのうえで、本番の店舗詳細でアドレスの登録・コピー・削除ができること、一覧画面のHTMLにアドレスが含まれないことを確かめます。
+8. **PR #388をマージした後：** Apply Migrationsが成功し、来歴が1件だけ増えて（#387の適用後は本番33件・dev 34件。本番が少ないのは`scripts/verify-migration-hashes.mjs`のallowlistにある既知の乖離のため）、`max(created_at)`が0034の`when`（`1792563512000`）になることを確かめます。そのうえで、本番の店舗詳細でアドレスの登録・コピー・削除ができること、一覧画面のHTMLにアドレスが含まれないことを確かめます。
 
 ## 切り戻し
 

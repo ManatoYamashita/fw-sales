@@ -45,3 +45,5 @@ export {
 export {
   makeResearchRunRepo,
 } from "./research-run-repository";
+
+export { makeDataRepo } from "./data-repository";

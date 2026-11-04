@@ -32,7 +32,7 @@ Playwrightが想定する版より古いブラウザでは、製品に問題が�
 2. `fw-sales-e2e-postgres`（`E2E_DB_CONTAINER`で変更可）という名前のPostgreSQLコンテナを起動し、Apple Containerの内部IPへ接続
 3. DB接続を待機
 4. `pnpm db:migrate`で`drizzle/`のmigrationを適用
-5. `pnpm seed`で再現可能なseedデータを投入
+5. `pnpm seed --tenant=firstweb`で再現可能なseedデータを投入
 6. E2E用のprofileとテナントの所属を冪等に作り直す。通知やレビュー待ちの調査結果など、specが前提にする状態は各specの`beforeAll`で作り直す（[retryしても同じ状態から始める](#retryしても同じ状態から始める)）
 7. Next.js開発サーバーを起動し、Chromium E2Eを実行
 

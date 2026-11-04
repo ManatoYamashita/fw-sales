@@ -22,6 +22,7 @@
 
 import "server-only";
 
+import type { DataRepository } from "./data-repository";
 import type { DealRepository } from "./deal-repository";
 import type { EventLogRepository } from "./event-log-repository";
 import type { StoreRepository } from "./store-repository";
@@ -35,6 +36,7 @@ import type { PlaceCandidateRepository } from "./place-candidate-repository";
 import type { ResearchRunRepository } from "./research-run-repository";
 
 export type {
+  DataRepository,
   DealRepository,
   StoreRepository,
   HandoffRepository,
@@ -63,6 +65,7 @@ export interface TenantTxRepos {
 
 /** 監査は業務commit後、専用プールへ書くためtransactionには含めない。 */
 export interface TenantRepos extends TenantTxRepos {
+  data: DataRepository;
   eventLog: EventLogRepository;
   transaction: <T>(fn: (tx: TenantTxRepos) => Promise<T>) => Promise<T>;
 }
@@ -74,7 +77,7 @@ export interface Repos {
 
 async function buildRepos(): Promise<Repos> {
   const {
-    db, auditDb, makeEventLogRepo, makeProfileRepo, makeMembershipRepo,
+    db, auditDb, makeDataRepo, makeEventLogRepo, makeProfileRepo, makeMembershipRepo,
     makeNotificationRepo, makePromptTemplateRepo, makeAppSettingsRepo,
     makeResearchRunRepo, makeDealRepo, makeHandoffRepo, makeStoreRepo, makePlaceCandidateRepo,
   } = await import("@/lib/db");
@@ -95,6 +98,7 @@ async function buildRepos(): Promise<Repos> {
       if (!tenantId.trim()) throw new Error("テナントが指定されていません");
       return Object.freeze({
         ...tenantTxRepos(db, tenantId),
+        data: makeDataRepo(db, tenantId),
         eventLog: makeEventLogRepo(auditDb, tenantId),
         transaction: <T>(fn: (tx: TenantTxRepos) => Promise<T>) =>
           db.transaction((tx) => fn(tenantTxRepos(tx, tenantId))),

@@ -1,3 +1,4 @@
+import { FIRSTWEB_TENANT_ID } from "../lib/tenant/id";
 import { expect, test, type Page, type Request } from "@playwright/test";
 import postgres from "postgres";
 import { e2eDatabaseUrl } from "./support/e2e-db";
@@ -36,8 +37,8 @@ test.beforeAll(async ({}, testInfo) => {
   for (const [index, n] of FIXED_NOTIFICATIONS.entries()) {
     const createdAt = `2026-10-0${7 - index}`;
     const rows = await sql`INSERT INTO notifications
-      (id, user_id, kind, title, body, link_url, read_at, created_at, updated_at)
-      SELECT ${n.id}, id, 'research_job_completed', ${n.title}, 'E2E 用の通知です',
+      (id, tenant_id, user_id, kind, title, body, link_url, read_at, created_at, updated_at)
+      SELECT ${n.id}, ${FIRSTWEB_TENANT_ID}, id, 'research_job_completed', ${n.title}, 'E2E 用の通知です',
         ${n.linkUrl}, ${n.readAt}, ${createdAt}, ${createdAt}
       FROM profiles WHERE email = ${E2E_EMAIL}
       RETURNING id`;
@@ -59,8 +60,8 @@ async function createLinkedNotification(id: string, readAt: string | null = null
   const title = `E2E: 既読保存の確認 ${id}`;
   const now = new Date().toISOString();
   const rows = await sql`INSERT INTO notifications
-    (id, user_id, kind, title, body, link_url, read_at, created_at, updated_at)
-    SELECT ${id}, id, 'research_job_completed', ${title}, '既読保存と遷移を確認します',
+    (id, tenant_id, user_id, kind, title, body, link_url, read_at, created_at, updated_at)
+    SELECT ${id}, ${FIRSTWEB_TENANT_ID}, id, 'research_job_completed', ${title}, '既読保存と遷移を確認します',
       '/stores/store_001', ${readAt}, ${now}, ${now}
     FROM profiles WHERE email = ${E2E_EMAIL}
     RETURNING id`;

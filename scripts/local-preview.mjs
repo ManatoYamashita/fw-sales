@@ -1,3 +1,5 @@
+// #370: 所有ラベルで管理する専用ローカルDBの初期化と共有identityの修復はDB全体を対象にする。
+// 業務seed・表示件数・ロールはFirstwebの所属に限定する。通常の運用DBへ流用しない。
 import { execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
@@ -202,9 +204,9 @@ async function setupLocalDatabase(config) {
     )`;
     const env = buildLocalPreviewEnv(databaseUrl, config, readLocalSecret());
     runPnpm(["db:migrate"], env);
-    const [{ count }] = await sql`SELECT count(*)::int AS count FROM stores`;
+    const [{ count }] = await sql`SELECT count(*)::int AS count FROM stores WHERE tenant_id=(SELECT id FROM tenants WHERE slug='firstweb')`;
     // 再起動時のseed上書きを避け、初回の空DBにだけテストデータを投入します。
-    if (count === 0) runPnpm(["seed"], env);
+    if (count === 0) runPnpm(["seed", "--tenant=firstweb"], env);
     const moved = await sql.begin((tx) => migrateLegacyLocalUser(tx));
     if (moved) {
       const detail = moved.map((m) => `${m.table}.${m.column} ${m.count}件`).join("、") || "参照なし";
@@ -296,10 +298,10 @@ async function showStatus(config) {
   const sql = postgres(getLocalDatabaseUrl(), { prepare: false, max: 1 });
   try {
     const [counts] = await sql`SELECT
-      (SELECT count(*)::int FROM stores) AS stores,
-      (SELECT count(*)::int FROM deals) AS deals,
-      (SELECT count(*)::int FROM handoffs) AS handoffs,
-      (SELECT role FROM profiles WHERE id = ${LOCAL_USER_ID}) AS local_user_role`;
+      (SELECT count(*)::int FROM stores WHERE tenant_id=(SELECT id FROM tenants WHERE slug='firstweb')) AS stores,
+      (SELECT count(*)::int FROM deals WHERE tenant_id=(SELECT id FROM tenants WHERE slug='firstweb')) AS deals,
+      (SELECT count(*)::int FROM handoffs WHERE tenant_id=(SELECT id FROM tenants WHERE slug='firstweb')) AS handoffs,
+      (SELECT role FROM memberships WHERE user_id = ${LOCAL_USER_ID} AND tenant_id=(SELECT id FROM tenants WHERE slug='firstweb')) AS local_user_role`;
     console.log("[local]", counts);
   } finally {
     await sql.end({ timeout: 5 });

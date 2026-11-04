@@ -149,7 +149,7 @@ pnpm drizzle-kit migrate          # drizzle/*.sql を順次適用 (推奨)
 
 > **dev / prd に `drizzle-kit push` を使わないこと。** push は `lib/db/schema.ts` と実 DB の差分を直接反映するため、migration が先行して schema.ts にまだ無い列 (例: #384 の `stores.contact_email`) を DROP します。dev / prd への適用は `main` への push を契機とする GitHub Actions の Apply Migrations だけで行います。
 >
-> 本番のスキーマを変える migration を merge する前は、[手動バックアップと復元確認](docs/manual-db-backup-runbook.md) を行います (Supabase は Free プランで自動バックアップが無い)。列の追加をアプリより先に出す手順は [`docs/store-contact-email-rollout.md`](docs/store-contact-email-rollout.md) を参照してください。
+> 本番のスキーマを変える migration を merge する前は、原則として [手動バックアップと復元確認](docs/manual-db-backup-runbook.md) を行います (Supabase は Free プランで自動バックアップが無い)。#384 (PR #387) では今回は省略する方針で、適用前の状態に戻すバックアップはありません。定期バックアップの体制は [#400](https://github.com/ManatoYamashita/fw-sales/issues/400) で整えます。列の追加をアプリより先に出す手順は [`docs/store-contact-email-rollout.md`](docs/store-contact-email-rollout.md) を参照してください。
 
 複数の `drizzle/000N_*.sql` がある場合は番号順に適用されます (`0000` → `0001` → `0002` ...)。スキーマ定義 (`lib/db/schema.ts`) を変更した場合は `pnpm drizzle-kit generate` で SQL を再生成してから `migrate` を実行してください。
 
@@ -160,8 +160,10 @@ pnpm drizzle-kit migrate          # drizzle/*.sql を順次適用 (推奨)
 `SEED_STORES` / `SEED_DEALS` / `SEED_HANDOFFS` (`lib/db/seed-data.ts`) の 3 entity データを Postgres に upsert します。FK 整合のため `stores → deals → handoffs` の順で投入され、`ON CONFLICT DO UPDATE` でベキ等です。
 
 ```bash
-pnpm seed
+pnpm seed --tenant=firstweb
 ```
+
+対象テナントの指定は必須です。slugの代わりに`--tenant-id=<UUID>`も使えます。Firstwebの既存IDは維持し、ほかの会社では会社ごとのIDと親子参照を生成します。他社IDとの衝突時は全体を取り消します。
 
 内部的に `NODE_OPTIONS='--conditions=react-server' tsx scripts/seed.ts` を実行します(`server-only` パッケージを `react-server` condition で `empty.js` に解決させ、CLI 単体実行を可能にするため)。
 
@@ -282,7 +284,7 @@ pause しない。
      (本番プロジェクトは Site URL `https://sales.firstweb-works.com` / Redirect URLs に `https://sales.firstweb-works.com/**` を登録済み。下記「本番ドメイン」参照)
    - Authentication → Providers → Google を Enable + Google Cloud Console で OAuth 2.0 Client (Web) を作成し Authorized redirect URIs に `https://<project-ref>.supabase.co/auth/v1/callback` を登録 → Client ID/Secret を Supabase の Google Provider 設定に貼り付け
 4. **DB マイグレーション適用**: `pnpm db:migrate` (#27 で導入された short-cut、`.env.local` を自動読込)
-5. (任意) **シード投入**: `pnpm seed`
+5. (任意) **シード投入**: `pnpm seed --tenant=firstweb`
 6. **開発サーバ起動**: `pnpm dev`
 7. **動作確認**: http://localhost:3000/login → Google でサインイン → `/stores` に着地、ヘッダーにアバター + 表示名
 

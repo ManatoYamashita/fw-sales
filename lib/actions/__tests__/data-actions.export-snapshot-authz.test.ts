@@ -13,6 +13,9 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/supabase/server", () => ({ getCurrentProfile: mocks.getCurrentProfile }));
 vi.mock("next/cache", () => ({ revalidateTag: vi.fn() }));
+// #395 でテナントの解決が入った。所属の解決は別のテストで確かめるため、ここでは固定する
+// (未所属・未ログインの実 DB での確認は tenant-data-isolation.integration.test.ts)。
+vi.mock("@/lib/tenant/context", () => ({ resolveTenantId: async () => "tenant-a" }));
 vi.mock("@/lib/repositories", () => ({
   repos: {
     forTenant: () => ({
