@@ -7,11 +7,17 @@ export type InputProps = InputHTMLAttributes<HTMLInputElement> & {
   ref?: Ref<HTMLInputElement>;
 };
 
+/** md 未満はボタンと同じ 44px 下限。高さ自体は変更せず、md で下限を解除する (#257)。 */
+export const INPUT_SIZE_CLASSES = {
+  default: "h-9 min-h-11 md:min-h-0",
+} as const;
+
 export function Input({ className, ...props }: InputProps) {
   return (
     <input
       className={cn(
-        "flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-base sm:text-sm",
+        INPUT_SIZE_CLASSES.default,
+        "flex w-full rounded-md border border-input bg-background px-3 py-1 text-base sm:text-sm",
         "text-foreground placeholder:text-muted-foreground",
         "shadow-xs transition-[box-shadow,border-color,background-color]",
         "file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground",
