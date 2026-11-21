@@ -5,3 +5,14 @@ allowBuilds:
 ignoredBuiltDependencies:
   - sharp
   - unrs-resolver
+# Security: patch transitive dependencies pulled in by workflow 5.0.0-beta.38 within
+# their current major versions until upstream updates them. (#402)
+# - zod: CVE-2023-54404 (memory exhaustion)
+# - proxy-addr: GHSA-jqcg-44mw-7w3h (IP spoofing via IPv4-mapped IPv6)
+# - piscina: GHSA-67c8-pqhq-4rmx (prototype-pollution gadget)
+# - @xhmikosr/decompress: GHSA-hrh2-vp3x-79xf (path traversal via symlink chain)
+overrides:
+  'zod@>=4.0.0 <4.6.6': ^4.6.7
+  'proxy-addr@<2.0.8': ^2.0.8
+  'piscina@>=4.0.0 <4.9.4': ^4.9.4
+  '@xhmikosr/decompress@>=11.0.0 <11.1.4': ^11.1.4
