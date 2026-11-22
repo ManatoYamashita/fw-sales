@@ -11,7 +11,11 @@ ignoredBuiltDependencies:
 # - proxy-addr: GHSA-jqcg-44mw-7w3h (IP spoofing via IPv4-mapped IPv6)
 # - piscina: GHSA-67c8-pqhq-4rmx (prototype-pollution gadget)
 # - @xhmikosr/decompress: GHSA-hrh2-vp3x-79xf (path traversal via symlink chain)
+# - nanoid / devalue / undici: open Dependabot alerts (critical/high) as of 2026-11-22
 overrides:
+  'nanoid@>=5.0.0 <5.1.16': '^5.1.16'
+  'devalue': '^5.9.3'
+  'undici': '^7.30.1'
   'zod@>=4.0.0 <4.6.6': ^4.6.7
   'proxy-addr@<2.0.8': ^2.0.8
   'piscina@>=4.0.0 <4.9.4': ^4.9.4
